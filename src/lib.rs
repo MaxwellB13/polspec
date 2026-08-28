@@ -455,7 +455,6 @@ fn gen_string_column(
     let min_len = spec.str_min_len.unwrap_or(DEFAULT_STR_MIN_LEN).max(0) as usize;
     let max_len = spec.str_max_len.unwrap_or(DEFAULT_STR_MAX_LEN).max(min_len as i64) as usize;
 
-    let charset_dist = Uniform::new(0, CHARSET.len());
     let len_dist = (max_len > min_len).then(|| Uniform::new_inclusive(min_len, max_len));
 
     let chunk_size = chunk_size_for(n);
@@ -492,7 +491,7 @@ fn gen_string_column(
                     }
                 }
             } else {
-                let mut scratch: Vec<u8> = Vec::with_capacity(max_len);
+                let mut scratch: Vec<u8> = vec![0u8; max_len];
                 if spec.nullable {
                     let null_p = spec.null_probability;
                     for _ in 0..len {
@@ -500,24 +499,46 @@ fn gen_string_column(
                             builder.append_null();
                         } else {
                             let str_len = len_dist.as_ref().map_or(min_len, |dist| dist.sample(&mut rng));
-                            scratch.clear();
-                            for _ in 0..str_len {
-                                scratch.push(CHARSET[charset_dist.sample(&mut rng)]);
+                            let mut rand_val = rng.next_u64();
+                            let mut bits_left = 64;
+                            for j in 0..str_len {
+                                if bits_left < 6 {
+                                    rand_val = rng.next_u64();
+                                    bits_left = 64;
+                                }
+                                let mut idx = (rand_val & 0x3F) as usize;
+                                rand_val >>= 6;
+                                bits_left -= 6;
+                                if idx >= 62 {
+                                    idx = (rng.next_u32() as usize) % 62;
+                                }
+                                scratch[j] = CHARSET[idx];
                             }
                             // SAFETY: CHARSET contains only ASCII bytes (A-Z, a-z, 0-9).
-                            let s = unsafe { std::str::from_utf8_unchecked(&scratch) };
+                            let s = unsafe { std::str::from_utf8_unchecked(&scratch[..str_len]) };
                             builder.append_value(s);
                         }
                     }
                 } else {
                     for _ in 0..len {
                         let str_len = len_dist.as_ref().map_or(min_len, |dist| dist.sample(&mut rng));
-                        scratch.clear();
-                        for _ in 0..str_len {
-                            scratch.push(CHARSET[charset_dist.sample(&mut rng)]);
+                        let mut rand_val = rng.next_u64();
+                        let mut bits_left = 64;
+                        for j in 0..str_len {
+                            if bits_left < 6 {
+                                rand_val = rng.next_u64();
+                                bits_left = 64;
+                            }
+                            let mut idx = (rand_val & 0x3F) as usize;
+                            rand_val >>= 6;
+                            bits_left -= 6;
+                            if idx >= 62 {
+                                idx = (rng.next_u32() as usize) % 62;
+                            }
+                            scratch[j] = CHARSET[idx];
                         }
                         // SAFETY: CHARSET contains only ASCII bytes (A-Z, a-z, 0-9).
-                        let s = unsafe { std::str::from_utf8_unchecked(&scratch) };
+                        let s = unsafe { std::str::from_utf8_unchecked(&scratch[..str_len]) };
                         builder.append_value(s);
                     }
                 }
