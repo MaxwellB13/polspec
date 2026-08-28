@@ -533,3 +533,509 @@ def test_temporal_and_binary_dtypes_and_yaml(tmp_path):
     df_loaded = Loaded.generate(500, seed=42)
     df_orig = TemporalAndBinary.generate(500, seed=42)
     assert df_orig.equals(df_loaded)
+
+
+def test_statistical_distributions():
+    class DistSpec(DfSpec):
+        norm_float = ColSpec(
+            dtype=pl.Float64,
+            distribution="normal",
+            distribution_params={"mean": 100.0, "std": 15.0},
+        )
+        norm_int = ColSpec(
+            dtype=pl.Int32,
+            distribution="normal",
+            distribution_params={"mean": 50.0, "std": 5.0},
+            bounds=(0, 100),
+        )
+        lognorm_float = ColSpec(
+            dtype=pl.Float64,
+            distribution="lognormal",
+            distribution_params={"mean": 0.0, "std": 0.5},
+        )
+        exp_float = ColSpec(
+            dtype=pl.Float64,
+            distribution="exponential",
+            distribution_params={"rate": 0.1},
+        )
+        poisson_int = ColSpec(
+            dtype=pl.Int64,
+            distribution="poisson",
+            distribution_params={"lambda": 10.0},
+        )
+        gamma_float = ColSpec(
+            dtype=pl.Float64,
+            distribution="gamma",
+            distribution_params={"shape": 2.0, "scale": 2.0},
+        )
+        beta_float = ColSpec(
+            dtype=pl.Float64,
+            distribution="beta",
+            distribution_params={"alpha": 2.0, "beta": 5.0},
+        )
+
+    df = DistSpec.generate(50_000, seed=42)
+    assert df.height == 50_000
+
+    # Normal float verification (mean ~ 100, std ~ 15)
+    mean_val = df["norm_float"].mean()
+    std_val = df["norm_float"].std()
+    assert 99.0 <= mean_val <= 101.0
+    assert 14.5 <= std_val <= 15.5
+
+    # Normal int bounded verification
+    assert df["norm_int"].min() >= 0
+    assert df["norm_int"].max() <= 100
+    assert 48.0 <= df["norm_int"].mean() <= 52.0
+
+    # Lognormal verification (strictly positive)
+    assert df["lognorm_float"].min() > 0.0
+
+    # Exponential verification (strictly positive, mean ~ 1/rate = 10)
+    assert df["exp_float"].min() >= 0.0
+    assert 9.0 <= df["exp_float"].mean() <= 11.0
+
+    # Poisson verification (mean ~ 10)
+    assert 9.5 <= df["poisson_int"].mean() <= 10.5
+
+    # Gamma verification (mean = shape * scale = 4.0)
+    assert df["gamma_float"].min() >= 0.0
+    assert 3.8 <= df["gamma_float"].mean() <= 4.2
+
+    # Beta verification (values in [0, 1], mean = alpha / (alpha + beta) = 2/7 ~ 0.2857)
+    assert df["beta_float"].min() >= 0.0
+    assert df["beta_float"].max() <= 1.0
+    assert 0.27 <= df["beta_float"].mean() <= 0.30
+
+
+def test_distribution_validation_and_errors():
+    with pytest.raises(ValueError, match="Unsupported distribution"):
+        ColSpec(dtype=pl.Float64, distribution="invalid_dist")
+
+    with pytest.raises(ValueError, match="Normal distribution std must be positive"):
+        ColSpec(
+            dtype=pl.Float64, distribution="normal", distribution_params={"std": -1.0}
+        )
+
+    with pytest.raises(
+        ValueError, match="Exponential distribution scale must be positive"
+    ):
+        ColSpec(
+            dtype=pl.Float64,
+            distribution="exponential",
+            distribution_params={"scale": -2.0},
+        )
+
+
+def test_weighted_choices_enum_and_categorical():
+    class WeightedSpec(DfSpec):
+        enum_col = ColSpec(
+            dtype=pl.Enum(["rare", "common"]),
+            weights=[0.1, 0.9],
+        )
+        cat_dict_col = ColSpec(
+            dtype=pl.Categorical,
+            choices={"A": 0.8, "B": 0.2},
+        )
+        str_choices_col = ColSpec(
+            dtype=pl.String,
+            choices=["first", "second"],
+            weights=[0.75, 0.25],
+        )
+        int_choices_col = ColSpec(
+            dtype=pl.Int64,
+            choices=[100, 200, 300],
+            weights=[0.7, 0.2, 0.1],
+        )
+        bool_col = ColSpec(
+            dtype=pl.Boolean,
+            weights=[0.8, 0.2],  # [p_false, p_true] -> 20% True
+        )
+
+    df = WeightedSpec.generate(50_000, seed=42)
+    assert df.height == 50_000
+
+    # Enum verification: common ~ 90%, rare ~ 10%
+    counts = df["enum_col"].value_counts()
+    common_ratio = counts.filter(pl.col("enum_col") == "common")["count"][0] / 50_000
+    assert 0.88 <= common_ratio <= 0.92
+
+    # Categorical verification: A ~ 80%, B ~ 20%
+    cat_counts = df["cat_dict_col"].value_counts()
+    a_ratio = cat_counts.filter(pl.col("cat_dict_col") == "A")["count"][0] / 50_000
+    assert 0.78 <= a_ratio <= 0.82
+
+    # String choices verification: first ~ 75%
+    str_counts = df["str_choices_col"].value_counts()
+    first_ratio = (
+        str_counts.filter(pl.col("str_choices_col") == "first")["count"][0] / 50_000
+    )
+    assert 0.73 <= first_ratio <= 0.77
+
+    # Int choices verification: 100 ~ 70%, 200 ~ 20%, 300 ~ 10%
+    int_counts = df["int_choices_col"].value_counts()
+    int_100_ratio = (
+        int_counts.filter(pl.col("int_choices_col") == 100)["count"][0] / 50_000
+    )
+    int_300_ratio = (
+        int_counts.filter(pl.col("int_choices_col") == 300)["count"][0] / 50_000
+    )
+    assert 0.68 <= int_100_ratio <= 0.72
+    assert 0.08 <= int_300_ratio <= 0.12
+
+    # Bool verification: True ~ 20%
+    true_ratio = df["bool_col"].sum() / 50_000
+    assert 0.18 <= true_ratio <= 0.22
+
+
+def test_colrule_weighted_choices():
+    class RuleWeightedSpec(DfSpec):
+        segment = ColSpec(dtype=pl.Enum(["standard", "premium"]))
+        reward = ColSpec(
+            dtype=pl.String,
+            rules=(
+                ColRule(
+                    when={"column": "segment", "equals": "standard"},
+                    choices={"voucher": 0.9, "gift": 0.1},
+                ),
+                ColRule(
+                    when={"column": "segment", "equals": "premium"},
+                    choices=["gift", "vip_pass"],
+                    weights=[0.3, 0.7],
+                ),
+            ),
+        )
+
+    df = RuleWeightedSpec.generate(30_000, seed=42)
+    standard_df = df.filter(pl.col("segment") == "standard")
+    voucher_ratio = (
+        standard_df.filter(pl.col("reward") == "voucher").height / standard_df.height
+    )
+    assert 0.88 <= voucher_ratio <= 0.92
+
+    premium_df = df.filter(pl.col("segment") == "premium")
+    vip_ratio = (
+        premium_df.filter(pl.col("reward") == "vip_pass").height / premium_df.height
+    )
+    assert 0.67 <= vip_ratio <= 0.73
+
+
+def test_weights_validation_errors():
+    with pytest.raises(ValueError, match="must match length of choices"):
+        ColSpec(dtype=pl.String, choices=["a", "b"], weights=[1.0])
+
+    with pytest.raises(ValueError, match="must match number of Enum categories"):
+        ColSpec(dtype=pl.Enum(["a", "b", "c"]), weights=[0.5, 0.5])
+
+    with pytest.raises(
+        ValueError, match="Boolean weights must be a 2-element sequence"
+    ):
+        ColSpec(dtype=pl.Boolean, weights=[0.5, 0.3, 0.2])
+
+    with pytest.raises(ValueError, match="Weights must all be non-negative"):
+        ColSpec(dtype=pl.Enum(["a", "b"]), weights=[-0.1, 1.1])
+
+    with pytest.raises(ValueError, match="Sum of weights must be positive"):
+        ColSpec(dtype=pl.Enum(["a", "b"]), weights=[0.0, 0.0])
+
+    with pytest.raises(
+        ValueError,
+        match="Cannot specify both a dict for choices and an explicit weights parameter",
+    ):
+        ColSpec(dtype=pl.String, choices={"a": 0.5, "b": 0.5}, weights=[0.5, 0.5])
+
+    with pytest.raises(
+        ValueError,
+        match="Cannot specify both a dict for choices and an explicit weights parameter",
+    ):
+        ColRule(
+            when={"column": "x", "equals": 1},
+            choices={"a": 0.5, "b": 0.5},
+            weights=[0.5, 0.5],
+        )
+
+
+def test_distributions_and_weights_yaml_roundtrip(tmp_path):
+    class FullFeatureSpec(DfSpec):
+        norm = ColSpec(
+            dtype=pl.Float64,
+            distribution="normal",
+            distribution_params={"mean": 42.0, "std": 3.5},
+            bounds=(0.0, 100.0),
+        )
+        enum_col = ColSpec(
+            dtype=pl.Enum(["X", "Y", "Z"]),
+            weights=[0.5, 0.3, 0.2],
+        )
+        rule_col = ColSpec(
+            dtype=pl.String,
+            rules=(
+                ColRule(
+                    when={"column": "enum_col", "equals": "X"},
+                    choices=["A", "B"],
+                    weights=[0.8, 0.2],
+                ),
+            ),
+        )
+
+    yaml_file = tmp_path / "full_spec.yaml"
+    FullFeatureSpec.to_yaml(source=yaml_file)
+
+    Loaded = DfSpec.from_yaml(source=yaml_file)
+    assert Loaded.schema() == FullFeatureSpec.schema()
+
+    df1 = FullFeatureSpec.generate(1_000, seed=123)
+    df2 = Loaded.generate(1_000, seed=123)
+    assert df1.equals(df2)
+
+
+def test_cartesian_with_custom_choices():
+    class ChoiceCartesian(DfSpec):
+        size = ColSpec(dtype=pl.String, choices=["S", "M", "L"])
+        color = ColSpec(dtype=pl.String, choices=["Red", "Blue"], nullable=True)
+
+    df = ChoiceCartesian.generate(n=1, method="cartesian", seed=42)
+    # 3 sizes * (2 colors + null) = 9 combinations
+    assert df.height == 9
+    assert df.select("size", "color").unique().height == 9
+
+
+def test_from_dataframe_basic():
+    from datetime import UTC, date, datetime
+
+    source_df = pl.DataFrame(
+        {
+            "id": [1, 2, 3, 4, 5],
+            "price": [10.5, 20.0, 15.25, 30.0, 25.5],
+            "is_active": [True, False, True, True, False],
+            "created_date": [
+                date(2023, 1, 1),
+                date(2023, 6, 15),
+                date(2023, 12, 31),
+                date(2023, 3, 10),
+                date(2023, 8, 20),
+            ],
+            "created_at": [
+                datetime(2023, 1, 1, 10, 0, tzinfo=UTC),
+                datetime(2023, 6, 15, 12, 30, tzinfo=UTC),
+                datetime(2023, 12, 31, 23, 59, tzinfo=UTC),
+                datetime(2023, 3, 10, 8, 15, tzinfo=UTC),
+                datetime(2023, 8, 20, 14, 45, tzinfo=UTC),
+            ],
+            "category": pl.Series(
+                ["electronics", "clothing", "electronics", "food", "food"],
+                dtype=pl.Enum(["electronics", "clothing", "food"]),
+            ),
+            "notes": [
+                "short note",
+                "a slightly longer note here",
+                "abc",
+                "tiny",
+                "medium note text",
+            ],
+        }
+    )
+
+    Profiled = DfSpec.from_dataframe(source_df, name="StoreProfile", max_unique_enum=2)
+    assert Profiled.__name__ == "StoreProfile"
+
+    cols = Profiled._columns
+    assert cols["id"].dtype == pl.Int64
+    assert cols["id"].bounds.min == 1
+    assert cols["id"].bounds.max == 5
+    assert not cols["id"].nullable
+
+    assert cols["price"].dtype == pl.Float64
+    assert cols["price"].bounds.min == 10.5
+    assert cols["price"].bounds.max == 30.0
+
+    assert cols["is_active"].dtype == pl.Boolean
+
+    assert cols["created_date"].dtype == pl.Date
+    assert cols["created_at"].dtype == pl.Datetime("us", "UTC")
+
+    assert isinstance(cols["category"].dtype, pl.Enum)
+    assert cols["notes"].dtype == pl.String
+    assert cols["notes"].string_length.min == 3
+    assert cols["notes"].string_length.max == 27
+
+    # Generate from profiled spec
+    gen_df = Profiled.generate(100, seed=42)
+    assert gen_df.height == 100
+    assert gen_df.schema["id"] == pl.Int64
+    assert gen_df.schema["created_date"] == pl.Date
+    assert gen_df["id"].min() >= 1
+    assert gen_df["id"].max() <= 5
+
+
+def test_from_dataframe_weights_and_enums():
+    # 80% cat, 20% dog
+    species = ["cat"] * 800 + ["dog"] * 200
+    # 90% True, 10% False
+    flags = [True] * 900 + [False] * 100
+
+    df = pl.DataFrame(
+        {
+            "species": species,
+            "flag": flags,
+        }
+    )
+
+    ProfiledWeighted = DfSpec.from_dataframe(df, weights=True, max_unique_enum=10)
+    cols = ProfiledWeighted._columns
+
+    # Species should be converted to Enum with categories ["cat", "dog"] and weights [0.8, 0.2]
+    assert isinstance(cols["species"].dtype, pl.Enum)
+    assert cols["species"].dtype.categories.to_list() == ["cat", "dog"]
+    assert cols["species"].weights == pytest.approx((0.8, 0.2), abs=1e-4)
+
+    # Boolean weights: [p_false, p_true] -> [0.1, 0.9]
+    assert cols["flag"].dtype == pl.Boolean
+    assert cols["flag"].weights == pytest.approx((0.1, 0.9), abs=1e-4)
+
+    # Generate and verify empirical convergence
+    gen = ProfiledWeighted.generate(20_000, seed=42)
+    cat_ratio = (gen["species"] == "cat").sum() / 20_000
+    true_ratio = gen["flag"].sum() / 20_000
+    assert 0.78 <= cat_ratio <= 0.82
+    assert 0.88 <= true_ratio <= 0.92
+
+
+def test_from_dataframe_max_unique_threshold():
+    df = pl.DataFrame(
+        {
+            "low_card": ["A", "B", "C", "A", "B"] * 20,
+            "high_card": [f"user_{i}" for i in range(100)],
+        }
+    )
+
+    # max_unique = 5 -> low_card (3 unique) becomes Enum, high_card (100 unique) stays String
+    Spec1 = DfSpec.from_dataframe(df, max_unique_enum=5)
+    assert isinstance(Spec1._columns["low_card"].dtype, pl.Enum)
+    assert Spec1._columns["high_card"].dtype == pl.String
+
+    # Using alias max_unique
+    Spec2 = DfSpec.from_dataframe(df, max_unique=2)
+    # low_card has 3 unique > 2, so it remains String
+    assert Spec2._columns["low_card"].dtype == pl.String
+
+
+def test_from_dataframe_calculate_bounds_toggle():
+    df = pl.DataFrame(
+        {
+            "num": [10, 20, 30, 40, 50],
+            "txt": ["hello", "world", "longer text here", "a", "bc"],
+        }
+    )
+
+    SpecWithBounds = DfSpec.from_dataframe(df, calculate_bounds=True, max_unique_enum=0)
+    assert SpecWithBounds._columns["num"].bounds == Bound(10, 50)
+    assert SpecWithBounds._columns["txt"].string_length == Bound(1, 16)
+
+    SpecNoBounds = DfSpec.from_dataframe(df, calculate_bounds=False, max_unique_enum=0)
+    assert SpecNoBounds._columns["num"].bounds is None
+    assert SpecNoBounds._columns["txt"].string_length is None
+
+    # Test alias bounds=False
+    SpecNoBoundsAlias = DfSpec.from_dataframe(df, bounds=False, max_unique_enum=0)
+    assert SpecNoBoundsAlias._columns["num"].bounds is None
+    assert SpecNoBoundsAlias._columns["txt"].string_length is None
+
+
+def test_from_dataframe_nullability_and_edge_cases():
+    df = pl.DataFrame(
+        {
+            "with_nulls": [1, None, 3, None, 5],
+            "no_nulls": [10, 20, 30, 40, 50],
+            "all_nulls": [None, None, None, None, None],
+        },
+        schema={"with_nulls": pl.Int64, "no_nulls": pl.Int64, "all_nulls": pl.Float64},
+    )
+
+    Spec = DfSpec.from_dataframe(df)
+    cols = Spec._columns
+
+    assert cols["with_nulls"].nullable is True
+    assert cols["with_nulls"].null_probability == pytest.approx(0.4, abs=1e-4)
+    assert cols["with_nulls"].bounds == Bound(1, 5)
+
+    assert cols["no_nulls"].nullable is False
+    assert cols["no_nulls"].null_probability == 0.0
+    assert cols["no_nulls"].bounds == Bound(10, 50)
+
+    assert cols["all_nulls"].nullable is True
+    assert cols["all_nulls"].null_probability == 1.0
+    assert cols["all_nulls"].bounds is None
+
+    # Non-dataframe raises TypeError
+    with pytest.raises(TypeError, match="Expected pl.DataFrame"):
+        DfSpec.from_dataframe([{"a": 1}])  # type: ignore[arg-type]
+
+    # Empty dataframe (0 rows)
+    empty_df = pl.DataFrame({"a": [], "b": []}, schema={"a": pl.Int32, "b": pl.String})
+    EmptySpec = DfSpec.from_dataframe(empty_df)
+    assert EmptySpec.schema() == empty_df.schema
+    assert not EmptySpec._columns["a"].nullable
+
+
+def test_from_dataframe_temporal_and_binary(tmp_path):
+    from datetime import time, timedelta
+
+    df = pl.DataFrame(
+        {
+            "t": [time(8, 0), time(12, 30), time(18, 45)],
+            "dur": [
+                timedelta(seconds=10),
+                timedelta(seconds=60),
+                timedelta(seconds=120),
+            ],
+            "bin": [b"hello", b"polars", b"data"],
+        },
+        schema={
+            "t": pl.Time,
+            "dur": pl.Duration("ms"),
+            "bin": pl.Binary,
+        },
+    )
+
+    Spec = DfSpec.from_dataframe(df)
+    cols = Spec._columns
+
+    assert cols["t"].dtype == pl.Time
+    assert cols["t"].bounds is not None
+    assert cols["dur"].dtype == pl.Duration("ms")
+    assert cols["dur"].bounds is not None
+    assert cols["bin"].dtype == pl.Binary
+    assert cols["bin"].string_length == Bound(4, 6)
+
+    # Roundtrip through YAML
+    yaml_path = tmp_path / "temporal_profile.yaml"
+    Spec.to_yaml(yaml_path)
+    LoadedSpec = DfSpec.from_yaml(yaml_path)
+    assert LoadedSpec.schema() == Spec.schema()
+
+    # Generate from LoadedSpec
+    gen = LoadedSpec.generate(100, seed=42)
+    assert gen.height == 100
+    assert gen.schema == df.schema
+
+
+def test_modular_subpackage_imports():
+    from polspec import Bound, ColRule, ColSpec, DfSpec, profile_dataframe
+    from polspec.bound import Bound as BoundDirect
+    from polspec.dfspec import DfSpec as DfSpecDirect
+    from polspec.engine import _generate_cartesian, _generate_random
+    from polspec.profiler import profile_dataframe as profile_dataframe_direct
+    from polspec.rules import ColRule as ColRuleDirect
+    from polspec.serialization import _colspec_from_yaml, _colspec_to_yaml
+    from polspec.spec import ColSpec as ColSpecDirect
+
+    assert Bound is BoundDirect
+    assert ColRule is ColRuleDirect
+    assert ColSpec is ColSpecDirect
+    assert DfSpec is DfSpecDirect
+    assert profile_dataframe is profile_dataframe_direct
+    assert callable(_colspec_to_yaml)
+    assert callable(_colspec_from_yaml)
+    assert callable(_generate_random)
+    assert callable(_generate_cartesian)

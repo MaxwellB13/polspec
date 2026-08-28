@@ -31,5 +31,6 @@ pyo3-polars = { version = "0.28.0", features = [
     "dtype-full",
 ] }
 rand = { version = "0.8" }
+rand_distr = "0.4"
 rand_xoshiro = "0.6"
 rayon = "1.12.0"
