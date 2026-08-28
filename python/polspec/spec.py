@@ -79,6 +79,9 @@ class ColSpec:
         elif self.weights is not None:
             object.__setattr__(self, "weights", tuple(float(w) for w in self.weights))
 
+        if self.choices is not None and not self.choices:
+            raise ValueError("ColSpec.choices must not be empty")
+
         if self.weights is not None:
             if self.choices is not None:
                 if len(self.weights) != len(self.choices):
@@ -100,6 +103,15 @@ class ColSpec:
                 raise ValueError("Sum of weights must be positive")
 
         if self.distribution is not None:
+            if not (
+                self.dtype.is_integer()
+                or self.dtype.is_float()
+                or self.dtype.is_temporal()
+            ):
+                raise ValueError(
+                    f"ColSpec.distribution is only supported for numeric or temporal "
+                    f"dtypes, got {self.dtype!r}"
+                )
             dist = self.distribution.lower()
             valid_dists = {
                 "uniform",
