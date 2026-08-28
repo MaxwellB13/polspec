@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, Literal
@@ -38,39 +39,68 @@ _MAX_CARTESIAN_ROWS = 50_000_000
 class Bound:
     """An inclusive [min, max] range, used for numeric bounds and string lengths."""
 
-    min: float
-    max: float
+    min: float | int
+    max: float | int
 
     def __post_init__(self) -> None:
         if self.min > self.max:
             raise ValueError(f"Bound min ({self.min}) must be <= max ({self.max})")
 
     @classmethod
-    def _coerce(cls, value: Bound | tuple[float, float] | None) -> Bound | None:
+    def _coerce(
+        cls, value: Bound | tuple[float | int, float | int] | None
+    ) -> Bound | None:
         if value is None or isinstance(value, Bound):
             return value
         lo, hi = value
         return cls(lo, hi)
 
 
-# The only condition shapes ColRule.when accepts. Keeping this to plain
-# equality/membership on a single column (rather than an arbitrary pl.Expr)
-# means every rule is a plain dict -- so it can be written to and read back
-# from YAML exactly, with no expression-tree parsing involved.
-_CONDITION_OPS = ("equals", "not_equals", "in", "not_in")
+# Condition operations ColRule.when accepts.
+_CONDITION_OPS = (
+    "equals",
+    "not_equals",
+    "in",
+    "not_in",
+    "lt",
+    "lte",
+    "le",
+    "gt",
+    "gte",
+    "ge",
+    "between",
+    "is_null",
+    "is_not_null",
+)
 
 
 def _validate_condition(condition: dict) -> None:
     if not isinstance(condition, dict) or "column" not in condition:
         raise TypeError(
             "ColRule.when must be a dict like {'column': 'enum_1', 'in': ['A', 'B']} "
-            f"(supported keys: {', '.join(_CONDITION_OPS)})"
+            f"(supported condition keys: {', '.join(_CONDITION_OPS)})"
         )
     ops_present = [op for op in _CONDITION_OPS if op in condition]
     if len(ops_present) != 1:
         raise ValueError(
             f"ColRule.when for column {condition['column']!r} must have exactly one of "
             f"{_CONDITION_OPS}, got {ops_present}"
+        )
+    if "between" in condition:
+        b = condition["between"]
+        if not (isinstance(b, (list, tuple)) and len(b) == 2 and b[0] <= b[1]):
+            raise ValueError(
+                f"ColRule.when 'between' condition requires a 2-element sequence [min, max] where min <= max, got {b!r}"
+            )
+    if "in" in condition and not isinstance(condition["in"], (list, tuple, set)):
+        raise TypeError(
+            f"ColRule.when 'in' condition requires a collection, got {type(condition['in']).__name__}"
+        )
+    if "not_in" in condition and not isinstance(
+        condition["not_in"], (list, tuple, set)
+    ):
+        raise TypeError(
+            f"ColRule.when 'not_in' condition requires a collection, got {type(condition['not_in']).__name__}"
         )
 
 
@@ -82,7 +112,26 @@ def _condition_to_expr(condition: dict) -> pl.Expr:
         return column != condition["not_equals"]
     if "in" in condition:
         return column.is_in(list(condition["in"]))
-    return ~column.is_in(list(condition["not_in"]))
+    if "not_in" in condition:
+        return ~column.is_in(list(condition["not_in"]))
+    if "lt" in condition:
+        return column < condition["lt"]
+    if "lte" in condition or "le" in condition:
+        val = condition.get("lte", condition.get("le"))
+        return column <= val
+    if "gt" in condition:
+        return column > condition["gt"]
+    if "gte" in condition or "ge" in condition:
+        val = condition.get("gte", condition.get("ge"))
+        return column >= val
+    if "between" in condition:
+        lo, hi = condition["between"]
+        return column.is_between(lo, hi)
+    if "is_null" in condition:
+        return column.is_null() if condition["is_null"] else column.is_not_null()
+    if "is_not_null" in condition:
+        return column.is_not_null() if condition["is_not_null"] else column.is_null()
+    raise ValueError(f"Unrecognized condition: {condition}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +183,9 @@ class ColSpec:
     rules: tuple[ColRule, ...] = ()
 
     def __post_init__(self) -> None:
+        if isinstance(self.dtype, type) and issubclass(self.dtype, pl.DataType):
+            with suppress(TypeError):
+                object.__setattr__(self, "dtype", self.dtype())
         object.__setattr__(self, "bounds", Bound._coerce(self.bounds))
         object.__setattr__(self, "string_length", Bound._coerce(self.string_length))
         object.__setattr__(self, "rules", tuple(self.rules))
@@ -155,20 +207,28 @@ def _column_kind(dtype: pl.DataType) -> str:
         return "int"
     if dtype.is_float():
         return "float"
+    if dtype.is_temporal():
+        return "temporal"
     if dtype == pl.Boolean:
         return "bool"
     if dtype in (pl.String, pl.Utf8):
         return "string"
+    if dtype == pl.Binary:
+        return "binary"
     if isinstance(dtype, pl.Enum):
         return "enum"
-    if isinstance(dtype, pl.Categorical) or dtype == pl.Categorical:
+    if (
+        isinstance(dtype, pl.Categorical)
+        or dtype == pl.Categorical
+        or (isinstance(dtype, type) and issubclass(dtype, pl.Categorical))
+    ):
         return "categorical"
     raise TypeError(f"polspec cannot generate data for dtype {dtype!r}")
 
 
 # Every dtype polspec can generate that has a fixed, unparametrized identity
-# -- Enum and (parametrized) Categorical are handled separately since they
-# carry their own category list.
+# -- Enum, Datetime, Duration, and (parametrized) Categorical are handled separately
+# since they carry their own metadata.
 _YAML_DTYPES: dict[pl.DataType, str] = {
     pl.String: "String",
     pl.Boolean: "Boolean",
@@ -182,6 +242,11 @@ _YAML_DTYPES: dict[pl.DataType, str] = {
     pl.UInt64: "UInt64",
     pl.Float32: "Float32",
     pl.Float64: "Float64",
+    pl.Date: "Date",
+    pl.Time: "Time",
+    pl.Datetime: "Datetime",
+    pl.Duration: "Duration",
+    pl.Binary: "Binary",
 }
 _YAML_NAME_TO_DTYPE = {name: dtype for dtype, name in _YAML_DTYPES.items()}
 
@@ -189,7 +254,18 @@ _YAML_NAME_TO_DTYPE = {name: dtype for dtype, name in _YAML_DTYPES.items()}
 def _dtype_to_yaml(dtype: pl.DataType) -> str | dict:
     if isinstance(dtype, pl.Enum):
         return {"Enum": dtype.categories.to_list()}
-    if dtype == pl.Categorical:
+    if isinstance(dtype, pl.Datetime):
+        res: dict = {"time_unit": dtype.time_unit}
+        if dtype.time_zone is not None:
+            res["time_zone"] = dtype.time_zone
+        return {"Datetime": res}
+    if isinstance(dtype, pl.Duration):
+        return {"Duration": {"time_unit": dtype.time_unit}}
+    if (
+        isinstance(dtype, pl.Categorical)
+        or dtype == pl.Categorical
+        or (isinstance(dtype, type) and issubclass(dtype, pl.Categorical))
+    ):
         return "Categorical"
     name = _YAML_DTYPES.get(dtype)
     if name is None:
@@ -201,9 +277,18 @@ def _dtype_from_yaml(value: str | dict) -> pl.DataType:
     if isinstance(value, dict):
         if "Enum" in value:
             return pl.Enum(value["Enum"])
+        if "Datetime" in value:
+            dt_info = value["Datetime"]
+            return pl.Datetime(
+                time_unit=dt_info.get("time_unit", "us"),
+                time_zone=dt_info.get("time_zone"),
+            )
+        if "Duration" in value:
+            dur_info = value["Duration"]
+            return pl.Duration(time_unit=dur_info.get("time_unit", "us"))
         raise ValueError(f"Unrecognized dtype mapping in YAML: {value!r}")
     if value == "Categorical":
-        return pl.Categorical
+        return pl.Categorical()
     dtype = _YAML_NAME_TO_DTYPE.get(value)
     if dtype is None:
         raise ValueError(f"Unrecognized dtype name in YAML: {value!r}")
@@ -250,8 +335,8 @@ def _colspec_from_yaml(data: dict) -> ColSpec:
     return ColSpec(dtype=_dtype_from_yaml(data["dtype"]), **kwargs)
 
 
-def _resolve_numeric_bounds(spec: ColSpec) -> tuple[float, float]:
-    """Returns the (min, max) an int/float ColSpec generates within.
+def _resolve_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
+    """Returns the (min, max) an int/float/temporal ColSpec generates within.
 
     Mirrors the defaulting rule used at generation time: explicit
     `spec.bounds` wins, otherwise a fixed-width int dtype defaults to its own
@@ -259,25 +344,32 @@ def _resolve_numeric_bounds(spec: ColSpec) -> tuple[float, float]:
     """
     kind = _column_kind(spec.dtype)
     if spec.bounds is not None:
-        return float(spec.bounds.min), float(spec.bounds.max)
+        return spec.bounds.min, spec.bounds.max
     if kind == "int":
         if spec.dtype in _INT_DTYPE_BOUNDS:
             lo, hi = _INT_DTYPE_BOUNDS[spec.dtype]
-            return float(lo), float(hi)
-        return float(-_DEFAULT_WIDE_INT_BOUND), float(_DEFAULT_WIDE_INT_BOUND)
+            return lo, hi
+        return -_DEFAULT_WIDE_INT_BOUND, _DEFAULT_WIDE_INT_BOUND
     if kind == "float":
         return -_DEFAULT_FLOAT_BOUND, _DEFAULT_FLOAT_BOUND
-    raise TypeError(f"{spec.dtype!r} is not a numeric dtype")
+    if kind == "temporal":
+        if spec.dtype == pl.Date:
+            return 0, 36525
+        if spec.dtype == pl.Time:
+            return 0, 86_399_999_999_999
+        if isinstance(spec.dtype, pl.Datetime) or spec.dtype == pl.Datetime:
+            return 0, 36525 * 86400 * 1_000_000
+        if isinstance(spec.dtype, pl.Duration) or spec.dtype == pl.Duration:
+            return 0, 365 * 86400 * 1_000_000
+        return 0, _DEFAULT_WIDE_INT_BOUND
+    raise TypeError(f"{spec.dtype!r} is not a numeric or temporal dtype")
 
 
 def _to_rust_spec(name: str, spec: ColSpec) -> tuple:
     """Builds the tuple the Rust extension expects for one column.
 
     Layout: (name, kind, nullable, null_probability, min, max, categories,
-    str_min_len, str_max_len). `kind` is always one of the four physical
-    generators Rust knows about ("int", "float", "bool", "string") -- Enum
-    and Categorical are generated as "string" from their category list and
-    cast to the real dtype afterwards.
+    str_min_len, str_max_len).
     """
     kind = _column_kind(spec.dtype)
     null_probability = spec.null_probability if spec.nullable else 0.0
@@ -288,11 +380,38 @@ def _to_rust_spec(name: str, spec: ColSpec) -> tuple:
     str_min_len: int | None = None
     str_max_len: int | None = None
 
-    if kind in ("int", "float"):
-        min_bound, max_bound = _resolve_numeric_bounds(spec)
-    elif kind == "string":
+    if spec.dtype == pl.Int8:
+        kind = "int8"
+    elif spec.dtype == pl.Int16:
+        kind = "int16"
+    elif spec.dtype == pl.Int32:
+        kind = "int32"
+    elif spec.dtype == pl.Int64:
+        kind = "int64"
+    elif spec.dtype == pl.UInt8:
+        kind = "uint8"
+    elif spec.dtype == pl.UInt16:
+        kind = "uint16"
+    elif spec.dtype == pl.UInt32:
+        kind = "uint32"
+    elif spec.dtype == pl.UInt64:
+        kind = "uint64"
+    elif spec.dtype == pl.Float32:
+        kind = "float32"
+    elif spec.dtype == pl.Float64:
+        kind = "float64"
+    elif spec.dtype == pl.Date:
+        kind = "int32"
+    elif spec.dtype == pl.Time or isinstance(spec.dtype, pl.Datetime) or spec.dtype == pl.Datetime or isinstance(spec.dtype, pl.Duration) or spec.dtype == pl.Duration:
+        kind = "int64"
+
+    if spec.dtype.is_integer() or spec.dtype.is_float() or spec.dtype.is_temporal():
+        lo, hi = _resolve_numeric_bounds(spec)
+        min_bound, max_bound = float(lo), float(hi)
+    elif kind in ("string", "binary"):
         length = spec.string_length or Bound(*_DEFAULT_STRING_LEN)
         str_min_len, str_max_len = int(length.min), int(length.max)
+        kind = "string"
     elif kind in ("enum", "categorical"):
         if kind == "enum":
             categories = spec.dtype.categories.to_list()
@@ -313,10 +432,28 @@ def _to_rust_spec(name: str, spec: ColSpec) -> tuple:
 
 def _cast_expr(name: str, spec: ColSpec) -> pl.Expr:
     kind = _column_kind(spec.dtype)
-    if kind == "categorical" and spec.dtype == pl.Categorical:
-        # Bare `pl.Categorical` (no explicit categories): let polars build
-        # the category set from the generated strings.
+    if (
+        isinstance(spec.dtype, pl.Categorical)
+        or spec.dtype == pl.Categorical
+        or (isinstance(spec.dtype, type) and issubclass(spec.dtype, pl.Categorical))
+    ):
         return pl.col(name).cast(pl.Categorical)
+    if kind == "string" and spec.dtype in (pl.String, pl.Utf8):
+        return pl.col(name)
+    if spec.dtype in (
+        pl.Int8,
+        pl.Int16,
+        pl.Int32,
+        pl.Int64,
+        pl.UInt8,
+        pl.UInt16,
+        pl.UInt32,
+        pl.UInt64,
+        pl.Float32,
+        pl.Float64,
+        pl.Boolean,
+    ):
+        return pl.col(name)
     return pl.col(name).cast(spec.dtype)
 
 
@@ -337,7 +474,7 @@ def _coverage_values(spec: ColSpec, rng: random.Random) -> list | None:
         values = list(spec.dtype.categories.to_list())
     elif kind == "bool":
         values = [True, False]
-    elif kind == "int":
+    elif kind in ("int", "temporal"):
         lo, hi = (int(v) for v in _resolve_numeric_bounds(spec))
         if lo < 0:
             values.append(rng.randint(lo, min(hi, -1)))
@@ -346,13 +483,15 @@ def _coverage_values(spec: ColSpec, rng: random.Random) -> list | None:
         if hi > 0:
             values.append(rng.randint(max(lo, 1), hi))
     elif kind == "float":
-        lo, hi = _resolve_numeric_bounds(spec)
+        lo, hi = (float(v) for v in _resolve_numeric_bounds(spec))
         if lo < 0:
-            values.append(rng.uniform(lo, min(hi, -1e-9)))
+            upper = hi if hi < 0 else (lo / 2.0 if lo > -2e-9 else -1e-9)
+            values.append(rng.uniform(lo, upper))
         if lo <= 0.0 <= hi:
             values.append(0.0)
         if hi > 0:
-            values.append(rng.uniform(max(lo, 1e-9), hi))
+            lower = lo if lo > 0 else (hi / 2.0 if hi < 2e-9 else 1e-9)
+            values.append(rng.uniform(lower, hi))
     else:
         return None
 
@@ -375,13 +514,12 @@ def _generate_random(
 def _sample_choices(choices: tuple, n: int, seed: int) -> pl.Series:
     """n values drawn uniformly (with replacement) from `choices`.
 
-    Generates a random index column through the same fast Rust "int"
-    generator every bounded-int ColSpec uses, then gathers `choices` by
-    those indices -- no per-row Python work, and no new Rust code needed.
+    Generates a random index column through the fast Rust generator, then
+    gathers `choices` by those indices.
     """
     idx_spec = (
         "__idx",
-        "int",
+        "uint32",
         False,
         0.0,
         0.0,
@@ -406,6 +544,8 @@ def _apply_rules(
     original freely-generated values, never another rule's output, so rules
     on different columns never need dependency ordering.
     """
+    if df.height == 0:
+        return df
     rng = random.Random(seed)
     exprs = []
     for name, spec in columns.items():
@@ -413,15 +553,20 @@ def _apply_rules(
             continue
         chain = None
         for rule in spec.rules:
-            fill = _sample_choices(rule.choices, df.height, rng.randrange(2**63)).cast(
-                spec.dtype
-            )
             condition = rule._expr()
-            if chain is None:
-                chain = pl.when(condition).then(pl.lit(fill))
+            if len(rule.choices) == 1:
+                fill_expr = pl.lit(rule.choices[0], dtype=spec.dtype)
             else:
-                chain = chain.when(condition).then(pl.lit(fill))
-        exprs.append(chain.otherwise(pl.col(name)).alias(name))
+                fill_series = _sample_choices(
+                    rule.choices, df.height, rng.randrange(2**63)
+                ).cast(spec.dtype)
+                fill_expr = pl.lit(fill_series)
+            if chain is None:
+                chain = pl.when(condition).then(fill_expr)
+            else:
+                chain = chain.when(condition).then(fill_expr)
+        if chain is not None:
+            exprs.append(chain.otherwise(pl.col(name)).alias(name))
     return df.with_columns(exprs) if exprs else df
 
 
@@ -502,18 +647,26 @@ class DfSpec:
     def __init_subclass__(cls, **kwargs) -> None:
         super().__init_subclass__(**kwargs)
         columns: dict[str, ColSpec] = {}
-        for base in reversed(cls.__mro__[1:]):
-            columns.update(
-                (name, value)
-                for name, value in vars(base).items()
-                if isinstance(value, ColSpec)
-            )
-        columns.update(
-            (name, value)
-            for name, value in vars(cls).items()
-            if isinstance(value, ColSpec)
-        )
+        for base in reversed(cls.__mro__):
+            for name, value in vars(base).items():
+                if name.startswith("_"):
+                    continue
+                if isinstance(value, ColSpec):
+                    columns[name] = value
+                elif name in columns:
+                    del columns[name]
         cls._columns = columns
+        cls._validate_rules()
+
+    @classmethod
+    def _validate_rules(cls) -> None:
+        for col_name, spec in cls._columns.items():
+            for rule in spec.rules:
+                ref_col = rule.when.get("column")
+                if ref_col not in cls._columns:
+                    raise ValueError(
+                        f"ColRule on column {col_name!r} references unknown column {ref_col!r}"
+                    )
 
     @classmethod
     def schema(cls) -> pl.Schema:

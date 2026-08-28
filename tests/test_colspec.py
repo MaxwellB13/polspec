@@ -360,3 +360,176 @@ def test_yaml_defaults_are_omitted_for_compactness(tmp_path):
     col = parsed["columns"]["plain_int"]
     # nullable=False and the default null_probability shouldn't be written
     assert col == {"dtype": "Int32"}
+
+
+class AllTypesSource(DfSpec):
+    i8 = ColSpec(dtype=pl.Int8, bounds=(-50, 50), nullable=True)
+    i16 = ColSpec(dtype=pl.Int16, bounds=(-1000, 1000), nullable=False)
+    i32 = ColSpec(dtype=pl.Int32, bounds=(-100000, 100000), nullable=True)
+    i64 = ColSpec(dtype=pl.Int64, bounds=(-10000000, 10000000), nullable=False)
+    u8 = ColSpec(dtype=pl.UInt8, bounds=(0, 200), nullable=True)
+    u16 = ColSpec(dtype=pl.UInt16, bounds=(10, 50000), nullable=False)
+    u32 = ColSpec(dtype=pl.UInt32, bounds=(100, 3000000), nullable=True)
+    u64 = ColSpec(dtype=pl.UInt64, bounds=(1000, 50000000), nullable=False)
+    f32 = ColSpec(dtype=pl.Float32, bounds=(-10.5, 10.5), nullable=True)
+    f64 = ColSpec(dtype=pl.Float64, bounds=(-1000.5, 1000.5), nullable=False)
+    b = ColSpec(dtype=pl.Boolean, nullable=True)
+    s = ColSpec(dtype=pl.String, nullable=False)
+
+
+def test_all_native_dtypes_generation_and_bounds():
+    df = AllTypesSource.generate(5_000, seed=123)
+    assert df.schema == AllTypesSource.schema()
+    assert df.height == 5_000
+
+    assert df["i8"].drop_nulls().min() >= -50
+    assert df["i8"].drop_nulls().max() <= 50
+
+    assert df["i16"].null_count() == 0
+    assert df["i16"].min() >= -1000
+    assert df["i16"].max() <= 1000
+
+    assert df["u8"].drop_nulls().min() >= 0
+    assert df["u8"].drop_nulls().max() <= 200
+
+    assert df["u16"].null_count() == 0
+    assert df["u16"].min() >= 10
+    assert df["u16"].max() <= 50000
+
+    assert df["f32"].drop_nulls().min() >= -10.5
+    assert df["f32"].drop_nulls().max() <= 10.5
+
+    assert df["b"].null_count() > 0
+    assert set(df["b"].drop_nulls().to_list()) <= {True, False}
+
+
+def test_concurrent_generation_releases_gil():
+    import concurrent.futures
+
+    def worker(seed):
+        return AllTypesSource.generate(10_000, seed=seed)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(worker, seed) for seed in range(4)]
+        results = [f.result() for f in futures]
+
+    for df in results:
+        assert df.height == 10_000
+        assert df.schema == AllTypesSource.schema()
+
+
+def test_narrow_float_bounds_in_cartesian():
+    class NarrowFloat(DfSpec):
+        flag = ColSpec(dtype=pl.Boolean, nullable=False)
+        narrow_pos = ColSpec(dtype=pl.Float64, bounds=(0.0, 1e-12), nullable=False)
+        narrow_neg = ColSpec(dtype=pl.Float64, bounds=(-1e-12, 0.0), nullable=False)
+
+    df = NarrowFloat.generate(n=1, method="cartesian", seed=42)
+    assert df["narrow_pos"].min() >= 0.0
+    assert df["narrow_pos"].max() <= 1e-12
+    assert df["narrow_neg"].min() >= -1e-12
+    assert df["narrow_neg"].max() <= 0.0
+
+
+def test_expanded_rule_operations():
+    class ComplexRules(DfSpec):
+        score = ColSpec(dtype=pl.Int32, bounds=(0, 100), nullable=False)
+        optional_val = ColSpec(dtype=pl.Float64, bounds=(0.0, 10.0), nullable=True)
+        tier = ColSpec(
+            dtype=pl.String,
+            nullable=False,
+            rules=(
+                ColRule(when={"column": "score", "lt": 50}, choices=["Low"]),
+                ColRule(when={"column": "score", "between": [50, 79]}, choices=["Mid"]),
+                ColRule(when={"column": "score", "gte": 80}, choices=["High"]),
+            ),
+        )
+        status = ColSpec(
+            dtype=pl.String,
+            nullable=False,
+            rules=(
+                ColRule(
+                    when={"column": "optional_val", "is_null": True},
+                    choices=["Missing"],
+                ),
+                ColRule(
+                    when={"column": "optional_val", "is_not_null": True},
+                    choices=["Present"],
+                ),
+            ),
+        )
+
+    df = ComplexRules.generate(5_000, seed=42)
+
+    low_check = df.filter(pl.col("score") < 50)["tier"].unique().to_list()
+    assert low_check == ["Low"]
+
+    mid_check = df.filter(pl.col("score").is_between(50, 79))["tier"].unique().to_list()
+    assert mid_check == ["Mid"]
+
+    high_check = df.filter(pl.col("score") >= 80)["tier"].unique().to_list()
+    assert high_check == ["High"]
+
+    missing_check = (
+        df.filter(pl.col("optional_val").is_null())["status"].unique().to_list()
+    )
+    assert missing_check == ["Missing"]
+
+    present_check = (
+        df.filter(pl.col("optional_val").is_not_null())["status"].unique().to_list()
+    )
+    assert present_check == ["Present"]
+
+
+def test_rule_referencing_unknown_column_raises():
+    with pytest.raises(ValueError, match="references unknown column"):
+
+        class BadRule(DfSpec):
+            x = ColSpec(
+                dtype=pl.Int32,
+                rules=(
+                    ColRule(when={"column": "non_existent", "equals": 1}, choices=[0]),
+                ),
+            )
+
+
+def test_subclass_attribute_overriding():
+    class BaseSpec(DfSpec):
+        a = ColSpec(dtype=pl.Int32)
+        b = ColSpec(dtype=pl.String)
+
+    class DerivedSpec(BaseSpec):
+        b = None  # removes column b
+        c = ColSpec(dtype=pl.Float64)
+
+    assert "b" not in DerivedSpec._columns
+    assert set(DerivedSpec._columns.keys()) == {"a", "c"}
+    df = DerivedSpec.generate(100, seed=42)
+    assert set(df.columns) == {"a", "c"}
+
+
+def test_temporal_and_binary_dtypes_and_yaml(tmp_path):
+    class TemporalAndBinary(DfSpec):
+        d = ColSpec(dtype=pl.Date, nullable=False)
+        t = ColSpec(dtype=pl.Time, nullable=True)
+        dt = ColSpec(dtype=pl.Datetime(time_unit="us"), nullable=False)
+        dur = ColSpec(dtype=pl.Duration(time_unit="ms"), nullable=True)
+        b = ColSpec(dtype=pl.Binary, nullable=False)
+        cat = ColSpec(dtype=pl.Categorical, nullable=False)
+
+    df = TemporalAndBinary.generate(1_000, seed=42)
+    assert df.schema["d"] == pl.Date
+    assert df.schema["t"] == pl.Time
+    assert df.schema["dt"] == pl.Datetime(time_unit="us")
+    assert df.schema["dur"] == pl.Duration(time_unit="ms")
+    assert df.schema["b"] == pl.Binary
+    assert isinstance(df.schema["cat"], pl.Categorical)
+
+    # Test YAML serialization
+    yaml_path = tmp_path / "temporal.yaml"
+    TemporalAndBinary.to_yaml(source=yaml_path)
+    Loaded = DfSpec.from_yaml(source=yaml_path)
+    assert Loaded.schema() == TemporalAndBinary.schema()
+    df_loaded = Loaded.generate(500, seed=42)
+    df_orig = TemporalAndBinary.generate(500, seed=42)
+    assert df_orig.equals(df_loaded)

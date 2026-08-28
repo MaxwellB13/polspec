@@ -99,13 +99,12 @@ def generate_python(n: int, seed: int) -> pl.DataFrame:
         float_1[i] = None if rng.random() < NULL_P else rng.uniform(FLOAT_LO, FLOAT_HI)
 
     df = pl.DataFrame(
-        {"string_1": string_1, "enum_1": enum_1, "int_1": int_1, "float_1": float_1},
-        schema={
-            "string_1": pl.String,
-            "enum_1": pl.String,
-            "int_1": pl.Int64,
-            "float_1": pl.Float64,
-        },
+        {
+            "string_1": pl.Series("string_1", string_1, dtype=pl.String),
+            "enum_1": pl.Series("enum_1", enum_1, dtype=pl.String),
+            "int_1": pl.Series("int_1", int_1, dtype=pl.Int64),
+            "float_1": pl.Series("float_1", float_1, dtype=pl.Float64),
+        }
     )
     return df.with_columns(pl.col("enum_1").cast(pl.Enum(CATEGORIES)))
 
