@@ -4,7 +4,7 @@ import polars as pl
 
 from polspec.bound import Bound
 from polspec.constants import _DEFAULT_NULL_PROBABILITY
-from polspec.spec import ColSpec
+from polspec.spec import ColSpec, _is_categorical_dtype
 
 
 def profile_dataframe(
@@ -58,12 +58,7 @@ def profile_dataframe(
                 null_probability=null_probability,
                 weights=col_weights,
             )
-        elif (
-            dtype in (pl.String, pl.Utf8)
-            or isinstance(dtype, pl.Categorical)
-            or dtype == pl.Categorical
-            or (isinstance(dtype, type) and issubclass(dtype, pl.Categorical))
-        ):
+        elif dtype in (pl.String, pl.Utf8) or _is_categorical_dtype(dtype):
             n_unique = non_null.n_unique()
             if 0 < n_unique <= max_unique_enum:
                 cats = non_null.unique().sort().to_list()
@@ -83,11 +78,7 @@ def profile_dataframe(
                     weights=col_weights,
                 )
             else:
-                if (
-                    isinstance(dtype, pl.Categorical)
-                    or dtype == pl.Categorical
-                    or (isinstance(dtype, type) and issubclass(dtype, pl.Categorical))
-                ):
+                if _is_categorical_dtype(dtype):
                     columns[col_name] = ColSpec(
                         dtype=pl.Categorical(),
                         nullable=nullable,

@@ -4,7 +4,7 @@ import polars as pl
 
 from polspec.constants import _DEFAULT_NULL_PROBABILITY
 from polspec.rules import ColRule
-from polspec.spec import ColSpec
+from polspec.spec import ColSpec, _is_categorical_dtype
 
 # Every dtype polspec can generate that has a fixed, unparametrized identity
 # -- Enum, Datetime, Duration, and (parametrized) Categorical are handled separately
@@ -41,11 +41,7 @@ def _dtype_to_yaml(dtype: pl.DataType) -> str | dict:
         return {"Datetime": res}
     if isinstance(dtype, pl.Duration):
         return {"Duration": {"time_unit": dtype.time_unit}}
-    if (
-        isinstance(dtype, pl.Categorical)
-        or dtype == pl.Categorical
-        or (isinstance(dtype, type) and issubclass(dtype, pl.Categorical))
-    ):
+    if _is_categorical_dtype(dtype):
         return "Categorical"
     name = _YAML_DTYPES.get(dtype)
     if name is None:

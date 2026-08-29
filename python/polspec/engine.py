@@ -13,7 +13,22 @@ from polspec.constants import (
     _INT_DTYPE_BOUNDS,
     _MAX_CARTESIAN_ROWS,
 )
-from polspec.spec import ColSpec, _column_kind
+from polspec.spec import ColSpec, _column_kind, _is_categorical_dtype
+
+# Factor to scale a day/second-denominated default range into a Datetime's or
+# Duration's own physical time_unit (default bounds below are expressed in µs).
+_TIME_UNIT_FACTORS = {"ms": 1_000, "us": 1_000_000, "ns": 1_000_000_000}
+
+
+def _bound_endpoint_to_physical(value: object, dtype: pl.DataType) -> float | int:
+    """Coerces a Bound endpoint to the physical (int) representation `dtype`
+    stores internally, so real `date`/`datetime`/`time`/`timedelta` objects
+    can be used as bounds on temporal ColSpecs, matching what `validate()`
+    already accepts.
+    """
+    if isinstance(value, (int, float)):
+        return value
+    return pl.Series([value], dtype=dtype).to_physical().item()
 
 
 def _resolve_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
@@ -25,11 +40,15 @@ def _resolve_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
     """
     kind = _column_kind(spec.dtype)
     if spec.bounds is not None:
-        return spec.bounds.min, spec.bounds.max
+        lo = _bound_endpoint_to_physical(spec.bounds.min, spec.dtype)
+        hi = _bound_endpoint_to_physical(spec.bounds.max, spec.dtype)
+        return lo, hi
     if kind == "int":
         if spec.dtype in _INT_DTYPE_BOUNDS:
             lo, hi = _INT_DTYPE_BOUNDS[spec.dtype]
             return lo, hi
+        if spec.dtype.is_unsigned_integer():
+            return 0, _DEFAULT_WIDE_INT_BOUND
         return -_DEFAULT_WIDE_INT_BOUND, _DEFAULT_WIDE_INT_BOUND
     if kind == "float":
         return -_DEFAULT_FLOAT_BOUND, _DEFAULT_FLOAT_BOUND
@@ -39,9 +58,11 @@ def _resolve_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
         if spec.dtype == pl.Time:
             return 0, 86_399_999_999_999
         if isinstance(spec.dtype, pl.Datetime) or spec.dtype == pl.Datetime:
-            return 0, 36525 * 86400 * 1_000_000
+            factor = _TIME_UNIT_FACTORS[getattr(spec.dtype, "time_unit", None) or "us"]
+            return 0, 36525 * 86400 * factor
         if isinstance(spec.dtype, pl.Duration) or spec.dtype == pl.Duration:
-            return 0, 365 * 86400 * 1_000_000
+            factor = _TIME_UNIT_FACTORS[getattr(spec.dtype, "time_unit", None) or "us"]
+            return 0, 365 * 86400 * factor
         return 0, _DEFAULT_WIDE_INT_BOUND
     raise TypeError(f"{spec.dtype!r} is not a numeric or temporal dtype")
 
@@ -138,14 +159,15 @@ def _cast_expr(name: str, spec: ColSpec) -> pl.Expr:
     if spec.choices is not None:
         if spec.dtype in (pl.String, pl.Utf8):
             return pl.col(name)
-        return pl.col(name).cast(spec.dtype)
+        # The Rust engine samples from str(choice) values as plain strings;
+        # look each one back up to its original typed value instead of
+        # relying on pl.cast(), which can't parse e.g. "True"/a datetime
+        # repr string into Boolean/Datetime/Duration/Binary.
+        mapping = {str(c): c for c in spec.choices}
+        return pl.col(name).replace_strict(mapping, return_dtype=spec.dtype)
 
     kind = _column_kind(spec.dtype)
-    if (
-        isinstance(spec.dtype, pl.Categorical)
-        or spec.dtype == pl.Categorical
-        or (isinstance(spec.dtype, type) and issubclass(spec.dtype, pl.Categorical))
-    ):
+    if _is_categorical_dtype(spec.dtype):
         return pl.col(name).cast(pl.Categorical)
     if kind == "string" and spec.dtype in (pl.String, pl.Utf8):
         return pl.col(name)

@@ -241,11 +241,14 @@ class FrameSpec:
         rng = random.Random(seed)
 
         if method == "cartesian":
-            first_batch_size = min(n, batch_size)
             first_batch = cls.generate(
-                first_batch_size, method="cartesian", seed=rng.randrange(2**63)
+                min(n, batch_size), method="cartesian", seed=rng.randrange(2**63)
             )
-            yield first_batch
+            # The coverage set built for the first batch can be far larger
+            # than batch_size (it's a cross-product, not a row count cap), so
+            # slice it before yielding to honor the per-batch memory bound.
+            for offset in range(0, first_batch.height, batch_size):
+                yield first_batch.slice(offset, batch_size)
             rows_remaining = max(0, n - first_batch.height)
             while rows_remaining > 0:
                 current_batch_size = min(rows_remaining, batch_size)

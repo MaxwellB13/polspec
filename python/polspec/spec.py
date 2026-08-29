@@ -25,13 +25,17 @@ def _column_kind(dtype: pl.DataType) -> str:
         return "binary"
     if isinstance(dtype, pl.Enum):
         return "enum"
-    if (
+    if _is_categorical_dtype(dtype):
+        return "categorical"
+    raise TypeError(f"polspec cannot generate data for dtype {dtype!r}")
+
+
+def _is_categorical_dtype(dtype: pl.DataType) -> bool:
+    return (
         isinstance(dtype, pl.Categorical)
         or dtype == pl.Categorical
         or (isinstance(dtype, type) and issubclass(dtype, pl.Categorical))
-    ):
-        return "categorical"
-    raise TypeError(f"polspec cannot generate data for dtype {dtype!r}")
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +63,14 @@ class ColSpec:
         object.__setattr__(self, "rules", tuple(self.rules))
         if not 0.0 <= self.null_probability <= 1.0:
             raise ValueError("null_probability must be between 0 and 1")
+
+        if self.bounds is not None and not (
+            self.dtype.is_integer() or self.dtype.is_float() or self.dtype.is_temporal()
+        ):
+            raise ValueError(
+                f"ColSpec.bounds is only supported for numeric or temporal "
+                f"dtypes, got {self.dtype!r}"
+            )
 
         # Process choices & weights
         if isinstance(self.choices, dict):
@@ -93,9 +105,16 @@ class ColSpec:
                     raise ValueError(
                         f"Length of weights ({len(self.weights)}) must match number of Enum categories ({len(self.dtype.categories)})"
                     )
-            elif self.dtype == pl.Boolean and len(self.weights) != 2:
+            elif self.dtype == pl.Boolean:
+                if len(self.weights) != 2:
+                    raise ValueError(
+                        "Boolean weights must be a 2-element sequence [p_false, p_true]"
+                    )
+            else:
                 raise ValueError(
-                    "Boolean weights must be a 2-element sequence [p_false, p_true]"
+                    "ColSpec.weights requires 'choices', an Enum dtype, or a Boolean "
+                    f"dtype to define the domain weights apply to; got dtype={self.dtype!r} "
+                    "with no choices"
                 )
             if any(w < 0 for w in self.weights):
                 raise ValueError("Weights must all be non-negative")
@@ -193,6 +212,14 @@ class ColSpec:
                             f"Beta distribution alpha and beta must be positive, got alpha={alpha}, beta={beta}"
                         )
 
+        if self.dtype == pl.Boolean and self.distribution_params is not None:
+            params = {str(k): float(v) for k, v in self.distribution_params.items()}
+            object.__setattr__(self, "distribution_params", params)
+            if "p" in params and not 0.0 <= params["p"] <= 1.0:
+                raise ValueError(
+                    f"Boolean distribution_params['p'] must be between 0 and 1, got {params['p']}"
+                )
+
         if isinstance(self.dtype, pl.Enum):
             valid = set(self.dtype.categories.to_list())
             if self.choices is not None:
@@ -207,4 +234,21 @@ class ColSpec:
                     raise ValueError(
                         f"ColRule.choices {unknown} are not among this column's "
                         f"Enum categories {sorted(valid)}"
+                    )
+
+        if self.bounds is not None:
+            b_min, b_max = self.bounds.min, self.bounds.max
+            if self.choices is not None:
+                out_of_bounds = [c for c in self.choices if not (b_min <= c <= b_max)]
+                if out_of_bounds:
+                    raise ValueError(
+                        f"ColSpec.choices {out_of_bounds} fall outside this column's "
+                        f"bounds [{b_min}, {b_max}]"
+                    )
+            for rule in self.rules:
+                out_of_bounds = [c for c in rule.choices if not (b_min <= c <= b_max)]
+                if out_of_bounds:
+                    raise ValueError(
+                        f"ColRule.choices {out_of_bounds} fall outside this column's "
+                        f"bounds [{b_min}, {b_max}]"
                     )
