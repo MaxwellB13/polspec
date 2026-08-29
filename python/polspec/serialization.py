@@ -143,8 +143,8 @@ def _colspec_to_yaml(spec: ColSpec) -> dict:
         data["nullable"] = True
     if spec.bounds is not None:
         data["bounds"] = [spec.bounds.min, spec.bounds.max]
-    if spec.category:
-        data["category"] = spec.category
+    if spec.tags:
+        data["tags"] = list(spec.tags) if len(spec.tags) > 1 else spec.tags[0]
     if spec.null_probability != _DEFAULT_NULL_PROBABILITY:
         data["null_probability"] = spec.null_probability
     if spec.string_length is not None:
@@ -176,8 +176,12 @@ def _colspec_from_yaml(
         kwargs["nullable"] = data["nullable"]
     if "bounds" in data:
         kwargs["bounds"] = tuple(data["bounds"])
-    if "category" in data:
-        kwargs["category"] = data["category"]
+    if "tags" in data:
+        kwargs["tags"] = data["tags"]
+    elif "category" in data:
+        kwargs["tags"] = data["category"]
+    elif "categories" in data:
+        kwargs["tags"] = data["categories"]
     if "null_probability" in data:
         kwargs["null_probability"] = data["null_probability"]
     if "string_length" in data:

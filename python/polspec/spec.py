@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 
 import polars as pl
 
@@ -52,7 +52,7 @@ class ColSpec:
     :ivar nullable: Whether the column allows null values.
     :ivar bounds: The inclusive range of values allowed in the column. Only
         supported for numeric and temporal data types.
-    :ivar category: Optional category to tag or classify the column.
+    :ivar tags: Optional tag or sequence of tags to classify the column.
     :ivar null_probability: Probability of a value being null in the column. Must
         be between 0 and 1.
     :ivar string_length: The inclusive range of string lengths for the column, if
@@ -71,7 +71,7 @@ class ColSpec:
     dtype: pl.DataType
     nullable: bool = False
     bounds: Bound | tuple[Any, Any] | list[Any] | None = None
-    category: str = ""
+    tags: str | Sequence[str] = ()
     null_probability: float = _DEFAULT_NULL_PROBABILITY
     string_length: Bound | tuple[int, int] | list[int] | None = None
     distribution: str | None = None
@@ -87,6 +87,26 @@ class ColSpec:
         object.__setattr__(self, "bounds", Bound._coerce(self.bounds))
         object.__setattr__(self, "string_length", Bound._coerce(self.string_length))
         object.__setattr__(self, "rules", tuple(self.rules))
+        if self.tags is None:
+            object.__setattr__(self, "tags", ())
+        elif isinstance(self.tags, str):
+            if not self.tags:
+                object.__setattr__(self, "tags", ())
+            else:
+                object.__setattr__(self, "tags", (self.tags,))
+        elif isinstance(self.tags, (list, tuple, set, Sequence)):
+            seen = set()
+            cleaned = []
+            for t in self.tags:
+                s = str(t)
+                if s and s not in seen:
+                    seen.add(s)
+                    cleaned.append(s)
+            object.__setattr__(self, "tags", tuple(cleaned))
+        else:
+            raise TypeError(
+                f"ColSpec.tags must be a string or sequence of strings, got {type(self.tags).__name__}"
+            )
         if not 0.0 <= self.null_probability <= 1.0:
             raise ValueError("null_probability must be between 0 and 1")
 

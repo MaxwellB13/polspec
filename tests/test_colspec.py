@@ -1068,3 +1068,78 @@ def test_modular_subpackage_imports():
     assert callable(_generate_random)
     assert callable(_generate_cartesian)
     assert callable(_validate_dataframe)
+
+
+def test_colspec_and_framespec_tags(tmp_path):
+    # 1. ColSpec initialization with tags
+    c1 = ColSpec(pl.Int64, tags="aggregate")
+    assert c1.tags == ("aggregate",)
+
+    c2 = ColSpec(pl.Float64, tags=["aggregate", "index"])
+    assert c2.tags == ("aggregate", "index")
+
+    c3 = ColSpec(pl.String, tags=("feature", "metadata"))
+    assert c3.tags == ("feature", "metadata")
+
+    c4 = ColSpec(pl.Boolean, tags="")
+    assert c4.tags == ()
+
+    c5 = ColSpec(pl.Date, tags=None)
+    assert c5.tags == ()
+
+    c6 = ColSpec(pl.Time, tags=["dup", "dup", "unique"])
+    assert c6.tags == ("dup", "unique")
+
+    with pytest.raises(TypeError, match="ColSpec.tags must be a string or sequence"):
+        ColSpec(pl.Int64, tags=123)  # type: ignore[arg-type]
+
+    # 2. FrameSpec.tag query
+    class TaggedSpec(FrameSpec):
+        id_col = ColSpec(pl.Int64, tags="index")
+        agg_val = ColSpec(pl.Float64, tags=["aggregate", "metric"])
+        total_sum = ColSpec(pl.Float64, tags=["aggregate", "index"])
+        feature_1 = ColSpec(pl.String, tags="feature")
+        untagged = ColSpec(pl.Boolean)
+
+    # Single tag
+    assert TaggedSpec.tag("aggregate") == ["agg_val", "total_sum"]
+    assert TaggedSpec.tag("index") == ["id_col", "total_sum"]
+    assert TaggedSpec.tag("feature") == ["feature_1"]
+    assert TaggedSpec.tag("non_existent") == []
+
+    # Sequence of tags (match="any" by default)
+    assert TaggedSpec.tag(["aggregate", "feature"]) == ["agg_val", "total_sum", "feature_1"]
+    assert TaggedSpec.tag(["index", "feature"]) == ["id_col", "total_sum", "feature_1"]
+
+    # Multiple positional arguments (match="any" by default)
+    assert TaggedSpec.tag("aggregate", "feature") == ["agg_val", "total_sum", "feature_1"]
+    assert TaggedSpec.tag("index", "feature") == ["id_col", "total_sum", "feature_1"]
+
+    # Multiple tags with match="all"
+    assert TaggedSpec.tag(["aggregate", "index"], match="all") == ["total_sum"]
+    assert TaggedSpec.tag("aggregate", "index", match="all") == ["total_sum"]
+    assert TaggedSpec.tag(["aggregate", "feature"], match="all") == []
+    assert TaggedSpec.tag("aggregate", "feature", match="all") == []
+
+    # Empty tags returns empty list
+    assert TaggedSpec.tag() == []
+
+    # Invalid tag type
+    with pytest.raises(TypeError, match="Tag must be a string or sequence"):
+        TaggedSpec.tag(123)  # type: ignore[arg-type]
+
+    # Invalid match mode
+    with pytest.raises(ValueError, match="Invalid match mode"):
+        TaggedSpec.tag(["aggregate"], match="invalid")  # type: ignore[arg-type]
+
+    # FrameSpec.tags should not exist
+    assert not hasattr(TaggedSpec, "tags")
+
+    # 3. YAML serialization roundtrip preserving tags
+    yaml_file = tmp_path / "tagged_spec.yaml"
+    TaggedSpec.to_yaml(yaml_file)
+    LoadedTagged = FrameSpec.from_yaml(yaml_file)
+    assert LoadedTagged.tag("aggregate") == ["agg_val", "total_sum"]
+    assert LoadedTagged.tag(["index", "feature"]) == ["id_col", "total_sum", "feature_1"]
+    assert LoadedTagged._columns["id_col"].tags == ("index",)
+    assert LoadedTagged._columns["agg_val"].tags == ("aggregate", "metric")

@@ -63,6 +63,57 @@ class FrameSpec:
         return pl.Schema({name: spec.dtype for name, spec in cls._columns.items()})
 
     @classmethod
+    def tag(
+        cls,
+        *tags: str | Sequence[str],
+        match: Literal["any", "all"] = "any",
+    ) -> list[str]:
+        """Returns the list of column names matching the specified tag or tags.
+
+        Parameters
+        ----------
+        *tags : str | Sequence[str]
+            One or more tag names or sequences of tag names to match.
+        match : {"any", "all"}, default "any"
+            Whether to match columns having any of the given tags ("any")
+            or all of the given tags ("all").
+
+        Returns
+        -------
+        list[str]
+            List of column names with matching tags, in declaration order.
+        """
+        flattened: list[str] = []
+        for t in tags:
+            if isinstance(t, str):
+                flattened.append(t)
+            elif isinstance(t, Sequence):
+                flattened.extend(str(item) for item in t)
+            else:
+                raise TypeError(
+                    f"Tag must be a string or sequence of strings, got {type(t).__name__}"
+                )
+
+        if not flattened:
+            return []
+
+        target_tags = set(flattened)
+        if match == "any":
+            return [
+                name
+                for name, spec in cls._columns.items()
+                if any(t in spec.tags for t in target_tags)
+            ]
+        elif match == "all":
+            return [
+                name
+                for name, spec in cls._columns.items()
+                if target_tags.issubset(spec.tags)
+            ]
+        else:
+            raise ValueError(f"Invalid match mode: {match!r}. Expected 'any' or 'all'.")
+
+    @classmethod
     def catspec(cls) -> CatSpec:
         """Extracts a CatSpec registry from this FrameSpec's column definitions."""
         return CatSpec.from_framespec(cls)
@@ -141,6 +192,7 @@ class FrameSpec:
                 new_columns[col_name] = ColSpec(
                     dtype=enum_dt,
                     nullable=spec.nullable,
+                    tags=spec.tags,
                     null_probability=spec.null_probability,
                     weights=spec.weights,
                     rules=spec.rules,
@@ -151,6 +203,7 @@ class FrameSpec:
                 new_columns[col_name] = ColSpec(
                     dtype=cat_dt,
                     nullable=spec.nullable,
+                    tags=spec.tags,
                     null_probability=spec.null_probability,
                     choices=choices,
                     weights=spec.weights,
