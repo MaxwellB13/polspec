@@ -164,7 +164,9 @@ def _cast_expr(name: str, spec: ColSpec) -> pl.Expr:
         # relying on pl.cast(), which can't parse e.g. "True"/a datetime
         # repr string into Boolean/Datetime/Duration/Binary.
         mapping = {str(c): c for c in spec.choices}
-        return pl.col(name).replace_strict(mapping, return_dtype=spec.dtype)
+        return pl.col(name).replace_strict(
+            mapping, default=None, return_dtype=spec.dtype
+        )
 
     kind = _column_kind(spec.dtype)
     if _is_categorical_dtype(spec.dtype):

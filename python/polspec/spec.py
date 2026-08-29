@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import suppress
 from dataclasses import dataclass
+from typing import Any
 
 import polars as pl
 
@@ -40,14 +41,39 @@ def _is_categorical_dtype(dtype: pl.DataType) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class ColSpec:
-    """Specification for a single generated column."""
+    """
+    Represents the specification of a column in a dataset, including its data type,
+    nullability, value constraints, and distribution properties.
+
+    This class is designed to encapsulate all related metadata and validations
+    required for defining the structure and properties of a dataset column.
+
+    :ivar dtype: The data type of the column.
+    :ivar nullable: Whether the column allows null values.
+    :ivar bounds: The inclusive range of values allowed in the column. Only
+        supported for numeric and temporal data types.
+    :ivar category: Optional category to tag or classify the column.
+    :ivar null_probability: Probability of a value being null in the column. Must
+        be between 0 and 1.
+    :ivar string_length: The inclusive range of string lengths for the column, if
+        applicable.
+    :ivar distribution: The name of the probability distribution for the column's
+        values (e.g., "uniform", "normal").
+    :ivar distribution_params: Parameters specific to the specified probability
+        distribution.
+    :ivar choices: A predefined set of allowed values for the column.
+    :ivar weights: Weights associated with the `choices`, used to bias
+        selection probabilities.
+    :ivar rules: A sequence of rules (`ColRule`) applied to constrain or validate
+        the column's values.
+    """
 
     dtype: pl.DataType
     nullable: bool = False
-    bounds: Bound | tuple[float, float] | None = None
+    bounds: Bound | tuple[Any, Any] | list[Any] | None = None
     category: str = ""
     null_probability: float = _DEFAULT_NULL_PROBABILITY
-    string_length: Bound | tuple[int, int] | None = None
+    string_length: Bound | tuple[int, int] | list[int] | None = None
     distribution: str | None = None
     distribution_params: dict[str, float] | None = None
     choices: tuple | list | dict | None = None

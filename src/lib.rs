@@ -17,7 +17,7 @@ const DEFAULT_FLOAT_BOUND: f64 = 1_000_000.0;
 const DEFAULT_FLOAT32_BOUND: f32 = 1_000_000.0;
 const DEFAULT_STR_MIN_LEN: i64 = 5;
 const DEFAULT_STR_MAX_LEN: i64 = 15;
-const MIN_CHUNK: usize = 4096;
+const CHUNK_SIZE: usize = 65_536;
 
 /// One column's generation instructions, sent over from the Python side.
 struct ColumnSpec {
@@ -246,12 +246,11 @@ impl CategorySampler {
     }
 }
 
-/// Splits `n` rows into roughly-equal, reproducibly-seeded chunks so a
+/// Splits `n` rows into fixed-size, reproducibly-seeded chunks so a
 /// column can be filled in parallel while staying deterministic for a
-/// given top-level seed.
-fn chunk_size_for(n: usize) -> usize {
-    let threads = rayon::current_num_threads().max(1);
-    (n / threads).max(1).max(MIN_CHUNK)
+/// given top-level seed across all machines and thread counts.
+fn chunk_size_for(_n: usize) -> usize {
+    CHUNK_SIZE
 }
 
 fn seed_for_chunk(base_seed: u64, chunk_index: usize) -> u64 {

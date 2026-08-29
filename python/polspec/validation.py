@@ -181,9 +181,16 @@ def _validate_dataframe(
             min_alias = f"__val__{name}__min_val"
             max_alias = f"__val__{name}__max_val"
 
-            oob_mask = pl.col(name).is_not_null() & (
-                (pl.col(name) < b_min) | (pl.col(name) > b_max)
-            )
+            if actual_dtype.is_temporal():
+                lit_min = pl.lit(b_min).cast(actual_dtype)
+                lit_max = pl.lit(b_max).cast(actual_dtype)
+                oob_mask = pl.col(name).is_not_null() & (
+                    (pl.col(name) < lit_min) | (pl.col(name) > lit_max)
+                )
+            else:
+                oob_mask = pl.col(name).is_not_null() & (
+                    (pl.col(name) < b_min) | (pl.col(name) > b_max)
+                )
             agg_exprs.append(oob_mask.sum().alias(oob_cnt_alias))
             agg_exprs.append(
                 pl.col(name).filter(oob_mask).head(5).implode().alias(oob_samples_alias)
@@ -242,6 +249,7 @@ def _validate_dataframe(
 
         # Rules validation
         if validate_rules and spec.rules and is_type_compatible:
+            matched_prior = pl.lit(False)
             for r_idx, rule in enumerate(spec.rules):
                 ref_col = rule.when.get("column")
                 if ref_col not in df_col_names:
@@ -250,7 +258,9 @@ def _validate_dataframe(
                 r_cnt_alias = f"__val__{name}__rule_{r_idx}_cnt"
                 r_samples_alias = f"__val__{name}__rule_{r_idx}_samples"
 
-                condition_expr = rule._expr()
+                condition_expr = rule._expr() & (~matched_prior)
+                matched_prior = matched_prior | rule._expr()
+
                 if actual_dtype in (pl.String, pl.Utf8, pl.Categorical) or isinstance(
                     actual_dtype, (pl.Enum, pl.Categorical)
                 ):
@@ -375,5 +385,11 @@ def _validate_dataframe(
                 cast_exprs.append(pl.col(name).cast(spec.dtype))
         if cast_exprs:
             result_lf = result_lf.with_columns(cast_exprs)
+
+    # Reorder columns to match FrameSpec declaration order for present declared columns,
+    # followed by any extra columns (if extra_cols == 'allow')
+    spec_order = [c for c in columns.keys() if c in result_lf.collect_schema().names()]
+    extra_order = [c for c in result_lf.collect_schema().names() if c not in columns]
+    result_lf = result_lf.select(spec_order + extra_order)
 
     return result_lf if is_lazy else result_lf.collect()

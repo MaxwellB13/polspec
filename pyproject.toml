@@ -7,6 +7,15 @@ dependencies = [
     "pyyaml>=6.0.3",
 ]
 
+[project.optional-dependencies]
+parquet = ["pyarrow>=14.0.0"]
+ipc = ["pyarrow>=14.0.0"]
+yaml = ["pyyaml>=6.0.3"]
+all = [
+    "pyarrow>=14.0.0",
+    "pyyaml>=6.0.3",
+]
+
 [dependency-groups]
 bench = [
     "numpy>=2.5.2",

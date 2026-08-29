@@ -87,7 +87,7 @@ def profile_dataframe(
                 else:
                     str_len: Bound | None = None
                     if calculate_bounds and num_valid > 0:
-                        lens = non_null.str.len_bytes()
+                        lens = non_null.str.len_chars()
                         str_len = Bound(int(lens.min()), int(lens.max()))
                     columns[col_name] = ColSpec(
                         dtype=pl.String,

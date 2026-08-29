@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Generic, TypeVar
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
-class Bound:
-    """An inclusive [min, max] range, used for numeric bounds and string lengths."""
+class Bound(Generic[T]):
+    """An inclusive [min, max] range, used for numeric bounds, temporal ranges, and string lengths."""
 
-    min: float | int
-    max: float | int
+    min: T
+    max: T
 
     def __post_init__(self) -> None:
         if self.min > self.max:
@@ -16,7 +19,7 @@ class Bound:
 
     @classmethod
     def _coerce(
-        cls, value: Bound | tuple[float | int, float | int] | None
+        cls, value: Bound | tuple[Any, Any] | list[Any] | None
     ) -> Bound | None:
         if value is None or isinstance(value, Bound):
             return value
