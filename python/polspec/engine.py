@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import dataclasses
+import hashlib
 import random
 
 import polars as pl
@@ -7,6 +9,7 @@ import polars as pl
 from polspec import _polspec
 from polspec.bound import Bound
 from polspec.constants import (
+    _CATEGORICAL_PHYSICAL_CAPACITY,
     _DEFAULT_FLOAT_BOUND,
     _DEFAULT_STRING_LEN,
     _DEFAULT_WIDE_INT_BOUND,
@@ -29,6 +32,67 @@ def _bound_endpoint_to_physical(value: object, dtype: pl.DataType) -> float | in
     if isinstance(value, (int, float)):
         return value
     return pl.Series([value], dtype=dtype).to_physical().item()
+
+
+def _stable_seed(*parts: str) -> int:
+    """A seed derived only from `parts`, stable across processes and runs
+    (unlike `hash()`, which is salted per-process for strings).
+    """
+    digest = hashlib.sha256("\0".join(parts).encode()).digest()
+    return int.from_bytes(digest[:8], "big")
+
+
+def _resolve_bounded_categorical(spec: ColSpec, seed: int) -> ColSpec:
+    """Pins `choices` for a bare Categorical whose physical dtype caps how
+    many distinct categories it can hold (UInt8/UInt16).
+
+    Without `choices`, a Categorical generates unbounded-cardinality random
+    strings, which will eventually try to insert more categories than a
+    capacity-limited registry allows. Instead, generate a pool of
+    representative string values up to that dtype's own maximum capacity
+    once, then treat it exactly like a user-supplied `choices` list, so
+    generation samples from (rather than overflows) the registry.
+    """
+    if spec.choices is not None or not isinstance(spec.dtype, pl.Categorical):
+        return spec
+    capacity = _CATEGORICAL_PHYSICAL_CAPACITY.get(spec.dtype.categories.physical())
+    if capacity is None:
+        return spec
+    length = spec.string_length or Bound(*_DEFAULT_STRING_LEN)
+    cat_name = spec.dtype.categories.name()
+    if cat_name:
+        # A named pl.Categories() registry is meant to be shared across
+        # ColSpecs/FrameSpecs (e.g. so two tables can be joined on physical
+        # codes). Every one of them must draw its pool from the exact same
+        # domain -- pinned to the registry's own identity, not this call's
+        # seed -- otherwise their independently-chosen pools could still
+        # jointly exceed the registry's capacity even though each one alone
+        # stayed within it.
+        pool_seed = _stable_seed(
+            cat_name, spec.dtype.categories.namespace(), str(length.min), str(length.max)
+        )
+    else:
+        pool_seed = seed
+    pool_spec = (
+        "__pool",
+        "string",
+        False,
+        0.0,
+        None,
+        None,
+        None,
+        None,
+        int(length.min),
+        int(length.max),
+        None,
+        None,
+    )
+    pool_df = _polspec.generate_dataframe([pool_spec], capacity, pool_seed)
+    # maintain_order=True: unique()'s default order isn't stable across calls,
+    # which would make the same seed silently pick different pool[i] -> string
+    # mappings and break reproducibility.
+    domain = pool_df["__pool"].unique(maintain_order=True).to_list()
+    return dataclasses.replace(spec, choices=domain, string_length=None)
 
 
 def _resolve_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
@@ -137,6 +201,9 @@ def _to_rust_spec(name: str, spec: ColSpec) -> tuple:
         elif kind in ("enum", "categorical"):
             if kind == "enum":
                 categories = spec.dtype.categories.to_list()
+            else:
+                length = spec.string_length or Bound(*_DEFAULT_STRING_LEN)
+                str_min_len, str_max_len = int(length.min), int(length.max)
             kind = "string"
 
     return (
@@ -170,7 +237,11 @@ def _cast_expr(name: str, spec: ColSpec) -> pl.Expr:
 
     kind = _column_kind(spec.dtype)
     if _is_categorical_dtype(spec.dtype):
-        return pl.col(name).cast(pl.Categorical)
+        # Cast to spec.dtype itself, not a bare pl.Categorical() -- a caller
+        # may have given a named pl.Categories() registry (e.g. shared across
+        # several FrameSpecs so their Categorical columns can be joined on
+        # physical codes), and that identity must survive generation.
+        return pl.col(name).cast(spec.dtype)
     if kind == "string" and spec.dtype in (pl.String, pl.Utf8):
         return pl.col(name)
     if spec.dtype in (
@@ -244,6 +315,11 @@ def _generate_random(
 ) -> pl.DataFrame:
     if not columns:
         return pl.DataFrame()
+    rng = random.Random(seed)
+    columns = {
+        name: _resolve_bounded_categorical(spec, rng.randrange(2**63))
+        for name, spec in columns.items()
+    }
     rust_specs = [_to_rust_spec(name, spec) for name, spec in columns.items()]
     raw_df = _polspec.generate_dataframe(rust_specs, n, seed)
     cast_exprs = [_cast_expr(name, spec) for name, spec in columns.items()]

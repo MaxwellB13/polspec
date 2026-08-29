@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
 import polars as pl
 
 from polspec.constants import _DEFAULT_NULL_PROBABILITY
 from polspec.rules import ColRule
 from polspec.spec import ColSpec, _is_categorical_dtype
+
+if TYPE_CHECKING:
+    from polspec.catspec import CatSpec
 
 # Every dtype polspec can generate that has a fixed, unparametrized identity
 # -- Enum, Datetime, Duration, and (parametrized) Categorical are handled separately
@@ -42,6 +46,22 @@ def _dtype_to_yaml(dtype: pl.DataType) -> str | dict:
     if isinstance(dtype, pl.Duration):
         return {"Duration": {"time_unit": dtype.time_unit}}
     if _is_categorical_dtype(dtype):
+        if isinstance(dtype, pl.Categorical):
+            cats = dtype.categories
+            cat_name = cats.name()
+            if cat_name:
+                # A named pl.Categories() registry: must round-trip by name
+                # (and namespace/physical) so specs sharing one -- e.g. two
+                # FrameSpecs whose columns are meant to be joined on physical
+                # codes -- still share it after a YAML round-trip.
+                info: dict = {"name": cat_name}
+                namespace = cats.namespace()
+                if namespace:
+                    info["namespace"] = namespace
+                physical = cats.physical()
+                if physical != pl.UInt32:
+                    info["physical"] = _YAML_DTYPES.get(physical, str(physical))
+                return {"Categorical": info}
         return "Categorical"
     name = _YAML_DTYPES.get(dtype)
     if name is None:
@@ -49,10 +69,20 @@ def _dtype_to_yaml(dtype: pl.DataType) -> str | dict:
     return name
 
 
-def _dtype_from_yaml(value: str | dict) -> pl.DataType:
+def _dtype_from_yaml(
+    value: str | dict, categories: CatSpec | None = None
+) -> pl.DataType:
     if isinstance(value, dict):
         if "Enum" in value:
-            return pl.Enum(value["Enum"])
+            enum_val = value["Enum"]
+            if isinstance(enum_val, str):
+                clean_name = enum_val.removeprefix("$categories.").removeprefix("categories.")
+                if categories is not None and clean_name in categories:
+                    return pl.Enum(categories.get_enum(clean_name))
+                raise ValueError(
+                    f"Enum {enum_val!r} referenced in YAML but not found in provided CatSpec"
+                )
+            return pl.Enum(enum_val)
         if "Datetime" in value:
             dt_info = value["Datetime"]
             return pl.Datetime(
@@ -62,11 +92,47 @@ def _dtype_from_yaml(value: str | dict) -> pl.DataType:
         if "Duration" in value:
             dur_info = value["Duration"]
             return pl.Duration(time_unit=dur_info.get("time_unit", "us"))
+        if "Categorical" in value:
+            cat_info = value["Categorical"]
+            if isinstance(cat_info, str):
+                clean_name = cat_info.removeprefix("$categories.").removeprefix("categories.")
+                if categories is not None and clean_name in categories:
+                    return pl.Categorical(categories.get_categorical(clean_name))
+                if clean_name == "Categorical":
+                    return pl.Categorical()
+                return pl.Categorical(pl.Categories(clean_name))
+            if isinstance(cat_info, dict):
+                cat_name = cat_info.get("name", "")
+                if categories is not None and cat_name and cat_name in categories.categoricals:
+                    return pl.Categorical(categories.get_categorical(cat_name))
+                physical = _YAML_NAME_TO_DTYPE.get(cat_info.get("physical", "UInt32"), pl.UInt32)
+                return pl.Categorical(
+                    pl.Categories(
+                        cat_name,
+                        namespace=cat_info.get("namespace", ""),
+                        physical=physical,
+                    )
+                )
         raise ValueError(f"Unrecognized dtype mapping in YAML: {value!r}")
     if value == "Categorical":
         return pl.Categorical()
+    if value.startswith("$categories.") or value.startswith("categories."):
+        clean_name = value.removeprefix("$categories.").removeprefix("categories.")
+        if categories is not None and clean_name in categories:
+            resolved = categories[clean_name]
+            if isinstance(resolved, pl.Categories):
+                return pl.Categorical(resolved)
+            if isinstance(resolved, (list, tuple)):
+                return pl.Enum(resolved)
+        raise ValueError(f"Category reference {value!r} not found in provided CatSpec")
     dtype = _YAML_NAME_TO_DTYPE.get(value)
     if dtype is None:
+        if categories is not None and value in categories:
+            resolved = categories[value]
+            if isinstance(resolved, pl.Categories):
+                return pl.Categorical(resolved)
+            if isinstance(resolved, (list, tuple)):
+                return pl.Enum(resolved)
         raise ValueError(f"Unrecognized dtype name in YAML: {value!r}")
     return dtype
 
@@ -102,7 +168,9 @@ def _colspec_to_yaml(spec: ColSpec) -> dict:
     return data
 
 
-def _colspec_from_yaml(data: dict) -> ColSpec:
+def _colspec_from_yaml(
+    data: dict, categories: CatSpec | None = None
+) -> ColSpec:
     kwargs: dict = {}
     if "nullable" in data:
         kwargs["nullable"] = data["nullable"]
@@ -131,4 +199,6 @@ def _colspec_from_yaml(data: dict) -> ColSpec:
             )
             for rule in data["rules"]
         )
-    return ColSpec(dtype=_dtype_from_yaml(data["dtype"]), **kwargs)
+    return ColSpec(
+        dtype=_dtype_from_yaml(data["dtype"], categories=categories), **kwargs
+    )

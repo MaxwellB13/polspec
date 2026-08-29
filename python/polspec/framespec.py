@@ -8,6 +8,7 @@ from typing import ClassVar, Literal, overload
 import polars as pl
 import yaml
 
+from polspec.catspec import CatSpec
 from polspec.engine import _generate_cartesian, _generate_random
 from polspec.profiler import profile_dataframe
 from polspec.rules import _apply_rules
@@ -75,18 +76,51 @@ class FrameSpec:
         Path(source).write_text(yaml.safe_dump(data, sort_keys=False))
 
     @classmethod
-    def from_yaml(cls, source: str | Path) -> type[FrameSpec]:
+    def from_yaml(
+        cls,
+        source: str | Path,
+        *,
+        categories: CatSpec | str | Path | None = None,
+    ) -> type[FrameSpec]:
         """Builds a new FrameSpec subclass from a YAML file written by `to_yaml`.
 
-        DataSource = FrameSpec.from_yaml(source="spec.yaml")
-        df = DataSource.generate(1_000, seed=42)
+        Parameters
+        ----------
+        source : str | Path
+            Path to the YAML specification file.
+        categories : CatSpec | str | Path | None, optional
+            A CatSpec registry or file path to resolve shared Enums and Categoricals.
+            If omitted and the YAML specifies a `categories` property, it is loaded automatically.
+
+        Examples
+        --------
+        >>> DataSource = FrameSpec.from_yaml(source="spec.yaml")
+        >>> df = DataSource.generate(1_000, seed=42)
         """
-        data = yaml.safe_load(Path(source).read_text())
+        source_path = Path(source)
+        data = yaml.safe_load(source_path.read_text())
+
+        catspec: CatSpec | None = None
+        if categories is not None:
+            if isinstance(categories, (str, Path)):
+                catspec = CatSpec.from_yaml(categories)
+            else:
+                catspec = categories
+        elif "categories" in data:
+            cat_source = data["categories"]
+            if isinstance(cat_source, (str, Path)):
+                cat_path = Path(cat_source)
+                if not cat_path.is_absolute():
+                    cat_path = source_path.parent / cat_path
+                catspec = CatSpec.from_yaml(cat_path)
+            elif isinstance(cat_source, dict):
+                catspec = CatSpec.from_dict(cat_source)
+
         columns_data = data.get("columns") or {}
         if not columns_data:
             raise ValueError(f"{source} declares no columns")
         columns = {
-            name: _colspec_from_yaml(col_data)
+            name: _colspec_from_yaml(col_data, categories=catspec)
             for name, col_data in columns_data.items()
         }
         return type(data.get("name", "LoadedFrameSpec"), (FrameSpec,), columns)

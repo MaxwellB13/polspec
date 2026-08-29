@@ -23,3 +23,11 @@ _DEFAULT_NULL_PROBABILITY = 0.1
 # the product of every dimension's cardinality, so a handful of wide enums
 # can explode into an unreasonable row count by accident.
 _MAX_CARTESIAN_ROWS = 50_000_000
+
+# Max distinct categories a pl.Categories() registry can hold, per physical
+# dtype (2**bits - 1). UInt32 (the default physical dtype) is omitted: at
+# ~4 billion categories it is never a practical constraint on generation.
+_CATEGORICAL_PHYSICAL_CAPACITY: dict[pl.DataType, int] = {
+    pl.UInt8: 255,
+    pl.UInt16: 65_535,
+}

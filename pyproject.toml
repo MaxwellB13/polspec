@@ -25,6 +25,7 @@ dev = [
     "maturin>=1.7",
     "numpy>=2.5.2",
     "pyarrow>=14.0.0",
+    "zensical>=0.0.57",
 ]
 
 [build-system]

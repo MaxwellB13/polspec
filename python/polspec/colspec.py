@@ -14,6 +14,7 @@ All core components have been modularized into:
 from __future__ import annotations
 
 from polspec.bound import Bound
+from polspec.catspec import CatSpec
 from polspec.constants import (
     _DEFAULT_FLOAT_BOUND,
     _DEFAULT_NULL_PROBABILITY,
@@ -62,6 +63,7 @@ __all__ = [
     "_YAML_DTYPES",
     "_YAML_NAME_TO_DTYPE",
     "Bound",
+    "CatSpec",
     "ColRule",
     "ColSpec",
     "FrameSchema",
