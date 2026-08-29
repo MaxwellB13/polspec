@@ -51,14 +51,12 @@ def _validate_dataframe(
     errors: list[str] = []
 
     # 1. Check Extra Columns
-    if extra:
-        if extra_cols == "raise":
-            errors.append(f"Extra columns found that are not in schema: {extra}")
+    if extra and extra_cols == "raise":
+        errors.append(f"Extra columns found that are not in schema: {extra}")
 
     # 2. Check Missing Columns
-    if missing:
-        if missing_cols == "raise":
-            errors.append(f"Missing required columns in DataFrame: {missing}")
+    if missing and missing_cols == "raise":
+        errors.append(f"Missing required columns in DataFrame: {missing}")
 
     # 3. Present columns to validate
     present_cols = [col for col in spec_col_names if col in df_col_names]
@@ -373,9 +371,8 @@ def _validate_dataframe(
         cast_exprs = []
         current_schema = result_lf.collect_schema()
         for name, spec in columns.items():
-            if name in current_schema:
-                if current_schema[name] != spec.dtype:
-                    cast_exprs.append(pl.col(name).cast(spec.dtype))
+            if name in current_schema and current_schema[name] != spec.dtype:
+                cast_exprs.append(pl.col(name).cast(spec.dtype))
         if cast_exprs:
             result_lf = result_lf.with_columns(cast_exprs)
 

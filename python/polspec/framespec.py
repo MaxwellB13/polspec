@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Iterator
 from pathlib import Path
-from typing import ClassVar, Iterator, Literal, overload
+from typing import ClassVar, Literal, overload
 
 import polars as pl
 import yaml
@@ -12,7 +13,7 @@ from polspec.profiler import profile_dataframe
 from polspec.rules import _apply_rules
 from polspec.serialization import _colspec_from_yaml, _colspec_to_yaml
 from polspec.spec import ColSpec
-from polspec.validation import ValidationError, _validate_dataframe
+from polspec.validation import _validate_dataframe
 
 
 class FrameSpec:
@@ -432,7 +433,7 @@ class FrameSpec:
             Additional arguments passed to `pyarrow.ipc.new_file`.
         """
         try:
-            import pyarrow.ipc as ipc
+            from pyarrow import ipc
         except ImportError as exc:
             raise ImportError(
                 "pyarrow is required for sink_ipc(). Please install pyarrow."

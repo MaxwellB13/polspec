@@ -1037,17 +1037,21 @@ def test_modular_subpackage_imports():
         profile_dataframe,
     )
     from polspec.bound import Bound as BoundDirect
+    from polspec.engine import _generate_cartesian, _generate_random
     from polspec.framespec import (
         FrameSchema as FrameSchemaDirect,
+    )
+    from polspec.framespec import (
         FrameSpec as FrameSpecDirect,
     )
-    from polspec.engine import _generate_cartesian, _generate_random
     from polspec.profiler import profile_dataframe as profile_dataframe_direct
     from polspec.rules import ColRule as ColRuleDirect
     from polspec.serialization import _colspec_from_yaml, _colspec_to_yaml
     from polspec.spec import ColSpec as ColSpecDirect
     from polspec.validation import (
         ValidationError as ValidationErrorDirect,
+    )
+    from polspec.validation import (
         _validate_dataframe,
     )
 

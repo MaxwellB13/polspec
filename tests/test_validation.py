@@ -1,4 +1,3 @@
-from datetime import date
 import polars as pl
 import pytest
 from polspec import Bound, ColRule, ColSpec, FrameSchema, FrameSpec, ValidationError

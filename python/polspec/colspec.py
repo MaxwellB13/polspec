@@ -22,7 +22,6 @@ from polspec.constants import (
     _INT_DTYPE_BOUNDS,
     _MAX_CARTESIAN_ROWS,
 )
-from polspec.framespec import FrameSchema, FrameSpec
 from polspec.engine import (
     _cast_expr,
     _coverage_values,
@@ -31,6 +30,7 @@ from polspec.engine import (
     _resolve_numeric_bounds,
     _to_rust_spec,
 )
+from polspec.framespec import FrameSchema, FrameSpec
 from polspec.profiler import profile_dataframe
 from polspec.rules import (
     _CONDITION_OPS,
