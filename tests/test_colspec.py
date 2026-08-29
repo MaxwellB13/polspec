@@ -1021,21 +1021,26 @@ def test_from_dataframe_temporal_and_binary(tmp_path):
 
 
 def test_modular_subpackage_imports():
-    from polspec import Bound, ColRule, ColSpec, DfSpec, profile_dataframe
+    from polspec import Bound, ColRule, ColSpec, DfSchema, DfSpec, ValidationError, profile_dataframe
     from polspec.bound import Bound as BoundDirect
-    from polspec.dfspec import DfSpec as DfSpecDirect
+    from polspec.dfspec import DfSchema as DfSchemaDirect, DfSpec as DfSpecDirect
     from polspec.engine import _generate_cartesian, _generate_random
     from polspec.profiler import profile_dataframe as profile_dataframe_direct
     from polspec.rules import ColRule as ColRuleDirect
     from polspec.serialization import _colspec_from_yaml, _colspec_to_yaml
     from polspec.spec import ColSpec as ColSpecDirect
+    from polspec.validation import ValidationError as ValidationErrorDirect, _validate_dataframe
 
     assert Bound is BoundDirect
     assert ColRule is ColRuleDirect
     assert ColSpec is ColSpecDirect
     assert DfSpec is DfSpecDirect
+    assert DfSchema is DfSchemaDirect
+    assert DfSchema is DfSpec
+    assert ValidationError is ValidationErrorDirect
     assert profile_dataframe is profile_dataframe_direct
     assert callable(_colspec_to_yaml)
     assert callable(_colspec_from_yaml)
     assert callable(_generate_random)
     assert callable(_generate_cartesian)
+    assert callable(_validate_dataframe)

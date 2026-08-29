@@ -22,7 +22,7 @@ from polspec.constants import (
     _INT_DTYPE_BOUNDS,
     _MAX_CARTESIAN_ROWS,
 )
-from polspec.dfspec import DfSpec
+from polspec.dfspec import DfSchema, DfSpec
 from polspec.engine import (
     _cast_expr,
     _coverage_values,
@@ -49,6 +49,7 @@ from polspec.serialization import (
     _dtype_to_yaml,
 )
 from polspec.spec import ColSpec, _column_kind
+from polspec.validation import ValidationError, _validate_dataframe
 
 __all__ = [
     "_CONDITION_OPS",
@@ -63,7 +64,9 @@ __all__ = [
     "Bound",
     "ColRule",
     "ColSpec",
+    "DfSchema",
     "DfSpec",
+    "ValidationError",
     "_apply_rules",
     "_cast_expr",
     "_colspec_from_yaml",
@@ -79,5 +82,6 @@ __all__ = [
     "_sample_choices",
     "_to_rust_spec",
     "_validate_condition",
+    "_validate_dataframe",
     "profile_dataframe",
 ]

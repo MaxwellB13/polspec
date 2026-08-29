@@ -12,6 +12,7 @@ from polspec.profiler import profile_dataframe
 from polspec.rules import _apply_rules
 from polspec.serialization import _colspec_from_yaml, _colspec_to_yaml
 from polspec.spec import ColSpec
+from polspec.validation import ValidationError, _validate_dataframe
 
 
 class DfSpec:
@@ -518,3 +519,99 @@ class DfSpec:
                 n, batch_size=batch_size, method=method, seed=seed
             ):
                 batch_df.write_ndjson(f, **kwargs)
+
+    @overload
+    @classmethod
+    def validate(
+        cls,
+        df: pl.DataFrame,
+        *,
+        extra_cols: Literal["drop", "allow", "raise"] = "raise",
+        missing_cols: Literal["add", "allow", "raise"] = "raise",
+        strict_dtypes: bool = False,
+        validate_rules: bool = True,
+        cast: bool = False,
+        streaming: bool = False,
+    ) -> pl.DataFrame: ...
+
+    @overload
+    @classmethod
+    def validate(
+        cls,
+        df: pl.LazyFrame,
+        *,
+        extra_cols: Literal["drop", "allow", "raise"] = "raise",
+        missing_cols: Literal["add", "allow", "raise"] = "raise",
+        strict_dtypes: bool = False,
+        validate_rules: bool = True,
+        cast: bool = False,
+        streaming: bool = False,
+    ) -> pl.LazyFrame: ...
+
+    @classmethod
+    def validate(
+        cls,
+        df: pl.DataFrame | pl.LazyFrame,
+        *,
+        extra_cols: Literal["drop", "allow", "raise"] = "raise",
+        missing_cols: Literal["add", "allow", "raise"] = "raise",
+        strict_dtypes: bool = False,
+        validate_rules: bool = True,
+        cast: bool = False,
+        streaming: bool = False,
+    ) -> pl.DataFrame | pl.LazyFrame:
+        """Validates a DataFrame or LazyFrame against this spec's schema and constraints.
+
+        Parameters
+        ----------
+        df : pl.DataFrame | pl.LazyFrame
+            The DataFrame or LazyFrame to validate.
+        extra_cols : Literal["drop", "allow", "raise"], default "raise"
+            How to handle columns present in `df` but not declared in this spec:
+            - "raise": raise a ValidationError containing all extra columns.
+            - "drop": drop extra columns from the returned DataFrame/LazyFrame.
+            - "allow": retain extra columns in the returned DataFrame/LazyFrame.
+        missing_cols : Literal["add", "allow", "raise"], default "raise"
+            How to handle columns declared in this spec but missing from `df`:
+            - "raise": raise a ValidationError containing all missing columns.
+            - "add": add missing columns populated with nulls of the declared dtype.
+            - "allow": skip missing columns without raising an error.
+        strict_dtypes : bool, default False
+            Whether to strictly enforce identical data types (True) or allow compatible
+            types like widened integers, floats, or string representations (False).
+        validate_rules : bool, default True
+            Whether to validate conditional `ColRule` expressions defined on columns.
+        cast : bool, default False
+            If True, casts validated columns to the declared `ColSpec.dtype`.
+        streaming : bool, default False
+            If True, uses Polars' streaming execution engine for evaluating LazyFrames.
+
+        Returns
+        -------
+        pl.DataFrame | pl.LazyFrame
+            The validated (and optionally transformed) DataFrame or LazyFrame.
+
+        Raises
+        ------
+        ValidationError
+            If any structural or column-level constraints are violated, collecting
+            all violations across all columns before raising.
+        ValueError
+            If invalid options are supplied for `extra_cols` or `missing_cols`.
+        """
+        if not cls._columns:
+            raise ValueError(f"{cls.__name__} declares no ColSpec columns")
+        return _validate_dataframe(
+            cls._columns,
+            cls.__name__,
+            df,
+            extra_cols=extra_cols,
+            missing_cols=missing_cols,
+            strict_dtypes=strict_dtypes,
+            validate_rules=validate_rules,
+            cast=cast,
+            streaming=streaming,
+        )
+
+
+DfSchema = DfSpec
