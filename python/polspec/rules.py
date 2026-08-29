@@ -102,7 +102,7 @@ class ColRule:
     checked in declaration order, first match wins (like SQL CASE/WHEN).
 
     `when` is a small dict, not an arbitrary polars expression, so that
-    every rule can round-trip through DfSpec.to_yaml/from_yaml:
+    every rule can round-trip through FrameSpec.to_yaml/from_yaml:
         {"column": "enum_1", "equals": "A"}
         {"column": "enum_1", "not_equals": "A"}
         {"column": "enum_1", "in": ["A", "B"]}

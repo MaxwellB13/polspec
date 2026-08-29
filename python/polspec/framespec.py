@@ -15,13 +15,13 @@ from polspec.spec import ColSpec
 from polspec.validation import ValidationError, _validate_dataframe
 
 
-class DfSpec:
-    """Base class for declaring a DataFrame specification.
+class FrameSpec:
+    """Base class for declaring a DataFrame/LazyFrame specification.
 
     Subclass it and assign `ColSpec` instances as class attributes, in the
     order columns should appear:
 
-        class DataSource(DfSpec):
+        class DataSource(FrameSpec):
             string_1 = ColSpec(dtype=pl.String, nullable=False)
             enum_1 = ColSpec(dtype=pl.Enum(["mammal", "reptile", "insect"]), nullable=True)
             int_1 = ColSpec(dtype=pl.Int64, bounds=Bound(-100, 100), nullable=True)
@@ -74,10 +74,10 @@ class DfSpec:
         Path(source).write_text(yaml.safe_dump(data, sort_keys=False))
 
     @classmethod
-    def from_yaml(cls, source: str | Path) -> type[DfSpec]:
-        """Builds a new DfSpec subclass from a YAML file written by `to_yaml`.
+    def from_yaml(cls, source: str | Path) -> type[FrameSpec]:
+        """Builds a new FrameSpec subclass from a YAML file written by `to_yaml`.
 
-        DataSource = DfSpec.from_yaml(source="spec.yaml")
+        DataSource = FrameSpec.from_yaml(source="spec.yaml")
         df = DataSource.generate(1_000, seed=42)
         """
         data = yaml.safe_load(Path(source).read_text())
@@ -88,28 +88,28 @@ class DfSpec:
             name: _colspec_from_yaml(col_data)
             for name, col_data in columns_data.items()
         }
-        return type(data.get("name", "LoadedDfSpec"), (DfSpec,), columns)
+        return type(data.get("name", "LoadedFrameSpec"), (FrameSpec,), columns)
 
     @classmethod
     def from_dataframe(
         cls,
         df: pl.DataFrame,
         *,
-        name: str = "ProfiledDfSpec",
+        name: str = "ProfiledFrameSpec",
         weights: bool = False,
         max_unique_enum: int = 50,
         max_unique: int | None = None,
         calculate_bounds: bool = True,
         bounds: bool | None = None,
-    ) -> type[DfSpec]:
-        """Infers and builds a new DfSpec subclass by profiling an existing DataFrame.
+    ) -> type[FrameSpec]:
+        """Infers and builds a new FrameSpec subclass by profiling an existing DataFrame.
 
         Parameters
         ----------
         df : pl.DataFrame
             The DataFrame to profile.
-        name : str, default "ProfiledDfSpec"
-            The name of the generated DfSpec subclass.
+        name : str, default "ProfiledFrameSpec"
+            The name of the generated FrameSpec subclass.
         weights : bool, default False
             If True, calculates empirical frequency weights for categorical, enum,
             and boolean columns.
@@ -132,7 +132,7 @@ class DfSpec:
             calculate_bounds=calculate_bounds,
             bounds=bounds,
         )
-        return type(name, (DfSpec,), columns)
+        return type(name, (FrameSpec,), columns)
 
     @overload
     @classmethod
@@ -614,4 +614,4 @@ class DfSpec:
         )
 
 
-DfSchema = DfSpec
+FrameSchema = FrameSpec

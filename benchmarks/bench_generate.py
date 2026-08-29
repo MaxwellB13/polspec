@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import polars as pl
-from polspec import Bound, ColSpec, DfSpec
+from polspec import Bound, ColSpec, FrameSpec
 
 CATEGORIES = ["mammal", "reptile", "insect"]
 NULL_P = 0.1
@@ -30,7 +30,7 @@ CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 CHARSET_BYTES = np.frombuffer(CHARSET.encode("ascii"), dtype=np.uint8)
 
 
-class DataSource(DfSpec):
+class DataSource(FrameSpec):
     string_1 = ColSpec(dtype=pl.String, nullable=False)
     enum_1 = ColSpec(dtype=pl.Enum(CATEGORIES), nullable=True, null_probability=NULL_P)
     int_1 = ColSpec(

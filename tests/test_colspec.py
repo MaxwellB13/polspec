@@ -1,11 +1,11 @@
 import polars as pl
 import pytest
 import yaml
-from polspec import Bound, ColRule, ColSpec, DfSpec
+from polspec import Bound, ColRule, ColSpec, FrameSpec
 from polspec.colspec import _colspec_to_yaml
 
 
-class DataSource(DfSpec):
+class DataSource(FrameSpec):
     string_1 = ColSpec(dtype=pl.String, nullable=False)
     enum_1 = ColSpec(dtype=pl.Enum(["mammal", "reptile", "insect"]), nullable=True)
     int_1 = ColSpec(dtype=pl.Int64, bounds=Bound(-100, 100), nullable=True)
@@ -66,7 +66,7 @@ def test_large_dataset_generation():
     assert df.height == 1_000_000
 
 
-class Bounded8(DfSpec):
+class Bounded8(FrameSpec):
     small_int = ColSpec(dtype=pl.Int8, nullable=False)
 
 
@@ -78,7 +78,7 @@ def test_fixed_width_int_default_bounds_fit_dtype():
     assert df["small_int"].max() <= 127
 
 
-class CoverageSource(DfSpec):
+class CoverageSource(FrameSpec):
     string_1 = ColSpec(dtype=pl.String, nullable=False)
     enum_1 = ColSpec(dtype=pl.Enum(["mammal", "reptile", "insect"]), nullable=True)
     enum_2 = ColSpec(dtype=pl.Enum(["red", "blue"]), nullable=False)
@@ -134,7 +134,7 @@ def test_cartesian_is_deterministic_given_seed():
 
 
 def test_cartesian_requires_at_least_one_coverage_column():
-    class StringsOnly(DfSpec):
+    class StringsOnly(FrameSpec):
         a = ColSpec(dtype=pl.String, nullable=False)
 
     with pytest.raises(
@@ -144,7 +144,7 @@ def test_cartesian_requires_at_least_one_coverage_column():
 
 
 def test_cartesian_size_cap_raises_before_allocating():
-    class Huge(DfSpec):
+    class Huge(FrameSpec):
         e1 = ColSpec(dtype=pl.Enum([f"v{i}" for i in range(200)]))
         e2 = ColSpec(dtype=pl.Enum([f"v{i}" for i in range(200)]))
         e3 = ColSpec(dtype=pl.Enum([f"v{i}" for i in range(200)]))
@@ -159,7 +159,7 @@ def test_unknown_method_raises():
         CoverageSource.generate(n=10, method="bogus")
 
 
-class RuledSource(DfSpec):
+class RuledSource(FrameSpec):
     enum_1 = ColSpec(dtype=pl.Enum(["A", "B", "C"]), nullable=False)
     enum_2 = ColSpec(
         dtype=pl.Enum(["X", "Y", "Z"]),
@@ -190,7 +190,7 @@ def test_rule_is_deterministic_given_seed():
     assert df_a.equals(df_b)
 
 
-class MultiRuleSource(DfSpec):
+class MultiRuleSource(FrameSpec):
     enum_1 = ColSpec(dtype=pl.Enum(["A", "B", "C"]), nullable=False)
     enum_2 = ColSpec(
         dtype=pl.Enum(["X", "Y", "Z"]),
@@ -212,7 +212,7 @@ def test_multiple_rules_first_match_wins():
     assert b_values == {"Y"}
 
 
-class NumericRuleSource(DfSpec):
+class NumericRuleSource(FrameSpec):
     enum_1 = ColSpec(dtype=pl.Enum(["A", "B", "C"]), nullable=False)
     int_1 = ColSpec(
         dtype=pl.Int64,
@@ -269,7 +269,7 @@ def test_colrule_rejects_empty_choices():
         ColRule(when={"column": "x", "equals": 1}, choices=[])
 
 
-class YamlSource(DfSpec):
+class YamlSource(FrameSpec):
     string_1 = ColSpec(dtype=pl.String, nullable=False)
     enum_1 = ColSpec(dtype=pl.Enum(["mammal", "reptile", "insect"]), nullable=True)
     int_1 = ColSpec(dtype=pl.Int64, bounds=Bound(-100, 100), nullable=True)
@@ -289,7 +289,7 @@ class YamlSource(DfSpec):
 def test_yaml_roundtrip_generates_identical_data(tmp_path):
     yaml_path = tmp_path / "spec.yaml"
     YamlSource.to_yaml(source=yaml_path)
-    Loaded = DfSpec.from_yaml(source=yaml_path)
+    Loaded = FrameSpec.from_yaml(source=yaml_path)
 
     assert Loaded.schema() == YamlSource.schema()
     df_original = YamlSource.generate(500, seed=42)
@@ -315,7 +315,7 @@ def test_yaml_roundtrip_preserves_column_order():
 def test_yaml_roundtrip_preserves_rule_behavior(tmp_path):
     yaml_path = tmp_path / "spec.yaml"
     YamlSource.to_yaml(source=yaml_path)
-    Loaded = DfSpec.from_yaml(source=yaml_path)
+    Loaded = FrameSpec.from_yaml(source=yaml_path)
 
     df = Loaded.generate(2_000, seed=1)
     restricted = df.filter(pl.col("enum_1").is_in(["mammal", "reptile"]))[
@@ -336,7 +336,7 @@ def test_yaml_file_is_plain_readable_yaml(tmp_path):
 
 
 def test_to_yaml_requires_columns(tmp_path):
-    class Empty(DfSpec):
+    class Empty(FrameSpec):
         pass
 
     with pytest.raises(ValueError, match="declares no ColSpec columns"):
@@ -347,11 +347,11 @@ def test_from_yaml_requires_columns(tmp_path):
     yaml_path = tmp_path / "empty.yaml"
     yaml_path.write_text(yaml.safe_dump({"name": "Empty", "columns": {}}))
     with pytest.raises(ValueError, match="declares no columns"):
-        DfSpec.from_yaml(source=yaml_path)
+        FrameSpec.from_yaml(source=yaml_path)
 
 
 def test_yaml_defaults_are_omitted_for_compactness(tmp_path):
-    class Minimal(DfSpec):
+    class Minimal(FrameSpec):
         plain_int = ColSpec(dtype=pl.Int32)
 
     yaml_path = tmp_path / "spec.yaml"
@@ -362,7 +362,7 @@ def test_yaml_defaults_are_omitted_for_compactness(tmp_path):
     assert col == {"dtype": "Int32"}
 
 
-class AllTypesSource(DfSpec):
+class AllTypesSource(FrameSpec):
     i8 = ColSpec(dtype=pl.Int8, bounds=(-50, 50), nullable=True)
     i16 = ColSpec(dtype=pl.Int16, bounds=(-1000, 1000), nullable=False)
     i32 = ColSpec(dtype=pl.Int32, bounds=(-100000, 100000), nullable=True)
@@ -419,7 +419,7 @@ def test_concurrent_generation_releases_gil():
 
 
 def test_narrow_float_bounds_in_cartesian():
-    class NarrowFloat(DfSpec):
+    class NarrowFloat(FrameSpec):
         flag = ColSpec(dtype=pl.Boolean, nullable=False)
         narrow_pos = ColSpec(dtype=pl.Float64, bounds=(0.0, 1e-12), nullable=False)
         narrow_neg = ColSpec(dtype=pl.Float64, bounds=(-1e-12, 0.0), nullable=False)
@@ -432,7 +432,7 @@ def test_narrow_float_bounds_in_cartesian():
 
 
 def test_expanded_rule_operations():
-    class ComplexRules(DfSpec):
+    class ComplexRules(FrameSpec):
         score = ColSpec(dtype=pl.Int32, bounds=(0, 100), nullable=False)
         optional_val = ColSpec(dtype=pl.Float64, bounds=(0.0, 10.0), nullable=True)
         tier = ColSpec(
@@ -484,7 +484,7 @@ def test_expanded_rule_operations():
 def test_rule_referencing_unknown_column_raises():
     with pytest.raises(ValueError, match="references unknown column"):
 
-        class BadRule(DfSpec):
+        class BadRule(FrameSpec):
             x = ColSpec(
                 dtype=pl.Int32,
                 rules=(
@@ -494,7 +494,7 @@ def test_rule_referencing_unknown_column_raises():
 
 
 def test_subclass_attribute_overriding():
-    class BaseSpec(DfSpec):
+    class BaseSpec(FrameSpec):
         a = ColSpec(dtype=pl.Int32)
         b = ColSpec(dtype=pl.String)
 
@@ -509,7 +509,7 @@ def test_subclass_attribute_overriding():
 
 
 def test_temporal_and_binary_dtypes_and_yaml(tmp_path):
-    class TemporalAndBinary(DfSpec):
+    class TemporalAndBinary(FrameSpec):
         d = ColSpec(dtype=pl.Date, nullable=False)
         t = ColSpec(dtype=pl.Time, nullable=True)
         dt = ColSpec(dtype=pl.Datetime(time_unit="us"), nullable=False)
@@ -528,7 +528,7 @@ def test_temporal_and_binary_dtypes_and_yaml(tmp_path):
     # Test YAML serialization
     yaml_path = tmp_path / "temporal.yaml"
     TemporalAndBinary.to_yaml(source=yaml_path)
-    Loaded = DfSpec.from_yaml(source=yaml_path)
+    Loaded = FrameSpec.from_yaml(source=yaml_path)
     assert Loaded.schema() == TemporalAndBinary.schema()
     df_loaded = Loaded.generate(500, seed=42)
     df_orig = TemporalAndBinary.generate(500, seed=42)
@@ -536,7 +536,7 @@ def test_temporal_and_binary_dtypes_and_yaml(tmp_path):
 
 
 def test_statistical_distributions():
-    class DistSpec(DfSpec):
+    class DistSpec(FrameSpec):
         norm_float = ColSpec(
             dtype=pl.Float64,
             distribution="normal",
@@ -628,7 +628,7 @@ def test_distribution_validation_and_errors():
 
 
 def test_weighted_choices_enum_and_categorical():
-    class WeightedSpec(DfSpec):
+    class WeightedSpec(FrameSpec):
         enum_col = ColSpec(
             dtype=pl.Enum(["rare", "common"]),
             weights=[0.1, 0.9],
@@ -689,7 +689,7 @@ def test_weighted_choices_enum_and_categorical():
 
 
 def test_colrule_weighted_choices():
-    class RuleWeightedSpec(DfSpec):
+    class RuleWeightedSpec(FrameSpec):
         segment = ColSpec(dtype=pl.Enum(["standard", "premium"]))
         reward = ColSpec(
             dtype=pl.String,
@@ -756,7 +756,7 @@ def test_weights_validation_errors():
 
 
 def test_distributions_and_weights_yaml_roundtrip(tmp_path):
-    class FullFeatureSpec(DfSpec):
+    class FullFeatureSpec(FrameSpec):
         norm = ColSpec(
             dtype=pl.Float64,
             distribution="normal",
@@ -781,7 +781,7 @@ def test_distributions_and_weights_yaml_roundtrip(tmp_path):
     yaml_file = tmp_path / "full_spec.yaml"
     FullFeatureSpec.to_yaml(source=yaml_file)
 
-    Loaded = DfSpec.from_yaml(source=yaml_file)
+    Loaded = FrameSpec.from_yaml(source=yaml_file)
     assert Loaded.schema() == FullFeatureSpec.schema()
 
     df1 = FullFeatureSpec.generate(1_000, seed=123)
@@ -790,7 +790,7 @@ def test_distributions_and_weights_yaml_roundtrip(tmp_path):
 
 
 def test_cartesian_with_custom_choices():
-    class ChoiceCartesian(DfSpec):
+    class ChoiceCartesian(FrameSpec):
         size = ColSpec(dtype=pl.String, choices=["S", "M", "L"])
         color = ColSpec(dtype=pl.String, choices=["Red", "Blue"], nullable=True)
 
@@ -836,7 +836,7 @@ def test_from_dataframe_basic():
         }
     )
 
-    Profiled = DfSpec.from_dataframe(source_df, name="StoreProfile", max_unique_enum=2)
+    Profiled = FrameSpec.from_dataframe(source_df, name="StoreProfile", max_unique_enum=2)
     assert Profiled.__name__ == "StoreProfile"
 
     cols = Profiled._columns
@@ -881,7 +881,7 @@ def test_from_dataframe_weights_and_enums():
         }
     )
 
-    ProfiledWeighted = DfSpec.from_dataframe(df, weights=True, max_unique_enum=10)
+    ProfiledWeighted = FrameSpec.from_dataframe(df, weights=True, max_unique_enum=10)
     cols = ProfiledWeighted._columns
 
     # Species should be converted to Enum with categories ["cat", "dog"] and weights [0.8, 0.2]
@@ -910,12 +910,12 @@ def test_from_dataframe_max_unique_threshold():
     )
 
     # max_unique = 5 -> low_card (3 unique) becomes Enum, high_card (100 unique) stays String
-    Spec1 = DfSpec.from_dataframe(df, max_unique_enum=5)
+    Spec1 = FrameSpec.from_dataframe(df, max_unique_enum=5)
     assert isinstance(Spec1._columns["low_card"].dtype, pl.Enum)
     assert Spec1._columns["high_card"].dtype == pl.String
 
     # Using alias max_unique
-    Spec2 = DfSpec.from_dataframe(df, max_unique=2)
+    Spec2 = FrameSpec.from_dataframe(df, max_unique=2)
     # low_card has 3 unique > 2, so it remains String
     assert Spec2._columns["low_card"].dtype == pl.String
 
@@ -928,16 +928,16 @@ def test_from_dataframe_calculate_bounds_toggle():
         }
     )
 
-    SpecWithBounds = DfSpec.from_dataframe(df, calculate_bounds=True, max_unique_enum=0)
+    SpecWithBounds = FrameSpec.from_dataframe(df, calculate_bounds=True, max_unique_enum=0)
     assert SpecWithBounds._columns["num"].bounds == Bound(10, 50)
     assert SpecWithBounds._columns["txt"].string_length == Bound(1, 16)
 
-    SpecNoBounds = DfSpec.from_dataframe(df, calculate_bounds=False, max_unique_enum=0)
+    SpecNoBounds = FrameSpec.from_dataframe(df, calculate_bounds=False, max_unique_enum=0)
     assert SpecNoBounds._columns["num"].bounds is None
     assert SpecNoBounds._columns["txt"].string_length is None
 
     # Test alias bounds=False
-    SpecNoBoundsAlias = DfSpec.from_dataframe(df, bounds=False, max_unique_enum=0)
+    SpecNoBoundsAlias = FrameSpec.from_dataframe(df, bounds=False, max_unique_enum=0)
     assert SpecNoBoundsAlias._columns["num"].bounds is None
     assert SpecNoBoundsAlias._columns["txt"].string_length is None
 
@@ -952,7 +952,7 @@ def test_from_dataframe_nullability_and_edge_cases():
         schema={"with_nulls": pl.Int64, "no_nulls": pl.Int64, "all_nulls": pl.Float64},
     )
 
-    Spec = DfSpec.from_dataframe(df)
+    Spec = FrameSpec.from_dataframe(df)
     cols = Spec._columns
 
     assert cols["with_nulls"].nullable is True
@@ -969,11 +969,11 @@ def test_from_dataframe_nullability_and_edge_cases():
 
     # Non-dataframe raises TypeError
     with pytest.raises(TypeError, match="Expected pl.DataFrame"):
-        DfSpec.from_dataframe([{"a": 1}])  # type: ignore[arg-type]
+        FrameSpec.from_dataframe([{"a": 1}])  # type: ignore[arg-type]
 
     # Empty dataframe (0 rows)
     empty_df = pl.DataFrame({"a": [], "b": []}, schema={"a": pl.Int32, "b": pl.String})
-    EmptySpec = DfSpec.from_dataframe(empty_df)
+    EmptySpec = FrameSpec.from_dataframe(empty_df)
     assert EmptySpec.schema() == empty_df.schema
     assert not EmptySpec._columns["a"].nullable
 
@@ -998,7 +998,7 @@ def test_from_dataframe_temporal_and_binary(tmp_path):
         },
     )
 
-    Spec = DfSpec.from_dataframe(df)
+    Spec = FrameSpec.from_dataframe(df)
     cols = Spec._columns
 
     assert cols["t"].dtype == pl.Time
@@ -1011,7 +1011,7 @@ def test_from_dataframe_temporal_and_binary(tmp_path):
     # Roundtrip through YAML
     yaml_path = tmp_path / "temporal_profile.yaml"
     Spec.to_yaml(yaml_path)
-    LoadedSpec = DfSpec.from_yaml(yaml_path)
+    LoadedSpec = FrameSpec.from_yaml(yaml_path)
     assert LoadedSpec.schema() == Spec.schema()
 
     # Generate from LoadedSpec
@@ -1021,9 +1021,9 @@ def test_from_dataframe_temporal_and_binary(tmp_path):
 
 
 def test_modular_subpackage_imports():
-    from polspec import Bound, ColRule, ColSpec, DfSchema, DfSpec, ValidationError, profile_dataframe
+    from polspec import Bound, ColRule, ColSpec, FrameSchema, FrameSpec, ValidationError, profile_dataframe
     from polspec.bound import Bound as BoundDirect
-    from polspec.dfspec import DfSchema as DfSchemaDirect, DfSpec as DfSpecDirect
+    from polspec.framespec import FrameSchema as FrameSchemaDirect, FrameSpec as FrameSpecDirect
     from polspec.engine import _generate_cartesian, _generate_random
     from polspec.profiler import profile_dataframe as profile_dataframe_direct
     from polspec.rules import ColRule as ColRuleDirect
@@ -1034,9 +1034,9 @@ def test_modular_subpackage_imports():
     assert Bound is BoundDirect
     assert ColRule is ColRuleDirect
     assert ColSpec is ColSpecDirect
-    assert DfSpec is DfSpecDirect
-    assert DfSchema is DfSchemaDirect
-    assert DfSchema is DfSpec
+    assert FrameSpec is FrameSpecDirect
+    assert FrameSchema is FrameSchemaDirect
+    assert FrameSchema is FrameSpec
     assert ValidationError is ValidationErrorDirect
     assert profile_dataframe is profile_dataframe_direct
     assert callable(_colspec_to_yaml)

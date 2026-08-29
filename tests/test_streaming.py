@@ -1,9 +1,9 @@
 import polars as pl
 import pytest
-from polspec import Bound, ColRule, ColSpec, DfSpec
+from polspec import Bound, ColRule, ColSpec, FrameSpec
 
 
-class StreamDataSource(DfSpec):
+class StreamDataSource(FrameSpec):
     id = ColSpec(dtype=pl.Int64, bounds=Bound(1, 1_000_000), nullable=False)
     category = ColSpec(
         dtype=pl.Enum(["alpha", "beta", "gamma"]),

@@ -1,10 +1,10 @@
 from datetime import date
 import polars as pl
 import pytest
-from polspec import Bound, ColRule, ColSpec, DfSchema, DfSpec, ValidationError
+from polspec import Bound, ColRule, ColSpec, FrameSchema, FrameSpec, ValidationError
 
 
-class ProduceInventory(DfSchema):
+class ProduceInventory(FrameSchema):
     id = ColSpec(dtype=pl.Int64, bounds=Bound(1, 10_000), nullable=False)
     category = ColSpec(
         dtype=pl.Enum(["fruit", "vegetable", "meat"]),
@@ -239,7 +239,7 @@ def test_validation_lazyframe_and_streaming():
 
 
 def test_validation_colrule():
-    class RuleSpec(DfSpec):
+    class RuleSpec(FrameSpec):
         status = ColSpec(dtype=pl.Enum(["active", "inactive"]), nullable=False)
         discount = ColSpec(
             dtype=pl.Float64,

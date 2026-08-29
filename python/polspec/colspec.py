@@ -3,8 +3,8 @@
 All core components have been modularized into:
 - polspec.bound
 - polspec.constants
-- polspec.dfspec
 - polspec.engine
+- polspec.framespec
 - polspec.profiler
 - polspec.rules
 - polspec.serialization
@@ -22,7 +22,7 @@ from polspec.constants import (
     _INT_DTYPE_BOUNDS,
     _MAX_CARTESIAN_ROWS,
 )
-from polspec.dfspec import DfSchema, DfSpec
+from polspec.framespec import FrameSchema, FrameSpec
 from polspec.engine import (
     _cast_expr,
     _coverage_values,
@@ -64,8 +64,8 @@ __all__ = [
     "Bound",
     "ColRule",
     "ColSpec",
-    "DfSchema",
-    "DfSpec",
+    "FrameSchema",
+    "FrameSpec",
     "ValidationError",
     "_apply_rules",
     "_cast_expr",

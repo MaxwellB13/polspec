@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 
 class ValidationError(ValueError):
-    """Raised when a DataFrame or LazyFrame fails validation against a DfSpec/DfSchema."""
+    """Raised when a DataFrame or LazyFrame fails validation against a FrameSpec/FrameSchema."""
 
     def __init__(self, message: str, errors: list[str] | None = None) -> None:
         super().__init__(message)
