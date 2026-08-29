@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 from pathlib import Path
-from typing import ClassVar, Literal
+from typing import ClassVar, Iterator, Literal, overload
 
 import polars as pl
 import yaml
@@ -133,6 +133,7 @@ class DfSpec:
         )
         return type(name, (DfSpec,), columns)
 
+    @overload
     @classmethod
     def generate(
         cls,
@@ -140,8 +141,30 @@ class DfSpec:
         *,
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
-    ) -> pl.DataFrame:
-        """Generates a DataFrame matching this spec.
+        lazy: Literal[False] = False,
+    ) -> pl.DataFrame: ...
+
+    @overload
+    @classmethod
+    def generate(
+        cls,
+        n: int,
+        *,
+        method: Literal["random", "cartesian"] = "random",
+        seed: int | None = None,
+        lazy: Literal[True],
+    ) -> pl.LazyFrame: ...
+
+    @classmethod
+    def generate(
+        cls,
+        n: int,
+        *,
+        method: Literal["random", "cartesian"] = "random",
+        seed: int | None = None,
+        lazy: bool = False,
+    ) -> pl.DataFrame | pl.LazyFrame:
+        """Generates a DataFrame (or LazyFrame) matching this spec.
 
         method="random" (default): `n` rows, each column drawn independently.
 
@@ -156,6 +179,8 @@ class DfSpec:
         Any ColSpec.rules are applied last, as a vectorized overwrite pass
         over the fully-generated DataFrame (see ColRule), regardless of
         method.
+
+        lazy=True returns a `pl.LazyFrame` around the generated DataFrame.
         """
         if not cls._columns:
             raise ValueError(f"{cls.__name__} declares no ColSpec columns")
@@ -173,4 +198,323 @@ class DfSpec:
                 f"Unknown method {method!r}; expected 'random' or 'cartesian'"
             )
 
-        return _apply_rules(df, cls._columns, rng.randrange(2**63))
+        res = _apply_rules(df, cls._columns, rng.randrange(2**63))
+        return res.lazy() if lazy else res
+
+    @classmethod
+    def generate_batches(
+        cls,
+        n: int,
+        *,
+        batch_size: int = 100_000,
+        method: Literal["random", "cartesian"] = "random",
+        seed: int | None = None,
+    ) -> Iterator[pl.DataFrame]:
+        """Yields chunks of generated DataFrames without holding all rows in memory.
+
+        Parameters
+        ----------
+        n : int
+            Total number of rows to generate across all batches.
+        batch_size : int, default 100_000
+            Maximum number of rows per batch. Must be > 0.
+        method : Literal["random", "cartesian"], default "random"
+            Generation strategy ("random" or "cartesian").
+        seed : int | None, optional
+            Random seed for reproducible batch generation.
+
+        Yields
+        ------
+        pl.DataFrame
+            Batches of generated DataFrames matching the spec schema.
+        """
+        if not cls._columns:
+            raise ValueError(f"{cls.__name__} declares no ColSpec columns")
+        if n < 0:
+            raise ValueError("n must be >= 0")
+        if batch_size <= 0:
+            raise ValueError("batch_size must be > 0")
+        if n == 0:
+            return
+
+        rng = random.Random(seed)
+
+        if method == "cartesian":
+            first_batch_size = min(n, batch_size)
+            first_batch = cls.generate(
+                first_batch_size, method="cartesian", seed=rng.randrange(2**63)
+            )
+            yield first_batch
+            rows_remaining = max(0, n - first_batch.height)
+            while rows_remaining > 0:
+                current_batch_size = min(rows_remaining, batch_size)
+                yield cls.generate(
+                    current_batch_size, method="random", seed=rng.randrange(2**63)
+                )
+                rows_remaining -= current_batch_size
+        elif method == "random":
+            rows_remaining = n
+            while rows_remaining > 0:
+                current_batch_size = min(rows_remaining, batch_size)
+                yield cls.generate(
+                    current_batch_size, method="random", seed=rng.randrange(2**63)
+                )
+                rows_remaining -= current_batch_size
+        else:
+            raise ValueError(
+                f"Unknown method {method!r}; expected 'random' or 'cartesian'"
+            )
+
+    @classmethod
+    def sink_parquet(
+        cls,
+        path: str | Path,
+        n: int,
+        *,
+        batch_size: int = 100_000,
+        compression: str = "zstd",
+        method: Literal["random", "cartesian"] = "random",
+        seed: int | None = None,
+        **kwargs,
+    ) -> None:
+        """Generates `n` rows and streams them directly to a Parquet file in batches.
+
+        Parameters
+        ----------
+        path : str | Path
+            Destination file path.
+        n : int
+            Total number of rows to generate and sink.
+        batch_size : int, default 100_000
+            Number of rows per generated batch.
+        compression : str, default "zstd"
+            Parquet compression codec (e.g. "zstd", "snappy", "gzip", "none").
+        method : Literal["random", "cartesian"], default "random"
+            Generation strategy ("random" or "cartesian").
+        seed : int | None, optional
+            Random seed for reproducibility.
+        **kwargs
+            Additional arguments passed to `pyarrow.parquet.ParquetWriter`.
+        """
+        try:
+            import pyarrow.parquet as pq
+        except ImportError as exc:
+            raise ImportError(
+                "pyarrow is required for sink_parquet(). Please install pyarrow."
+            ) from exc
+
+        if not cls._columns:
+            raise ValueError(f"{cls.__name__} declares no ColSpec columns")
+        if n < 0:
+            raise ValueError("n must be >= 0")
+        if batch_size <= 0:
+            raise ValueError("batch_size must be > 0")
+
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        writer = None
+        try:
+            for batch_df in cls.generate_batches(
+                n, batch_size=batch_size, method=method, seed=seed
+            ):
+                arrow_table = batch_df.to_arrow()
+                if writer is None:
+                    writer = pq.ParquetWriter(
+                        str(path),
+                        arrow_table.schema,
+                        compression=compression,
+                        **kwargs,
+                    )
+                writer.write_table(arrow_table)
+        finally:
+            if writer is not None:
+                writer.close()
+            elif n == 0:
+                empty_df = cls.generate(0)
+                empty_table = empty_df.to_arrow()
+                writer = pq.ParquetWriter(
+                    str(path),
+                    empty_table.schema,
+                    compression=compression,
+                    **kwargs,
+                )
+                writer.close()
+
+    @classmethod
+    def sink_csv(
+        cls,
+        path: str | Path,
+        n: int,
+        *,
+        batch_size: int = 100_000,
+        include_header: bool = True,
+        method: Literal["random", "cartesian"] = "random",
+        seed: int | None = None,
+        **kwargs,
+    ) -> None:
+        """Generates `n` rows and streams them directly to a CSV file in batches.
+
+        Parameters
+        ----------
+        path : str | Path
+            Destination file path.
+        n : int
+            Total number of rows to generate and sink.
+        batch_size : int, default 100_000
+            Number of rows per generated batch.
+        include_header : bool, default True
+            Whether to include the CSV header row.
+        method : Literal["random", "cartesian"], default "random"
+            Generation strategy ("random" or "cartesian").
+        seed : int | None, optional
+            Random seed for reproducibility.
+        **kwargs
+            Additional arguments passed to `pl.DataFrame.write_csv`.
+        """
+        if not cls._columns:
+            raise ValueError(f"{cls.__name__} declares no ColSpec columns")
+        if n < 0:
+            raise ValueError("n must be >= 0")
+        if batch_size <= 0:
+            raise ValueError("batch_size must be > 0")
+
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        header_needed = include_header
+        with open(path, "wb") as f:
+            if n == 0:
+                empty_df = cls.generate(0)
+                if include_header:
+                    empty_df.write_csv(f, include_header=True, **kwargs)
+                return
+
+            for batch_df in cls.generate_batches(
+                n, batch_size=batch_size, method=method, seed=seed
+            ):
+                batch_df.write_csv(f, include_header=header_needed, **kwargs)
+                header_needed = False
+
+    @classmethod
+    def sink_ipc(
+        cls,
+        path: str | Path,
+        n: int,
+        *,
+        batch_size: int = 100_000,
+        compression: str | None = "zstd",
+        method: Literal["random", "cartesian"] = "random",
+        seed: int | None = None,
+        **kwargs,
+    ) -> None:
+        """Generates `n` rows and streams them directly to an Arrow IPC / Feather file in batches.
+
+        Parameters
+        ----------
+        path : str | Path
+            Destination file path.
+        n : int
+            Total number of rows to generate and sink.
+        batch_size : int, default 100_000
+            Number of rows per generated batch.
+        compression : str | None, default "zstd"
+            Compression codec (e.g. "zstd", "lz4", "uncompressed", None).
+        method : Literal["random", "cartesian"], default "random"
+            Generation strategy ("random" or "cartesian").
+        seed : int | None, optional
+            Random seed for reproducibility.
+        **kwargs
+            Additional arguments passed to `pyarrow.ipc.new_file`.
+        """
+        try:
+            import pyarrow.ipc as ipc
+        except ImportError as exc:
+            raise ImportError(
+                "pyarrow is required for sink_ipc(). Please install pyarrow."
+            ) from exc
+
+        if not cls._columns:
+            raise ValueError(f"{cls.__name__} declares no ColSpec columns")
+        if n < 0:
+            raise ValueError("n must be >= 0")
+        if batch_size <= 0:
+            raise ValueError("batch_size must be > 0")
+
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        writer = None
+        with open(path, "wb") as f:
+            try:
+                for batch_df in cls.generate_batches(
+                    n, batch_size=batch_size, method=method, seed=seed
+                ):
+                    arrow_table = batch_df.to_arrow()
+                    if writer is None:
+                        writer = ipc.new_file(
+                            f,
+                            arrow_table.schema,
+                            options=ipc.IpcWriteOptions(compression=compression),
+                            **kwargs,
+                        )
+                    writer.write_table(arrow_table)
+            finally:
+                if writer is not None:
+                    writer.close()
+                elif n == 0:
+                    empty_df = cls.generate(0)
+                    empty_table = empty_df.to_arrow()
+                    writer = ipc.new_file(
+                        f,
+                        empty_table.schema,
+                        options=ipc.IpcWriteOptions(compression=compression),
+                        **kwargs,
+                    )
+                    writer.close()
+
+    @classmethod
+    def sink_ndjson(
+        cls,
+        path: str | Path,
+        n: int,
+        *,
+        batch_size: int = 100_000,
+        method: Literal["random", "cartesian"] = "random",
+        seed: int | None = None,
+        **kwargs,
+    ) -> None:
+        """Generates `n` rows and streams them directly to a newline-delimited JSON (NDJSON) file in batches.
+
+        Parameters
+        ----------
+        path : str | Path
+            Destination file path.
+        n : int
+            Total number of rows to generate and sink.
+        batch_size : int, default 100_000
+            Number of rows per generated batch.
+        method : Literal["random", "cartesian"], default "random"
+            Generation strategy ("random" or "cartesian").
+        seed : int | None, optional
+            Random seed for reproducibility.
+        **kwargs
+            Additional arguments passed to `pl.DataFrame.write_ndjson`.
+        """
+        if not cls._columns:
+            raise ValueError(f"{cls.__name__} declares no ColSpec columns")
+        if n < 0:
+            raise ValueError("n must be >= 0")
+        if batch_size <= 0:
+            raise ValueError("batch_size must be > 0")
+
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(path, "wb") as f:
+            if n == 0:
+                return
+            for batch_df in cls.generate_batches(
+                n, batch_size=batch_size, method=method, seed=seed
+            ):
+                batch_df.write_ndjson(f, **kwargs)
