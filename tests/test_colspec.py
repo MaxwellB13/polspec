@@ -1321,6 +1321,31 @@ def test_framespec_to_markdown_and_to_mermaid(tmp_path):
     assert mermaid_file.exists()
     assert mermaid_file.read_text(encoding="utf-8") == written_mermaid
 
+    # 5. to_mermaid() with quotes in choices / tags / fk names
+    class QuotedSpec(FrameSpec):
+        id = ColSpec(pl.Int64, unique=True)
+        flag = ColSpec(pl.String, choices=['a"1', 'b"2'], tags=['geo"zone'])
+        __foreign_keys__ = [ForeignKey("id", references="self", name='quoted"fk')]
+
+    quoted_mmd = QuotedSpec.to_mermaid()
+    # Ensure double quotes inside attributes are replaced to avoid breaking mermaid ER syntax
+    assert "choices: [a'1, b'2]" in quoted_mmd
+    assert "tags: [geo'zone]" in quoted_mmd
+    assert "quoted'fk" in quoted_mmd
+
+
+def test_yaml_nested_directory_creation_and_utf8(tmp_path):
+    class UnicodeYamlSpec(FrameSpec):
+        user_id = ColSpec(pl.Int64, unique=True)
+        comment = ColSpec(pl.String, choices=["café", "naïve", "🚀"])
+
+    nested_file = tmp_path / "nested" / "subfolder" / "spec.yaml"
+    UnicodeYamlSpec.to_yaml(nested_file)
+    assert nested_file.exists()
+
+    LoadedSpec = FrameSpec.from_yaml(nested_file)
+    assert LoadedSpec._columns["comment"].choices == ("café", "naïve", "🚀")
+
 
 # =====================================================================
 # Foreign Keys (ForeignKey / __foreign_keys__)
@@ -1366,7 +1391,9 @@ def test_foreign_key_declaration_variations():
         a = ColSpec(pl.Int64)
         b = ColSpec(pl.String)
         __foreign_keys__ = [
-            ForeignKey(["a", "b"], references=CustomerFkSpec, ref_columns=["id", "code"])
+            ForeignKey(
+                ["a", "b"], references=CustomerFkSpec, ref_columns=["id", "code"]
+            )
         ]
 
     fk3 = CompositeFk.foreign_keys()[0]
@@ -1405,7 +1432,9 @@ def test_foreign_key_declaration_rejects_unknown_local_column():
 
 
 def test_foreign_key_declaration_rejects_unknown_ref_column():
-    with pytest.raises(ValueError, match="unknown column 'missing' on 'CustomerFkSpec'"):
+    with pytest.raises(
+        ValueError, match="unknown column 'missing' on 'CustomerFkSpec'"
+    ):
 
         class BadRef(FrameSpec):
             a = ColSpec(pl.Int64)
@@ -1442,7 +1471,9 @@ def test_foreign_key_declaration_rejects_duplicate_names():
             a = ColSpec(pl.Int64)
             b = ColSpec(pl.String)
             __foreign_keys__ = [
-                ForeignKey("a", references=CustomerFkSpec, ref_columns="id", name="dup"),
+                ForeignKey(
+                    "a", references=CustomerFkSpec, ref_columns="id", name="dup"
+                ),
                 ForeignKey(
                     "b", references=CustomerFkSpec, ref_columns="code", name="dup"
                 ),
@@ -1452,7 +1483,9 @@ def test_foreign_key_declaration_rejects_duplicate_names():
 def test_foreign_key_inheritance_deduplicates_and_accumulates():
     class BaseFkSpec(FrameSpec):
         a = ColSpec(pl.Int64)
-        __foreign_keys__ = [ForeignKey("a", references=CustomerFkSpec, ref_columns="id")]
+        __foreign_keys__ = [
+            ForeignKey("a", references=CustomerFkSpec, ref_columns="id")
+        ]
 
     class ExtendedFkSpec(BaseFkSpec):
         b = ColSpec(pl.String)
@@ -1664,6 +1697,35 @@ def test_generate_foreign_key_empty_parent_raises():
         GenOrderSpec.generate(10, references={GenCustomerSpec: empty_customers})
 
 
+def test_generate_foreign_key_parent_with_nulls_filters_them():
+    parent_df = pl.DataFrame({"id": [1, None, 2, None, 3]})
+
+    class ChildGenSpec(FrameSpec):
+        id = ColSpec(pl.Int64, unique=True)
+        customer_id = ColSpec(pl.Int64, nullable=False)
+        __foreign_keys__ = [
+            ForeignKey("customer_id", references=GenCustomerSpec, ref_columns="id")
+        ]
+
+    df = ChildGenSpec.generate(20, seed=42, references={GenCustomerSpec: parent_df})
+    assert df["customer_id"].null_count() == 0
+    assert set(df["customer_id"].to_list()).issubset({1, 2, 3})
+
+
+def test_generate_foreign_key_parent_all_nulls_raises():
+    all_null_parent = pl.DataFrame({"id": [None, None]})
+
+    class ChildGenSpec(FrameSpec):
+        id = ColSpec(pl.Int64, unique=True)
+        customer_id = ColSpec(pl.Int64, nullable=False)
+        __foreign_keys__ = [
+            ForeignKey("customer_id", references=GenCustomerSpec, ref_columns="id")
+        ]
+
+    with pytest.raises(ValueError, match="cannot generate values"):
+        ChildGenSpec.generate(10, references={GenCustomerSpec: all_null_parent})
+
+
 def test_generate_batches_and_sink_thread_foreign_key_references(tmp_path):
     customers = GenCustomerSpec.generate(5, seed=1)
     customer_ids = set(customers["id"].to_list())
@@ -1678,9 +1740,7 @@ def test_generate_batches_and_sink_thread_foreign_key_references(tmp_path):
     assert all(v in customer_ids for v in all_vals)
 
     out_path = tmp_path / "orders.csv"
-    GenOrderSpec.sink_csv(
-        out_path, 30, seed=6, references={GenCustomerSpec: customers}
-    )
+    GenOrderSpec.sink_csv(out_path, 30, seed=6, references={GenCustomerSpec: customers})
     sunk = pl.read_csv(out_path)
     sunk_vals = [v for v in sunk["customer_id"].to_list() if v is not None]
     assert sunk_vals

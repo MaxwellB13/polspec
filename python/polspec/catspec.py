@@ -328,7 +328,7 @@ class CatSpec:
                     categoricals[col_name] = pl.Categories(col_name, physical=pl.UInt32)
                 non_null = df[col_name].drop_nulls()
                 if len(non_null) > 0:
-                    choices[col_name] = non_null.unique().to_list()
+                    choices[col_name] = non_null.unique().sort().to_list()
 
         return cls(enums=enums, categoricals=categoricals, choices=choices)
 
@@ -393,18 +393,17 @@ class CatSpec:
                 enums[col_name] = dtype.categories.to_list()
                 continue
             elif _is_categorical_dtype(dtype):
+                non_null = df[col_name].drop_nulls()
                 if hasattr(dtype, "categories") and isinstance(
                     dtype.categories, pl.Categories
                 ):
                     categoricals[col_name] = dtype.categories
                 else:
-                    non_null = df[col_name].drop_nulls()
                     n_u = non_null.n_unique()
                     phys = default_physical or _auto_physical(n_u)
                     categoricals[col_name] = pl.Categories(col_name, physical=phys)
-                non_null = df[col_name].drop_nulls()
                 if len(non_null) > 0:
-                    choices[col_name] = non_null.unique().to_list()
+                    choices[col_name] = non_null.unique().sort().to_list()
                 continue
 
             if dtype not in (pl.String, pl.Utf8):
@@ -583,7 +582,7 @@ class CatSpec:
         path = Path(source)
         if not path.exists():
             raise FileNotFoundError(f"CatSpec file not found: {source}")
-        raw = yaml.safe_load(path.read_text())
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
         if raw is None:
             return cls()
         return cls.from_dict(raw)
@@ -620,7 +619,9 @@ class CatSpec:
         data = self.to_dict()
         dumped = yaml.safe_dump(data, sort_keys=False)
         if source is not None:
-            Path(source).write_text(dumped)
+            p = Path(source)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(dumped, encoding="utf-8")
             return None
         return dumped
 

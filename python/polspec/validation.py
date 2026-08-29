@@ -339,7 +339,10 @@ def _validate_dataframe(
                 comp_cnt_alias = f"__val__comp_unique_{u_idx}__cnt"
                 comp_samples_alias = f"__val__comp_unique_{u_idx}__samples"
                 struct_col = pl.struct([pl.col(c) for c in comp_cols_tuple])
-                comp_mask = struct_col.is_duplicated()
+                not_null_mask = pl.all_horizontal(
+                    [pl.col(c).is_not_null() for c in comp_cols_tuple]
+                )
+                comp_mask = not_null_mask & struct_col.is_duplicated()
                 agg_exprs.append(comp_mask.sum().alias(comp_cnt_alias))
                 agg_exprs.append(
                     struct_col.filter(comp_mask)
@@ -483,9 +486,7 @@ def _validate_dataframe(
                 )
 
             key_expr = (
-                pl.col(local_cols[0])
-                if len(local_cols) == 1
-                else pl.struct(local_cols)
+                pl.col(local_cols[0]) if len(local_cols) == 1 else pl.struct(local_cols)
             )
             not_null_expr = (
                 pl.col(local_cols[0]).is_not_null()
@@ -508,7 +509,9 @@ def _validate_dataframe(
                 raw_samples = fk_stats["samples"][0]
                 samples = list(raw_samples) if raw_samples is not None else []
                 target_label = (
-                    "self" if target_lf is None else getattr(fk.references, "__name__", str(fk.references))
+                    "self"
+                    if target_lf is None
+                    else getattr(fk.references, "__name__", str(fk.references))
                 )
                 errors.append(
                     f"ForeignKey '{fk.name}' violated ({local_cols} -> "

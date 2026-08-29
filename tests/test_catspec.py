@@ -454,3 +454,28 @@ def test_framespec_with_catspec_preserves_foreign_keys():
         orders_ok, references={CustomerSpec: customers_df}
     )
     assert result.height == 2
+
+
+def test_catspec_to_yaml_nested_directory_and_utf8(tmp_path):
+    cats = CatSpec(
+        enums={"GREETING": ["héllo", "bonjour", "🚀"]},
+        categoricals={"REGION": pl.Categories("REGION")},
+        choices={"REGION": ["Zürich", "München", "Tokyo"]},
+    )
+    out_file = tmp_path / "deeply" / "nested" / "cats.yaml"
+    cats.to_yaml(out_file)
+    assert out_file.exists()
+
+    loaded = CatSpec.from_yaml(out_file)
+    assert loaded.enums["GREETING"] == ["héllo", "bonjour", "🚀"]
+    assert loaded.get_choices("REGION") == ["Zürich", "München", "Tokyo"]
+
+
+def test_catspec_infer_from_dataframe_existing_categorical_deterministic_sort():
+    df = pl.DataFrame(
+        {
+            "cat_col": pl.Series(["Z", "A", "M", None, "B"]).cast(pl.Categorical),
+        }
+    )
+    inferred = CatSpec.infer_from_dataframe(df)
+    assert inferred.get_choices("cat_col") == ["A", "B", "M", "Z"]

@@ -503,7 +503,9 @@ class FrameSpec:
         self_fks = [fk for fk in cls._foreign_keys if fk.references == "self"]
         if self_fks:
             data["foreign_keys"] = [_foreignkey_to_yaml(fk) for fk in self_fks]
-        Path(source).write_text(yaml.safe_dump(data, sort_keys=False))
+        p = Path(source)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
     @classmethod
     def from_yaml(
@@ -528,7 +530,7 @@ class FrameSpec:
         >>> df = DataSource.generate(1_000, seed=42)
         """
         source_path = Path(source)
-        data = yaml.safe_load(source_path.read_text())
+        data = yaml.safe_load(source_path.read_text(encoding="utf-8"))
 
         catspec: CatSpec | None = None
         if categories is not None:
@@ -614,8 +616,7 @@ class FrameSpec:
         *,
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
-        | None = None,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
         lazy: Literal[False] = False,
     ) -> pl.DataFrame: ...
 
@@ -627,8 +628,7 @@ class FrameSpec:
         *,
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
-        | None = None,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
         lazy: Literal[True],
     ) -> pl.LazyFrame: ...
 
@@ -639,8 +639,7 @@ class FrameSpec:
         *,
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
-        | None = None,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
         lazy: bool = False,
     ) -> pl.DataFrame | pl.LazyFrame:
         """Generates a DataFrame (or LazyFrame) matching this spec.
@@ -702,7 +701,9 @@ class FrameSpec:
                 if parent is None:
                     resolved_foreign_keys.append((fk, None))
                     continue
-                parent_df = parent.collect() if isinstance(parent, pl.LazyFrame) else parent
+                parent_df = (
+                    parent.collect() if isinstance(parent, pl.LazyFrame) else parent
+                )
                 resolved_foreign_keys.append((fk, parent_df))
             res = _apply_foreign_keys(
                 res, cls._columns, resolved_foreign_keys, rng.randrange(2**63)
@@ -718,8 +719,7 @@ class FrameSpec:
         batch_size: int = 100_000,
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
-        | None = None,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
     ) -> Iterator[pl.DataFrame]:
         """Yields chunks of generated DataFrames without holding all rows in memory.
 
@@ -803,8 +803,7 @@ class FrameSpec:
         compression: str = "zstd",
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
-        | None = None,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
         **kwargs,
     ) -> None:
         """Generates `n` rows and streams them directly to a Parquet file in batches.
@@ -849,7 +848,11 @@ class FrameSpec:
         writer = None
         try:
             for batch_df in cls.generate_batches(
-                n, batch_size=batch_size, method=method, seed=seed, references=references
+                n,
+                batch_size=batch_size,
+                method=method,
+                seed=seed,
+                references=references,
             ):
                 arrow_table = batch_df.to_arrow()
                 if writer is None:
@@ -884,8 +887,7 @@ class FrameSpec:
         include_header: bool = True,
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
-        | None = None,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
         **kwargs,
     ) -> None:
         """Generates `n` rows and streams them directly to a CSV file in batches.
@@ -929,7 +931,11 @@ class FrameSpec:
                 return
 
             for batch_df in cls.generate_batches(
-                n, batch_size=batch_size, method=method, seed=seed, references=references
+                n,
+                batch_size=batch_size,
+                method=method,
+                seed=seed,
+                references=references,
             ):
                 batch_df.write_csv(f, include_header=header_needed, **kwargs)
                 header_needed = False
@@ -944,8 +950,7 @@ class FrameSpec:
         compression: str | None = "zstd",
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
-        | None = None,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
         **kwargs,
     ) -> None:
         """Generates `n` rows and streams them directly to an Arrow IPC / Feather file in batches.
@@ -991,7 +996,11 @@ class FrameSpec:
         with open(path, "wb") as f:
             try:
                 for batch_df in cls.generate_batches(
-                    n, batch_size=batch_size, method=method, seed=seed, references=references
+                    n,
+                    batch_size=batch_size,
+                    method=method,
+                    seed=seed,
+                    references=references,
                 ):
                     arrow_table = batch_df.to_arrow()
                     if writer is None:
@@ -1025,8 +1034,7 @@ class FrameSpec:
         batch_size: int = 100_000,
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
-        | None = None,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
         **kwargs,
     ) -> None:
         """Generates `n` rows and streams them directly to a newline-delimited JSON (NDJSON) file in batches.
@@ -1063,7 +1071,11 @@ class FrameSpec:
             if n == 0:
                 return
             for batch_df in cls.generate_batches(
-                n, batch_size=batch_size, method=method, seed=seed, references=references
+                n,
+                batch_size=batch_size,
+                method=method,
+                seed=seed,
+                references=references,
             ):
                 batch_df.write_ndjson(f, **kwargs)
 
@@ -1211,7 +1223,9 @@ class FrameSpec:
                 )
                 for fk in cls._foreign_keys:
                     target_label = (
-                        cls.__name__ if fk.references == "self" else fk.references.__name__
+                        cls.__name__
+                        if fk.references == "self"
+                        else fk.references.__name__
                     )
                     lines.append(
                         f"- **`{fk.name}`**: `{list(fk.columns)}` -> "
@@ -1323,7 +1337,8 @@ class FrameSpec:
                     f"len: [{spec.string_length.min}, {spec.string_length.max}]"
                 )
 
-            comment_str = f' "{", ".join(comments)}"' if comments else ""
+            comment_body = ", ".join(comments).replace('"', "'")
+            comment_str = f' "{comment_body}"' if comments else ""
             key_str = f" {key_token}" if key_token else ""
             lines.append(f"        {type_name} {col_name}{key_str}{comment_str}")
 
@@ -1338,9 +1353,8 @@ class FrameSpec:
                         c if c.isalnum() or c == "_" else "_"
                         for c in fk.references.__name__
                     )
-                lines.append(
-                    f'    {target_name} ||--o{{ {entity_name} : "{fk.name}"'
-                )
+                fk_label = fk.name.replace('"', "'") if fk.name else "references"
+                lines.append(f'    {target_name} ||--o{{ {entity_name} : "{fk_label}"')
 
         content = "\n".join(lines) + "\n"
 
@@ -1363,8 +1377,7 @@ class FrameSpec:
         validate_unique: bool = True,
         validate_checks: bool = True,
         validate_foreign_keys: bool = True,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
-        | None = None,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
         cast: bool = False,
         streaming: bool = False,
     ) -> pl.DataFrame: ...
@@ -1382,8 +1395,7 @@ class FrameSpec:
         validate_unique: bool = True,
         validate_checks: bool = True,
         validate_foreign_keys: bool = True,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
-        | None = None,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
         cast: bool = False,
         streaming: bool = False,
     ) -> pl.LazyFrame: ...
@@ -1400,8 +1412,7 @@ class FrameSpec:
         validate_unique: bool = True,
         validate_checks: bool = True,
         validate_foreign_keys: bool = True,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
-        | None = None,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
         cast: bool = False,
         streaming: bool = False,
     ) -> pl.DataFrame | pl.LazyFrame:
@@ -1475,7 +1486,9 @@ class FrameSpec:
                         f"references {target.__name__!r}, but no DataFrame for it "
                         "was supplied via validate(references={...})"
                     )
-                parent_lf = parent.lazy() if isinstance(parent, pl.DataFrame) else parent
+                parent_lf = (
+                    parent.lazy() if isinstance(parent, pl.DataFrame) else parent
+                )
                 resolved_foreign_keys.append((fk, parent_lf))
 
         return _validate_dataframe(

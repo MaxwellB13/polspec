@@ -785,3 +785,34 @@ def test_validation_foreign_key_missing_ref_columns_in_parent_raises():
     df = pl.DataFrame({"order_id": [1], "customer_id": [1]})
     with pytest.raises(ValueError, match="not present in the referenced DataFrame"):
         OrderSpec2.validate(df, references={CustomerSpec: bad_parent})
+
+
+def test_validation_composite_uniqueness_with_nulls():
+    class CompNullSpec(FrameSpec):
+        tenant_id = ColSpec(pl.Int64, nullable=True)
+        user_id = ColSpec(pl.Int64, nullable=True)
+        val = ColSpec(pl.String)
+
+        __unique_together__ = [("tenant_id", "user_id")]
+
+    # Multiple rows with nulls in composite unique columns should not trigger unique violation
+    df_nulls = pl.DataFrame(
+        {
+            "tenant_id": [1, 1, None, None, 2],
+            "user_id": [10, None, 10, None, 20],
+            "val": ["a", "b", "c", "d", "e"],
+        }
+    )
+    res = CompNullSpec.validate(df_nulls)
+    assert res.height == 5
+
+    # But non-null duplicate pairs still fail
+    df_dups = pl.DataFrame(
+        {
+            "tenant_id": [1, 1, None],
+            "user_id": [10, 10, None],
+            "val": ["a", "b", "c"],
+        }
+    )
+    with pytest.raises(ValidationError, match="Composite unique key"):
+        CompNullSpec.validate(df_dups)

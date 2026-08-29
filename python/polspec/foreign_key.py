@@ -13,9 +13,13 @@ if TYPE_CHECKING:
     from polspec.framespec import FrameSpec
 
 
-def _default_fk_name(columns: tuple[str, ...], references: type[FrameSpec] | str) -> str:
-    ref_label = references if references == "self" else getattr(
-        references, "__name__", str(references)
+def _default_fk_name(
+    columns: tuple[str, ...], references: type[FrameSpec] | str
+) -> str:
+    ref_label = (
+        references
+        if references == "self"
+        else getattr(references, "__name__", str(references))
     )
     return f"fk_{'_'.join(columns)}__{ref_label}"
 
@@ -61,7 +65,7 @@ class ForeignKey:
     """
 
     columns: str | Sequence[str]
-    references: type[FrameSpec] | Literal['self']
+    references: type[FrameSpec] | Literal["self"]
     ref_columns: str | Sequence[str] | None = None
     name: str | None = None
 
@@ -104,7 +108,9 @@ class ForeignKey:
         )
 
     def __hash__(self) -> int:
-        ref = self.references if isinstance(self.references, str) else id(self.references)
+        ref = (
+            self.references if isinstance(self.references, str) else id(self.references)
+        )
         return hash((self.name, self.columns, self.ref_columns, ref))
 
 
@@ -145,11 +151,11 @@ def _apply_foreign_keys(
         local_cols = list(fk.columns)
         ref_cols = list(fk.ref_columns)
 
-        parent_keys = parent_df.select(ref_cols).unique()
+        parent_keys = parent_df.select(ref_cols).drop_nulls().unique()
         if parent_keys.height == 0:
             raise ValueError(
                 f"ForeignKey '{fk.name}' cannot generate values: the referenced "
-                f"parent has no rows for columns {ref_cols}"
+                f"parent has no non-null rows for columns {ref_cols}"
             )
 
         wants_unique = len(local_cols) == 1 and columns[local_cols[0]].unique

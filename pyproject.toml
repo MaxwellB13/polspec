@@ -34,3 +34,6 @@ build-backend = "maturin"
 python-source = "python"
 module-name = "polspec._polspec"
 features = ["pyo3/extension-module"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["RUF012", "DTZ001"]
