@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from polspec.bound import Bound
 from polspec.catspec import CatSpec
+from polspec.check import Check
 from polspec.constants import (
     _DEFAULT_FLOAT_BOUND,
     _DEFAULT_NULL_PROBABILITY,
@@ -64,6 +65,7 @@ __all__ = [
     "_YAML_NAME_TO_DTYPE",
     "Bound",
     "CatSpec",
+    "Check",
     "ColRule",
     "ColSpec",
     "FrameSchema",

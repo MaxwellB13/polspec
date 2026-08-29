@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Sequence
 
 import polars as pl
 
 if TYPE_CHECKING:
+    from polspec.check import Check
     from polspec.spec import ColSpec
 
 
@@ -25,10 +26,14 @@ def _validate_dataframe(
     missing_cols: Literal["add", "allow", "raise"] = "raise",
     strict_dtypes: bool = False,
     validate_rules: bool = True,
+    validate_unique: bool = True,
+    validate_checks: bool = True,
+    checks: Sequence[Check] | None = None,
+    unique_together: Sequence[Sequence[str]] | None = None,
     cast: bool = False,
     streaming: bool = False,
 ) -> pl.DataFrame | pl.LazyFrame:
-    """Validates a DataFrame or LazyFrame against declared ColSpecs."""
+    """Validates a DataFrame or LazyFrame against declared ColSpecs, checks, and unique constraints."""
     if extra_cols not in ("drop", "allow", "raise"):
         raise ValueError(
             f"extra_cols must be one of 'drop', 'allow', 'raise'; got {extra_cols!r}"
@@ -298,6 +303,71 @@ def _validate_dataframe(
                     }
                 )
 
+        # Uniqueness validation (single-column)
+        if validate_unique and spec.unique and is_type_compatible:
+            uniq_cnt_alias = f"__val__{name}__uniq_cnt"
+            uniq_samples_alias = f"__val__{name}__uniq_samples"
+            uniq_mask = pl.col(name).is_not_null() & pl.col(name).is_duplicated()
+            agg_exprs.append(uniq_mask.sum().alias(uniq_cnt_alias))
+            agg_exprs.append(
+                pl.col(name)
+                .filter(uniq_mask)
+                .unique()
+                .head(5)
+                .implode()
+                .alias(uniq_samples_alias)
+            )
+            expr_metadata.append(
+                {
+                    "type": "unique",
+                    "column": name,
+                    "cnt_alias": uniq_cnt_alias,
+                    "samples_alias": uniq_samples_alias,
+                }
+            )
+
+    # Composite uniqueness validation (__unique_together__)
+    if validate_unique and unique_together:
+        for u_idx, comp_cols in enumerate(unique_together):
+            comp_cols_tuple = tuple(comp_cols)
+            # Only validate if all constituent columns are present in df
+            if all(c in df_col_names for c in comp_cols_tuple):
+                comp_cnt_alias = f"__val__comp_unique_{u_idx}__cnt"
+                comp_samples_alias = f"__val__comp_unique_{u_idx}__samples"
+                struct_col = pl.struct([pl.col(c) for c in comp_cols_tuple])
+                comp_mask = struct_col.is_duplicated()
+                agg_exprs.append(comp_mask.sum().alias(comp_cnt_alias))
+                agg_exprs.append(
+                    struct_col.filter(comp_mask)
+                    .unique()
+                    .head(5)
+                    .implode()
+                    .alias(comp_samples_alias)
+                )
+                expr_metadata.append(
+                    {
+                        "type": "composite_unique",
+                        "columns": comp_cols_tuple,
+                        "cnt_alias": comp_cnt_alias,
+                        "samples_alias": comp_samples_alias,
+                    }
+                )
+
+    # Multi-column Check constraints
+    if validate_checks and checks:
+        for c_idx, check in enumerate(checks):
+            chk_cnt_alias = f"__val__check_{c_idx}__cnt"
+            fail_mask = check._failure_mask()
+            agg_exprs.append(fail_mask.sum().alias(chk_cnt_alias))
+            expr_metadata.append(
+                {
+                    "type": "check",
+                    "check": check,
+                    "check_idx": c_idx,
+                    "cnt_alias": chk_cnt_alias,
+                }
+            )
+
     # Execute data aggregations if any
     if agg_exprs:
         collect_kwargs = {"engine": "streaming"} if streaming else {}
@@ -305,7 +375,7 @@ def _validate_dataframe(
         stats_row = stats_df.to_dict(as_series=False)
 
         for meta in expr_metadata:
-            col_name = meta["column"]
+            col_name = meta.get("column", "")
             m_type = meta["type"]
 
             if m_type == "nullability":
@@ -356,6 +426,36 @@ def _validate_dataframe(
                     errors.append(
                         f"Column '{col_name}': found {cnt} value(s) violating ColRule(when={rule_obj.when}, "
                         f"choices={rule_obj.choices}). Violating samples: {samples}"
+                    )
+
+            elif m_type == "unique":
+                cnt = stats_row[meta["cnt_alias"]][0]
+                if cnt and cnt > 0:
+                    raw_samples = stats_row[meta["samples_alias"]][0]
+                    samples = list(raw_samples) if raw_samples is not None else []
+                    errors.append(
+                        f"Column '{col_name}': unique column contains {cnt} duplicate value(s). "
+                        f"Duplicate samples: {samples}"
+                    )
+
+            elif m_type == "composite_unique":
+                cnt = stats_row[meta["cnt_alias"]][0]
+                if cnt and cnt > 0:
+                    raw_samples = stats_row[meta["samples_alias"]][0]
+                    samples = list(raw_samples) if raw_samples is not None else []
+                    errors.append(
+                        f"Composite unique key {list(meta['columns'])} violated: found {cnt} duplicate row(s). "
+                        f"Duplicate samples: {samples}"
+                    )
+
+            elif m_type == "check":
+                cnt = stats_row[meta["cnt_alias"]][0]
+                if cnt and cnt > 0:
+                    chk = meta["check"]
+                    chk_desc = f" ({chk.description})" if chk.description else ""
+                    errors.append(
+                        f"Check '{chk.name}' failed: found {cnt} row(s) violating condition "
+                        f"{chk.expr}{chk_desc}"
                     )
 
     if errors:

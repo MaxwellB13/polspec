@@ -1108,11 +1108,19 @@ def test_colspec_and_framespec_tags(tmp_path):
     assert TaggedSpec.tag("non_existent") == []
 
     # Sequence of tags (match="any" by default)
-    assert TaggedSpec.tag(["aggregate", "feature"]) == ["agg_val", "total_sum", "feature_1"]
+    assert TaggedSpec.tag(["aggregate", "feature"]) == [
+        "agg_val",
+        "total_sum",
+        "feature_1",
+    ]
     assert TaggedSpec.tag(["index", "feature"]) == ["id_col", "total_sum", "feature_1"]
 
     # Multiple positional arguments (match="any" by default)
-    assert TaggedSpec.tag("aggregate", "feature") == ["agg_val", "total_sum", "feature_1"]
+    assert TaggedSpec.tag("aggregate", "feature") == [
+        "agg_val",
+        "total_sum",
+        "feature_1",
+    ]
     assert TaggedSpec.tag("index", "feature") == ["id_col", "total_sum", "feature_1"]
 
     # Multiple tags with match="all"
@@ -1140,6 +1148,10 @@ def test_colspec_and_framespec_tags(tmp_path):
     TaggedSpec.to_yaml(yaml_file)
     LoadedTagged = FrameSpec.from_yaml(yaml_file)
     assert LoadedTagged.tag("aggregate") == ["agg_val", "total_sum"]
-    assert LoadedTagged.tag(["index", "feature"]) == ["id_col", "total_sum", "feature_1"]
+    assert LoadedTagged.tag(["index", "feature"]) == [
+        "id_col",
+        "total_sum",
+        "feature_1",
+    ]
     assert LoadedTagged._columns["id_col"].tags == ("index",)
     assert LoadedTagged._columns["agg_val"].tags == ("aggregate", "metric")

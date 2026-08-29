@@ -112,7 +112,12 @@ def test_catspec_yaml_roundtrip():
     cats = CatSpec(
         enums={"STATUS": ["OPEN", "IN_PROGRESS", "CLOSED"]},
         categoricals={
-            "CURRENCY": {"name": "CURRENCY", "physical": "UInt8", "namespace": "finance", "categories": ["USD", "EUR"]},
+            "CURRENCY": {
+                "name": "CURRENCY",
+                "physical": "UInt8",
+                "namespace": "finance",
+                "categories": ["USD", "EUR"],
+            },
             "PRODUCT": {"name": "PRODUCT", "physical": "UInt16"},
         },
     )
@@ -179,11 +184,18 @@ columns:
 
 
 def test_catspec_from_dataframe_and_framespec():
-    df = pl.DataFrame({
-        "status": pl.Series(["OPEN", "CLOSED", "OPEN"], dtype=pl.Enum(["OPEN", "CLOSED"])),
-        "currency": pl.Series(["USD", "EUR", "USD"], dtype=pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt8))),
-        "val": [1, 2, 3],
-    })
+    df = pl.DataFrame(
+        {
+            "status": pl.Series(
+                ["OPEN", "CLOSED", "OPEN"], dtype=pl.Enum(["OPEN", "CLOSED"])
+            ),
+            "currency": pl.Series(
+                ["USD", "EUR", "USD"],
+                dtype=pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt8)),
+            ),
+            "val": [1, 2, 3],
+        }
+    )
 
     # from_dataframe
     cats_from_df = CatSpec.from_dataframe(df)
@@ -199,7 +211,10 @@ def test_catspec_from_dataframe_and_framespec():
     # from_framespec & FrameSpec.catspec / generate_catspec / write_catspec
     class MySpec(FrameSpec):
         status = ColSpec(dtype=pl.Enum(["PENDING", "COMPLETED"]))
-        currency = ColSpec(dtype=pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt16)), choices=["USD", "EUR"])
+        currency = ColSpec(
+            dtype=pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt16)),
+            choices=["USD", "EUR"],
+        )
         amount = ColSpec(dtype=pl.Float64)
 
     cats_from_spec = MySpec.catspec()
@@ -232,12 +247,14 @@ def test_catspec_heuristic_inference():
     order_ids = [f"ORD_{i:06d}" for i in range(n)]
     amounts = [float(i) for i in range(n)]
 
-    df = pl.DataFrame({
-        "status": statuses,
-        "country": countries,
-        "order_id": order_ids,
-        "amount": amounts,
-    })
+    df = pl.DataFrame(
+        {
+            "status": statuses,
+            "country": countries,
+            "order_id": order_ids,
+            "amount": amounts,
+        }
+    )
 
     cats = CatSpec.infer_from_dataframe(df)
 
@@ -320,11 +337,13 @@ def test_catspec_case_insensitivity_and_resolution():
 
 
 def test_framespec_infer_with_live_dataframe():
-    df = pl.DataFrame({
-        "status": ["A", "B", "A", "B"],
-        "region": ["US", "EU", "APAC", "LATAM"],
-        "uuid": ["123", "456", "789", "012"],
-    })
+    df = pl.DataFrame(
+        {
+            "status": ["A", "B", "A", "B"],
+            "region": ["US", "EU", "APAC", "LATAM"],
+            "uuid": ["123", "456", "789", "012"],
+        }
+    )
 
     class SchemaSpec(FrameSpec):
         status = ColSpec(dtype=pl.String)

@@ -319,10 +319,14 @@ def test_validation_temporal_bounds():
             bounds=Bound(datetime.date(2023, 1, 1), datetime.date(2023, 12, 31)),
         )
 
-    valid_df = pl.DataFrame({"d": [datetime.date(2023, 6, 15), datetime.date(2023, 1, 1)]})
+    valid_df = pl.DataFrame(
+        {"d": [datetime.date(2023, 6, 15), datetime.date(2023, 1, 1)]}
+    )
     assert DateSpec.validate(valid_df).height == 2
 
-    invalid_df = pl.DataFrame({"d": [datetime.date(2022, 12, 31), datetime.date(2023, 6, 15)]})
+    invalid_df = pl.DataFrame(
+        {"d": [datetime.date(2022, 12, 31), datetime.date(2023, 6, 15)]}
+    )
     with pytest.raises(ValidationError) as exc:
         DateSpec.validate(invalid_df)
     assert "out of bounds" in str(exc.value)
@@ -335,16 +339,20 @@ def test_validation_rule_precedence():
             dtype=pl.Int64,
             rules=(
                 ColRule(when={"column": "tier", "equals": "gold"}, choices=[100]),
-                ColRule(when={"column": "tier", "in": ["gold", "silver"]}, choices=[50]),
+                ColRule(
+                    when={"column": "tier", "in": ["gold", "silver"]}, choices=[50]
+                ),
             ),
         )
 
     # For "gold", Rule 1 matches so amount must be 100.
     # Because Rule 1 matched, Rule 2 should NOT fail "gold" for not being 50.
-    df = pl.DataFrame({
-        "tier": ["gold", "silver"],
-        "amount": [100, 50],
-    })
+    df = pl.DataFrame(
+        {
+            "tier": ["gold", "silver"],
+            "amount": [100, 50],
+        }
+    )
     validated = TierSpec.validate(df)
     assert validated.height == 2
 
@@ -356,12 +364,14 @@ def test_validation_column_ordering():
         third = ColSpec(dtype=pl.Float64)
 
     # Input DataFrame has columns in scrambled order and an extra column
-    df = pl.DataFrame({
-        "third": [3.0],
-        "extra": ["foo"],
-        "first": [1],
-        "second": ["bar"],
-    })
+    df = pl.DataFrame(
+        {
+            "third": [3.0],
+            "extra": ["foo"],
+            "first": [1],
+            "second": ["bar"],
+        }
+    )
 
     res = OrderedSpec.validate(df, extra_cols="allow")
     assert res.columns == ["first", "second", "third", "extra"]

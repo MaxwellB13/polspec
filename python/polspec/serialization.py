@@ -76,7 +76,9 @@ def _dtype_from_yaml(
         if "Enum" in value:
             enum_val = value["Enum"]
             if isinstance(enum_val, str):
-                clean_name = enum_val.removeprefix("$categories.").removeprefix("categories.")
+                clean_name = enum_val.removeprefix("$categories.").removeprefix(
+                    "categories."
+                )
                 if categories is not None and clean_name in categories:
                     return pl.Enum(categories.get_enum(clean_name))
                 raise ValueError(
@@ -95,7 +97,9 @@ def _dtype_from_yaml(
         if "Categorical" in value:
             cat_info = value["Categorical"]
             if isinstance(cat_info, str):
-                clean_name = cat_info.removeprefix("$categories.").removeprefix("categories.")
+                clean_name = cat_info.removeprefix("$categories.").removeprefix(
+                    "categories."
+                )
                 if categories is not None and clean_name in categories:
                     return pl.Categorical(categories.get_categorical(clean_name))
                 if clean_name == "Categorical":
@@ -103,9 +107,15 @@ def _dtype_from_yaml(
                 return pl.Categorical(pl.Categories(clean_name))
             if isinstance(cat_info, dict):
                 cat_name = cat_info.get("name", "")
-                if categories is not None and cat_name and cat_name in categories.categoricals:
+                if (
+                    categories is not None
+                    and cat_name
+                    and cat_name in categories.categoricals
+                ):
                     return pl.Categorical(categories.get_categorical(cat_name))
-                physical = _YAML_NAME_TO_DTYPE.get(cat_info.get("physical", "UInt32"), pl.UInt32)
+                physical = _YAML_NAME_TO_DTYPE.get(
+                    cat_info.get("physical", "UInt32"), pl.UInt32
+                )
                 return pl.Categorical(
                     pl.Categories(
                         cat_name,
@@ -145,6 +155,8 @@ def _colspec_to_yaml(spec: ColSpec) -> dict:
         data["bounds"] = [spec.bounds.min, spec.bounds.max]
     if spec.tags:
         data["tags"] = list(spec.tags) if len(spec.tags) > 1 else spec.tags[0]
+    if spec.unique:
+        data["unique"] = True
     if spec.null_probability != _DEFAULT_NULL_PROBABILITY:
         data["null_probability"] = spec.null_probability
     if spec.string_length is not None:
@@ -168,9 +180,7 @@ def _colspec_to_yaml(spec: ColSpec) -> dict:
     return data
 
 
-def _colspec_from_yaml(
-    data: dict, categories: CatSpec | None = None
-) -> ColSpec:
+def _colspec_from_yaml(data: dict, categories: CatSpec | None = None) -> ColSpec:
     kwargs: dict = {}
     if "nullable" in data:
         kwargs["nullable"] = data["nullable"]
@@ -182,6 +192,8 @@ def _colspec_from_yaml(
         kwargs["tags"] = data["category"]
     elif "categories" in data:
         kwargs["tags"] = data["categories"]
+    if "unique" in data:
+        kwargs["unique"] = data["unique"]
     if "null_probability" in data:
         kwargs["null_probability"] = data["null_probability"]
     if "string_length" in data:

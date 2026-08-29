@@ -110,13 +110,20 @@ class CatSpec:
     Categorical(Categories(name="CURRENCY", namespace="", physical=pl.UInt8))
     """
 
-    __slots__ = ("_enums", "_categoricals", "_choices", "_enum_accessor", "_cat_accessor")
+    __slots__ = (
+        "_enums",
+        "_categoricals",
+        "_choices",
+        "_enum_accessor",
+        "_cat_accessor",
+    )
 
     def __init__(
         self,
         *,
         enums: Mapping[str, Sequence[str]] | None = None,
-        categoricals: Mapping[str, pl.Categories | dict[str, Any] | str | pl.DataType] | None = None,
+        categoricals: Mapping[str, pl.Categories | dict[str, Any] | str | pl.DataType]
+        | None = None,
         choices: Mapping[str, Sequence[Any]] | None = None,
     ) -> None:
         self._enums: dict[str, list[str]] = {}
@@ -299,7 +306,9 @@ class CatSpec:
         if isinstance(df, pl.LazyFrame):
             df = df.collect()
         if not isinstance(df, pl.DataFrame):
-            raise TypeError(f"Expected pl.DataFrame or pl.LazyFrame, got {type(df).__name__}")
+            raise TypeError(
+                f"Expected pl.DataFrame or pl.LazyFrame, got {type(df).__name__}"
+            )
 
         enums: dict[str, list[str]] = {}
         categoricals: dict[str, Any] = {}
@@ -309,7 +318,9 @@ class CatSpec:
             if isinstance(dtype, pl.Enum):
                 enums[col_name] = dtype.categories.to_list()
             elif _is_categorical_dtype(dtype):
-                if hasattr(dtype, "categories") and isinstance(dtype.categories, pl.Categories):
+                if hasattr(dtype, "categories") and isinstance(
+                    dtype.categories, pl.Categories
+                ):
                     categoricals[col_name] = dtype.categories
                 else:
                     categoricals[col_name] = pl.Categories(col_name, physical=pl.UInt32)
@@ -335,7 +346,9 @@ class CatSpec:
             if isinstance(dtype, pl.Enum):
                 enums[col_name] = dtype.categories.to_list()
             elif _is_categorical_dtype(dtype):
-                if hasattr(dtype, "categories") and isinstance(dtype.categories, pl.Categories):
+                if hasattr(dtype, "categories") and isinstance(
+                    dtype.categories, pl.Categories
+                ):
                     categoricals[col_name] = dtype.categories
                 else:
                     categoricals[col_name] = pl.Categories(col_name, physical=pl.UInt32)
@@ -362,7 +375,9 @@ class CatSpec:
         if isinstance(df, pl.LazyFrame):
             df = df.collect()
         if not isinstance(df, pl.DataFrame):
-            raise TypeError(f"Expected pl.DataFrame or pl.LazyFrame, got {type(df).__name__}")
+            raise TypeError(
+                f"Expected pl.DataFrame or pl.LazyFrame, got {type(df).__name__}"
+            )
 
         enums: dict[str, list[str]] = {}
         categoricals: dict[str, Any] = {}
@@ -376,7 +391,9 @@ class CatSpec:
                 enums[col_name] = dtype.categories.to_list()
                 continue
             elif _is_categorical_dtype(dtype):
-                if hasattr(dtype, "categories") and isinstance(dtype.categories, pl.Categories):
+                if hasattr(dtype, "categories") and isinstance(
+                    dtype.categories, pl.Categories
+                ):
                     categoricals[col_name] = dtype.categories
                 else:
                     non_null = df[col_name].drop_nulls()
@@ -394,7 +411,11 @@ class CatSpec:
             is_explicit_include = include_set is not None and col_name in include_set
             if include_set is not None and not is_explicit_include:
                 continue
-            if not is_explicit_include and exclude_patterns and _matches_patterns(col_name, exclude_patterns):
+            if (
+                not is_explicit_include
+                and exclude_patterns
+                and _matches_patterns(col_name, exclude_patterns)
+            ):
                 continue
 
             non_null = df[col_name].drop_nulls()
@@ -407,9 +428,7 @@ class CatSpec:
             if 0 < n_unique <= max_enum_cardinality:
                 unique_vals = non_null.unique().sort().to_list()
                 enums[col_name] = [str(x) for x in unique_vals]
-            elif (
-                is_explicit_include and n_unique <= max_categorical_cardinality
-            ) or (
+            elif (is_explicit_include and n_unique <= max_categorical_cardinality) or (
                 n_unique <= max_categorical_cardinality
                 and (ratio <= max_categorical_ratio or n_unique <= 256)
             ):
@@ -446,10 +465,14 @@ class CatSpec:
                 enums[col_name] = dtype.categories.to_list()
                 continue
             elif _is_categorical_dtype(dtype):
-                if hasattr(dtype, "categories") and isinstance(dtype.categories, pl.Categories):
+                if hasattr(dtype, "categories") and isinstance(
+                    dtype.categories, pl.Categories
+                ):
                     categoricals[col_name] = dtype.categories
                 else:
-                    categoricals[col_name] = pl.Categories(col_name, physical=default_physical or pl.UInt8)
+                    categoricals[col_name] = pl.Categories(
+                        col_name, physical=default_physical or pl.UInt8
+                    )
                 if col_spec.choices:
                     choices[col_name] = list(col_spec.choices)
                 continue
@@ -461,8 +484,14 @@ class CatSpec:
                 continue
 
             if col_spec.string_length and (
-                (col_spec.string_length.min is not None and col_spec.string_length.min > 255)
-                or (col_spec.string_length.max is not None and col_spec.string_length.max > 255)
+                (
+                    col_spec.string_length.min is not None
+                    and col_spec.string_length.min > 255
+                )
+                or (
+                    col_spec.string_length.max is not None
+                    and col_spec.string_length.max > 255
+                )
             ):
                 continue
 
@@ -520,7 +549,9 @@ class CatSpec:
     def from_dict(cls, data: dict[str, Any]) -> CatSpec:
         """Constructs a CatSpec from a dictionary."""
         if not isinstance(data, dict):
-            raise TypeError(f"Expected dict for CatSpec data, got {type(data).__name__}")
+            raise TypeError(
+                f"Expected dict for CatSpec data, got {type(data).__name__}"
+            )
 
         if "enums" in data or "categoricals" in data:
             return cls(
@@ -590,6 +621,129 @@ class CatSpec:
             Path(source).write_text(dumped)
             return None
         return dumped
+
+    def to_markdown(
+        self,
+        path: str | Path | None = None,
+        *,
+        title: str | None = None,
+    ) -> str:
+        """Generates a Markdown documentation table of this CatSpec registry.
+
+        Parameters
+        ----------
+        path : str | Path | None, optional
+            File destination to write. If None, returns the Markdown string.
+        title : str | None, optional
+            Custom title for the document. Defaults to 'Categorical & Enum Registry'.
+
+        Returns
+        -------
+        str
+            The formatted Markdown string.
+        """
+        doc_title = title or "Categorical & Enum Registry"
+        lines: list[str] = [
+            f"# {doc_title}",
+            "",
+            "## Summary",
+            f"- **Enums:** {len(self._enums)}",
+            f"- **Categoricals:** {len(self._categoricals)}",
+            "",
+        ]
+
+        if self._enums:
+            lines.extend(
+                [
+                    "## Enums (`pl.Enum`)",
+                    "",
+                    "| Name | Variants Count | Allowed Variants |",
+                    "|:---|:---|:---|",
+                ]
+            )
+            for k, variants in self._enums.items():
+                var_str = f"[{', '.join(repr(v) for v in variants[:6])}{', ...' if len(variants) > 6 else ''}]"
+                lines.append(f"| `{k}` | {len(variants)} | `{var_str}` |")
+            lines.append("")
+
+        if self._categoricals:
+            lines.extend(
+                [
+                    "## Categoricals (`pl.Categorical`)",
+                    "",
+                    "| Key | Registry Name | Physical Dtype | Namespace | Domain Choices Pool |",
+                    "|:---|:---|:---|:---|:---|",
+                ]
+            )
+            for k, cat in self._categoricals.items():
+                phys = _YAML_DTYPES.get(cat.physical(), str(cat.physical()))
+                ns = cat.namespace() or "-"
+                choices = self._choices.get(k)
+                if choices:
+                    ch_str = f"[{', '.join(repr(c) for c in choices[:6])}{', ...' if len(choices) > 6 else ''}] ({len(choices)} total)"
+                else:
+                    ch_str = "-"
+                lines.append(
+                    f"| `{k}` | `{cat.name()}` | `{phys}` | `{ns}` | `{ch_str}` |"
+                )
+            lines.append("")
+
+        content = "\n".join(lines).rstrip() + "\n"
+        if path is not None:
+            p = Path(path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+        return content
+
+    def to_mermaid(
+        self,
+        path: str | Path | None = None,
+        *,
+        title: str | None = None,
+    ) -> str:
+        """Generates a Mermaid class diagram definition for this CatSpec registry."""
+        lines: list[str] = [
+            "classDiagram",
+        ]
+        if title:
+            lines.insert(0, f"%% {title}")
+
+        for k, variants in self._enums.items():
+            clean_k = "".join(c if c.isalnum() or c == "_" else "_" for c in k)
+            lines.append(f"    class {clean_k} {{")
+            lines.append("        <<enumeration>>")
+            for v in variants[:10]:
+                clean_v = "".join(c if c.isalnum() or c == "_" else "_" for c in str(v))
+                lines.append(f"        +{clean_v}")
+            if len(variants) > 10:
+                lines.append(f"        +... ({len(variants) - 10} more)")
+            lines.append("    }")
+
+        for k, cat in self._categoricals.items():
+            clean_k = "".join(c if c.isalnum() or c == "_" else "_" for c in k)
+            phys = _YAML_DTYPES.get(cat.physical(), str(cat.physical()))
+            lines.append(f"    class {clean_k} {{")
+            lines.append(f"        <<categorical: {phys}>>")
+            ns = cat.namespace()
+            if ns:
+                lines.append(f"        +namespace: {ns}")
+            choices = self._choices.get(k)
+            if choices:
+                for c in choices[:5]:
+                    clean_c = "".join(
+                        c if c.isalnum() or c == "_" else "_" for c in str(c)
+                    )
+                    lines.append(f"        +{clean_c}")
+                if len(choices) > 5:
+                    lines.append(f"        +... ({len(choices) - 5} more)")
+            lines.append("    }")
+
+        content = "\n".join(lines) + "\n"
+        if path is not None:
+            p = Path(path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+        return content
 
     def __repr__(self) -> str:
         enum_keys = list(self._enums.keys())

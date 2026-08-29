@@ -9,6 +9,7 @@ import polars as pl
 import yaml
 
 from polspec.catspec import CatSpec
+from polspec.check import Check
 from polspec.engine import _generate_cartesian, _generate_random
 from polspec.profiler import profile_dataframe
 from polspec.rules import _apply_rules
@@ -33,11 +34,48 @@ class FrameSpec:
     """
 
     _columns: ClassVar[dict[str, ColSpec]] = {}
+    _checks: ClassVar[tuple[Check, ...]] = ()
+    _unique_together: ClassVar[tuple[tuple[str, ...], ...]] = ()
 
     def __init_subclass__(cls, **kwargs) -> None:
         super().__init_subclass__(**kwargs)
         columns: dict[str, ColSpec] = {}
+        checks_list: list[Check] = []
+        unique_together_list: list[tuple[str, ...]] = []
+
         for base in reversed(cls.__mro__):
+            # Collect checks from base classes
+            for attr_name in ("__checks__", "checks"):
+                if attr_name in vars(base):
+                    val = vars(base)[attr_name]
+                    if isinstance(val, (classmethod, staticmethod)) or callable(val):
+                        continue
+                    if isinstance(val, Check):
+                        if val not in checks_list:
+                            checks_list.append(val)
+                    elif isinstance(val, (list, tuple, Sequence)):
+                        for item in val:
+                            if isinstance(item, Check):
+                                if item not in checks_list:
+                                    checks_list.append(item)
+                            else:
+                                raise TypeError(
+                                    f"Items in __checks__ must be Check instances, got {type(item).__name__}"
+                                )
+                    elif val is not None:
+                        raise TypeError(
+                            f"__checks__ must be a Check or sequence of Check instances, got {type(val).__name__}"
+                        )
+
+            # Collect unique_together from base classes
+            for attr_name in ("__unique_together__", "unique_together"):
+                if attr_name in vars(base):
+                    val = vars(base)[attr_name]
+                    if isinstance(val, (classmethod, staticmethod)) or callable(val):
+                        continue
+                    cls._parse_unique_together(val, unique_together_list)
+
+            # Collect columns
             for name, value in vars(base).items():
                 if name.startswith("_"):
                     continue
@@ -45,8 +83,69 @@ class FrameSpec:
                     columns[name] = value
                 elif name in columns:
                     del columns[name]
+
         cls._columns = columns
+        cls._checks = tuple(checks_list)
+        cls._unique_together = tuple(unique_together_list)
         cls._validate_rules()
+        cls._validate_unique_together()
+
+    @classmethod
+    def _parse_unique_together(
+        cls,
+        val: Any,
+        out: list[tuple[str, ...]],
+    ) -> None:
+        if val is None:
+            return
+        if isinstance(val, str):
+            t = (val,)
+            if t not in out:
+                out.append(t)
+        elif isinstance(val, (list, tuple, Sequence)):
+            if not val:
+                return
+            if all(isinstance(x, str) for x in val):
+                t = tuple(val)
+                if t not in out:
+                    out.append(t)
+            else:
+                for item in val:
+                    if isinstance(item, str):
+                        t = (item,)
+                        if t not in out:
+                            out.append(t)
+                    elif isinstance(item, (list, tuple, Sequence)):
+                        t = tuple(str(x) for x in item)
+                        if t not in out:
+                            out.append(t)
+                    else:
+                        raise TypeError(
+                            f"Elements of unique_together must be strings or sequences of strings, got {type(item).__name__}"
+                        )
+        else:
+            raise TypeError(
+                f"unique_together must be a sequence of column names or sequence of sequences, got {type(val).__name__}"
+            )
+
+    @classmethod
+    def _validate_unique_together(cls) -> None:
+        for group in cls._unique_together:
+            for col_name in group:
+                if col_name not in cls._columns:
+                    raise ValueError(
+                        f"Composite unique key {group} references unknown column {col_name!r}"
+                    )
+
+    @classmethod
+    def checks(cls) -> tuple[Check, ...]:
+        """Returns the tuple of Check constraints defined on this FrameSpec."""
+        return cls._checks
+
+    @classmethod
+    def unique_together(cls) -> tuple[tuple[str, ...], ...]:
+        """Returns the tuple of composite unique column groups defined on this FrameSpec."""
+        return cls._unique_together
 
     @classmethod
     def _validate_rules(cls) -> None:
@@ -213,7 +312,12 @@ class FrameSpec:
                 new_columns[col_name] = spec
 
         subclass_name = name or f"{cls.__name__}WithCatSpec"
-        return type(subclass_name, (FrameSpec,), new_columns)
+        class_attrs: dict[str, Any] = dict(new_columns)
+        if cls._checks:
+            class_attrs["__checks__"] = cls._checks
+        if cls._unique_together:
+            class_attrs["__unique_together__"] = cls._unique_together
+        return type(subclass_name, (FrameSpec,), class_attrs)
 
     @classmethod
     def with_inferred_catspec(
@@ -254,12 +358,14 @@ class FrameSpec:
         """Writes this spec's columns to a human-readable YAML file at `source`."""
         if not cls._columns:
             raise ValueError(f"{cls.__name__} declares no ColSpec columns")
-        data = {
+        data: dict[str, Any] = {
             "name": cls.__name__,
             "columns": {
                 name: _colspec_to_yaml(spec) for name, spec in cls._columns.items()
             },
         }
+        if cls._unique_together:
+            data["unique_together"] = [list(group) for group in cls._unique_together]
         Path(source).write_text(yaml.safe_dump(data, sort_keys=False))
 
     @classmethod
@@ -310,7 +416,10 @@ class FrameSpec:
             name: _colspec_from_yaml(col_data, categories=catspec)
             for name, col_data in columns_data.items()
         }
-        return type(data.get("name", "LoadedFrameSpec"), (FrameSpec,), columns)
+        class_attrs: dict[str, Any] = dict(columns)
+        if "unique_together" in data:
+            class_attrs["__unique_together__"] = data["unique_together"]
+        return type(data.get("name", "LoadedFrameSpec"), (FrameSpec,), class_attrs)
 
     @classmethod
     def from_dataframe(
@@ -745,6 +854,248 @@ class FrameSpec:
             ):
                 batch_df.write_ndjson(f, **kwargs)
 
+    @classmethod
+    def to_markdown(
+        cls,
+        path: str | Path | None = None,
+        *,
+        title: str | None = None,
+    ) -> str:
+        """Generates a Markdown data dictionary document for this FrameSpec.
+
+        Parameters
+        ----------
+        path : str | Path | None, optional
+            If specified, writes the generated Markdown to this file path.
+        title : str | None, optional
+            Custom title for the data dictionary. Defaults to the FrameSpec class name.
+
+        Returns
+        -------
+        str
+            The formatted Markdown string.
+        """
+        doc_title = title or cls.__name__
+        lines: list[str] = [
+            f"# {doc_title}",
+            "",
+            "## Overview",
+            f"- **Schema:** `{cls.__name__}`",
+            f"- **Total Columns:** {len(cls._columns)}",
+        ]
+
+        if cls._unique_together:
+            ut_str = ", ".join(f"`{list(g)}`" for g in cls._unique_together)
+            lines.append(f"- **Composite Unique Keys:** {ut_str}")
+
+        if cls._checks:
+            lines.append(
+                f"- **Custom Invariants / Checks:** {len(cls._checks)} check(s)"
+            )
+
+        lines.extend(
+            [
+                "",
+                "## Columns",
+                "",
+                "| Column | Type | Nullable | Bounds | Domain / Choices | String Length | Tags | Rules | Unique |",
+                "|:---|:---|:---|:---|:---|:---|:---|:---|:---|",
+            ]
+        )
+
+        for col_name, spec in cls._columns.items():
+            dtype_str = str(spec.dtype)
+            if isinstance(spec.dtype, pl.Enum):
+                cats_preview = list(spec.dtype.categories)
+                if len(cats_preview) <= 4:
+                    dtype_str = f"Enum({cats_preview})"
+                else:
+                    dtype_str = (
+                        f"Enum({cats_preview[:3]} + {len(cats_preview) - 3} more)"
+                    )
+            elif isinstance(spec.dtype, pl.Categorical):
+                cat_obj = getattr(spec.dtype, "categories", None)
+                if cat_obj and hasattr(cat_obj, "name") and cat_obj.name():
+                    dtype_str = f"Categorical({cat_obj.name()})"
+                else:
+                    dtype_str = "Categorical"
+
+            nullable_str = "Yes" if spec.nullable else "No"
+            bounds_str = (
+                f"[{spec.bounds.min}, {spec.bounds.max}]" if spec.bounds else "-"
+            )
+
+            if spec.choices is not None:
+                ch_list = list(spec.choices)
+                if len(ch_list) <= 4:
+                    choices_str = str(ch_list)
+                else:
+                    choices_str = f"[{', '.join(str(c) for c in ch_list[:3])}, ... ({len(ch_list)} total)]"
+            else:
+                choices_str = "-"
+
+            str_len_str = (
+                f"[{spec.string_length.min}, {spec.string_length.max}]"
+                if spec.string_length
+                else "-"
+            )
+            tags_str = ", ".join(f"`{t}`" for t in spec.tags) if spec.tags else "-"
+            rules_str = f"{len(spec.rules)} rule(s)" if spec.rules else "-"
+            unique_str = "Yes" if spec.unique else "No"
+
+            lines.append(
+                f"| `{col_name}` | `{dtype_str}` | {nullable_str} | {bounds_str} | {choices_str} | {str_len_str} | {tags_str} | {rules_str} | {unique_str} |"
+            )
+
+        has_constraints = bool(
+            cls._checks
+            or cls._unique_together
+            or any(s.rules for s in cls._columns.values())
+        )
+        if has_constraints:
+            lines.extend(
+                [
+                    "",
+                    "## Constraints & Invariants",
+                ]
+            )
+
+            if cls._unique_together:
+                lines.extend(
+                    [
+                        "",
+                        "### Composite Uniqueness",
+                    ]
+                )
+                for group in cls._unique_together:
+                    lines.append(f"- Key: `{list(group)}`")
+
+            if cls._checks:
+                lines.extend(
+                    [
+                        "",
+                        "### Multi-Column Checks",
+                    ]
+                )
+                for chk in cls._checks:
+                    desc_line = (
+                        f"\n  - *Description:* {chk.description}"
+                        if chk.description
+                        else ""
+                    )
+                    lines.append(f"- **`{chk.name}`**: `{chk.expr}`{desc_line}")
+
+            cols_with_rules = [
+                (name, spec) for name, spec in cls._columns.items() if spec.rules
+            ]
+            if cols_with_rules:
+                lines.extend(
+                    [
+                        "",
+                        "### Conditional Rules (`ColRule`)",
+                    ]
+                )
+                for name, spec in cols_with_rules:
+                    lines.append(f"- **Column `{name}`**:")
+                    for r_idx, rule in enumerate(spec.rules, 1):
+                        lines.append(
+                            f"  {r_idx}. When `{rule.when}` -> Choices: `{list(rule.choices)}`"
+                        )
+
+        content = "\n".join(lines) + "\n"
+        if path is not None:
+            p = Path(path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+        return content
+
+    @classmethod
+    def to_mermaid(
+        cls,
+        path: str | Path | None = None,
+        *,
+        title: str | None = None,
+    ) -> str:
+        """Generates a Mermaid Entity-Relationship (ER) diagram for this FrameSpec.
+
+        Parameters
+        ----------
+        path : str | Path | None, optional
+            If specified, writes the generated Mermaid diagram to this file path.
+        title : str | None, optional
+            Entity name in the diagram. Defaults to the FrameSpec class name.
+
+        Returns
+        -------
+        str
+            The formatted Mermaid diagram definition.
+        """
+        entity_name = title or cls.__name__
+        entity_name = "".join(
+            c if c.isalnum() or c == "_" else "_" for c in entity_name
+        )
+
+        lines: list[str] = [
+            "erDiagram",
+            f"    {entity_name} {{",
+        ]
+
+        for col_name, spec in cls._columns.items():
+            dtype = spec.dtype
+            if isinstance(dtype, pl.Enum):
+                type_name = "Enum"
+            elif isinstance(dtype, pl.Categorical):
+                type_name = "Categorical"
+            elif isinstance(dtype, pl.Datetime):
+                type_name = "Datetime"
+            elif isinstance(dtype, pl.Duration):
+                type_name = "Duration"
+            elif isinstance(dtype, pl.List):
+                type_name = "List"
+            elif isinstance(dtype, pl.Struct):
+                type_name = "Struct"
+            elif isinstance(dtype, pl.Array):
+                type_name = "Array"
+            else:
+                type_name = type(dtype).__name__
+
+            key_token = ""
+            if spec.unique:
+                key_token = "PK"
+            elif any(col_name in group for group in cls._unique_together):
+                key_token = "UK"
+
+            comments: list[str] = []
+            if spec.nullable:
+                comments.append("nullable")
+            if spec.bounds is not None:
+                comments.append(f"bounds: [{spec.bounds.min}, {spec.bounds.max}]")
+            elif spec.choices is not None:
+                ch = list(spec.choices)
+                if len(ch) <= 3:
+                    comments.append(f"choices: [{', '.join(str(c) for c in ch)}]")
+                else:
+                    comments.append(f"choices: [{len(ch)} items]")
+            if spec.tags:
+                comments.append(f"tags: [{', '.join(spec.tags)}]")
+            if spec.string_length is not None:
+                comments.append(
+                    f"len: [{spec.string_length.min}, {spec.string_length.max}]"
+                )
+
+            comment_str = f' "{", ".join(comments)}"' if comments else ""
+            key_str = f" {key_token}" if key_token else ""
+            lines.append(f"        {type_name} {col_name}{key_str}{comment_str}")
+
+        lines.append("    }")
+        content = "\n".join(lines) + "\n"
+
+        if path is not None:
+            p = Path(path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+        return content
+
     @overload
     @classmethod
     def validate(
@@ -755,6 +1106,8 @@ class FrameSpec:
         missing_cols: Literal["add", "allow", "raise"] = "raise",
         strict_dtypes: bool = False,
         validate_rules: bool = True,
+        validate_unique: bool = True,
+        validate_checks: bool = True,
         cast: bool = False,
         streaming: bool = False,
     ) -> pl.DataFrame: ...
@@ -769,6 +1122,8 @@ class FrameSpec:
         missing_cols: Literal["add", "allow", "raise"] = "raise",
         strict_dtypes: bool = False,
         validate_rules: bool = True,
+        validate_unique: bool = True,
+        validate_checks: bool = True,
         cast: bool = False,
         streaming: bool = False,
     ) -> pl.LazyFrame: ...
@@ -782,6 +1137,8 @@ class FrameSpec:
         missing_cols: Literal["add", "allow", "raise"] = "raise",
         strict_dtypes: bool = False,
         validate_rules: bool = True,
+        validate_unique: bool = True,
+        validate_checks: bool = True,
         cast: bool = False,
         streaming: bool = False,
     ) -> pl.DataFrame | pl.LazyFrame:
@@ -806,6 +1163,10 @@ class FrameSpec:
             types like widened integers, floats, or string representations (False).
         validate_rules : bool, default True
             Whether to validate conditional `ColRule` expressions defined on columns.
+        validate_unique : bool, default True
+            Whether to validate single-column (`unique=True`) and composite unique constraints (`__unique_together__`).
+        validate_checks : bool, default True
+            Whether to validate multi-column `Check` constraints (`__checks__`).
         cast : bool, default False
             If True, casts validated columns to the declared `ColSpec.dtype`.
         streaming : bool, default False
@@ -834,6 +1195,10 @@ class FrameSpec:
             missing_cols=missing_cols,
             strict_dtypes=strict_dtypes,
             validate_rules=validate_rules,
+            validate_unique=validate_unique,
+            validate_checks=validate_checks,
+            checks=cls._checks if validate_checks else None,
+            unique_together=cls._unique_together if validate_unique else None,
             cast=cast,
             streaming=streaming,
         )

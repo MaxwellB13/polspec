@@ -69,7 +69,10 @@ def _resolve_bounded_categorical(spec: ColSpec, seed: int) -> ColSpec:
         # jointly exceed the registry's capacity even though each one alone
         # stayed within it.
         pool_seed = _stable_seed(
-            cat_name, spec.dtype.categories.namespace(), str(length.min), str(length.max)
+            cat_name,
+            spec.dtype.categories.namespace(),
+            str(length.min),
+            str(length.max),
         )
     else:
         pool_seed = seed

@@ -18,9 +18,7 @@ class Bound(Generic[T]):
             raise ValueError(f"Bound min ({self.min}) must be <= max ({self.max})")
 
     @classmethod
-    def _coerce(
-        cls, value: Bound | tuple[Any, Any] | list[Any] | None
-    ) -> Bound | None:
+    def _coerce(cls, value: Bound | tuple[Any, Any] | list[Any] | None) -> Bound | None:
         if value is None or isinstance(value, Bound):
             return value
         lo, hi = value

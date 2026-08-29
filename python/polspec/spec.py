@@ -53,6 +53,7 @@ class ColSpec:
     :ivar bounds: The inclusive range of values allowed in the column. Only
         supported for numeric and temporal data types.
     :ivar tags: Optional tag or sequence of tags to classify the column.
+    :ivar unique: Whether values in the column must be unique (distinct).
     :ivar null_probability: Probability of a value being null in the column. Must
         be between 0 and 1.
     :ivar string_length: The inclusive range of string lengths for the column, if
@@ -72,6 +73,7 @@ class ColSpec:
     nullable: bool = False
     bounds: Bound | tuple[Any, Any] | list[Any] | None = None
     tags: str | Sequence[str] = ()
+    unique: bool = False
     null_probability: float = _DEFAULT_NULL_PROBABILITY
     string_length: Bound | tuple[int, int] | list[int] | None = None
     distribution: str | None = None
