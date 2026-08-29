@@ -274,16 +274,12 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "pyarrow" },
-    { name = "pyyaml" },
 ]
 ipc = [
     { name = "pyarrow" },
 ]
 parquet = [
     { name = "pyarrow" },
-]
-yaml = [
-    { name = "pyyaml" },
 ]
 
 [package.dev-dependencies]
@@ -305,10 +301,8 @@ requires-dist = [
     { name = "pyarrow", marker = "extra == 'ipc'", specifier = ">=14.0.0" },
     { name = "pyarrow", marker = "extra == 'parquet'", specifier = ">=14.0.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "pyyaml", marker = "extra == 'all'", specifier = ">=6.0.3" },
-    { name = "pyyaml", marker = "extra == 'yaml'", specifier = ">=6.0.3" },
 ]
-provides-extras = ["parquet", "ipc", "yaml", "all"]
+provides-extras = ["parquet", "ipc", "all"]
 
 [package.metadata.requires-dev]
 bench = [{ name = "numpy", specifier = ">=2.5.2" }]

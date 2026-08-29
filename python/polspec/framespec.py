@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import random
-from collections.abc import Iterator
+import warnings
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import ClassVar, Literal, Sequence, overload
+from typing import Any, ClassVar, Literal, overload
 
 import polars as pl
 import yaml
@@ -11,10 +12,16 @@ import yaml
 from polspec.catspec import CatSpec
 from polspec.check import Check
 from polspec.engine import _generate_cartesian, _generate_random
+from polspec.foreign_key import ForeignKey, _apply_foreign_keys
 from polspec.profiler import profile_dataframe
 from polspec.rules import _apply_rules
-from polspec.serialization import _colspec_from_yaml, _colspec_to_yaml
-from polspec.spec import ColSpec
+from polspec.serialization import (
+    _colspec_from_yaml,
+    _colspec_to_yaml,
+    _foreignkey_from_yaml,
+    _foreignkey_to_yaml,
+)
+from polspec.spec import ColSpec, _column_kind
 from polspec.validation import _validate_dataframe
 
 
@@ -36,12 +43,14 @@ class FrameSpec:
     _columns: ClassVar[dict[str, ColSpec]] = {}
     _checks: ClassVar[tuple[Check, ...]] = ()
     _unique_together: ClassVar[tuple[tuple[str, ...], ...]] = ()
+    _foreign_keys: ClassVar[tuple[ForeignKey, ...]] = ()
 
     def __init_subclass__(cls, **kwargs) -> None:
         super().__init_subclass__(**kwargs)
         columns: dict[str, ColSpec] = {}
         checks_list: list[Check] = []
         unique_together_list: list[tuple[str, ...]] = []
+        foreign_keys_list: list[ForeignKey] = []
 
         for base in reversed(cls.__mro__):
             # Collect checks from base classes
@@ -75,6 +84,29 @@ class FrameSpec:
                         continue
                     cls._parse_unique_together(val, unique_together_list)
 
+            # Collect foreign keys from base classes
+            for attr_name in ("__foreign_keys__", "foreign_keys"):
+                if attr_name in vars(base):
+                    val = vars(base)[attr_name]
+                    if isinstance(val, (classmethod, staticmethod)) or callable(val):
+                        continue
+                    if isinstance(val, ForeignKey):
+                        if val not in foreign_keys_list:
+                            foreign_keys_list.append(val)
+                    elif isinstance(val, (list, tuple, Sequence)):
+                        for item in val:
+                            if isinstance(item, ForeignKey):
+                                if item not in foreign_keys_list:
+                                    foreign_keys_list.append(item)
+                            else:
+                                raise TypeError(
+                                    f"Items in __foreign_keys__ must be ForeignKey instances, got {type(item).__name__}"
+                                )
+                    elif val is not None:
+                        raise TypeError(
+                            f"__foreign_keys__ must be a ForeignKey or sequence of ForeignKey instances, got {type(val).__name__}"
+                        )
+
             # Collect columns
             for name, value in vars(base).items():
                 if name.startswith("_"):
@@ -87,8 +119,11 @@ class FrameSpec:
         cls._columns = columns
         cls._checks = tuple(checks_list)
         cls._unique_together = tuple(unique_together_list)
+        cls._foreign_keys = tuple(foreign_keys_list)
         cls._validate_rules()
         cls._validate_unique_together()
+        cls._validate_checks()
+        cls._validate_foreign_keys()
 
     @classmethod
     def _parse_unique_together(
@@ -138,9 +173,84 @@ class FrameSpec:
                     )
 
     @classmethod
+    def _validate_checks(cls) -> None:
+        seen: dict[str, Check] = {}
+        for check in cls._checks:
+            prior = seen.get(check.name)
+            if prior is not None:
+                raise ValueError(
+                    f"Duplicate Check name {check.name!r} on {cls.__name__}: "
+                    f"{prior.expr!r} vs {check.expr!r}. Give each Check a "
+                    "distinct name, or reuse the exact same Check instance/"
+                    "definition to inherit it unchanged."
+                )
+            seen[check.name] = check
+
+    @staticmethod
+    def _fk_kind_bucket(kind: str) -> str:
+        # String/Enum/Categorical columns are all textual domains that can
+        # reasonably reference one another (e.g. a plain String FK column
+        # pointing at an Enum primary key), so they share one bucket here.
+        return "string" if kind in ("string", "enum", "categorical") else kind
+
+    @classmethod
+    def _validate_foreign_keys(cls) -> None:
+        seen: dict[str, ForeignKey] = {}
+        for fk in cls._foreign_keys:
+            prior = seen.get(fk.name)
+            if prior is not None and prior != fk:
+                raise ValueError(
+                    f"Duplicate ForeignKey name {fk.name!r} on {cls.__name__} "
+                    f"points at two different targets/columns. Give each "
+                    "ForeignKey a distinct name."
+                )
+            seen[fk.name] = fk
+
+            for col in fk.columns:
+                if col not in cls._columns:
+                    raise ValueError(
+                        f"ForeignKey {fk.name!r} on {cls.__name__!r} references "
+                        f"unknown local column {col!r}"
+                    )
+
+            target = cls if fk.references == "self" else fk.references
+            if not (isinstance(target, type) and hasattr(target, "_columns")):
+                raise TypeError(
+                    f"ForeignKey {fk.name!r} on {cls.__name__!r}: references must "
+                    f"be a FrameSpec subclass or 'self', got {fk.references!r}"
+                )
+            target_name = "self" if fk.references == "self" else target.__name__
+            target_columns: dict[str, ColSpec] = target._columns
+
+            for ref_col in fk.ref_columns:
+                if ref_col not in target_columns:
+                    raise ValueError(
+                        f"ForeignKey {fk.name!r} on {cls.__name__!r} references "
+                        f"unknown column {ref_col!r} on {target_name!r}"
+                    )
+
+            for col, ref_col in zip(fk.columns, fk.ref_columns):
+                local_kind = cls._fk_kind_bucket(_column_kind(cls._columns[col].dtype))
+                ref_kind = cls._fk_kind_bucket(
+                    _column_kind(target_columns[ref_col].dtype)
+                )
+                if local_kind != ref_kind:
+                    raise ValueError(
+                        f"ForeignKey {fk.name!r} on {cls.__name__!r}: column "
+                        f"{col!r} ({cls._columns[col].dtype}) is not "
+                        f"dtype-compatible with referenced column {ref_col!r} "
+                        f"({target_columns[ref_col].dtype}) on {target_name!r}"
+                    )
+
+    @classmethod
     def checks(cls) -> tuple[Check, ...]:
         """Returns the tuple of Check constraints defined on this FrameSpec."""
         return cls._checks
+
+    @classmethod
+    def foreign_keys(cls) -> tuple[ForeignKey, ...]:
+        """Returns the tuple of ForeignKey constraints defined on this FrameSpec."""
+        return cls._foreign_keys
 
     @classmethod
     def unique_together(cls) -> tuple[tuple[str, ...], ...]:
@@ -317,6 +427,8 @@ class FrameSpec:
             class_attrs["__checks__"] = cls._checks
         if cls._unique_together:
             class_attrs["__unique_together__"] = cls._unique_together
+        if cls._foreign_keys:
+            class_attrs["__foreign_keys__"] = cls._foreign_keys
         return type(subclass_name, (FrameSpec,), class_attrs)
 
     @classmethod
@@ -358,6 +470,28 @@ class FrameSpec:
         """Writes this spec's columns to a human-readable YAML file at `source`."""
         if not cls._columns:
             raise ValueError(f"{cls.__name__} declares no ColSpec columns")
+        if cls._checks:
+            check_names = ", ".join(repr(c.name) for c in cls._checks)
+            warnings.warn(
+                f"{cls.__name__} declares {len(cls._checks)} __checks__ "
+                f"({check_names}) that cannot be represented in YAML (a Check "
+                "wraps an arbitrary polars.Expr) and will NOT be written to "
+                f"{source!s}. They will be lost on FrameSpec.from_yaml() unless "
+                "re-declared on a subclass of the loaded spec.",
+                stacklevel=2,
+            )
+        external_fks = [fk for fk in cls._foreign_keys if fk.references != "self"]
+        if external_fks:
+            fk_names = ", ".join(repr(fk.name) for fk in external_fks)
+            warnings.warn(
+                f"{cls.__name__} declares {len(external_fks)} ForeignKey(s) "
+                f"({fk_names}) referencing another FrameSpec class, which has no "
+                f"stable name to persist and will NOT be written to {source!s}. "
+                "Only self-referencing ForeignKeys (references='self') survive a "
+                "YAML round-trip; re-declare the others on a subclass of the "
+                "loaded spec.",
+                stacklevel=2,
+            )
         data: dict[str, Any] = {
             "name": cls.__name__,
             "columns": {
@@ -366,6 +500,9 @@ class FrameSpec:
         }
         if cls._unique_together:
             data["unique_together"] = [list(group) for group in cls._unique_together]
+        self_fks = [fk for fk in cls._foreign_keys if fk.references == "self"]
+        if self_fks:
+            data["foreign_keys"] = [_foreignkey_to_yaml(fk) for fk in self_fks]
         Path(source).write_text(yaml.safe_dump(data, sort_keys=False))
 
     @classmethod
@@ -419,6 +556,10 @@ class FrameSpec:
         class_attrs: dict[str, Any] = dict(columns)
         if "unique_together" in data:
             class_attrs["__unique_together__"] = data["unique_together"]
+        if "foreign_keys" in data:
+            class_attrs["__foreign_keys__"] = [
+                _foreignkey_from_yaml(fk_data) for fk_data in data["foreign_keys"]
+            ]
         return type(data.get("name", "LoadedFrameSpec"), (FrameSpec,), class_attrs)
 
     @classmethod
@@ -473,6 +614,8 @@ class FrameSpec:
         *,
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
+        | None = None,
         lazy: Literal[False] = False,
     ) -> pl.DataFrame: ...
 
@@ -484,6 +627,8 @@ class FrameSpec:
         *,
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
+        | None = None,
         lazy: Literal[True],
     ) -> pl.LazyFrame: ...
 
@@ -494,6 +639,8 @@ class FrameSpec:
         *,
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
+        | None = None,
         lazy: bool = False,
     ) -> pl.DataFrame | pl.LazyFrame:
         """Generates a DataFrame (or LazyFrame) matching this spec.
@@ -508,9 +655,22 @@ class FrameSpec:
         that coverage set has fewer than `n` rows, it's padded with ordinary
         random rows up to `n`; if it already has more, all of it is kept.
 
-        Any ColSpec.rules are applied last, as a vectorized overwrite pass
+        Any ColSpec.rules are applied next, as a vectorized overwrite pass
         over the fully-generated DataFrame (see ColRule), regardless of
         method.
+
+        Any `ForeignKey` this spec declares is then made referentially
+        consistent, but only where data for its target is actually
+        available: self-referencing keys (`references="self"`) always are,
+        sampled from this same generated DataFrame; a key referencing
+        another FrameSpec only is if a matching entry is supplied via
+        `references={OtherSpec: other_df}` -- otherwise that column is left
+        exactly as freely generated, same as before this existed. Composite
+        keys are sampled as one joint pick per row so multi-column keys stay
+        internally consistent; a single-column key whose ColSpec is
+        `unique=True` samples without replacement when the parent has enough
+        distinct rows to cover `n` (a one-to-one relationship), otherwise
+        (or for composite keys) sampling is with replacement.
 
         lazy=True returns a `pl.LazyFrame` around the generated DataFrame.
         """
@@ -531,6 +691,23 @@ class FrameSpec:
             )
 
         res = _apply_rules(df, cls._columns, rng.randrange(2**63))
+
+        if cls._foreign_keys:
+            resolved_foreign_keys: list[tuple[ForeignKey, pl.DataFrame | None]] = []
+            for fk in cls._foreign_keys:
+                if fk.references == "self":
+                    resolved_foreign_keys.append((fk, res))
+                    continue
+                parent = references.get(fk.references) if references else None
+                if parent is None:
+                    resolved_foreign_keys.append((fk, None))
+                    continue
+                parent_df = parent.collect() if isinstance(parent, pl.LazyFrame) else parent
+                resolved_foreign_keys.append((fk, parent_df))
+            res = _apply_foreign_keys(
+                res, cls._columns, resolved_foreign_keys, rng.randrange(2**63)
+            )
+
         return res.lazy() if lazy else res
 
     @classmethod
@@ -541,6 +718,8 @@ class FrameSpec:
         batch_size: int = 100_000,
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
+        | None = None,
     ) -> Iterator[pl.DataFrame]:
         """Yields chunks of generated DataFrames without holding all rows in memory.
 
@@ -554,6 +733,11 @@ class FrameSpec:
             Generation strategy ("random" or "cartesian").
         seed : int | None, optional
             Random seed for reproducible batch generation.
+        references : Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None, optional
+            Parent DataFrames/LazyFrames for any `ForeignKey` referencing
+            another FrameSpec, as in `generate()`. Note each batch samples
+            independently, so a `unique=True` FK column is only sampled
+            without replacement *within* a batch, not across the whole `n`.
 
         Yields
         ------
@@ -573,7 +757,10 @@ class FrameSpec:
 
         if method == "cartesian":
             first_batch = cls.generate(
-                min(n, batch_size), method="cartesian", seed=rng.randrange(2**63)
+                min(n, batch_size),
+                method="cartesian",
+                seed=rng.randrange(2**63),
+                references=references,
             )
             # The coverage set built for the first batch can be far larger
             # than batch_size (it's a cross-product, not a row count cap), so
@@ -584,7 +771,10 @@ class FrameSpec:
             while rows_remaining > 0:
                 current_batch_size = min(rows_remaining, batch_size)
                 yield cls.generate(
-                    current_batch_size, method="random", seed=rng.randrange(2**63)
+                    current_batch_size,
+                    method="random",
+                    seed=rng.randrange(2**63),
+                    references=references,
                 )
                 rows_remaining -= current_batch_size
         elif method == "random":
@@ -592,7 +782,10 @@ class FrameSpec:
             while rows_remaining > 0:
                 current_batch_size = min(rows_remaining, batch_size)
                 yield cls.generate(
-                    current_batch_size, method="random", seed=rng.randrange(2**63)
+                    current_batch_size,
+                    method="random",
+                    seed=rng.randrange(2**63),
+                    references=references,
                 )
                 rows_remaining -= current_batch_size
         else:
@@ -610,6 +803,8 @@ class FrameSpec:
         compression: str = "zstd",
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
+        | None = None,
         **kwargs,
     ) -> None:
         """Generates `n` rows and streams them directly to a Parquet file in batches.
@@ -628,6 +823,9 @@ class FrameSpec:
             Generation strategy ("random" or "cartesian").
         seed : int | None, optional
             Random seed for reproducibility.
+        references : Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None, optional
+            Parent DataFrames/LazyFrames for any `ForeignKey` referencing
+            another FrameSpec, as in `generate()`.
         **kwargs
             Additional arguments passed to `pyarrow.parquet.ParquetWriter`.
         """
@@ -651,7 +849,7 @@ class FrameSpec:
         writer = None
         try:
             for batch_df in cls.generate_batches(
-                n, batch_size=batch_size, method=method, seed=seed
+                n, batch_size=batch_size, method=method, seed=seed, references=references
             ):
                 arrow_table = batch_df.to_arrow()
                 if writer is None:
@@ -666,7 +864,7 @@ class FrameSpec:
             if writer is not None:
                 writer.close()
             elif n == 0:
-                empty_df = cls.generate(0)
+                empty_df = cls.generate(0, references=references)
                 empty_table = empty_df.to_arrow()
                 writer = pq.ParquetWriter(
                     str(path),
@@ -686,6 +884,8 @@ class FrameSpec:
         include_header: bool = True,
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
+        | None = None,
         **kwargs,
     ) -> None:
         """Generates `n` rows and streams them directly to a CSV file in batches.
@@ -704,6 +904,9 @@ class FrameSpec:
             Generation strategy ("random" or "cartesian").
         seed : int | None, optional
             Random seed for reproducibility.
+        references : Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None, optional
+            Parent DataFrames/LazyFrames for any `ForeignKey` referencing
+            another FrameSpec, as in `generate()`.
         **kwargs
             Additional arguments passed to `pl.DataFrame.write_csv`.
         """
@@ -720,13 +923,13 @@ class FrameSpec:
         header_needed = include_header
         with open(path, "wb") as f:
             if n == 0:
-                empty_df = cls.generate(0)
+                empty_df = cls.generate(0, references=references)
                 if include_header:
                     empty_df.write_csv(f, include_header=True, **kwargs)
                 return
 
             for batch_df in cls.generate_batches(
-                n, batch_size=batch_size, method=method, seed=seed
+                n, batch_size=batch_size, method=method, seed=seed, references=references
             ):
                 batch_df.write_csv(f, include_header=header_needed, **kwargs)
                 header_needed = False
@@ -741,6 +944,8 @@ class FrameSpec:
         compression: str | None = "zstd",
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
+        | None = None,
         **kwargs,
     ) -> None:
         """Generates `n` rows and streams them directly to an Arrow IPC / Feather file in batches.
@@ -759,6 +964,9 @@ class FrameSpec:
             Generation strategy ("random" or "cartesian").
         seed : int | None, optional
             Random seed for reproducibility.
+        references : Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None, optional
+            Parent DataFrames/LazyFrames for any `ForeignKey` referencing
+            another FrameSpec, as in `generate()`.
         **kwargs
             Additional arguments passed to `pyarrow.ipc.new_file`.
         """
@@ -783,7 +991,7 @@ class FrameSpec:
         with open(path, "wb") as f:
             try:
                 for batch_df in cls.generate_batches(
-                    n, batch_size=batch_size, method=method, seed=seed
+                    n, batch_size=batch_size, method=method, seed=seed, references=references
                 ):
                     arrow_table = batch_df.to_arrow()
                     if writer is None:
@@ -798,7 +1006,7 @@ class FrameSpec:
                 if writer is not None:
                     writer.close()
                 elif n == 0:
-                    empty_df = cls.generate(0)
+                    empty_df = cls.generate(0, references=references)
                     empty_table = empty_df.to_arrow()
                     writer = ipc.new_file(
                         f,
@@ -817,6 +1025,8 @@ class FrameSpec:
         batch_size: int = 100_000,
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
+        | None = None,
         **kwargs,
     ) -> None:
         """Generates `n` rows and streams them directly to a newline-delimited JSON (NDJSON) file in batches.
@@ -833,6 +1043,9 @@ class FrameSpec:
             Generation strategy ("random" or "cartesian").
         seed : int | None, optional
             Random seed for reproducibility.
+        references : Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None, optional
+            Parent DataFrames/LazyFrames for any `ForeignKey` referencing
+            another FrameSpec, as in `generate()`.
         **kwargs
             Additional arguments passed to `pl.DataFrame.write_ndjson`.
         """
@@ -850,7 +1063,7 @@ class FrameSpec:
             if n == 0:
                 return
             for batch_df in cls.generate_batches(
-                n, batch_size=batch_size, method=method, seed=seed
+                n, batch_size=batch_size, method=method, seed=seed, references=references
             ):
                 batch_df.write_ndjson(f, **kwargs)
 
@@ -892,6 +1105,9 @@ class FrameSpec:
             lines.append(
                 f"- **Custom Invariants / Checks:** {len(cls._checks)} check(s)"
             )
+
+        if cls._foreign_keys:
+            lines.append(f"- **Foreign Keys:** {len(cls._foreign_keys)} key(s)")
 
         lines.extend(
             [
@@ -950,6 +1166,7 @@ class FrameSpec:
         has_constraints = bool(
             cls._checks
             or cls._unique_together
+            or cls._foreign_keys
             or any(s.rules for s in cls._columns.values())
         )
         if has_constraints:
@@ -984,6 +1201,22 @@ class FrameSpec:
                         else ""
                     )
                     lines.append(f"- **`{chk.name}`**: `{chk.expr}`{desc_line}")
+
+            if cls._foreign_keys:
+                lines.extend(
+                    [
+                        "",
+                        "### Foreign Keys",
+                    ]
+                )
+                for fk in cls._foreign_keys:
+                    target_label = (
+                        cls.__name__ if fk.references == "self" else fk.references.__name__
+                    )
+                    lines.append(
+                        f"- **`{fk.name}`**: `{list(fk.columns)}` -> "
+                        f"`{target_label}.{list(fk.ref_columns)}`"
+                    )
 
             cols_with_rules = [
                 (name, spec) for name, spec in cls._columns.items() if spec.rules
@@ -1035,6 +1268,11 @@ class FrameSpec:
             c if c.isalnum() or c == "_" else "_" for c in entity_name
         )
 
+        fk_columns: dict[str, ForeignKey] = {}
+        for fk in cls._foreign_keys:
+            for col in fk.columns:
+                fk_columns.setdefault(col, fk)
+
         lines: list[str] = [
             "erDiagram",
             f"    {entity_name} {{",
@@ -1064,6 +1302,8 @@ class FrameSpec:
                 key_token = "PK"
             elif any(col_name in group for group in cls._unique_together):
                 key_token = "UK"
+            elif col_name in fk_columns:
+                key_token = "FK"
 
             comments: list[str] = []
             if spec.nullable:
@@ -1088,6 +1328,20 @@ class FrameSpec:
             lines.append(f"        {type_name} {col_name}{key_str}{comment_str}")
 
         lines.append("    }")
+
+        if cls._foreign_keys:
+            for fk in cls._foreign_keys:
+                if fk.references == "self":
+                    target_name = entity_name
+                else:
+                    target_name = "".join(
+                        c if c.isalnum() or c == "_" else "_"
+                        for c in fk.references.__name__
+                    )
+                lines.append(
+                    f'    {target_name} ||--o{{ {entity_name} : "{fk.name}"'
+                )
+
         content = "\n".join(lines) + "\n"
 
         if path is not None:
@@ -1108,6 +1362,9 @@ class FrameSpec:
         validate_rules: bool = True,
         validate_unique: bool = True,
         validate_checks: bool = True,
+        validate_foreign_keys: bool = True,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
+        | None = None,
         cast: bool = False,
         streaming: bool = False,
     ) -> pl.DataFrame: ...
@@ -1124,6 +1381,9 @@ class FrameSpec:
         validate_rules: bool = True,
         validate_unique: bool = True,
         validate_checks: bool = True,
+        validate_foreign_keys: bool = True,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
+        | None = None,
         cast: bool = False,
         streaming: bool = False,
     ) -> pl.LazyFrame: ...
@@ -1139,6 +1399,9 @@ class FrameSpec:
         validate_rules: bool = True,
         validate_unique: bool = True,
         validate_checks: bool = True,
+        validate_foreign_keys: bool = True,
+        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame]
+        | None = None,
         cast: bool = False,
         streaming: bool = False,
     ) -> pl.DataFrame | pl.LazyFrame:
@@ -1167,6 +1430,14 @@ class FrameSpec:
             Whether to validate single-column (`unique=True`) and composite unique constraints (`__unique_together__`).
         validate_checks : bool, default True
             Whether to validate multi-column `Check` constraints (`__checks__`).
+        validate_foreign_keys : bool, default True
+            Whether to validate `ForeignKey` referential-integrity constraints
+            (`__foreign_keys__`).
+        references : Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None, optional
+            Parent DataFrames/LazyFrames for any `ForeignKey` that references
+            another FrameSpec, keyed by that FrameSpec class. Not needed for
+            self-referencing ForeignKeys (`references="self"`), which are
+            checked against `df` itself.
         cast : bool, default False
             If True, casts validated columns to the declared `ColSpec.dtype`.
         streaming : bool, default False
@@ -1183,10 +1454,30 @@ class FrameSpec:
             If any structural or column-level constraints are violated, collecting
             all violations across all columns before raising.
         ValueError
-            If invalid options are supplied for `extra_cols` or `missing_cols`.
+            If invalid options are supplied for `extra_cols` or `missing_cols`, or if
+            a declared ForeignKey references another FrameSpec but no matching
+            DataFrame was supplied via `references`.
         """
         if not cls._columns:
             raise ValueError(f"{cls.__name__} declares no ColSpec columns")
+
+        resolved_foreign_keys: list[tuple[ForeignKey, pl.LazyFrame | None]] = []
+        if validate_foreign_keys:
+            for fk in cls._foreign_keys:
+                if fk.references == "self":
+                    resolved_foreign_keys.append((fk, None))
+                    continue
+                target = fk.references
+                parent = references.get(target) if references else None
+                if parent is None:
+                    raise ValueError(
+                        f"{cls.__name__}.validate(): ForeignKey {fk.name!r} "
+                        f"references {target.__name__!r}, but no DataFrame for it "
+                        "was supplied via validate(references={...})"
+                    )
+                parent_lf = parent.lazy() if isinstance(parent, pl.DataFrame) else parent
+                resolved_foreign_keys.append((fk, parent_lf))
+
         return _validate_dataframe(
             cls._columns,
             cls.__name__,
@@ -1197,8 +1488,10 @@ class FrameSpec:
             validate_rules=validate_rules,
             validate_unique=validate_unique,
             validate_checks=validate_checks,
+            validate_foreign_keys=validate_foreign_keys,
             checks=cls._checks if validate_checks else None,
             unique_together=cls._unique_together if validate_unique else None,
+            foreign_keys=resolved_foreign_keys if validate_foreign_keys else None,
             cast=cast,
             streaming=streaming,
         )

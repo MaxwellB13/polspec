@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator, Mapping, Sequence
-import yaml
+from typing import TYPE_CHECKING, Any
+
 import polars as pl
+import yaml
 
 from polspec.serialization import _YAML_DTYPES, _YAML_NAME_TO_DTYPE
 from polspec.spec import _is_categorical_dtype
@@ -111,11 +113,11 @@ class CatSpec:
     """
 
     __slots__ = (
-        "_enums",
+        "_cat_accessor",
         "_categoricals",
         "_choices",
         "_enum_accessor",
-        "_cat_accessor",
+        "_enums",
     )
 
     def __init__(

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any
 
 import polars as pl
 

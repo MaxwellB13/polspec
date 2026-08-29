@@ -32,6 +32,7 @@ from polspec.engine import (
     _resolve_numeric_bounds,
     _to_rust_spec,
 )
+from polspec.foreign_key import ForeignKey
 from polspec.framespec import FrameSchema, FrameSpec
 from polspec.profiler import profile_dataframe
 from polspec.rules import (
@@ -49,6 +50,8 @@ from polspec.serialization import (
     _colspec_to_yaml,
     _dtype_from_yaml,
     _dtype_to_yaml,
+    _foreignkey_from_yaml,
+    _foreignkey_to_yaml,
 )
 from polspec.spec import ColSpec, _column_kind
 from polspec.validation import ValidationError, _validate_dataframe
@@ -68,6 +71,7 @@ __all__ = [
     "Check",
     "ColRule",
     "ColSpec",
+    "ForeignKey",
     "FrameSchema",
     "FrameSpec",
     "ValidationError",
@@ -80,6 +84,8 @@ __all__ = [
     "_coverage_values",
     "_dtype_from_yaml",
     "_dtype_to_yaml",
+    "_foreignkey_from_yaml",
+    "_foreignkey_to_yaml",
     "_generate_cartesian",
     "_generate_random",
     "_resolve_numeric_bounds",

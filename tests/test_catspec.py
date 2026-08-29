@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+
 import polars as pl
 import pytest
-
-from polspec import Bound, CatSpec, ColSpec, FrameSpec
+from polspec import Bound, CatSpec, Check, ColSpec, ForeignKey, FrameSpec
 
 
 def test_catspec_basic_access():
@@ -361,3 +361,96 @@ def test_framespec_infer_with_live_dataframe():
     assert isinstance(Optimized.schema()["status"], pl.Enum)
     assert isinstance(Optimized.schema()["region"], pl.Categorical)
     assert Optimized.schema()["uuid"] == pl.String
+
+
+def test_catspec_to_markdown_and_to_mermaid(tmp_path):
+    cats = CatSpec(
+        enums={"STATUS": ["PENDING", "PROCESSING", "COMPLETED"]},
+        categoricals={
+            "CURRENCY": pl.Categories(
+                "CURRENCY", physical=pl.UInt8, namespace="finance"
+            )
+        },
+        choices={"CURRENCY": ["USD", "EUR", "GBP"]},
+    )
+
+    # 1. to_markdown
+    md = cats.to_markdown(title="Finance Taxonomy")
+    assert "# Finance Taxonomy" in md
+    assert "## Enums (`pl.Enum`)" in md
+    assert "STATUS" in md
+    assert "## Categoricals (`pl.Categorical`)" in md
+    assert "CURRENCY" in md
+    assert "UInt8" in md
+    assert "finance" in md
+
+    md_file = tmp_path / "cats.md"
+    cats.to_markdown(md_file)
+    assert md_file.exists()
+
+    # 2. to_mermaid
+    mmd = cats.to_mermaid(title="Taxonomy Diagram")
+    assert "classDiagram" in mmd
+    assert "class STATUS {" in mmd
+    assert "<<enumeration>>" in mmd
+    assert "+PENDING" in mmd
+    assert "class CURRENCY {" in mmd
+    assert "<<categorical: UInt8>>" in mmd
+    assert "+namespace: finance" in mmd
+
+    mmd_file = tmp_path / "cats.mmd"
+    cats.to_mermaid(mmd_file)
+    assert mmd_file.exists()
+
+
+def test_framespec_with_catspec_preserves_checks_and_diagrams():
+    cats = CatSpec(enums={"TIER": ["BRONZE", "SILVER", "GOLD"]})
+
+    class BaseSpec(FrameSpec):
+        customer_id = ColSpec(pl.Int64, unique=True)
+        tier = ColSpec(pl.String, choices=["BRONZE", "SILVER", "GOLD"])
+        score = ColSpec(pl.Float64)
+
+        __unique_together__ = [("customer_id", "tier")]
+        __checks__ = [Check(pl.col("score") >= 0, name="score_positive")]
+
+    EnhancedSpec = BaseSpec.with_catspec(cats, name="EnhancedSpec")
+    assert EnhancedSpec.checks() == BaseSpec.checks()
+    assert EnhancedSpec.unique_together() == BaseSpec.unique_together()
+    assert isinstance(EnhancedSpec._columns["tier"].dtype, pl.Enum)
+
+    md = EnhancedSpec.to_markdown()
+    assert "# EnhancedSpec" in md
+    assert "score_positive" in md
+    assert "['customer_id', 'tier']" in md
+
+    mmd = EnhancedSpec.to_mermaid()
+    assert "EnhancedSpec {" in mmd
+    assert "Int64 customer_id PK" in mmd
+    assert "Enum tier" in mmd
+
+
+def test_framespec_with_catspec_preserves_foreign_keys():
+    cats = CatSpec(enums={"TIER": ["BRONZE", "SILVER", "GOLD"]})
+
+    class CustomerSpec(FrameSpec):
+        id = ColSpec(pl.Int64, unique=True)
+
+    class BaseOrderSpec(FrameSpec):
+        customer_id = ColSpec(pl.Int64)
+        tier = ColSpec(pl.String, choices=["BRONZE", "SILVER", "GOLD"])
+
+        __foreign_keys__ = [
+            ForeignKey("customer_id", references=CustomerSpec, ref_columns="id")
+        ]
+
+    EnhancedOrderSpec = BaseOrderSpec.with_catspec(cats, name="EnhancedOrderSpec")
+    assert EnhancedOrderSpec.foreign_keys() == BaseOrderSpec.foreign_keys()
+    assert isinstance(EnhancedOrderSpec._columns["tier"].dtype, pl.Enum)
+
+    customers_df = pl.DataFrame({"id": [1, 2]})
+    orders_ok = pl.DataFrame({"customer_id": [1, 2], "tier": ["BRONZE", "GOLD"]})
+    result = EnhancedOrderSpec.validate(
+        orders_ok, references={CustomerSpec: customers_df}
+    )
+    assert result.height == 2

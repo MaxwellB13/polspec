@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar
-
-T = TypeVar("T")
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
-class Bound(Generic[T]):
+class Bound[T]:
     """An inclusive [min, max] range, used for numeric bounds, temporal ranges, and string lengths."""
 
     min: T

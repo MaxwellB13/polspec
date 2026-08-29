@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
 import polars as pl
 
 from polspec.constants import _DEFAULT_NULL_PROBABILITY
+from polspec.foreign_key import ForeignKey, _default_fk_name
 from polspec.rules import ColRule
 from polspec.spec import ColSpec, _is_categorical_dtype
 
@@ -126,7 +128,7 @@ def _dtype_from_yaml(
         raise ValueError(f"Unrecognized dtype mapping in YAML: {value!r}")
     if value == "Categorical":
         return pl.Categorical()
-    if value.startswith("$categories.") or value.startswith("categories."):
+    if value.startswith(("$categories.", "categories.")):
         clean_name = value.removeprefix("$categories.").removeprefix("categories.")
         if categories is not None and clean_name in categories:
             resolved = categories[clean_name]
@@ -217,4 +219,29 @@ def _colspec_from_yaml(data: dict, categories: CatSpec | None = None) -> ColSpec
         )
     return ColSpec(
         dtype=_dtype_from_yaml(data["dtype"], categories=categories), **kwargs
+    )
+
+
+def _foreignkey_to_yaml(fk: ForeignKey) -> dict:
+    """Serializes a self-referencing ForeignKey to YAML.
+
+    Only `references="self"` keys are representable: a ForeignKey pointing at
+    another FrameSpec class has no stable, round-trippable name for that
+    class in a standalone YAML file, so callers must filter those out first
+    (see FrameSpec.to_yaml's warning).
+    """
+    data: dict = {"columns": list(fk.columns), "references": "self"}
+    if fk.ref_columns != fk.columns:
+        data["ref_columns"] = list(fk.ref_columns)
+    if fk.name != _default_fk_name(fk.columns, "self"):
+        data["name"] = fk.name
+    return data
+
+
+def _foreignkey_from_yaml(data: dict) -> ForeignKey:
+    return ForeignKey(
+        columns=data["columns"],
+        references=data.get("references", "self"),
+        ref_columns=data.get("ref_columns"),
+        name=data.get("name"),
     )

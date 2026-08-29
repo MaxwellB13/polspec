@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal, Sequence
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, Literal
 
 import polars as pl
 
 if TYPE_CHECKING:
     from polspec.check import Check
+    from polspec.foreign_key import ForeignKey
     from polspec.spec import ColSpec
 
 
@@ -28,8 +30,10 @@ def _validate_dataframe(
     validate_rules: bool = True,
     validate_unique: bool = True,
     validate_checks: bool = True,
+    validate_foreign_keys: bool = True,
     checks: Sequence[Check] | None = None,
     unique_together: Sequence[Sequence[str]] | None = None,
+    foreign_keys: Sequence[tuple[ForeignKey, pl.LazyFrame | None]] | None = None,
     cast: bool = False,
     streaming: bool = False,
 ) -> pl.DataFrame | pl.LazyFrame:
@@ -458,6 +462,60 @@ def _validate_dataframe(
                         f"{chk.expr}{chk_desc}"
                     )
 
+    # Foreign key (referential integrity) validation. Each one needs its own
+    # join against a (possibly external) parent frame, so it can't share the
+    # single scalar-aggregation pass above.
+    if validate_foreign_keys and foreign_keys:
+        collect_kwargs = {"engine": "streaming"} if streaming else {}
+        for fk, target_lf in foreign_keys:
+            local_cols = list(fk.columns)
+            ref_cols = list(fk.ref_columns)
+            if not all(c in df_col_names for c in local_cols):
+                continue  # missing columns already reported via missing_cols handling
+
+            parent_lf = target_lf if target_lf is not None else lf
+            parent_schema_names = parent_lf.collect_schema().names()
+            missing_ref = [c for c in ref_cols if c not in parent_schema_names]
+            if missing_ref:
+                raise ValueError(
+                    f"ForeignKey '{fk.name}' on {schema_name!r} references columns "
+                    f"{missing_ref} not present in the referenced DataFrame"
+                )
+
+            key_expr = (
+                pl.col(local_cols[0])
+                if len(local_cols) == 1
+                else pl.struct(local_cols)
+            )
+            not_null_expr = (
+                pl.col(local_cols[0]).is_not_null()
+                if len(local_cols) == 1
+                else pl.all_horizontal([pl.col(c).is_not_null() for c in local_cols])
+            )
+
+            parent_keys = parent_lf.select(ref_cols).unique()
+            candidates = lf.select(local_cols).filter(not_null_expr)
+            orphans_lf = candidates.join(
+                parent_keys, left_on=local_cols, right_on=ref_cols, how="anti"
+            )
+            fk_stats = orphans_lf.select(
+                pl.len().alias("cnt"),
+                key_expr.unique().head(5).implode().alias("samples"),
+            ).collect(**collect_kwargs)
+
+            cnt = fk_stats["cnt"][0]
+            if cnt and cnt > 0:
+                raw_samples = fk_stats["samples"][0]
+                samples = list(raw_samples) if raw_samples is not None else []
+                target_label = (
+                    "self" if target_lf is None else getattr(fk.references, "__name__", str(fk.references))
+                )
+                errors.append(
+                    f"ForeignKey '{fk.name}' violated ({local_cols} -> "
+                    f"{target_label}.{ref_cols}): found {cnt} row(s) with no "
+                    f"matching parent record. Violating samples: {samples}"
+                )
+
     if errors:
         msg_lines = [
             f"Validation failed for DataFrame against '{schema_name}' ({len(errors)} error(s) found):"
@@ -488,7 +546,7 @@ def _validate_dataframe(
 
     # Reorder columns to match FrameSpec declaration order for present declared columns,
     # followed by any extra columns (if extra_cols == 'allow')
-    spec_order = [c for c in columns.keys() if c in result_lf.collect_schema().names()]
+    spec_order = [c for c in columns if c in result_lf.collect_schema().names()]
     extra_order = [c for c in result_lf.collect_schema().names() if c not in columns]
     result_lf = result_lf.select(spec_order + extra_order)
 
