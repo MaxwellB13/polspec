@@ -836,7 +836,9 @@ def test_from_dataframe_basic():
         }
     )
 
-    Profiled = FrameSpec.from_dataframe(source_df, name="StoreProfile", max_unique_enum=2)
+    Profiled = FrameSpec.from_dataframe(
+        source_df, name="StoreProfile", max_unique_enum=2
+    )
     assert Profiled.__name__ == "StoreProfile"
 
     cols = Profiled._columns
@@ -928,11 +930,15 @@ def test_from_dataframe_calculate_bounds_toggle():
         }
     )
 
-    SpecWithBounds = FrameSpec.from_dataframe(df, calculate_bounds=True, max_unique_enum=0)
+    SpecWithBounds = FrameSpec.from_dataframe(
+        df, calculate_bounds=True, max_unique_enum=0
+    )
     assert SpecWithBounds._columns["num"].bounds == Bound(10, 50)
     assert SpecWithBounds._columns["txt"].string_length == Bound(1, 16)
 
-    SpecNoBounds = FrameSpec.from_dataframe(df, calculate_bounds=False, max_unique_enum=0)
+    SpecNoBounds = FrameSpec.from_dataframe(
+        df, calculate_bounds=False, max_unique_enum=0
+    )
     assert SpecNoBounds._columns["num"].bounds is None
     assert SpecNoBounds._columns["txt"].string_length is None
 
@@ -1021,15 +1027,29 @@ def test_from_dataframe_temporal_and_binary(tmp_path):
 
 
 def test_modular_subpackage_imports():
-    from polspec import Bound, ColRule, ColSpec, FrameSchema, FrameSpec, ValidationError, profile_dataframe
+    from polspec import (
+        Bound,
+        ColRule,
+        ColSpec,
+        FrameSchema,
+        FrameSpec,
+        ValidationError,
+        profile_dataframe,
+    )
     from polspec.bound import Bound as BoundDirect
-    from polspec.framespec import FrameSchema as FrameSchemaDirect, FrameSpec as FrameSpecDirect
+    from polspec.framespec import (
+        FrameSchema as FrameSchemaDirect,
+        FrameSpec as FrameSpecDirect,
+    )
     from polspec.engine import _generate_cartesian, _generate_random
     from polspec.profiler import profile_dataframe as profile_dataframe_direct
     from polspec.rules import ColRule as ColRuleDirect
     from polspec.serialization import _colspec_from_yaml, _colspec_to_yaml
     from polspec.spec import ColSpec as ColSpecDirect
-    from polspec.validation import ValidationError as ValidationErrorDirect, _validate_dataframe
+    from polspec.validation import (
+        ValidationError as ValidationErrorDirect,
+        _validate_dataframe,
+    )
 
     assert Bound is BoundDirect
     assert ColRule is ColRuleDirect

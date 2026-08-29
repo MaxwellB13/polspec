@@ -53,16 +53,12 @@ def _validate_dataframe(
     # 1. Check Extra Columns
     if extra:
         if extra_cols == "raise":
-            errors.append(
-                f"Extra columns found that are not in schema: {extra}"
-            )
+            errors.append(f"Extra columns found that are not in schema: {extra}")
 
     # 2. Check Missing Columns
     if missing:
         if missing_cols == "raise":
-            errors.append(
-                f"Missing required columns in DataFrame: {missing}"
-            )
+            errors.append(f"Missing required columns in DataFrame: {missing}")
 
     # 3. Present columns to validate
     present_cols = [col for col in spec_col_names if col in df_col_names]
@@ -91,7 +87,10 @@ def _validate_dataframe(
                     or actual_dtype in (pl.String, pl.Utf8, pl.Categorical)
                 ):
                     is_type_compatible = False
-            elif isinstance(expected_dtype, pl.Categorical) or expected_dtype == pl.Categorical:
+            elif (
+                isinstance(expected_dtype, pl.Categorical)
+                or expected_dtype == pl.Categorical
+            ):
                 if not (
                     actual_dtype in (pl.String, pl.Utf8, pl.Categorical)
                     or isinstance(actual_dtype, (pl.Enum, pl.Categorical))
@@ -141,7 +140,7 @@ def _validate_dataframe(
         if allowed_choices is not None:
             invalid_alias_cnt = f"__val__{name}__choice_invalid_cnt"
             invalid_alias_samples = f"__val__{name}__choice_samples"
-            
+
             # Use string representation comparison for Enum/Categorical/String
             if actual_dtype in (pl.String, pl.Utf8, pl.Categorical) or isinstance(
                 actual_dtype, (pl.Enum, pl.Categorical)
@@ -226,7 +225,11 @@ def _validate_dataframe(
                 )
                 agg_exprs.append(len_mask.sum().alias(len_cnt_alias))
                 agg_exprs.append(
-                    pl.col(name).filter(len_mask).head(5).implode().alias(len_samples_alias)
+                    pl.col(name)
+                    .filter(len_mask)
+                    .head(5)
+                    .implode()
+                    .alias(len_samples_alias)
                 )
                 expr_metadata.append(
                     {
@@ -363,9 +366,7 @@ def _validate_dataframe(
         result_lf = result_lf.select(keep_cols)
 
     if missing and missing_cols == "add":
-        add_exprs = [
-            pl.lit(None, dtype=columns[c].dtype).alias(c) for c in missing
-        ]
+        add_exprs = [pl.lit(None, dtype=columns[c].dtype).alias(c) for c in missing]
         result_lf = result_lf.with_columns(add_exprs)
 
     if cast:
