@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 from collections.abc import Iterator
 from pathlib import Path
-from typing import ClassVar, Literal, overload
+from typing import ClassVar, Literal, Sequence, overload
 
 import polars as pl
 import yaml
@@ -61,6 +61,140 @@ class FrameSpec:
     @classmethod
     def schema(cls) -> pl.Schema:
         return pl.Schema({name: spec.dtype for name, spec in cls._columns.items()})
+
+    @classmethod
+    def catspec(cls) -> CatSpec:
+        """Extracts a CatSpec registry from this FrameSpec's column definitions."""
+        return CatSpec.from_framespec(cls)
+
+    @classmethod
+    def generate_catspec(cls) -> CatSpec:
+        """Extracts a CatSpec registry from this FrameSpec's column definitions (alias for `catspec`)."""
+        return cls.catspec()
+
+    @classmethod
+    def write_catspec(cls, source: str | Path) -> None:
+        """Extracts and writes a CatSpec YAML registry for this FrameSpec to `source`."""
+        cls.catspec().to_yaml(source)
+
+    @classmethod
+    def infer_catspec(
+        cls,
+        data: pl.DataFrame | pl.LazyFrame | None = None,
+        *,
+        max_enum_cardinality: int = 30,
+        max_categorical_cardinality: int = 10_000,
+        max_categorical_ratio: float = 0.20,
+        include_columns: Sequence[str] | None = None,
+        exclude_patterns: Sequence[str] | None = (
+            r"(?:^|.*_)id$",
+            r"(?:^|.*_)uuid$",
+            r"(?:^|.*_)hash$",
+            r"(?:^|.*_)url$",
+            r"(?:^|.*_)key$",
+        ),
+        default_physical: pl.DataType | None = None,
+    ) -> CatSpec:
+        """Infers an optimal CatSpec registry from string columns using heuristic rules."""
+        if data is not None:
+            return CatSpec.infer_from_dataframe(
+                data,
+                max_enum_cardinality=max_enum_cardinality,
+                max_categorical_cardinality=max_categorical_cardinality,
+                max_categorical_ratio=max_categorical_ratio,
+                include_columns=include_columns,
+                exclude_patterns=exclude_patterns,
+                default_physical=default_physical,
+            )
+        return CatSpec.infer_from_framespec(
+            cls,
+            max_enum_cardinality=max_enum_cardinality,
+            max_categorical_cardinality=max_categorical_cardinality,
+            include_columns=include_columns,
+            exclude_patterns=exclude_patterns,
+            default_physical=default_physical,
+        )
+
+    @classmethod
+    def with_catspec(
+        cls,
+        catspec: CatSpec,
+        *,
+        name: str | None = None,
+    ) -> type[FrameSpec]:
+        """Creates a new FrameSpec subclass with columns re-typed using the provided CatSpec."""
+        new_columns: dict[str, ColSpec] = {}
+        for col_name, spec in cls._columns.items():
+            enum_key = (
+                catspec._resolve_enum_key(col_name)
+                if hasattr(catspec, "_resolve_enum_key")
+                else (col_name if col_name in catspec.enums else None)
+            )
+            cat_key = (
+                catspec._resolve_cat_key(col_name)
+                if hasattr(catspec, "_resolve_cat_key")
+                else (col_name if col_name in catspec.categoricals else None)
+            )
+
+            if enum_key is not None:
+                enum_dt = pl.Enum(catspec.get_enum(enum_key))
+                new_columns[col_name] = ColSpec(
+                    dtype=enum_dt,
+                    nullable=spec.nullable,
+                    null_probability=spec.null_probability,
+                    weights=spec.weights,
+                    rules=spec.rules,
+                )
+            elif cat_key is not None:
+                cat_dt = pl.Categorical(catspec.get_categorical(cat_key))
+                choices = catspec.get_choices(cat_key) or spec.choices
+                new_columns[col_name] = ColSpec(
+                    dtype=cat_dt,
+                    nullable=spec.nullable,
+                    null_probability=spec.null_probability,
+                    choices=choices,
+                    weights=spec.weights,
+                    rules=spec.rules,
+                )
+            else:
+                new_columns[col_name] = spec
+
+        subclass_name = name or f"{cls.__name__}WithCatSpec"
+        return type(subclass_name, (FrameSpec,), new_columns)
+
+    @classmethod
+    def with_inferred_catspec(
+        cls,
+        catspec: CatSpec | None = None,
+        *,
+        data: pl.DataFrame | pl.LazyFrame | None = None,
+        name: str | None = None,
+        max_enum_cardinality: int = 30,
+        max_categorical_cardinality: int = 10_000,
+        max_categorical_ratio: float = 0.20,
+        include_columns: Sequence[str] | None = None,
+        exclude_patterns: Sequence[str] | None = (
+            r"(?:^|.*_)id$",
+            r"(?:^|.*_)uuid$",
+            r"(?:^|.*_)hash$",
+            r"(?:^|.*_)url$",
+            r"(?:^|.*_)key$",
+        ),
+        default_physical: pl.DataType | None = None,
+    ) -> type[FrameSpec]:
+        """Infers a CatSpec and returns a new FrameSpec subclass with optimized Enum and Categorical columns."""
+        if catspec is None:
+            catspec = cls.infer_catspec(
+                data=data,
+                max_enum_cardinality=max_enum_cardinality,
+                max_categorical_cardinality=max_categorical_cardinality,
+                max_categorical_ratio=max_categorical_ratio,
+                include_columns=include_columns,
+                exclude_patterns=exclude_patterns,
+                default_physical=default_physical,
+            )
+        subclass_name = name or f"{cls.__name__}Optimized"
+        return cls.with_catspec(catspec, name=subclass_name)
 
     @classmethod
     def to_yaml(cls, source: str | Path) -> None:

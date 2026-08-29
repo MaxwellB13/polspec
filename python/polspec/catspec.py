@@ -1,14 +1,36 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator, Mapping, Sequence
 import yaml
 import polars as pl
 
 from polspec.serialization import _YAML_DTYPES, _YAML_NAME_TO_DTYPE
+from polspec.spec import _is_categorical_dtype
 
 if TYPE_CHECKING:
-    pass
+    from polspec.framespec import FrameSpec
+
+DEFAULT_EXCLUDE_PATTERNS: tuple[str, ...] = (
+    r"(?:^|.*_)id$",
+    r"(?:^|.*_)uuid$",
+    r"(?:^|.*_)hash$",
+    r"(?:^|.*_)url$",
+    r"(?:^|.*_)key$",
+)
+
+
+def _matches_patterns(name: str, patterns: Sequence[str]) -> bool:
+    return any(re.search(pat, name, re.IGNORECASE) for pat in patterns)
+
+
+def _auto_physical(n_unique: int) -> pl.DataType:
+    if n_unique < 256:
+        return pl.UInt8
+    elif n_unique < 65536:
+        return pl.UInt16
+    return pl.UInt32
 
 
 class _EnumAccessor:
@@ -164,24 +186,48 @@ class CatSpec:
         """Accessor for pl.Categorical dtypes."""
         return self._cat_accessor
 
+    def _resolve_enum_key(self, name: str) -> str | None:
+        if name in self._enums:
+            return name
+        if name.upper() in self._enums:
+            return name.upper()
+        if name.lower() in self._enums:
+            return name.lower()
+        return None
+
+    def _resolve_cat_key(self, name: str) -> str | None:
+        if name in self._categoricals:
+            return name
+        if name.upper() in self._categoricals:
+            return name.upper()
+        if name.lower() in self._categoricals:
+            return name.lower()
+        return None
+
     def get_enum(self, name: str) -> list[str]:
         """Returns the list of categories/variants for an enum."""
-        if name in self._enums:
-            return list(self._enums[name])
+        key = self._resolve_enum_key(name)
+        if key is not None:
+            return list(self._enums[key])
         raise KeyError(f"No enum named {name!r} in CatSpec")
 
     def get_categorical(self, name: str) -> pl.Categories:
         """Returns the pl.Categories definition for a categorical."""
-        if name in self._categoricals:
-            return self._categoricals[name]
+        key = self._resolve_cat_key(name)
+        if key is not None:
+            return self._categoricals[key]
         raise KeyError(f"No categorical named {name!r} in CatSpec")
 
     def get_choices(self, name: str) -> list[Any] | None:
         """Returns domain choices if defined for this enum or categorical."""
         if name in self._choices:
             return list(self._choices[name])
-        if name in self._enums:
-            return list(self._enums[name])
+        cat_key = self._resolve_cat_key(name)
+        if cat_key is not None and cat_key in self._choices:
+            return list(self._choices[cat_key])
+        enum_key = self._resolve_enum_key(name)
+        if enum_key is not None:
+            return list(self._enums[enum_key])
         return None
 
     def __getattr__(self, name: str) -> Any:
@@ -191,6 +237,12 @@ class CatSpec:
             return self._categoricals[name]
         if name in self._enums:
             return list(self._enums[name])
+        cat_key = self._resolve_cat_key(name)
+        if cat_key is not None:
+            return self._categoricals[cat_key]
+        enum_key = self._resolve_enum_key(name)
+        if enum_key is not None:
+            return list(self._enums[enum_key])
         raise AttributeError(f"CatSpec has no Enum or Categorical named {name!r}")
 
     def __getitem__(self, name: str) -> Any:
@@ -198,10 +250,23 @@ class CatSpec:
             return self._categoricals[name]
         if name in self._enums:
             return list(self._enums[name])
+        cat_key = self._resolve_cat_key(name)
+        if cat_key is not None:
+            return self._categoricals[cat_key]
+        enum_key = self._resolve_enum_key(name)
+        if enum_key is not None:
+            return list(self._enums[enum_key])
         raise KeyError(f"CatSpec has no Enum or Categorical named {name!r}")
 
     def __contains__(self, name: object) -> bool:
-        return name in self._categoricals or name in self._enums
+        if not isinstance(name, str):
+            return False
+        return (
+            name in self._categoricals
+            or name in self._enums
+            or self._resolve_cat_key(name) is not None
+            or self._resolve_enum_key(name) is not None
+        )
 
     def __len__(self) -> int:
         return len(self._categoricals) + len(self._enums)
@@ -220,7 +285,236 @@ class CatSpec:
             return self._categoricals[name]
         if name in self._enums:
             return list(self._enums[name])
+        cat_key = self._resolve_cat_key(name)
+        if cat_key is not None:
+            return self._categoricals[cat_key]
+        enum_key = self._resolve_enum_key(name)
+        if enum_key is not None:
+            return list(self._enums[enum_key])
         return default
+
+    @classmethod
+    def from_dataframe(cls, df: pl.DataFrame | pl.LazyFrame) -> CatSpec:
+        """Constructs a CatSpec from existing Enum and Categorical columns in a DataFrame or LazyFrame."""
+        if isinstance(df, pl.LazyFrame):
+            df = df.collect()
+        if not isinstance(df, pl.DataFrame):
+            raise TypeError(f"Expected pl.DataFrame or pl.LazyFrame, got {type(df).__name__}")
+
+        enums: dict[str, list[str]] = {}
+        categoricals: dict[str, Any] = {}
+        choices: dict[str, list[Any]] = {}
+
+        for col_name, dtype in df.schema.items():
+            if isinstance(dtype, pl.Enum):
+                enums[col_name] = dtype.categories.to_list()
+            elif _is_categorical_dtype(dtype):
+                if hasattr(dtype, "categories") and isinstance(dtype.categories, pl.Categories):
+                    categoricals[col_name] = dtype.categories
+                else:
+                    categoricals[col_name] = pl.Categories(col_name, physical=pl.UInt32)
+                non_null = df[col_name].drop_nulls()
+                if len(non_null) > 0:
+                    choices[col_name] = non_null.unique().to_list()
+
+        return cls(enums=enums, categoricals=categoricals, choices=choices)
+
+    @classmethod
+    def from_framespec(cls, spec: type[FrameSpec] | FrameSpec) -> CatSpec:
+        """Constructs a CatSpec from a declared FrameSpec class or instance."""
+        spec_cls = spec if isinstance(spec, type) else type(spec)
+        if not hasattr(spec_cls, "_columns"):
+            raise TypeError(f"Expected FrameSpec subclass, got {spec_cls.__name__}")
+
+        enums: dict[str, list[str]] = {}
+        categoricals: dict[str, Any] = {}
+        choices: dict[str, list[Any]] = {}
+
+        for col_name, col_spec in spec_cls._columns.items():
+            dtype = col_spec.dtype
+            if isinstance(dtype, pl.Enum):
+                enums[col_name] = dtype.categories.to_list()
+            elif _is_categorical_dtype(dtype):
+                if hasattr(dtype, "categories") and isinstance(dtype.categories, pl.Categories):
+                    categoricals[col_name] = dtype.categories
+                else:
+                    categoricals[col_name] = pl.Categories(col_name, physical=pl.UInt32)
+                if col_spec.choices:
+                    choices[col_name] = list(col_spec.choices)
+            elif col_spec.choices:
+                choices[col_name] = list(col_spec.choices)
+
+        return cls(enums=enums, categoricals=categoricals, choices=choices)
+
+    @classmethod
+    def infer_from_dataframe(
+        cls,
+        df: pl.DataFrame | pl.LazyFrame,
+        *,
+        max_enum_cardinality: int = 30,
+        max_categorical_cardinality: int = 10_000,
+        max_categorical_ratio: float = 0.20,
+        include_columns: Sequence[str] | None = None,
+        exclude_patterns: Sequence[str] | None = DEFAULT_EXCLUDE_PATTERNS,
+        default_physical: pl.DataType | None = None,
+    ) -> CatSpec:
+        """Infers an optimal CatSpec from String and Categorical columns in a DataFrame or LazyFrame."""
+        if isinstance(df, pl.LazyFrame):
+            df = df.collect()
+        if not isinstance(df, pl.DataFrame):
+            raise TypeError(f"Expected pl.DataFrame or pl.LazyFrame, got {type(df).__name__}")
+
+        enums: dict[str, list[str]] = {}
+        categoricals: dict[str, Any] = {}
+        choices: dict[str, list[Any]] = {}
+
+        total_rows = df.height
+        include_set = set(include_columns) if include_columns is not None else None
+
+        for col_name, dtype in df.schema.items():
+            if isinstance(dtype, pl.Enum):
+                enums[col_name] = dtype.categories.to_list()
+                continue
+            elif _is_categorical_dtype(dtype):
+                if hasattr(dtype, "categories") and isinstance(dtype.categories, pl.Categories):
+                    categoricals[col_name] = dtype.categories
+                else:
+                    non_null = df[col_name].drop_nulls()
+                    n_u = non_null.n_unique()
+                    phys = default_physical or _auto_physical(n_u)
+                    categoricals[col_name] = pl.Categories(col_name, physical=phys)
+                non_null = df[col_name].drop_nulls()
+                if len(non_null) > 0:
+                    choices[col_name] = non_null.unique().to_list()
+                continue
+
+            if dtype not in (pl.String, pl.Utf8):
+                continue
+
+            is_explicit_include = include_set is not None and col_name in include_set
+            if include_set is not None and not is_explicit_include:
+                continue
+            if not is_explicit_include and exclude_patterns and _matches_patterns(col_name, exclude_patterns):
+                continue
+
+            non_null = df[col_name].drop_nulls()
+            if len(non_null) == 0:
+                continue
+
+            n_unique = non_null.n_unique()
+            ratio = n_unique / total_rows if total_rows > 0 else 1.0
+
+            if 0 < n_unique <= max_enum_cardinality:
+                unique_vals = non_null.unique().sort().to_list()
+                enums[col_name] = [str(x) for x in unique_vals]
+            elif (
+                is_explicit_include and n_unique <= max_categorical_cardinality
+            ) or (
+                n_unique <= max_categorical_cardinality
+                and (ratio <= max_categorical_ratio or n_unique <= 256)
+            ):
+                phys = default_physical or _auto_physical(n_unique)
+                categoricals[col_name] = pl.Categories(col_name, physical=phys)
+                choices[col_name] = non_null.unique().sort().to_list()
+
+        return cls(enums=enums, categoricals=categoricals, choices=choices)
+
+    @classmethod
+    def infer_from_framespec(
+        cls,
+        spec: type[FrameSpec] | FrameSpec,
+        *,
+        max_enum_cardinality: int = 30,
+        max_categorical_cardinality: int = 10_000,
+        include_columns: Sequence[str] | None = None,
+        exclude_patterns: Sequence[str] | None = DEFAULT_EXCLUDE_PATTERNS,
+        default_physical: pl.DataType | None = None,
+    ) -> CatSpec:
+        """Infers an optimal CatSpec from a declared FrameSpec class using schema definitions."""
+        spec_cls = spec if isinstance(spec, type) else type(spec)
+        if not hasattr(spec_cls, "_columns"):
+            raise TypeError(f"Expected FrameSpec subclass, got {spec_cls.__name__}")
+
+        enums: dict[str, list[str]] = {}
+        categoricals: dict[str, Any] = {}
+        choices: dict[str, list[Any]] = {}
+        include_set = set(include_columns) if include_columns is not None else None
+
+        for col_name, col_spec in spec_cls._columns.items():
+            dtype = col_spec.dtype
+            if isinstance(dtype, pl.Enum):
+                enums[col_name] = dtype.categories.to_list()
+                continue
+            elif _is_categorical_dtype(dtype):
+                if hasattr(dtype, "categories") and isinstance(dtype.categories, pl.Categories):
+                    categoricals[col_name] = dtype.categories
+                else:
+                    categoricals[col_name] = pl.Categories(col_name, physical=default_physical or pl.UInt8)
+                if col_spec.choices:
+                    choices[col_name] = list(col_spec.choices)
+                continue
+
+            if dtype not in (pl.String, pl.Utf8):
+                continue
+
+            if getattr(col_spec, "unique", False):
+                continue
+
+            if col_spec.string_length and (
+                (col_spec.string_length.min is not None and col_spec.string_length.min > 255)
+                or (col_spec.string_length.max is not None and col_spec.string_length.max > 255)
+            ):
+                continue
+
+            if include_set is not None:
+                if col_name not in include_set:
+                    continue
+            elif exclude_patterns and _matches_patterns(col_name, exclude_patterns):
+                continue
+
+            if col_spec.choices:
+                c_list = list(col_spec.choices)
+                n_unique = len(c_list)
+                if 0 < n_unique <= max_enum_cardinality:
+                    enums[col_name] = [str(x) for x in c_list]
+                elif n_unique <= max_categorical_cardinality:
+                    phys = default_physical or _auto_physical(n_unique)
+                    categoricals[col_name] = pl.Categories(col_name, physical=phys)
+                    choices[col_name] = c_list
+
+        return cls(enums=enums, categoricals=categoricals, choices=choices)
+
+    @classmethod
+    def infer(
+        cls,
+        target: pl.DataFrame | pl.LazyFrame | type[FrameSpec] | FrameSpec,
+        *,
+        max_enum_cardinality: int = 30,
+        max_categorical_cardinality: int = 10_000,
+        max_categorical_ratio: float = 0.20,
+        include_columns: Sequence[str] | None = None,
+        exclude_patterns: Sequence[str] | None = DEFAULT_EXCLUDE_PATTERNS,
+        default_physical: pl.DataType | None = None,
+    ) -> CatSpec:
+        """Infers an optimal CatSpec from a DataFrame, LazyFrame, or FrameSpec."""
+        if isinstance(target, (pl.DataFrame, pl.LazyFrame)):
+            return cls.infer_from_dataframe(
+                target,
+                max_enum_cardinality=max_enum_cardinality,
+                max_categorical_cardinality=max_categorical_cardinality,
+                max_categorical_ratio=max_categorical_ratio,
+                include_columns=include_columns,
+                exclude_patterns=exclude_patterns,
+                default_physical=default_physical,
+            )
+        return cls.infer_from_framespec(
+            target,
+            max_enum_cardinality=max_enum_cardinality,
+            max_categorical_cardinality=max_categorical_cardinality,
+            include_columns=include_columns,
+            exclude_patterns=exclude_patterns,
+            default_physical=default_physical,
+        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> CatSpec:

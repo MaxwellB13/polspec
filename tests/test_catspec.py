@@ -176,3 +176,169 @@ columns:
         LoadedSpec2 = FrameSpec.from_yaml(spec_yaml, categories=cat_spec)
         df2 = LoadedSpec2.generate(10, seed=1)
         assert df2.schema["tier"] == pl.Enum(["BRONZE", "SILVER", "GOLD"])
+
+
+def test_catspec_from_dataframe_and_framespec():
+    df = pl.DataFrame({
+        "status": pl.Series(["OPEN", "CLOSED", "OPEN"], dtype=pl.Enum(["OPEN", "CLOSED"])),
+        "currency": pl.Series(["USD", "EUR", "USD"], dtype=pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt8))),
+        "val": [1, 2, 3],
+    })
+
+    # from_dataframe
+    cats_from_df = CatSpec.from_dataframe(df)
+    assert cats_from_df.status == ["OPEN", "CLOSED"]
+    assert cats_from_df.currency.name() == "CURRENCY"
+    assert cats_from_df.currency.physical() == pl.UInt8
+    assert "val" not in cats_from_df
+
+    # LazyFrame support
+    cats_from_lazy = CatSpec.from_dataframe(df.lazy())
+    assert cats_from_lazy.status == ["OPEN", "CLOSED"]
+
+    # from_framespec & FrameSpec.catspec / generate_catspec / write_catspec
+    class MySpec(FrameSpec):
+        status = ColSpec(dtype=pl.Enum(["PENDING", "COMPLETED"]))
+        currency = ColSpec(dtype=pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt16)), choices=["USD", "EUR"])
+        amount = ColSpec(dtype=pl.Float64)
+
+    cats_from_spec = MySpec.catspec()
+    assert cats_from_spec.status == ["PENDING", "COMPLETED"]
+    assert cats_from_spec.currency.name() == "CURRENCY"
+    assert cats_from_spec.currency.physical() == pl.UInt16
+    assert cats_from_spec.get_choices("currency") == ["USD", "EUR"]
+
+    # Alias check
+    assert MySpec.generate_catspec().enums == cats_from_spec.enums
+
+    # write_catspec check
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out_yaml = Path(tmpdir) / "extracted.yaml"
+        MySpec.write_catspec(out_yaml)
+        loaded = CatSpec.from_yaml(out_yaml)
+        assert loaded.status == ["PENDING", "COMPLETED"]
+        assert loaded.currency.physical() == pl.UInt16
+
+
+def test_catspec_heuristic_inference():
+    # DataFrame with:
+    # 1. low cardinality string (< 30) -> should infer as Enum
+    # 2. medium cardinality string (> 30, ratio < 0.20) -> should infer as Categorical
+    # 3. ID column -> excluded by default
+    # 4. integer column -> ignored
+    n = 1000
+    statuses = ["PENDING", "PROCESSING", "COMPLETED", "FAILED"] * 250
+    countries = [f"COUNTRY_{i % 50}" for i in range(n)]
+    order_ids = [f"ORD_{i:06d}" for i in range(n)]
+    amounts = [float(i) for i in range(n)]
+
+    df = pl.DataFrame({
+        "status": statuses,
+        "country": countries,
+        "order_id": order_ids,
+        "amount": amounts,
+    })
+
+    cats = CatSpec.infer_from_dataframe(df)
+
+    # status has 4 unique values <= 30 -> Enum
+    assert "status" in cats.enums
+    assert set(cats.status) == {"PENDING", "PROCESSING", "COMPLETED", "FAILED"}
+
+    # country has 50 unique values (ratio 50/1000 = 0.05 <= 0.20) -> Categorical (UInt8 because 50 < 256)
+    assert "country" in cats.categoricals
+    assert cats.country.physical() == pl.UInt8
+
+    # order_id matches exclude_patterns (r".*_id$") -> skipped
+    assert "order_id" not in cats
+
+    # amount is float -> skipped
+    assert "amount" not in cats
+
+    # include_columns override
+    cats_override = CatSpec.infer(df, include_columns=["order_id"])
+    assert "order_id" in cats_override.enums or "order_id" in cats_override.categoricals
+
+
+def test_framespec_infer_catspec_and_transformation():
+    class RawOrders(FrameSpec):
+        status = ColSpec(dtype=pl.String, choices=["NEW", "PAID", "CANCELLED"])
+        tag = ColSpec(dtype=pl.String, choices=[f"TAG_{i}" for i in range(40)])
+        user_id = ColSpec(dtype=pl.String)
+        long_notes = ColSpec(dtype=pl.String, string_length=Bound(0, 1000))
+        plain_str = ColSpec(dtype=pl.String)
+
+    # 1. Infer CatSpec from FrameSpec schema
+    cats = RawOrders.infer_catspec(max_enum_cardinality=10)
+    assert "status" in cats.enums
+    assert cats.status == ["NEW", "PAID", "CANCELLED"]
+
+    assert "tag" in cats.categoricals
+    assert cats.tag.physical() == pl.UInt8
+    assert len(cats.get_choices("tag")) == 40
+
+    # user_id matches exclude_patterns (r".*_id$") -> skipped
+    assert "user_id" not in cats
+    # long_notes max > 255 -> skipped
+    assert "long_notes" not in cats
+
+    # 2. Transform FrameSpec using with_inferred_catspec
+    OptimizedOrders = RawOrders.with_inferred_catspec(catspec=cats)
+    assert OptimizedOrders.schema()["status"] == pl.Enum(["NEW", "PAID", "CANCELLED"])
+    assert isinstance(OptimizedOrders.schema()["tag"], pl.Categorical)
+    assert OptimizedOrders.schema()["user_id"] == pl.String
+    assert OptimizedOrders.schema()["long_notes"] == pl.String
+
+    # 3. Generating data from Optimized FrameSpec
+    gen_df = OptimizedOrders.generate(50, seed=42)
+    assert gen_df.schema["status"] == pl.Enum(["NEW", "PAID", "CANCELLED"])
+    assert gen_df["status"].is_in(["NEW", "PAID", "CANCELLED"]).all()
+
+
+def test_catspec_case_insensitivity_and_resolution():
+    cats = CatSpec(
+        enums={"order_status": ["A", "B"]},
+        categoricals={"CURRENCY": pl.Categories("CURRENCY", physical=pl.UInt8)},
+    )
+
+    # Mixed case lookups
+    assert cats.get_enum("ORDER_STATUS") == ["A", "B"]
+    assert cats.get_enum("order_status") == ["A", "B"]
+    assert cats.enum("ORDER_STATUS") == pl.Enum(["A", "B"])
+    assert cats.ORDER_STATUS == ["A", "B"]
+    assert cats.order_status == ["A", "B"]
+    assert "ORDER_STATUS" in cats
+    assert "order_status" in cats
+
+    assert cats.get_categorical("currency").physical() == pl.UInt8
+    assert cats.get_categorical("CURRENCY").physical() == pl.UInt8
+    assert cats.categorical("currency").categories.name() == "CURRENCY"
+    assert cats.currency.physical() == pl.UInt8
+    assert cats.CURRENCY.physical() == pl.UInt8
+    assert "currency" in cats
+    assert "CURRENCY" in cats
+
+
+def test_framespec_infer_with_live_dataframe():
+    df = pl.DataFrame({
+        "status": ["A", "B", "A", "B"],
+        "region": ["US", "EU", "APAC", "LATAM"],
+        "uuid": ["123", "456", "789", "012"],
+    })
+
+    class SchemaSpec(FrameSpec):
+        status = ColSpec(dtype=pl.String)
+        region = ColSpec(dtype=pl.String)
+        uuid = ColSpec(dtype=pl.String)
+
+    # Infer using DataFrame data through FrameSpec.infer_catspec(data=df)
+    cats = SchemaSpec.infer_catspec(data=df, max_enum_cardinality=3)
+    assert "status" in cats.enums
+    assert "region" in cats.categoricals  # 4 unique > max_enum_cardinality (3)
+    assert "uuid" not in cats
+
+    # with_inferred_catspec with live data
+    Optimized = SchemaSpec.with_inferred_catspec(data=df, max_enum_cardinality=3)
+    assert isinstance(Optimized.schema()["status"], pl.Enum)
+    assert isinstance(Optimized.schema()["region"], pl.Categorical)
+    assert Optimized.schema()["uuid"] == pl.String
