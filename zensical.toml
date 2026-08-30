@@ -1,7 +1,10 @@
 [project]
 site_name = "polspec"
 site_description = "Declare a Polars schema once, then generate data from it and validate data against it."
-site_url = "https://example.com/polspec/"
+site_url = "https://maxwellb13.github.io/polspec/"
+repo_url = "https://github.com/MaxwellB13/polspec"
+repo_name = "MaxwellB13/polspec"
+edit_uri = "edit/main/docs/"
 
 nav = [
   { "Home" = "index.md" },
@@ -28,6 +31,7 @@ nav = [
 language = "en"
 features = [
   "announce.dismiss",
+  "content.action.edit",
   "content.code.annotate",
   "content.code.copy",
   "content.code.select",
@@ -64,6 +68,10 @@ primary = "teal"
 accent = "teal"
 toggle.icon = "lucide/moon"
 toggle.name = "Switch to system preference"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/MaxwellB13/polspec"
 
 [project.markdown_extensions]
 abbr = {}
