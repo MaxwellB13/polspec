@@ -15,16 +15,14 @@ implementation, and a pure-Python loop using `random`. All three produce an
 equivalent `pl.DataFrame`, so the comparison is "how fast can each approach
 hand back a usable frame," not raw loop speed in isolation.
 
-```text
-      n_rows |         rust |        numpy |       python
----------------------------------------------------------
-       1,000 |     0.0004s |     0.0008s |     0.0016s
-      10,000 |     0.0005s |     0.0054s |     0.0147s
-     100,000 |     0.0025s |     0.0493s |     0.1491s
-   1,000,000 |     0.0112s |     0.4932s |     1.4918s
-   5,000,000 |     0.0293s |     2.4706s |     skipped
-  20,000,000 |     0.0835s |     9.8463s |     skipped
-```
+| n_rows     | polspec (Rust) |     NumPy |    Python |
+|-----------:|---------------:|----------:|----------:|
+| 1,000      |        0.0004s |   0.0008s |   0.0016s |
+| 10,000     |        0.0005s |   0.0054s |   0.0147s |
+| 100,000    |        0.0025s |   0.0493s |   0.1491s |
+| 1,000,000  |        0.0112s |   0.4932s |   1.4918s |
+| 5,000,000  |        0.0293s |   2.4706s |   skipped |
+| 20,000,000 |        0.0835s |   9.8463s |   skipped |
 
 Measured on this machine; yours will differ, and the shape matters more than
 the absolute numbers. Two things worth reading off it:
