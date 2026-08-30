@@ -5,6 +5,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+import yaml
 from polspec import Bound, CatSpec, Check, ColSpec, ForeignKey, FrameSpec
 
 
@@ -508,3 +509,138 @@ def test_catspec_infer_from_dataframe_existing_categorical_deterministic_sort():
     )
     inferred = CatSpec.infer_from_dataframe(df)
     assert inferred.get_choices("cat_col") == ["A", "B", "M", "Z"]
+
+
+# ---------------------------------------------------------------------------
+# Class-body declaration -- one line per entry instead of parallel
+# enums={}/categoricals={}/choices={} dicts, in the same vocabulary
+# ColSpec.dtype already accepts.
+# ---------------------------------------------------------------------------
+
+
+def test_class_body_declares_enum_and_categorical():
+    class Categories(CatSpec):
+        STATUS = pl.Enum(["NEW", "PAID", "SHIPPED"])
+        CURRENCY = pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt8))
+
+    assert Categories.STATUS == pl.Enum(["NEW", "PAID", "SHIPPED"])
+    assert Categories.CURRENCY == pl.Categorical(
+        pl.Categories("CURRENCY", physical=pl.UInt8)
+    )
+    assert Categories._declared_enums == {"STATUS": ["NEW", "PAID", "SHIPPED"]}
+    assert set(Categories._declared_categoricals) == {"CURRENCY"}
+
+
+def test_class_body_value_plugs_straight_into_colspec():
+    class Categories(CatSpec):
+        STATUS = pl.Enum(["NEW", "PAID", "SHIPPED"])
+        CURRENCY = pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt8))
+
+    class Orders(FrameSpec):
+        status = ColSpec(Categories.STATUS)
+        currency = ColSpec(Categories.CURRENCY)
+
+    df = Orders.generate(200, seed=1)
+    Orders.validate(df)
+    assert df.schema["status"] == Categories.STATUS
+    assert df.schema["currency"] == Categories.CURRENCY
+
+
+def test_class_body_accepts_bare_categories():
+    class Categories(CatSpec):
+        REGION = pl.Categories("REGION", physical=pl.UInt16)
+
+    assert Categories().get_categorical("REGION") == pl.Categories(
+        "REGION", physical=pl.UInt16
+    )
+
+
+def test_class_body_instance_still_supports_full_registry_api():
+    class Categories(CatSpec):
+        STATUS = pl.Enum(["NEW", "PAID", "SHIPPED"])
+        CURRENCY = pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt8))
+
+    cats = Categories()
+    assert cats.get_enum("STATUS") == ["NEW", "PAID", "SHIPPED"]
+    assert cats.enum.STATUS == pl.Enum(["NEW", "PAID", "SHIPPED"])
+    assert cats.categorical.CURRENCY == pl.Categorical(
+        pl.Categories("CURRENCY", physical=pl.UInt8)
+    )
+    assert "STATUS" in cats
+    assert len(cats) == 2
+
+    dumped = cats.to_yaml()
+    assert "STATUS" in dumped and "CURRENCY" in dumped
+    reloaded = CatSpec.from_dict(yaml.safe_load(dumped))
+    assert reloaded.get_enum("STATUS") == ["NEW", "PAID", "SHIPPED"]
+
+
+def test_class_body_attribute_returns_the_dtype_not_the_raw_list():
+    """The documented difference from the dict-constructor form.
+
+    A class-body entry is a real class attribute, so plain attribute access
+    returns the dtype exactly as written; a dict-built registry's `.STATUS`
+    goes through __getattr__ and returns the raw category list instead.
+    """
+
+    class Categories(CatSpec):
+        STATUS = pl.Enum(["NEW", "PAID"])
+
+    dict_built = CatSpec(enums={"STATUS": ["NEW", "PAID"]})
+    assert isinstance(Categories.STATUS, pl.Enum)
+    assert isinstance(dict_built.STATUS, list)
+    assert Categories().get_enum("STATUS") == dict_built.get_enum("STATUS")
+
+
+def test_class_body_dict_constructor_still_extends_a_declared_registry():
+    """The two forms compose: a subclass's entries are defaults, not the only option."""
+
+    class Categories(CatSpec):
+        STATUS = pl.Enum(["NEW", "PAID"])
+
+    extended = Categories(enums={"REASON": ["A", "B"]})
+    assert extended.get_enum("STATUS") == ["NEW", "PAID"]
+    assert extended.get_enum("REASON") == ["A", "B"]
+
+
+def test_class_body_inheritance_collects_base_and_subclass_entries():
+    class Base(CatSpec):
+        A = pl.Enum(["x", "y"])
+
+    class Derived(Base):
+        B = pl.Enum(["p", "q"])
+
+    assert Derived._declared_enums == {"A": ["x", "y"], "B": ["p", "q"]}
+
+
+def test_class_body_rejects_an_unnamed_categorical():
+    with pytest.raises(ValueError, match="has no name"):
+
+        class Categories(CatSpec):
+            X = pl.Categorical()
+
+
+def test_class_body_shadowing_a_method_warns_but_still_works():
+    with pytest.warns(UserWarning, match=r"shadows CatSpec\.get"):
+
+        class Categories(CatSpec):
+            get = pl.Enum(["A", "B"])
+
+    # The entry is honoured; only the shadowed method is lost.
+    assert Categories.get == pl.Enum(["A", "B"])
+    with pytest.raises(TypeError):
+        Categories().get("STATUS")
+
+
+def test_class_body_ordinary_entries_do_not_warn(recwarn):
+    class Categories(CatSpec):
+        STATUS = pl.Enum(["NEW", "PAID"])
+
+    assert [w for w in recwarn if "shadows" in str(w.message)] == []
+
+
+def test_plain_catspec_is_unaffected_by_declared_defaults():
+    """CatSpec itself declares nothing, so the dict constructor works exactly as before."""
+    cats = CatSpec(enums={"STATUS": ["A", "B"]})
+    assert cats.STATUS == ["A", "B"]
+    assert CatSpec._declared_enums == {}

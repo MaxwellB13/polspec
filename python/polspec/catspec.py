@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import re
+import warnings
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import polars as pl
 import yaml
@@ -33,6 +34,23 @@ def _auto_physical(n_unique: int) -> pl.DataType:
     elif n_unique < 65536:
         return pl.UInt16
     return pl.UInt32
+
+
+def _declared_categories_from(value: object) -> pl.Categories | None:
+    """The Categories a class-body value declares, if it declares one at all.
+
+    Accepts either a bare `pl.Categories(...)` or a `pl.Categorical(...)`
+    wrapping one -- the latter is what `ColSpec.dtype` already expects, so a
+    value can be copied straight from a CatSpec declaration into a ColSpec
+    without unwrapping it first.
+    """
+    if isinstance(value, pl.Categories):
+        return value
+    if isinstance(value, pl.Categorical):
+        cats = value.categories
+        if isinstance(cats, pl.Categories):
+            return cats
+    return None
 
 
 class _EnumAccessor:
@@ -96,6 +114,40 @@ class CatSpec:
     (for `pl.Categorical` / `pl.Categories`), enabling seamless schema reuse, join
     compatibility, and clean YAML serialization.
 
+    The declarative way to write one by hand is to subclass it, one line per
+    entry, in the same vocabulary `ColSpec.dtype` already accepts:
+
+        class Categories(CatSpec):
+            STATUS   = pl.Enum(["NEW", "PAID", "SHIPPED"])
+            CURRENCY = pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt8))
+
+        ColSpec(Categories.STATUS)
+        ColSpec(Categories.CURRENCY)
+
+    `Categories.STATUS` is a plain class attribute -- ordinary Python
+    attribute lookup, nothing polspec-specific -- so it can be handed
+    straight to `ColSpec()`. Instantiating the class (`Categories()`) also
+    still works, and behaves exactly like the keyword-argument form below,
+    for the registry-level operations (`to_yaml`, `get_enum`,
+    case-insensitive lookup, ...) that need an instance.
+
+    This makes `.STATUS` mean two different things depending on how the
+    registry was built, which is worth being deliberate about rather than
+    surprised by: on a class-body subclass, plain attribute access returns
+    the dtype exactly as written (a `pl.Enum`/`pl.Categorical`), because that
+    is a real class attribute and nothing intercepts it. On a registry built
+    from `enums=`/`categoricals=` dicts, `.STATUS` goes through `__getattr__`
+    instead and returns the raw category list -- `pl.Enum(cats.STATUS)` is
+    how that form turns it into a dtype. `get_enum()`, `get_categorical()`,
+    `[...]` and the `.enum`/`.categorical` accessors behave identically
+    either way, since those always go through the registry, never through
+    plain attribute lookup.
+
+    The `enums=`/`categoricals=`/`choices=` constructor below remains the
+    form `CatSpec.infer()`, `from_dataframe()` and `from_yaml()` build
+    programmatically, since their names come from data rather than from a
+    class body someone writes by hand -- the two are not in competition.
+
     Examples
     --------
     >>> cats = CatSpec(
@@ -120,6 +172,61 @@ class CatSpec:
         "_enums",
     )
 
+    # Populated by __init_subclass__ from bare pl.Enum / pl.Categorical class
+    # attributes; empty for CatSpec itself and for any subclass declaring none.
+    _declared_enums: ClassVar[dict[str, list[str]]] = {}
+    _declared_categoricals: ClassVar[dict[str, pl.Categories]] = {}
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Collects this subclass's pl.Enum / pl.Categorical class attributes.
+
+        Walks the MRO like `FrameSpec.__init_subclass__` collects `ColSpec`
+        columns, so a subclass inherits and can override entries the same
+        way. Anything that isn't a `pl.Enum`, a `pl.Categorical` wrapping a
+        named `pl.Categories`, or a bare `pl.Categories` is left alone --
+        including CatSpec's own methods, which are never instances of either.
+        """
+        super().__init_subclass__(**kwargs)
+        enums: dict[str, list[str]] = {}
+        categoricals: dict[str, pl.Categories] = {}
+
+        for base in reversed(cls.__mro__):
+            for name, value in vars(base).items():
+                if name.startswith("_"):
+                    continue
+
+                if isinstance(value, pl.Enum):
+                    target, entry = enums, value.categories.to_list()
+                else:
+                    categories_obj = _declared_categories_from(value)
+                    if categories_obj is None:
+                        continue
+                    if not categories_obj.name():
+                        raise ValueError(
+                            f"{cls.__name__}.{name} has no name, but a CatSpec "
+                            "entry needs one to act as a shared registry key -- "
+                            f"give it one: pl.Categories({name!r}, ...)"
+                        )
+                    target, entry = categoricals, categories_obj
+
+                if name in _RESERVED_ATTRS:
+                    # A warning, not an error, for the same reason FrameSpec's
+                    # column/method collision is a warning: the entry itself
+                    # still works (Categories.get, say, is still a valid
+                    # attribute), only the shadowed method is lost.
+                    warnings.warn(
+                        f"{cls.__name__}.{name} shadows CatSpec.{name}, so "
+                        f"{cls.__name__}().{name} no longer resolves to the "
+                        "method. Access it via .get(...), the .enum/"
+                        ".categorical accessors, or rename the entry.",
+                        stacklevel=2,
+                    )
+
+                target[name] = entry
+
+        cls._declared_enums = enums
+        cls._declared_categoricals = categoricals
+
     def __init__(
         self,
         *,
@@ -128,6 +235,12 @@ class CatSpec:
         | None = None,
         choices: Mapping[str, Sequence[Any]] | None = None,
     ) -> None:
+        # A subclass declaring pl.Enum/pl.Categorical class attributes (see
+        # __init_subclass__) seeds these as defaults; explicit keyword
+        # arguments here still add to or override them, per key.
+        enums = {**type(self)._declared_enums, **(enums or {})}
+        categoricals = {**type(self)._declared_categoricals, **(categoricals or {})}
+
         self._enums: dict[str, list[str]] = {}
         if enums:
             for k, v in enums.items():
@@ -664,3 +777,12 @@ class CatSpec:
         enum_keys = list(self._enums.keys())
         cat_keys = list(self._categoricals.keys())
         return f"CatSpec(enums={enum_keys}, categoricals={cat_keys})"
+
+
+# Names a class-body entry may not take: assigning one shadows the CatSpec
+# method it collides with, e.g. an entry named "get" would shadow
+# CatSpec.get(). Computed here, after CatSpec's own body is complete, and
+# referenced (as a module global, resolved lazily) from __init_subclass__
+# above -- which only ever runs for a subclass defined later, by which point
+# this already exists.
+_RESERVED_ATTRS = frozenset(name for name in vars(CatSpec) if not name.startswith("_"))

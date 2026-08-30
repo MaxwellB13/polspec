@@ -3,31 +3,83 @@
 A `CatSpec` is a registry of `Enum` and `Categorical` definitions shared across
 specs, so several tables agree on a domain instead of each restating it.
 
+## Declaring one by hand
+
+Subclass `CatSpec`, one line per entry, in the same vocabulary `ColSpec.dtype`
+already accepts:
+
 ```python
 import polars as pl
-from polspec import CatSpec
+from polspec import CatSpec, ColSpec, FrameSpec
 
+class Categories(CatSpec):
+    STATUS   = pl.Enum(["NEW", "PAID", "SHIPPED"])
+    CURRENCY = pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt8))
+```
+
+`Categories.STATUS` is a plain class attribute — ordinary Python attribute
+lookup, nothing polspec-specific — so it plugs straight into a `ColSpec`:
+
+```python
+class Orders(FrameSpec):
+    status   = ColSpec(Categories.STATUS)
+    currency = ColSpec(Categories.CURRENCY)
+```
+
+This is deliberately not a dict. `CatSpec(enums={...}, categoricals={...},
+choices={...})` puts one name across up to three parallel mappings that all
+have to stay in step; a class body puts each entry on its own line, in the
+declaration order that also documents it, and inherits the same collision
+handling `FrameSpec` uses for columns — an entry that shadows one of
+`CatSpec`'s own methods (naming an entry `get`, say) warns rather than
+silently breaking, and an unnamed `pl.Categorical()` is rejected outright,
+since a registry entry with no name can't act as a shared key.
+
+!!! note "`.STATUS` means something different on each form"
+
+    On a class-body registry, `.STATUS` is a genuine class attribute, so it
+    returns the dtype exactly as written. On a registry built from
+    `enums=`/`categoricals=` dicts (below), `.STATUS` goes through a lookup
+    method instead and returns the raw category list — `pl.Enum(cats.STATUS)`
+    is how that form turns it into a dtype. `get_enum()`, `get_categorical()`,
+    `[...]`, and the `.enum`/`.categorical` accessors below behave identically
+    either way, since those always go through the registry rather than plain
+    attribute lookup.
+
+## The dict constructor
+
+The form `CatSpec.infer()`, `from_dataframe()` and `from_yaml()` build
+programmatically, since their entry names come from data at runtime rather
+than from a class body someone writes by hand:
+
+```python
 categories = CatSpec(
     enums={"STATUS": ["NEW", "PAID", "SHIPPED"]},
     categoricals={"CURRENCY": pl.Categories("CURRENCY", physical=pl.UInt8)},
 )
 ```
 
-## Using a registry
-
-Three equivalent accessors, whichever reads best where you are:
+The two forms compose rather than compete: a class-body subclass's entries
+become the defaults, and an explicit `enums=`/`categoricals=`/`choices=`
+argument at construction time can still add to or override them per key.
 
 ```python
-pl.Enum(categories.STATUS)          # attribute
-categories.enum.STATUS              # typed accessor -> pl.Enum
-categories.enum["STATUS"]           # item access
-categories.categorical.CURRENCY     # -> pl.Categorical
+extended = Categories(enums={"REASON": ["FRAUD", "DUPLICATE"]})
+extended.get_enum("STATUS")   # ["NEW", "PAID", "SHIPPED"] -- inherited
+extended.get_enum("REASON")   # ["FRAUD", "DUPLICATE"]     -- added
 ```
 
+## Using a registry
+
+Whichever form built it, the registry accessors are the same. Four equivalent
+ways to reach an entry:
+
 ```python
-class Orders(FrameSpec):
-    status   = ColSpec(categories.enum.STATUS)
-    currency = ColSpec(categories.categorical.CURRENCY)
+pl.Enum(categories.STATUS)          # attribute, dict-built form only -- see note above
+categories.enum.STATUS              # typed accessor -> pl.Enum
+categories.enum["STATUS"]           # item access
+categories.get_enum("STATUS")       # -> list[str]
+categories.categorical.CURRENCY     # -> pl.Categorical
 ```
 
 Lookup falls back to case variants, so a column named `status` finds a registry

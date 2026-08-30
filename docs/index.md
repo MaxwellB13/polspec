@@ -66,6 +66,14 @@ production will reject.
 
     [YAML specs](guide/yaml.md)
 
+- **From the command line**
+
+    `polspec schema infer data.parquet -o spec.yaml` profiles a data file into
+    a schema; `polspec test spec.yaml -o test_spec.py` turns a schema into a
+    pytest round-trip test.
+
+    [Command line](guide/cli.md)
+
 </div>
 
 ## Install
