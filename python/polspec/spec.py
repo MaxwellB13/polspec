@@ -54,8 +54,19 @@ class ColSpec:
 
     :ivar dtype: The data type of the column.
     :ivar nullable: Whether the column allows null values.
-    :ivar bounds: The inclusive range of values allowed in the column. Only
-        supported for numeric and temporal data types.
+    :ivar bounds: The inclusive range of values allowed in the column, as a
+        `Bound` or a 2-sequence. Only supported for numeric and temporal data
+        types. Either endpoint may be None to leave that side unconstrained --
+        `bounds=(0, None)` for a non-negative column, `bounds=(None, 0)` for a
+        non-positive one.
+
+        Note that an open end means different things to the two consumers of
+        this field, deliberately. `validate()` treats it as genuinely
+        unconstrained and omits that half of the check. `generate()` cannot
+        sample an unbounded range, so it falls back to the same default it
+        would use with no bounds at all -- `bounds=(0, None)` on Int64
+        generates 0..1,000,000 while validating any value >= 0. This mirrors
+        how `bounds=None` already behaves rather than adding a third rule.
     :ivar tags: Optional tag or sequence of tags to classify the column.
     :ivar unique: Whether values in the column must be unique (distinct).
     :ivar null_probability: Probability of a value being null in the column. Must
@@ -97,6 +108,20 @@ class ColSpec:
                 object.__setattr__(self, "dtype", self.dtype())
         object.__setattr__(self, "bounds", Bound._coerce(self.bounds))
         object.__setattr__(self, "string_length", Bound._coerce(self.string_length))
+        # One internal representation for "unconstrained", so every downstream
+        # `if spec.bounds is not None` guard keeps meaning what it says.
+        if (
+            self.bounds is not None
+            and self.bounds.min is None
+            and self.bounds.max is None
+        ):
+            object.__setattr__(self, "bounds", None)
+        if self.string_length is not None and self.string_length.is_open:
+            raise ValueError(
+                "ColSpec.string_length requires both endpoints, got "
+                f"{self.string_length!r}. An open end (None) is supported on "
+                "ColSpec.bounds only."
+            )
         object.__setattr__(self, "rules", tuple(self.rules))
         self._normalize_validators()
         if self.tags is None:
@@ -300,19 +325,25 @@ class ColSpec:
 
         if self.bounds is not None:
             b_min, b_max = self.bounds.min, self.bounds.max
+
+            def _outside(value: Any) -> bool:
+                return (b_min is not None and value < b_min) or (
+                    b_max is not None and value > b_max
+                )
+
             if self.choices is not None:
-                out_of_bounds = [c for c in self.choices if not (b_min <= c <= b_max)]
+                out_of_bounds = [c for c in self.choices if _outside(c)]
                 if out_of_bounds:
                     raise ValueError(
                         f"ColSpec.choices {out_of_bounds} fall outside this column's "
-                        f"bounds [{b_min}, {b_max}]"
+                        f"bounds {self.bounds}"
                     )
             for rule in self.rules:
-                out_of_bounds = [c for c in rule.choices if not (b_min <= c <= b_max)]
+                out_of_bounds = [c for c in rule.choices if _outside(c)]
                 if out_of_bounds:
                     raise ValueError(
                         f"ColRule.choices {out_of_bounds} fall outside this column's "
-                        f"bounds [{b_min}, {b_max}]"
+                        f"bounds {self.bounds}"
                     )
 
     def _validate_bounds_fit_dtype(self) -> None:
@@ -331,6 +362,8 @@ class ColSpec:
             return
         lo_limit, hi_limit = limits
         for label, endpoint in (("min", self.bounds.min), ("max", self.bounds.max)):
+            if endpoint is None:
+                continue  # unconstrained on this side; nothing to fit
             physical = _bound_endpoint_to_physical(endpoint, self.dtype)
             if not math.isfinite(physical):
                 raise ValueError(

@@ -84,11 +84,15 @@ COLUMN_CASES: dict[str, ColSpec] = {
     "int64_bounded": ColSpec(pl.Int64, bounds=(-100, 100)),
     "int64_nullable": ColSpec(pl.Int64, nullable=True, null_probability=0.3),
     "int64_always_null": ColSpec(pl.Int64, nullable=True, null_probability=1.0),
+    "int64_lower_open": ColSpec(pl.Int64, bounds=(0, None)),
+    "int64_upper_open": ColSpec(pl.Int64, bounds=(None, 0)),
+    "int64_lower_open_nullable": ColSpec(pl.Int64, bounds=(0, None), nullable=True),
     # floats
     "float32": ColSpec(pl.Float32),
     "float64": ColSpec(pl.Float64),
     "float32_bounded": ColSpec(pl.Float32, bounds=(-1.0, 1.0)),
     "float64_bounded": ColSpec(pl.Float64, bounds=(-2.5, 2.5)),
+    "float64_lower_open": ColSpec(pl.Float64, bounds=(0.0, None)),
     # boolean
     "bool": ColSpec(pl.Boolean),
     "bool_weighted": ColSpec(pl.Boolean, weights=[0.3, 0.7]),
@@ -104,6 +108,7 @@ COLUMN_CASES: dict[str, ColSpec] = {
     "date_bounded": ColSpec(
         pl.Date, bounds=(dt.date(2020, 1, 1), dt.date(2021, 12, 31))
     ),
+    "date_lower_open": ColSpec(pl.Date, bounds=(dt.date(2020, 1, 1), None)),
     "time": ColSpec(pl.Time),
     "datetime_us": ColSpec(pl.Datetime("us")),
     "datetime_ns": ColSpec(pl.Datetime("ns")),

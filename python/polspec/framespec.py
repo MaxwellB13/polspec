@@ -1272,9 +1272,7 @@ class FrameSpec:
                     dtype_str = "Categorical"
 
             nullable_str = "Yes" if spec.nullable else "No"
-            bounds_str = (
-                f"[{spec.bounds.min}, {spec.bounds.max}]" if spec.bounds else "-"
-            )
+            bounds_str = str(spec.bounds) if spec.bounds else "-"
 
             if spec.choices is not None:
                 ch_list = list(spec.choices)
@@ -1469,7 +1467,7 @@ class FrameSpec:
             if spec.nullable:
                 comments.append("nullable")
             if spec.bounds is not None:
-                comments.append(f"bounds: [{spec.bounds.min}, {spec.bounds.max}]")
+                comments.append(f"bounds: {spec.bounds}")
             elif spec.choices is not None:
                 ch = list(spec.choices)
                 if len(ch) <= 3:

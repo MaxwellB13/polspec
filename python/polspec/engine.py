@@ -91,15 +91,42 @@ def _resolve_bounded_categorical(spec: ColSpec, seed: int) -> ColSpec:
 def _resolve_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
     """Returns the (min, max) an int/float/temporal ColSpec generates within.
 
-    Mirrors the defaulting rule used at generation time: explicit
-    `spec.bounds` wins, otherwise a fixed-width int dtype defaults to its own
-    range, and anything else falls back to the wide/default bound constants.
+    Each end is the user's own bound where they gave one, and this dtype's
+    default otherwise. An open end (`bounds=(0, None)`) therefore generates
+    within the same default range it would have used with no bounds at all --
+    generation cannot sample an unbounded range, so `validate()` is where an
+    open end stays genuinely unconstrained.
+    """
+    lo, hi = _default_numeric_bounds(spec)
+    if spec.bounds is None:
+        return lo, hi
+
+    if spec.bounds.min is not None:
+        lo = _bound_endpoint_to_physical(spec.bounds.min, spec.dtype)
+    if spec.bounds.max is not None:
+        hi = _bound_endpoint_to_physical(spec.bounds.max, spec.dtype)
+
+    # A closed end can sit outside the default range -- bounds=(2_000_000, None)
+    # on Int64 leaves lo above the default hi of 1_000_000. Widen the open end
+    # to the dtype's own limit rather than hand the engine an inverted range,
+    # which it would silently swap.
+    if lo > hi:
+        limits = _generation_clamp_limits(spec.dtype)
+        if limits is not None:
+            if spec.bounds.max is None:
+                hi = limits[1]
+            elif spec.bounds.min is None:
+                lo = limits[0]
+    return lo, hi
+
+
+def _default_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
+    """The range polspec generates within when a ColSpec declares no bounds.
+
+    A fixed-width int dtype defaults to its own range, temporal dtypes to a
+    reasonable era or span, and anything else to the wide/default constants.
     """
     kind = _column_kind(spec.dtype)
-    if spec.bounds is not None:
-        lo = _bound_endpoint_to_physical(spec.bounds.min, spec.dtype)
-        hi = _bound_endpoint_to_physical(spec.bounds.max, spec.dtype)
-        return lo, hi
     if kind == "int":
         if spec.dtype in _INT_DTYPE_BOUNDS:
             lo, hi = _INT_DTYPE_BOUNDS[spec.dtype]

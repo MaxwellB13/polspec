@@ -182,8 +182,14 @@ def _validate_dataframe(
                 }
             )
 
-        # Bounds validation (numeric / temporal)
-        if spec.bounds is not None and is_type_compatible:
+        # Bounds validation (numeric / temporal). `bounds` with both ends open
+        # is normalized to None by ColSpec, so reaching here means at least one
+        # side is constrained.
+        if (
+            spec.bounds is not None
+            and not spec.bounds.is_open_both
+            and is_type_compatible
+        ):
             b_min = spec.bounds.min
             b_max = spec.bounds.max
             oob_cnt_alias = f"__val__{name}__oob_cnt"
@@ -191,16 +197,28 @@ def _validate_dataframe(
             min_alias = f"__val__{name}__min_val"
             max_alias = f"__val__{name}__max_val"
 
-            if actual_dtype.is_temporal():
-                lit_min = pl.lit(b_min).cast(actual_dtype)
-                lit_max = pl.lit(b_max).cast(actual_dtype)
-                oob_mask = pl.col(name).is_not_null() & (
-                    (pl.col(name) < lit_min) | (pl.col(name) > lit_max)
+            # An open end is genuinely unconstrained here, unlike at generation
+            # time where it falls back to a default: only the sides the spec
+            # actually constrains contribute to the mask.
+            violations: list[pl.Expr] = []
+            if b_min is not None:
+                floor = (
+                    pl.lit(b_min).cast(actual_dtype)
+                    if actual_dtype.is_temporal()
+                    else b_min
                 )
-            else:
-                oob_mask = pl.col(name).is_not_null() & (
-                    (pl.col(name) < b_min) | (pl.col(name) > b_max)
+                violations.append(pl.col(name) < floor)
+            if b_max is not None:
+                ceiling = (
+                    pl.lit(b_max).cast(actual_dtype)
+                    if actual_dtype.is_temporal()
+                    else b_max
                 )
+                violations.append(pl.col(name) > ceiling)
+
+            oob_mask = pl.col(name).is_not_null() & (
+                violations[0] if len(violations) == 1 else violations[0] | violations[1]
+            )
             agg_exprs.append(oob_mask.sum().alias(oob_cnt_alias))
             agg_exprs.append(
                 pl.col(name).filter(oob_mask).head(5).implode().alias(oob_samples_alias)
@@ -211,6 +229,7 @@ def _validate_dataframe(
                 {
                     "type": "bounds",
                     "column": name,
+                    "range": str(spec.bounds),
                     "min": b_min,
                     "max": b_max,
                     "cnt_alias": oob_cnt_alias,
@@ -426,7 +445,7 @@ def _validate_dataframe(
                     min_f = stats_row[meta["min_alias"]][0]
                     max_f = stats_row[meta["max_alias"]][0]
                     errors.append(
-                        f"Column '{col_name}': found {cnt} value(s) out of bounds [{meta['min']}, {meta['max']}] "
+                        f"Column '{col_name}': found {cnt} value(s) out of bounds {meta['range']} "
                         f"(min found: {min_f}, max found: {max_f}). Out of bounds samples: {samples}"
                     )
 
