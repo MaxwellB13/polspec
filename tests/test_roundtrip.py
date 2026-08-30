@@ -209,32 +209,70 @@ def test_broken_column_roundtrips(case):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="C1: bounds outside the dtype's range reach Rust as +/-inf and "
-    "panic in Uniform::new_inclusive instead of raising",
+@pytest.mark.parametrize(
+    ("dtype", "bounds"),
+    [
+        (pl.Float32, (-1e40, 1e40)),
+        (pl.Float32, (0.0, 1e39)),
+        (pl.Int8, (0, 1_000)),
+        (pl.UInt8, (-5, 10)),
+        (pl.Int32, (0, 2**40)),
+        (pl.Date, (0, 10**12)),
+    ],
 )
-def test_bounds_wider_than_dtype_raise_cleanly():
-    spec_cls = _spec_for("f32_overflow", ColSpec(pl.Float32, bounds=(-1e40, 1e40)))
-    with pytest.raises(ValueError):
-        spec_cls.generate(ROWS, seed=SEED)
+def test_bounds_wider_than_dtype_raise_cleanly(dtype, bounds):
+    """C1: an unrepresentable bound is a declaration error, not a process abort."""
+    with pytest.raises(ValueError, match="outside the range"):
+        ColSpec(dtype, bounds=bounds)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="C2: a non-uniform distribution on a temporal column drops its "
-    "bounds entirely, so Rust samples the full i32/i64 range",
-)
-def test_distribution_on_temporal_column_stays_in_dtype_range():
-    spec_cls = _spec_for(
-        "date_normal",
-        ColSpec(
-            pl.Date,
-            distribution="normal",
-            distribution_params={"mean": 0.0, "std": 1e9},
-        ),
+@pytest.mark.parametrize("bounds", [(float("nan"), 1.0), (0.0, float("inf"))])
+def test_non_finite_bounds_raise_cleanly(bounds):
+    with pytest.raises(ValueError, match="finite"):
+        ColSpec(pl.Float64, bounds=bounds)
+
+
+def test_bounds_at_the_dtype_limit_are_accepted():
+    """The check rejects what falls outside the domain, not what sits on its edge."""
+    assert_roundtrip(_spec_for("int8_full", ColSpec(pl.Int8, bounds=(-128, 127))))
+    assert_roundtrip(_spec_for("uint8_full", ColSpec(pl.UInt8, bounds=(0, 255))))
+    assert_roundtrip(
+        _spec_for("date_full", ColSpec(pl.Date, bounds=(dt.date.min, dt.date.max)))
     )
-    assert_roundtrip(spec_cls)
+
+
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        pl.Date,
+        pl.Time,
+        pl.Datetime("ms"),
+        pl.Datetime("us"),
+        pl.Datetime("ns"),
+        pl.Duration("ms"),
+        pl.Duration("us"),
+        pl.Duration("ns"),
+    ],
+    ids=str,
+)
+@pytest.mark.parametrize("std", [1e3, 1e9, 1e18])
+def test_distribution_on_temporal_column_stays_in_dtype_range(dtype, std):
+    """C2: the distribution governs the shape; the dtype still governs the domain.
+
+    Unbounded temporal columns reach the engine as a bare int32/int64, so a
+    distribution wide enough to leave the dtype's range used to yield values
+    that could not be read back -- an out-of-range date panicked outright.
+    """
+    assert_roundtrip(
+        _spec_for(
+            f"temporal_normal_{std:.0e}",
+            ColSpec(
+                dtype,
+                distribution="normal",
+                distribution_params={"mean": 0.0, "std": std},
+            ),
+        )
+    )
 
 
 @pytest.mark.xfail(

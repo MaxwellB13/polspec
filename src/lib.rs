@@ -553,7 +553,30 @@ fn gen_string_column(
     result
 }
 
+/// Rejects bounds that would panic the samplers downstream.
+///
+/// `Uniform::new_inclusive` aborts the process on a non-finite range, and a
+/// panic crossing the FFI boundary is not something the Python caller can
+/// handle. The Python side validates bounds against the dtype before we get
+/// here; this is the backstop that keeps any future caller from reaching that
+/// panic.
+fn check_finite_bounds(spec: &ColumnSpec) -> PyResult<()> {
+    for (label, value) in [("min", spec.min), ("max", spec.max)] {
+        match value {
+            Some(v) if !v.is_finite() => {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                    "Bound {label} for column '{}' must be finite, got {v}",
+                    spec.name
+                )))
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 fn generate_series(spec: &ColumnSpec, n: usize, seed: u64) -> PyResult<Series> {
+    check_finite_bounds(spec)?;
     let dist_kind = DistKind::from_spec(spec)?;
     let series = match spec.kind.to_ascii_lowercase().as_str() {
         "int" | "int64" | "i64" => gen_int64_column(spec, dist_kind, n, seed).into_series(),

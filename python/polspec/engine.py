@@ -16,22 +16,12 @@ from polspec.constants import (
     _INT_DTYPE_BOUNDS,
     _MAX_CARTESIAN_ROWS,
 )
+from polspec.dtypes import (
+    _TIME_UNIT_FACTORS,
+    _bound_endpoint_to_physical,
+    _generation_clamp_limits,
+)
 from polspec.spec import ColSpec, _column_kind, _is_categorical_dtype
-
-# Factor to scale a day/second-denominated default range into a Datetime's or
-# Duration's own physical time_unit (default bounds below are expressed in µs).
-_TIME_UNIT_FACTORS = {"ms": 1_000, "us": 1_000_000, "ns": 1_000_000_000}
-
-
-def _bound_endpoint_to_physical(value: object, dtype: pl.DataType) -> float | int:
-    """Coerces a Bound endpoint to the physical (int) representation `dtype`
-    stores internally, so real `date`/`datetime`/`time`/`timedelta` objects
-    can be used as bounds on temporal ColSpecs, matching what `validate()`
-    already accepts.
-    """
-    if isinstance(value, (int, float)):
-        return value
-    return pl.Series([value], dtype=dtype).to_physical().item()
 
 
 def _stable_seed(*parts: str) -> int:
@@ -197,6 +187,19 @@ def _to_rust_spec(name: str, spec: ColSpec) -> tuple:
             ):
                 lo, hi = _resolve_numeric_bounds(spec)
                 min_bound, max_bound = float(lo), float(hi)
+            elif spec.dtype.is_temporal():
+                # A non-uniform distribution with no explicit bounds is left to
+                # its own shape rather than squeezed into polspec's default
+                # range -- but a temporal dtype's own domain is not optional.
+                # Temporal columns reach the engine as a bare int32/int64 kind,
+                # so without this clamp they are sampled across that whole
+                # integer range and produce values the dtype cannot represent
+                # (an unreadable Date, a negative Time). Integer and float
+                # dtypes need no such clamp: the engine already samples them in
+                # their own native type.
+                limits = _generation_clamp_limits(spec.dtype)
+                if limits is not None:
+                    min_bound, max_bound = float(limits[0]), float(limits[1])
         elif kind in ("string", "binary"):
             length = spec.string_length or Bound(*_DEFAULT_STRING_LEN)
             str_min_len, str_max_len = int(length.min), int(length.max)

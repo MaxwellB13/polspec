@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ import polars as pl
 from polspec.bound import Bound
 from polspec.check import Check
 from polspec.constants import _DEFAULT_NULL_PROBABILITY
+from polspec.dtypes import _bound_endpoint_to_physical, _dtype_value_limits
 from polspec.rules import ColRule
 
 
@@ -127,6 +129,8 @@ class ColSpec:
                 f"ColSpec.bounds is only supported for numeric or temporal "
                 f"dtypes, got {self.dtype!r}"
             )
+
+        self._validate_bounds_fit_dtype()
 
         # Process choices & weights
         if isinstance(self.choices, dict):
@@ -308,6 +312,33 @@ class ColSpec:
                         f"ColRule.choices {out_of_bounds} fall outside this column's "
                         f"bounds [{b_min}, {b_max}]"
                     )
+
+    def _validate_bounds_fit_dtype(self) -> None:
+        """Rejects bounds the dtype cannot represent.
+
+        Generation clamps to these endpoints, so an endpoint outside the
+        dtype's domain has no valid interpretation. Caught here rather than at
+        generation time because the Rust engine reaches them as a saturated
+        cast -- an out-of-range float becomes an infinity, and building a
+        distribution over a non-finite range aborts the process.
+        """
+        if self.bounds is None:
+            return
+        limits = _dtype_value_limits(self.dtype)
+        if limits is None:
+            return
+        lo_limit, hi_limit = limits
+        for label, endpoint in (("min", self.bounds.min), ("max", self.bounds.max)):
+            physical = _bound_endpoint_to_physical(endpoint, self.dtype)
+            if not math.isfinite(physical):
+                raise ValueError(
+                    f"ColSpec.bounds {label} must be a finite value, got {endpoint!r}"
+                )
+            if not lo_limit <= physical <= hi_limit:
+                raise ValueError(
+                    f"ColSpec.bounds {label} ({endpoint!r}) is outside the range "
+                    f"{self.dtype!r} can represent [{lo_limit}, {hi_limit}]"
+                )
 
     def _normalize_validators(self) -> None:
         if self.validators is None:

@@ -1858,5 +1858,3 @@ def test_framespec_to_markdown_lists_column_validators():
     assert "Column `price`" in md
     assert "price_positive" in md
     assert "Price must be positive" in md
-
-
