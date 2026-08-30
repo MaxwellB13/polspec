@@ -78,24 +78,25 @@ production will reject.
 
 ## Install
 
-```bash
-pip install polspec
-```
-
-Writing Parquet or Arrow IPC needs PyArrow:
+Not published to PyPI yet — install from a checkout. The generator is a
+compiled Rust extension, so this needs a Rust toolchain and
+[maturin](https://www.maturin.rs):
 
 ```bash
-pip install "polspec[all]"
-```
-
-Building from a checkout needs a Rust toolchain, since the generator is a
-compiled extension:
-
-```bash
+git clone https://github.com/MaxwellB13/polspec.git
+cd polspec
+uv sync --group dev        # or: pip install -e ".[all]" && pip install maturin
 maturin develop --release
 ```
+
+`maturin develop` builds the extension and installs the package into your
+active environment, editable. Writing Parquet or Arrow IPC needs PyArrow,
+included via `[all]`/the `dev` group above.
 
 ## Where to go next
 
 Start with [Getting started](getting-started.md) for the full loop — declare,
-generate, validate — in about five minutes.
+generate, validate — in about five minutes. If you're weighing polspec
+against a hand-rolled fixture, Faker, or a data-quality framework, see
+[Comparison to other approaches](comparison.md) for where each one fits and
+the benchmark numbers behind the speed claim.

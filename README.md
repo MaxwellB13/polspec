@@ -103,7 +103,7 @@ given — see [Command line](https://maxwellb13.github.io/polspec/guide/cli/).
 
 Full docs: **[maxwellb13.github.io/polspec](https://maxwellb13.github.io/polspec/)**
 
-- [Getting started](https://maxwellb13.github.io/polspec/getting-started/)
+- [Getting started](https://maxwellb13.github.io/polspec/getting-started/) · [Comparison to other approaches](https://maxwellb13.github.io/polspec/comparison/)
 - [Declaring columns](https://maxwellb13.github.io/polspec/guide/columns/) · [Constraints](https://maxwellb13.github.io/polspec/guide/constraints/)
 - [Generating data](https://maxwellb13.github.io/polspec/guide/generating/) · [Validating data](https://maxwellb13.github.io/polspec/guide/validating/)
 - [Shared categories](https://maxwellb13.github.io/polspec/guide/categories/) · [YAML specs](https://maxwellb13.github.io/polspec/guide/yaml/)
@@ -144,7 +144,6 @@ Example results (illustrative; your hardware will differ):
 Notes
 - All three implementations emit a Polars `DataFrame` with the same schema to keep the comparison fair. The NumPy version uses a fixed-width trick for strings (since vectorized ragged strings are not available), and the pure-Python version builds lists then constructs a `DataFrame`.
 - The script warms each implementation once, then times increasing sizes; the pure-Python path is skipped for very large sizes once it exceeds a cutoff.
-- If you want a Markdown table for your machine in this README, run the script and paste its table output here.
 
 ## Development
 
