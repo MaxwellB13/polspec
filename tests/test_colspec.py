@@ -10,7 +10,7 @@ from polspec import (
     FrameSpec,
     ValidationError,
 )
-from polspec.colspec import _colspec_to_yaml
+from polspec.serialization import _colspec_to_yaml
 
 
 class DataSource(FrameSpec):
