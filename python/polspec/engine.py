@@ -151,6 +151,23 @@ def _default_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
     raise TypeError(f"{spec.dtype!r} is not a numeric or temporal dtype")
 
 
+# The name the Rust engine knows each fixed-width dtype by. Anything absent --
+# String, Binary, Boolean, Enum, Categorical -- keeps the kind `_column_kind`
+# already worked out.
+_ENGINE_KINDS: dict[pl.DataType, str] = {
+    pl.Int8: "int8",
+    pl.Int16: "int16",
+    pl.Int32: "int32",
+    pl.Int64: "int64",
+    pl.UInt8: "uint8",
+    pl.UInt16: "uint16",
+    pl.UInt32: "uint32",
+    pl.UInt64: "uint64",
+    pl.Float32: "float32",
+    pl.Float64: "float64",
+}
+
+
 def _to_rust_spec(name: str, spec: ColSpec) -> tuple:
     """Builds the tuple the Rust extension expects for one column.
 
@@ -175,36 +192,11 @@ def _to_rust_spec(name: str, spec: ColSpec) -> tuple:
         categories = [str(c) for c in spec.choices]
         kind = "string"
     else:
-        if spec.dtype == pl.Int8:
-            kind = "int8"
-        elif spec.dtype == pl.Int16:
-            kind = "int16"
-        elif spec.dtype == pl.Int32:
-            kind = "int32"
-        elif spec.dtype == pl.Int64:
-            kind = "int64"
-        elif spec.dtype == pl.UInt8:
-            kind = "uint8"
-        elif spec.dtype == pl.UInt16:
-            kind = "uint16"
-        elif spec.dtype == pl.UInt32:
-            kind = "uint32"
-        elif spec.dtype == pl.UInt64:
-            kind = "uint64"
-        elif spec.dtype == pl.Float32:
-            kind = "float32"
-        elif spec.dtype == pl.Float64:
-            kind = "float64"
-        elif spec.dtype == pl.Date:
-            kind = "int32"
-        elif (
-            spec.dtype == pl.Time
-            or isinstance(spec.dtype, pl.Datetime)
-            or spec.dtype == pl.Datetime
-            or isinstance(spec.dtype, pl.Duration)
-            or spec.dtype == pl.Duration
-        ):
-            kind = "int64"
+        kind = _ENGINE_KINDS.get(spec.dtype, kind)
+        if spec.dtype.is_temporal():
+            # Temporal columns cross as their physical integer: Date is an
+            # i32 day count, everything else an i64 in its own time unit.
+            kind = "int32" if spec.dtype == pl.Date else "int64"
 
         if spec.dtype.is_integer() or spec.dtype.is_float() or spec.dtype.is_temporal():
             if (

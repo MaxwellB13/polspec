@@ -1,14 +1,32 @@
+"""Checking a frame against the claims a spec makes about it.
+
+Every claim is a `_Constraint`: it contributes aggregation expressions, and it
+turns the results back into an error message. All of them are collected first
+and evaluated in a single pass over the frame, so validating fifty columns
+costs one scan rather than fifty.
+
+This replaces a pair of long loops that communicated through hand-built alias
+strings (`f"__val__{name}__oob_cnt"`) built in one and looked up in the other,
+two hundred lines apart. Each constraint now owns its own aliases, and adding
+a new kind of check is a new class rather than an edit in two distant places.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 import polars as pl
 
 if TYPE_CHECKING:
+    from polspec.bound import Bound
     from polspec.check import Check
     from polspec.foreign_key import ForeignKey
+    from polspec.rules import ColRule
     from polspec.spec import ColSpec
+
+_MAX_SAMPLES = 5
 
 
 class ValidationError(ValueError):
@@ -19,583 +37,670 @@ class ValidationError(ValueError):
         self.errors = errors or []
 
 
+@dataclass(frozen=True, slots=True)
+class _Options:
+    """Which checks to run and what to do about structural mismatches.
+
+    Grouped rather than passed as ten separate arguments, so adding a check
+    does not widen every signature between here and `FrameSpec.validate`.
+    """
+
+    extra_cols: Literal["drop", "allow", "raise"] = "raise"
+    missing_cols: Literal["add", "allow", "raise"] = "raise"
+    strict_dtypes: bool = False
+    rules: bool = True
+    validators: bool = True
+    unique: bool = True
+    checks: bool = True
+    foreign_keys: bool = True
+    cast: bool = False
+    streaming: bool = False
+
+    def __post_init__(self) -> None:
+        if self.extra_cols not in ("drop", "allow", "raise"):
+            raise ValueError(
+                f"extra_cols must be one of 'drop', 'allow', 'raise'; got {self.extra_cols!r}"
+            )
+        if self.missing_cols not in ("add", "allow", "raise"):
+            raise ValueError(
+                f"missing_cols must be one of 'add', 'allow', 'raise'; got {self.missing_cols!r}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Constraints
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _Constraint:
+    """One checkable claim, measured by counting the rows that violate a mask.
+
+    Subclasses supply the mask and the wording; the aliases tying the two
+    halves together stay private to the instance.
+    """
+
+    key: str
+    mask: pl.Expr
+    sample_expr: pl.Expr | None = None
+    unique_samples: bool = True
+
+    def _alias(self, suffix: str) -> str:
+        return f"__val__{self.key}__{suffix}"
+
+    def aggregations(self) -> list[pl.Expr]:
+        exprs = [self.mask.sum().alias(self._alias("cnt"))]
+        if self.sample_expr is not None:
+            samples = self.sample_expr.filter(self.mask)
+            if self.unique_samples:
+                samples = samples.unique()
+            exprs.append(
+                samples.head(_MAX_SAMPLES).implode().alias(self._alias("samples"))
+            )
+        return exprs
+
+    def failure(self, stats: dict[str, list]) -> str | None:
+        count = stats[self._alias("cnt")][0]
+        if not count:
+            return None
+        return self.message(count, self._samples(stats), stats)
+
+    def _samples(self, stats: dict[str, list]) -> list:
+        if self.sample_expr is None:
+            return []
+        raw = stats[self._alias("samples")][0]
+        return list(raw) if raw is not None else []
+
+    def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
+        raise NotImplementedError
+
+
+@dataclass
+class _Nullability(_Constraint):
+    column: str = ""
+    sample_expr: None = None
+
+    def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
+        return (
+            f"Column '{self.column}': non-nullable column contains "
+            f"{count} null value(s)"
+        )
+
+
+@dataclass
+class _AllowedValues(_Constraint):
+    column: str = ""
+    allowed: list[Any] = field(default_factory=list)
+
+    def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
+        return (
+            f"Column '{self.column}': found {count} invalid value(s) not in "
+            f"allowed choices/categories {self.allowed}. Invalid samples: {samples}"
+        )
+
+
+@dataclass
+class _Bounds(_Constraint):
+    column: str = ""
+    bounds: Bound | None = None
+    unique_samples: bool = False
+
+    def aggregations(self) -> list[pl.Expr]:
+        # The observed extremes make an out-of-bounds report actionable, so
+        # they are gathered alongside the violating samples.
+        return super().aggregations() + [
+            pl.col(self.column).min().alias(self._alias("min")),
+            pl.col(self.column).max().alias(self._alias("max")),
+        ]
+
+    def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
+        found_min = stats[self._alias("min")][0]
+        found_max = stats[self._alias("max")][0]
+        return (
+            f"Column '{self.column}': found {count} value(s) out of bounds "
+            f"{self.bounds} (min found: {found_min}, max found: {found_max}). "
+            f"Out of bounds samples: {samples}"
+        )
+
+
+@dataclass
+class _StringLength(_Constraint):
+    column: str = ""
+    length: Bound | None = None
+    unique_samples: bool = False
+
+    def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
+        return (
+            f"Column '{self.column}': found {count} value(s) with string length "
+            f"outside [{self.length.min}, {self.length.max}]. "
+            f"Invalid samples: {samples}"
+        )
+
+
+@dataclass
+class _RuleHolds(_Constraint):
+    column: str = ""
+    rule: ColRule | None = None
+
+    def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
+        return (
+            f"Column '{self.column}': found {count} value(s) violating "
+            f"ColRule(when={self.rule.when}, choices={self.rule.choices}). "
+            f"Violating samples: {samples}"
+        )
+
+
+@dataclass
+class _ColumnValidator(_Constraint):
+    column: str = ""
+    validator: Check | None = None
+    sample_expr: None = None
+
+    def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
+        described = (
+            f" ({self.validator.description})" if self.validator.description else ""
+        )
+        return (
+            f"Column '{self.column}': validator '{self.validator.name}' failed: "
+            f"found {count} row(s) violating condition {self.validator.expr}{described}"
+        )
+
+
+@dataclass
+class _UniqueValues(_Constraint):
+    column: str = ""
+
+    def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
+        return (
+            f"Column '{self.column}': unique column contains {count} duplicate "
+            f"value(s). Duplicate samples: {samples}"
+        )
+
+
+@dataclass
+class _CompositeUnique(_Constraint):
+    columns: tuple[str, ...] = ()
+
+    def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
+        return (
+            f"Composite unique key {list(self.columns)} violated: found {count} "
+            f"duplicate row(s). Duplicate samples: {samples}"
+        )
+
+
+@dataclass
+class _FrameCheck(_Constraint):
+    check: Check | None = None
+    sample_expr: None = None
+
+    def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
+        described = f" ({self.check.description})" if self.check.description else ""
+        return (
+            f"Check '{self.check.name}' failed: found {count} row(s) violating "
+            f"condition {self.check.expr}{described}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Dtype compatibility
+# ---------------------------------------------------------------------------
+
+
+def _is_dtype_compatible(
+    expected: pl.DataType, actual: pl.DataType, *, strict: bool
+) -> bool:
+    """Whether `actual` can stand in for the declared `expected` dtype.
+
+    Strict mode demands the same dtype, with String/Utf8 treated as one. The
+    default is permissive about widening and about textual columns arriving as
+    String rather than their declared Enum/Categorical, since that is how they
+    come back from CSV and JSON.
+    """
+    if strict:
+        if expected in (pl.String, pl.Utf8):
+            return actual in (pl.String, pl.Utf8)
+        return actual == expected
+
+    if isinstance(expected, pl.Enum):
+        return isinstance(actual, pl.Enum) or actual in (
+            pl.String,
+            pl.Utf8,
+            pl.Categorical,
+        )
+    if isinstance(expected, pl.Categorical) or expected == pl.Categorical:
+        return actual in (pl.String, pl.Utf8, pl.Categorical) or isinstance(
+            actual, (pl.Enum, pl.Categorical)
+        )
+    if expected in (pl.String, pl.Utf8):
+        return actual in (pl.String, pl.Utf8)
+    if expected.is_integer():
+        return actual.is_integer()
+    if expected.is_float():
+        return actual.is_float() or actual.is_integer()
+    if expected.is_temporal():
+        return actual.is_temporal()
+    return actual == expected
+
+
+def _is_textual(dtype: pl.DataType) -> bool:
+    """Whether values of `dtype` are compared to `choices` by their string form."""
+    return dtype in (pl.String, pl.Utf8, pl.Categorical) or isinstance(
+        dtype, (pl.Enum, pl.Categorical)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Building constraints from a spec
+# ---------------------------------------------------------------------------
+
+
+def _column_constraints(
+    name: str,
+    spec: ColSpec,
+    actual_dtype: pl.DataType,
+    *,
+    compatible: bool,
+    options: _Options,
+    df_col_names: Sequence[str],
+) -> list[_Constraint]:
+    """The constraints one declared column contributes to the single pass.
+
+    Most are skipped when the dtype is already wrong: comparing values against
+    bounds or choices of an incompatible type produces noise on top of the
+    dtype error the caller will already see.
+    """
+    column = pl.col(name)
+    present = column.is_not_null()
+    constraints: list[_Constraint] = []
+
+    if not spec.nullable:
+        constraints.append(
+            _Nullability(key=f"{name}__null", mask=column.is_null(), column=name)
+        )
+
+    allowed = _allowed_values(spec)
+    if allowed is not None:
+        if _is_textual(actual_dtype):
+            in_domain = column.cast(pl.String).is_in([str(c) for c in allowed])
+            sample_expr = column.cast(pl.String)
+        else:
+            in_domain = column.is_in(allowed)
+            sample_expr = column
+        constraints.append(
+            _AllowedValues(
+                key=f"{name}__choices",
+                mask=present & ~in_domain,
+                sample_expr=sample_expr,
+                column=name,
+                allowed=allowed,
+            )
+        )
+
+    if not compatible:
+        return constraints
+
+    if spec.bounds is not None and not spec.bounds.is_open_both:
+        constraints.append(
+            _Bounds(
+                key=f"{name}__bounds",
+                mask=present & _out_of_bounds(name, spec.bounds, actual_dtype),
+                sample_expr=column,
+                column=name,
+                bounds=spec.bounds,
+            )
+        )
+
+    if spec.string_length is not None:
+        measured = _measure_length(name, actual_dtype)
+        if measured is not None:
+            too_short = measured < spec.string_length.min
+            too_long = measured > spec.string_length.max
+            constraints.append(
+                _StringLength(
+                    key=f"{name}__len",
+                    mask=present & (too_short | too_long),
+                    sample_expr=column,
+                    column=name,
+                    length=spec.string_length,
+                )
+            )
+
+    if options.rules and spec.rules:
+        constraints.extend(_rule_constraints(name, spec, actual_dtype, df_col_names))
+
+    if options.validators and spec.validators:
+        constraints.extend(
+            _ColumnValidator(
+                key=f"{name}__validator_{index}",
+                mask=validator._failure_mask(),
+                column=name,
+                validator=validator,
+            )
+            for index, validator in enumerate(spec.validators)
+        )
+
+    if options.unique and spec.unique:
+        constraints.append(
+            _UniqueValues(
+                key=f"{name}__unique",
+                mask=present & column.is_duplicated(),
+                sample_expr=column,
+                column=name,
+            )
+        )
+
+    return constraints
+
+
+def _allowed_values(spec: ColSpec) -> list[Any] | None:
+    """The closed domain this column's values must fall in, if it has one."""
+    if isinstance(spec.dtype, pl.Enum):
+        categories = spec.dtype.categories.to_list()
+        if spec.choices is not None:
+            return [c for c in spec.choices if c in categories]
+        return categories
+    if spec.choices is not None:
+        return list(spec.choices)
+    return None
+
+
+def _out_of_bounds(name: str, bounds: Bound, actual_dtype: pl.DataType) -> pl.Expr:
+    """A mask for values outside `bounds`, testing only the constrained sides.
+
+    An open end is genuinely unconstrained here, unlike at generation time
+    where it falls back to a default (see `ColSpec.bounds`).
+    """
+    column = pl.col(name)
+
+    def limit(value: Any) -> Any:
+        return pl.lit(value).cast(actual_dtype) if actual_dtype.is_temporal() else value
+
+    violations = []
+    if bounds.min is not None:
+        violations.append(column < limit(bounds.min))
+    if bounds.max is not None:
+        violations.append(column > limit(bounds.max))
+    return violations[0] if len(violations) == 1 else violations[0] | violations[1]
+
+
+def _measure_length(name: str, actual_dtype: pl.DataType) -> pl.Expr | None:
+    """Length of each value, for the dtypes where that is meaningful."""
+    if actual_dtype in (pl.String, pl.Utf8):
+        return pl.col(name).str.len_chars()
+    if actual_dtype == pl.Binary:
+        return pl.col(name).bin.size()
+    return None
+
+
+def _rule_constraints(
+    name: str,
+    spec: ColSpec,
+    actual_dtype: pl.DataType,
+    df_col_names: Sequence[str],
+) -> list[_Constraint]:
+    """One constraint per ColRule, respecting first-match-wins ordering.
+
+    Each rule only governs the rows no earlier rule already claimed, matching
+    how `_apply_rules` assigns them at generation time.
+    """
+    column = pl.col(name)
+    constraints: list[_Constraint] = []
+    claimed = pl.lit(False)
+
+    for index, rule in enumerate(spec.rules):
+        if rule.when.get("column") not in df_col_names:
+            continue  # reported through missing_cols instead
+        applies = rule._expr() & ~claimed
+        claimed = claimed | rule._expr()
+
+        if _is_textual(actual_dtype):
+            in_choices = column.cast(pl.String).is_in([str(c) for c in rule.choices])
+            sample_expr = column.cast(pl.String)
+        else:
+            in_choices = column.is_in(list(rule.choices))
+            sample_expr = column
+
+        constraints.append(
+            _RuleHolds(
+                key=f"{name}__rule_{index}",
+                mask=applies & column.is_not_null() & ~in_choices,
+                sample_expr=sample_expr,
+                column=name,
+                rule=rule,
+            )
+        )
+    return constraints
+
+
+def _frame_constraints(
+    unique_together: Sequence[Sequence[str]] | None,
+    checks: Sequence[Check] | None,
+    df_col_names: Sequence[str],
+) -> list[_Constraint]:
+    """Constraints spanning several columns rather than belonging to one."""
+    constraints: list[_Constraint] = []
+
+    for index, group in enumerate(unique_together or ()):
+        columns = tuple(group)
+        if not all(c in df_col_names for c in columns):
+            continue
+        key_struct = pl.struct([pl.col(c) for c in columns])
+        all_present = pl.all_horizontal([pl.col(c).is_not_null() for c in columns])
+        constraints.append(
+            _CompositeUnique(
+                key=f"composite_{index}",
+                mask=all_present & key_struct.is_duplicated(),
+                sample_expr=key_struct,
+                columns=columns,
+            )
+        )
+
+    constraints.extend(
+        _FrameCheck(key=f"check_{index}", mask=check._failure_mask(), check=check)
+        for index, check in enumerate(checks or ())
+    )
+    return constraints
+
+
+# ---------------------------------------------------------------------------
+# Foreign keys -- each needs its own join, so they cannot share the pass above
+# ---------------------------------------------------------------------------
+
+
+def _foreign_key_errors(
+    lf: pl.LazyFrame,
+    schema_name: str,
+    foreign_keys: Sequence[tuple[ForeignKey, pl.LazyFrame | None]],
+    df_col_names: Sequence[str],
+    collect_kwargs: dict[str, Any],
+) -> list[str]:
+    errors: list[str] = []
+    for fk, target_lf in foreign_keys:
+        local_cols = list(fk.columns)
+        ref_cols = list(fk.ref_columns)
+        if not all(c in df_col_names for c in local_cols):
+            continue  # already reported through missing_cols handling
+
+        parent_lf = target_lf if target_lf is not None else lf
+        missing_ref = [
+            c for c in ref_cols if c not in parent_lf.collect_schema().names()
+        ]
+        if missing_ref:
+            raise ValueError(
+                f"ForeignKey '{fk.name}' on {schema_name!r} references columns "
+                f"{missing_ref} not present in the referenced DataFrame"
+            )
+
+        key_expr = (
+            pl.col(local_cols[0]) if len(local_cols) == 1 else pl.struct(local_cols)
+        )
+        present = (
+            pl.col(local_cols[0]).is_not_null()
+            if len(local_cols) == 1
+            else pl.all_horizontal([pl.col(c).is_not_null() for c in local_cols])
+        )
+        orphans = (
+            lf.select(local_cols)
+            .filter(present)
+            .join(
+                parent_lf.select(ref_cols).unique(),
+                left_on=local_cols,
+                right_on=ref_cols,
+                how="anti",
+            )
+        )
+        stats = orphans.select(
+            pl.len().alias("cnt"),
+            key_expr.unique().head(_MAX_SAMPLES).implode().alias("samples"),
+        ).collect(**collect_kwargs)
+
+        count = stats["cnt"][0]
+        if not count:
+            continue
+        raw_samples = stats["samples"][0]
+        target_label = (
+            "self"
+            if target_lf is None
+            else getattr(fk.references, "__name__", str(fk.references))
+        )
+        errors.append(
+            f"ForeignKey '{fk.name}' violated ({local_cols} -> "
+            f"{target_label}.{ref_cols}): found {count} row(s) with no "
+            f"matching parent record. Violating samples: "
+            f"{list(raw_samples) if raw_samples is not None else []}"
+        )
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+
 def _validate_dataframe(
     columns: dict[str, ColSpec],
     schema_name: str,
     df: pl.DataFrame | pl.LazyFrame,
+    options: _Options,
     *,
-    extra_cols: Literal["drop", "allow", "raise"] = "raise",
-    missing_cols: Literal["add", "allow", "raise"] = "raise",
-    strict_dtypes: bool = False,
-    validate_rules: bool = True,
-    validate_validators: bool = True,
-    validate_unique: bool = True,
-    validate_checks: bool = True,
-    validate_foreign_keys: bool = True,
     checks: Sequence[Check] | None = None,
     unique_together: Sequence[Sequence[str]] | None = None,
     foreign_keys: Sequence[tuple[ForeignKey, pl.LazyFrame | None]] | None = None,
-    cast: bool = False,
-    streaming: bool = False,
 ) -> pl.DataFrame | pl.LazyFrame:
     """Validates a DataFrame or LazyFrame against declared ColSpecs, checks, and unique constraints."""
-    if extra_cols not in ("drop", "allow", "raise"):
-        raise ValueError(
-            f"extra_cols must be one of 'drop', 'allow', 'raise'; got {extra_cols!r}"
-        )
-    if missing_cols not in ("add", "allow", "raise"):
-        raise ValueError(
-            f"missing_cols must be one of 'add', 'allow', 'raise'; got {missing_cols!r}"
-        )
-
     is_lazy = isinstance(df, pl.LazyFrame)
     lf = df if is_lazy else df.lazy()
 
     df_schema = lf.collect_schema()
     df_col_names = df_schema.names()
-    spec_col_names = list(columns.keys())
 
     extra = [col for col in df_col_names if col not in columns]
-    missing = [col for col in spec_col_names if col not in df_col_names]
+    missing = [col for col in columns if col not in df_col_names]
 
     errors: list[str] = []
-
-    # 1. Check Extra Columns
-    if extra and extra_cols == "raise":
+    if extra and options.extra_cols == "raise":
         errors.append(f"Extra columns found that are not in schema: {extra}")
-
-    # 2. Check Missing Columns
-    if missing and missing_cols == "raise":
+    if missing and options.missing_cols == "raise":
         errors.append(f"Missing required columns in DataFrame: {missing}")
 
-    # 3. Present columns to validate
-    present_cols = [col for col in spec_col_names if col in df_col_names]
-
-    # Check dtypes and build aggregation expressions for data validation
-    agg_exprs: list[pl.Expr] = []
-    expr_metadata: list[dict[str, Any]] = []
-
-    for name in present_cols:
+    constraints: list[_Constraint] = []
+    for name in (c for c in columns if c in df_col_names):
         spec = columns[name]
         actual_dtype = df_schema[name]
-        expected_dtype = spec.dtype
-
-        # Type compatibility check
-        is_type_compatible = True
-        if strict_dtypes:
-            if expected_dtype in (pl.String, pl.Utf8):
-                if actual_dtype not in (pl.String, pl.Utf8):
-                    is_type_compatible = False
-            elif actual_dtype != expected_dtype:
-                is_type_compatible = False
-        else:
-            if isinstance(expected_dtype, pl.Enum):
-                if not (
-                    isinstance(actual_dtype, pl.Enum)
-                    or actual_dtype in (pl.String, pl.Utf8, pl.Categorical)
-                ):
-                    is_type_compatible = False
-            elif (
-                isinstance(expected_dtype, pl.Categorical)
-                or expected_dtype == pl.Categorical
-            ):
-                if not (
-                    actual_dtype in (pl.String, pl.Utf8, pl.Categorical)
-                    or isinstance(actual_dtype, (pl.Enum, pl.Categorical))
-                ):
-                    is_type_compatible = False
-            elif expected_dtype in (pl.String, pl.Utf8):
-                if actual_dtype not in (pl.String, pl.Utf8):
-                    is_type_compatible = False
-            elif expected_dtype.is_integer():
-                if not actual_dtype.is_integer():
-                    is_type_compatible = False
-            elif expected_dtype.is_float():
-                if not (actual_dtype.is_float() or actual_dtype.is_integer()):
-                    is_type_compatible = False
-            elif expected_dtype.is_temporal():
-                if not actual_dtype.is_temporal():
-                    is_type_compatible = False
-            elif actual_dtype != expected_dtype:
-                is_type_compatible = False
-
-        if not is_type_compatible:
+        compatible = _is_dtype_compatible(
+            spec.dtype, actual_dtype, strict=options.strict_dtypes
+        )
+        if not compatible:
             errors.append(
-                f"Column '{name}': expected dtype {expected_dtype}, got {actual_dtype}"
+                f"Column '{name}': expected dtype {spec.dtype}, got {actual_dtype}"
             )
-
-        # Nullability validation
-        if not spec.nullable:
-            null_cnt_alias = f"__val__{name}__null_cnt"
-            agg_exprs.append(pl.col(name).null_count().alias(null_cnt_alias))
-            expr_metadata.append(
-                {
-                    "type": "nullability",
-                    "column": name,
-                    "alias": null_cnt_alias,
-                }
+        constraints.extend(
+            _column_constraints(
+                name,
+                spec,
+                actual_dtype,
+                compatible=compatible,
+                options=options,
+                df_col_names=df_col_names,
             )
+        )
 
-        # Enum & Choices validation
-        allowed_choices: list[Any] | None = None
-        if isinstance(spec.dtype, pl.Enum):
-            allowed_choices = spec.dtype.categories.to_list()
-            if spec.choices is not None:
-                allowed_choices = [c for c in spec.choices if c in allowed_choices]
-        elif spec.choices is not None:
-            allowed_choices = list(spec.choices)
+    constraints.extend(
+        _frame_constraints(
+            unique_together if options.unique else None,
+            checks if options.checks else None,
+            df_col_names,
+        )
+    )
 
-        if allowed_choices is not None:
-            invalid_alias_cnt = f"__val__{name}__choice_invalid_cnt"
-            invalid_alias_samples = f"__val__{name}__choice_samples"
+    collect_kwargs: dict[str, Any] = (
+        {"engine": "streaming"} if options.streaming else {}
+    )
 
-            # Use string representation comparison for Enum/Categorical/String
-            if actual_dtype in (pl.String, pl.Utf8, pl.Categorical) or isinstance(
-                actual_dtype, (pl.Enum, pl.Categorical)
-            ):
-                str_allowed = [str(c) for c in allowed_choices]
-                invalid_mask = pl.col(name).is_not_null() & (
-                    ~pl.col(name).cast(pl.String).is_in(str_allowed)
-                )
-                sample_expr = pl.col(name).cast(pl.String)
-            else:
-                invalid_mask = pl.col(name).is_not_null() & (
-                    ~pl.col(name).is_in(allowed_choices)
-                )
-                sample_expr = pl.col(name)
+    if constraints:
+        aggregations = [expr for c in constraints for expr in c.aggregations()]
+        stats = (
+            lf.select(aggregations).collect(**collect_kwargs).to_dict(as_series=False)
+        )
+        errors.extend(
+            message
+            for message in (c.failure(stats) for c in constraints)
+            if message is not None
+        )
 
-            agg_exprs.append(invalid_mask.sum().alias(invalid_alias_cnt))
-            agg_exprs.append(
-                sample_expr.filter(invalid_mask)
-                .unique()
-                .head(5)
-                .implode()
-                .alias(invalid_alias_samples)
+    if options.foreign_keys and foreign_keys:
+        errors.extend(
+            _foreign_key_errors(
+                lf, schema_name, foreign_keys, df_col_names, collect_kwargs
             )
-            expr_metadata.append(
-                {
-                    "type": "choices",
-                    "column": name,
-                    "allowed": allowed_choices,
-                    "cnt_alias": invalid_alias_cnt,
-                    "samples_alias": invalid_alias_samples,
-                }
-            )
-
-        # Bounds validation (numeric / temporal). `bounds` with both ends open
-        # is normalized to None by ColSpec, so reaching here means at least one
-        # side is constrained.
-        if (
-            spec.bounds is not None
-            and not spec.bounds.is_open_both
-            and is_type_compatible
-        ):
-            b_min = spec.bounds.min
-            b_max = spec.bounds.max
-            oob_cnt_alias = f"__val__{name}__oob_cnt"
-            oob_samples_alias = f"__val__{name}__oob_samples"
-            min_alias = f"__val__{name}__min_val"
-            max_alias = f"__val__{name}__max_val"
-
-            # An open end is genuinely unconstrained here, unlike at generation
-            # time where it falls back to a default: only the sides the spec
-            # actually constrains contribute to the mask.
-            violations: list[pl.Expr] = []
-            if b_min is not None:
-                floor = (
-                    pl.lit(b_min).cast(actual_dtype)
-                    if actual_dtype.is_temporal()
-                    else b_min
-                )
-                violations.append(pl.col(name) < floor)
-            if b_max is not None:
-                ceiling = (
-                    pl.lit(b_max).cast(actual_dtype)
-                    if actual_dtype.is_temporal()
-                    else b_max
-                )
-                violations.append(pl.col(name) > ceiling)
-
-            oob_mask = pl.col(name).is_not_null() & (
-                violations[0] if len(violations) == 1 else violations[0] | violations[1]
-            )
-            agg_exprs.append(oob_mask.sum().alias(oob_cnt_alias))
-            agg_exprs.append(
-                pl.col(name).filter(oob_mask).head(5).implode().alias(oob_samples_alias)
-            )
-            agg_exprs.append(pl.col(name).min().alias(min_alias))
-            agg_exprs.append(pl.col(name).max().alias(max_alias))
-            expr_metadata.append(
-                {
-                    "type": "bounds",
-                    "column": name,
-                    "range": str(spec.bounds),
-                    "min": b_min,
-                    "max": b_max,
-                    "cnt_alias": oob_cnt_alias,
-                    "samples_alias": oob_samples_alias,
-                    "min_alias": min_alias,
-                    "max_alias": max_alias,
-                }
-            )
-
-        # String / Binary length validation
-        if spec.string_length is not None and is_type_compatible:
-            len_min = spec.string_length.min
-            len_max = spec.string_length.max
-            len_cnt_alias = f"__val__{name}__len_cnt"
-            len_samples_alias = f"__val__{name}__len_samples"
-
-            if actual_dtype in (pl.String, pl.Utf8):
-                len_col = pl.col(name).str.len_chars()
-            elif actual_dtype == pl.Binary:
-                len_col = pl.col(name).bin.size()
-            else:
-                len_col = None
-
-            if len_col is not None:
-                len_mask = pl.col(name).is_not_null() & (
-                    (len_col < len_min) | (len_col > len_max)
-                )
-                agg_exprs.append(len_mask.sum().alias(len_cnt_alias))
-                agg_exprs.append(
-                    pl.col(name)
-                    .filter(len_mask)
-                    .head(5)
-                    .implode()
-                    .alias(len_samples_alias)
-                )
-                expr_metadata.append(
-                    {
-                        "type": "string_length",
-                        "column": name,
-                        "min": len_min,
-                        "max": len_max,
-                        "cnt_alias": len_cnt_alias,
-                        "samples_alias": len_samples_alias,
-                    }
-                )
-
-        # Rules validation
-        if validate_rules and spec.rules and is_type_compatible:
-            matched_prior = pl.lit(False)
-            for r_idx, rule in enumerate(spec.rules):
-                ref_col = rule.when.get("column")
-                if ref_col not in df_col_names:
-                    continue
-
-                r_cnt_alias = f"__val__{name}__rule_{r_idx}_cnt"
-                r_samples_alias = f"__val__{name}__rule_{r_idx}_samples"
-
-                condition_expr = rule._expr() & (~matched_prior)
-                matched_prior = matched_prior | rule._expr()
-
-                if actual_dtype in (pl.String, pl.Utf8, pl.Categorical) or isinstance(
-                    actual_dtype, (pl.Enum, pl.Categorical)
-                ):
-                    str_rule_choices = [str(c) for c in rule.choices]
-                    rule_viol_mask = (
-                        condition_expr
-                        & pl.col(name).is_not_null()
-                        & (~pl.col(name).cast(pl.String).is_in(str_rule_choices))
-                    )
-                    r_sample_expr = pl.col(name).cast(pl.String)
-                else:
-                    rule_viol_mask = (
-                        condition_expr
-                        & pl.col(name).is_not_null()
-                        & (~pl.col(name).is_in(list(rule.choices)))
-                    )
-                    r_sample_expr = pl.col(name)
-
-                agg_exprs.append(rule_viol_mask.sum().alias(r_cnt_alias))
-                agg_exprs.append(
-                    r_sample_expr.filter(rule_viol_mask)
-                    .unique()
-                    .head(5)
-                    .implode()
-                    .alias(r_samples_alias)
-                )
-                expr_metadata.append(
-                    {
-                        "type": "rule",
-                        "column": name,
-                        "rule_idx": r_idx,
-                        "rule": rule,
-                        "cnt_alias": r_cnt_alias,
-                        "samples_alias": r_samples_alias,
-                    }
-                )
-
-        # Column-level validators (ColSpec.validators)
-        if validate_validators and spec.validators and is_type_compatible:
-            for v_idx, validator in enumerate(spec.validators):
-                v_cnt_alias = f"__val__{name}__validator_{v_idx}_cnt"
-                fail_mask = validator._failure_mask()
-                agg_exprs.append(fail_mask.sum().alias(v_cnt_alias))
-                expr_metadata.append(
-                    {
-                        "type": "col_validator",
-                        "column": name,
-                        "validator": validator,
-                        "cnt_alias": v_cnt_alias,
-                    }
-                )
-
-        # Uniqueness validation (single-column)
-        if validate_unique and spec.unique and is_type_compatible:
-            uniq_cnt_alias = f"__val__{name}__uniq_cnt"
-            uniq_samples_alias = f"__val__{name}__uniq_samples"
-            uniq_mask = pl.col(name).is_not_null() & pl.col(name).is_duplicated()
-            agg_exprs.append(uniq_mask.sum().alias(uniq_cnt_alias))
-            agg_exprs.append(
-                pl.col(name)
-                .filter(uniq_mask)
-                .unique()
-                .head(5)
-                .implode()
-                .alias(uniq_samples_alias)
-            )
-            expr_metadata.append(
-                {
-                    "type": "unique",
-                    "column": name,
-                    "cnt_alias": uniq_cnt_alias,
-                    "samples_alias": uniq_samples_alias,
-                }
-            )
-
-    # Composite uniqueness validation (__unique_together__)
-    if validate_unique and unique_together:
-        for u_idx, comp_cols in enumerate(unique_together):
-            comp_cols_tuple = tuple(comp_cols)
-            # Only validate if all constituent columns are present in df
-            if all(c in df_col_names for c in comp_cols_tuple):
-                comp_cnt_alias = f"__val__comp_unique_{u_idx}__cnt"
-                comp_samples_alias = f"__val__comp_unique_{u_idx}__samples"
-                struct_col = pl.struct([pl.col(c) for c in comp_cols_tuple])
-                not_null_mask = pl.all_horizontal(
-                    [pl.col(c).is_not_null() for c in comp_cols_tuple]
-                )
-                comp_mask = not_null_mask & struct_col.is_duplicated()
-                agg_exprs.append(comp_mask.sum().alias(comp_cnt_alias))
-                agg_exprs.append(
-                    struct_col.filter(comp_mask)
-                    .unique()
-                    .head(5)
-                    .implode()
-                    .alias(comp_samples_alias)
-                )
-                expr_metadata.append(
-                    {
-                        "type": "composite_unique",
-                        "columns": comp_cols_tuple,
-                        "cnt_alias": comp_cnt_alias,
-                        "samples_alias": comp_samples_alias,
-                    }
-                )
-
-    # Multi-column Check constraints
-    if validate_checks and checks:
-        for c_idx, check in enumerate(checks):
-            chk_cnt_alias = f"__val__check_{c_idx}__cnt"
-            fail_mask = check._failure_mask()
-            agg_exprs.append(fail_mask.sum().alias(chk_cnt_alias))
-            expr_metadata.append(
-                {
-                    "type": "check",
-                    "check": check,
-                    "check_idx": c_idx,
-                    "cnt_alias": chk_cnt_alias,
-                }
-            )
-
-    # Execute data aggregations if any
-    if agg_exprs:
-        collect_kwargs = {"engine": "streaming"} if streaming else {}
-        stats_df = lf.select(agg_exprs).collect(**collect_kwargs)
-        stats_row = stats_df.to_dict(as_series=False)
-
-        for meta in expr_metadata:
-            col_name = meta.get("column", "")
-            m_type = meta["type"]
-
-            if m_type == "nullability":
-                cnt = stats_row[meta["alias"]][0]
-                if cnt and cnt > 0:
-                    errors.append(
-                        f"Column '{col_name}': non-nullable column contains {cnt} null value(s)"
-                    )
-
-            elif m_type == "choices":
-                cnt = stats_row[meta["cnt_alias"]][0]
-                if cnt and cnt > 0:
-                    raw_samples = stats_row[meta["samples_alias"]][0]
-                    samples = list(raw_samples) if raw_samples is not None else []
-                    errors.append(
-                        f"Column '{col_name}': found {cnt} invalid value(s) not in allowed choices/categories "
-                        f"{meta['allowed']}. Invalid samples: {samples}"
-                    )
-
-            elif m_type == "bounds":
-                cnt = stats_row[meta["cnt_alias"]][0]
-                if cnt and cnt > 0:
-                    raw_samples = stats_row[meta["samples_alias"]][0]
-                    samples = list(raw_samples) if raw_samples is not None else []
-                    min_f = stats_row[meta["min_alias"]][0]
-                    max_f = stats_row[meta["max_alias"]][0]
-                    errors.append(
-                        f"Column '{col_name}': found {cnt} value(s) out of bounds {meta['range']} "
-                        f"(min found: {min_f}, max found: {max_f}). Out of bounds samples: {samples}"
-                    )
-
-            elif m_type == "string_length":
-                cnt = stats_row[meta["cnt_alias"]][0]
-                if cnt and cnt > 0:
-                    raw_samples = stats_row[meta["samples_alias"]][0]
-                    samples = list(raw_samples) if raw_samples is not None else []
-                    errors.append(
-                        f"Column '{col_name}': found {cnt} value(s) with string length outside "
-                        f"[{meta['min']}, {meta['max']}]. Invalid samples: {samples}"
-                    )
-
-            elif m_type == "rule":
-                cnt = stats_row[meta["cnt_alias"]][0]
-                if cnt and cnt > 0:
-                    raw_samples = stats_row[meta["samples_alias"]][0]
-                    samples = list(raw_samples) if raw_samples is not None else []
-                    rule_obj = meta["rule"]
-                    errors.append(
-                        f"Column '{col_name}': found {cnt} value(s) violating ColRule(when={rule_obj.when}, "
-                        f"choices={rule_obj.choices}). Violating samples: {samples}"
-                    )
-
-            elif m_type == "col_validator":
-                cnt = stats_row[meta["cnt_alias"]][0]
-                if cnt and cnt > 0:
-                    v = meta["validator"]
-                    v_desc = f" ({v.description})" if v.description else ""
-                    errors.append(
-                        f"Column '{col_name}': validator '{v.name}' failed: found "
-                        f"{cnt} row(s) violating condition {v.expr}{v_desc}"
-                    )
-
-            elif m_type == "unique":
-                cnt = stats_row[meta["cnt_alias"]][0]
-                if cnt and cnt > 0:
-                    raw_samples = stats_row[meta["samples_alias"]][0]
-                    samples = list(raw_samples) if raw_samples is not None else []
-                    errors.append(
-                        f"Column '{col_name}': unique column contains {cnt} duplicate value(s). "
-                        f"Duplicate samples: {samples}"
-                    )
-
-            elif m_type == "composite_unique":
-                cnt = stats_row[meta["cnt_alias"]][0]
-                if cnt and cnt > 0:
-                    raw_samples = stats_row[meta["samples_alias"]][0]
-                    samples = list(raw_samples) if raw_samples is not None else []
-                    errors.append(
-                        f"Composite unique key {list(meta['columns'])} violated: found {cnt} duplicate row(s). "
-                        f"Duplicate samples: {samples}"
-                    )
-
-            elif m_type == "check":
-                cnt = stats_row[meta["cnt_alias"]][0]
-                if cnt and cnt > 0:
-                    chk = meta["check"]
-                    chk_desc = f" ({chk.description})" if chk.description else ""
-                    errors.append(
-                        f"Check '{chk.name}' failed: found {cnt} row(s) violating condition "
-                        f"{chk.expr}{chk_desc}"
-                    )
-
-    # Foreign key (referential integrity) validation. Each one needs its own
-    # join against a (possibly external) parent frame, so it can't share the
-    # single scalar-aggregation pass above.
-    if validate_foreign_keys and foreign_keys:
-        collect_kwargs = {"engine": "streaming"} if streaming else {}
-        for fk, target_lf in foreign_keys:
-            local_cols = list(fk.columns)
-            ref_cols = list(fk.ref_columns)
-            if not all(c in df_col_names for c in local_cols):
-                continue  # missing columns already reported via missing_cols handling
-
-            parent_lf = target_lf if target_lf is not None else lf
-            parent_schema_names = parent_lf.collect_schema().names()
-            missing_ref = [c for c in ref_cols if c not in parent_schema_names]
-            if missing_ref:
-                raise ValueError(
-                    f"ForeignKey '{fk.name}' on {schema_name!r} references columns "
-                    f"{missing_ref} not present in the referenced DataFrame"
-                )
-
-            key_expr = (
-                pl.col(local_cols[0]) if len(local_cols) == 1 else pl.struct(local_cols)
-            )
-            not_null_expr = (
-                pl.col(local_cols[0]).is_not_null()
-                if len(local_cols) == 1
-                else pl.all_horizontal([pl.col(c).is_not_null() for c in local_cols])
-            )
-
-            parent_keys = parent_lf.select(ref_cols).unique()
-            candidates = lf.select(local_cols).filter(not_null_expr)
-            orphans_lf = candidates.join(
-                parent_keys, left_on=local_cols, right_on=ref_cols, how="anti"
-            )
-            fk_stats = orphans_lf.select(
-                pl.len().alias("cnt"),
-                key_expr.unique().head(5).implode().alias("samples"),
-            ).collect(**collect_kwargs)
-
-            cnt = fk_stats["cnt"][0]
-            if cnt and cnt > 0:
-                raw_samples = fk_stats["samples"][0]
-                samples = list(raw_samples) if raw_samples is not None else []
-                target_label = (
-                    "self"
-                    if target_lf is None
-                    else getattr(fk.references, "__name__", str(fk.references))
-                )
-                errors.append(
-                    f"ForeignKey '{fk.name}' violated ({local_cols} -> "
-                    f"{target_label}.{ref_cols}): found {cnt} row(s) with no "
-                    f"matching parent record. Violating samples: {samples}"
-                )
+        )
 
     if errors:
-        msg_lines = [
-            f"Validation failed for DataFrame against '{schema_name}' ({len(errors)} error(s) found):"
+        raise ValidationError(
+            "\n".join(
+                [
+                    (
+                        f"Validation failed for DataFrame against '{schema_name}' "
+                        f"({len(errors)} error(s) found):"
+                    ),
+                    *(f"  - {err}" for err in errors),
+                ]
+            ),
+            errors=errors,
+        )
+
+    result = _apply_transformations(lf, columns, extra, missing, options)
+    return result if is_lazy else result.collect()
+
+
+def _apply_transformations(
+    lf: pl.LazyFrame,
+    columns: dict[str, ColSpec],
+    extra: list[str],
+    missing: list[str],
+    options: _Options,
+) -> pl.LazyFrame:
+    """Drops, adds, casts and reorders once validation has passed."""
+    if extra and options.extra_cols == "drop":
+        lf = lf.drop(extra)
+
+    if missing and options.missing_cols == "add":
+        lf = lf.with_columns(
+            pl.lit(None, dtype=columns[c].dtype).alias(c) for c in missing
+        )
+
+    if options.cast:
+        schema = lf.collect_schema()
+        cast_exprs = [
+            pl.col(name).cast(spec.dtype)
+            for name, spec in columns.items()
+            if name in schema and schema[name] != spec.dtype
         ]
-        for err in errors:
-            msg_lines.append(f"  - {err}")
-        raise ValidationError("\n".join(msg_lines), errors=errors)
-
-    # Transformation if validation succeeded
-    result_lf = lf
-
-    if extra and extra_cols == "drop":
-        keep_cols = [c for c in df_col_names if c not in extra]
-        result_lf = result_lf.select(keep_cols)
-
-    if missing and missing_cols == "add":
-        add_exprs = [pl.lit(None, dtype=columns[c].dtype).alias(c) for c in missing]
-        result_lf = result_lf.with_columns(add_exprs)
-
-    if cast:
-        cast_exprs = []
-        current_schema = result_lf.collect_schema()
-        for name, spec in columns.items():
-            if name in current_schema and current_schema[name] != spec.dtype:
-                cast_exprs.append(pl.col(name).cast(spec.dtype))
         if cast_exprs:
-            result_lf = result_lf.with_columns(cast_exprs)
+            lf = lf.with_columns(cast_exprs)
 
-    # Reorder columns to match FrameSpec declaration order for present declared columns,
-    # followed by any extra columns (if extra_cols == 'allow')
-    spec_order = [c for c in columns if c in result_lf.collect_schema().names()]
-    extra_order = [c for c in result_lf.collect_schema().names() if c not in columns]
-    result_lf = result_lf.select(spec_order + extra_order)
-
-    return result_lf if is_lazy else result_lf.collect()
+    # Declared columns first, in declaration order, then anything extra that
+    # survived.
+    present = lf.collect_schema().names()
+    declared = [c for c in columns if c in present]
+    return lf.select(declared + [c for c in present if c not in columns])

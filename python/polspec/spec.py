@@ -11,6 +11,10 @@ import polars as pl
 from polspec.bound import Bound
 from polspec.check import Check
 from polspec.constants import _DEFAULT_NULL_PROBABILITY
+from polspec.distributions import (
+    normalize_distribution,
+    validate_distribution_params,
+)
 from polspec.dtypes import _bound_endpoint_to_physical, _dtype_value_limits
 from polspec.rules import ColRule, _reject_colliding_choices
 
@@ -103,18 +107,36 @@ class ColSpec:
     validators: Check | pl.Expr | Sequence[Check | pl.Expr] | None = ()
 
     def __post_init__(self) -> None:
+        # Order matters: normalization first, so every check below sees the
+        # canonical form; then the checks that need only one field; then the
+        # ones that compare fields against each other.
+        self._normalize_dtype()
+        self._normalize_ranges()
+        self._normalize_tags()
+        object.__setattr__(self, "rules", tuple(self.rules))
+        self._normalize_validators()
+        self._normalize_choices_and_weights()
+        self._normalize_distribution()
+
+        self._validate_probabilities()
+        self._validate_bounds_dtype_support()
+        self._validate_bounds_fit_dtype()
+        self._validate_weights()
+        self._validate_choices_against_domain()
+
+    def _normalize_dtype(self) -> None:
+        """Instantiates a dtype passed as a class, so `pl.Int64` means `pl.Int64()`."""
         if isinstance(self.dtype, type) and issubclass(self.dtype, pl.DataType):
             with suppress(TypeError):
                 object.__setattr__(self, "dtype", self.dtype())
+
+    def _normalize_ranges(self) -> None:
+        """Coerces `bounds` and `string_length` to `Bound`, rejecting open lengths."""
         object.__setattr__(self, "bounds", Bound._coerce(self.bounds))
         object.__setattr__(self, "string_length", Bound._coerce(self.string_length))
         # One internal representation for "unconstrained", so every downstream
         # `if spec.bounds is not None` guard keeps meaning what it says.
-        if (
-            self.bounds is not None
-            and self.bounds.min is None
-            and self.bounds.max is None
-        ):
+        if self.bounds is not None and self.bounds.is_open_both:
             object.__setattr__(self, "bounds", None)
         if self.string_length is not None and self.string_length.is_open:
             raise ValueError(
@@ -122,42 +144,27 @@ class ColSpec:
                 f"{self.string_length!r}. An open end (None) is supported on "
                 "ColSpec.bounds only."
             )
-        object.__setattr__(self, "rules", tuple(self.rules))
-        self._normalize_validators()
+
+    def _normalize_tags(self) -> None:
+        """Reduces `tags` to a tuple of distinct, non-empty strings."""
         if self.tags is None:
             object.__setattr__(self, "tags", ())
         elif isinstance(self.tags, str):
-            if not self.tags:
-                object.__setattr__(self, "tags", ())
-            else:
-                object.__setattr__(self, "tags", (self.tags,))
+            object.__setattr__(self, "tags", (self.tags,) if self.tags else ())
         elif isinstance(self.tags, (list, tuple, set, Sequence)):
-            seen = set()
-            cleaned = []
-            for t in self.tags:
-                s = str(t)
-                if s and s not in seen:
-                    seen.add(s)
-                    cleaned.append(s)
-            object.__setattr__(self, "tags", tuple(cleaned))
+            distinct: dict[str, None] = {}
+            for tag in self.tags:
+                text = str(tag)
+                if text:
+                    distinct.setdefault(text, None)
+            object.__setattr__(self, "tags", tuple(distinct))
         else:
             raise TypeError(
                 f"ColSpec.tags must be a string or sequence of strings, got {type(self.tags).__name__}"
             )
-        if not 0.0 <= self.null_probability <= 1.0:
-            raise ValueError("null_probability must be between 0 and 1")
 
-        if self.bounds is not None and not (
-            self.dtype.is_integer() or self.dtype.is_float() or self.dtype.is_temporal()
-        ):
-            raise ValueError(
-                f"ColSpec.bounds is only supported for numeric or temporal "
-                f"dtypes, got {self.dtype!r}"
-            )
-
-        self._validate_bounds_fit_dtype()
-
-        # Process choices & weights
+    def _normalize_choices_and_weights(self) -> None:
+        """Splits a `{choice: weight}` mapping into the two fields, and tuples both."""
         if isinstance(self.choices, dict):
             if self.weights is not None:
                 raise ValueError(
@@ -167,47 +174,21 @@ class ColSpec:
                 self, "weights", tuple(float(w) for w in self.choices.values())
             )
             object.__setattr__(self, "choices", tuple(self.choices.keys()))
-        elif self.choices is not None:
-            object.__setattr__(self, "choices", tuple(self.choices))
+        else:
+            if self.choices is not None:
+                object.__setattr__(self, "choices", tuple(self.choices))
             if self.weights is not None:
                 object.__setattr__(
                     self, "weights", tuple(float(w) for w in self.weights)
                 )
-        elif self.weights is not None:
-            object.__setattr__(self, "weights", tuple(float(w) for w in self.weights))
 
         if self.choices is not None:
             if not self.choices:
                 raise ValueError("ColSpec.choices must not be empty")
             _reject_colliding_choices(self.choices, "ColSpec.choices")
 
-        if self.weights is not None:
-            if self.choices is not None:
-                if len(self.weights) != len(self.choices):
-                    raise ValueError(
-                        f"Length of weights ({len(self.weights)}) must match length of choices ({len(self.choices)})"
-                    )
-            elif isinstance(self.dtype, pl.Enum):
-                if len(self.weights) != len(self.dtype.categories):
-                    raise ValueError(
-                        f"Length of weights ({len(self.weights)}) must match number of Enum categories ({len(self.dtype.categories)})"
-                    )
-            elif self.dtype == pl.Boolean:
-                if len(self.weights) != 2:
-                    raise ValueError(
-                        "Boolean weights must be a 2-element sequence [p_false, p_true]"
-                    )
-            else:
-                raise ValueError(
-                    "ColSpec.weights requires 'choices', an Enum dtype, or a Boolean "
-                    f"dtype to define the domain weights apply to; got dtype={self.dtype!r} "
-                    "with no choices"
-                )
-            if any(w < 0 for w in self.weights):
-                raise ValueError("Weights must all be non-negative")
-            if sum(self.weights) <= 0:
-                raise ValueError("Sum of weights must be positive")
-
+    def _normalize_distribution(self) -> None:
+        """Canonicalizes the distribution name and floats its parameters."""
         if self.distribution is not None:
             if not (
                 self.dtype.is_integer()
@@ -218,87 +199,13 @@ class ColSpec:
                     f"ColSpec.distribution is only supported for numeric or temporal "
                     f"dtypes, got {self.dtype!r}"
                 )
-            dist = self.distribution.lower()
-            valid_dists = {
-                "uniform",
-                "normal",
-                "lognormal",
-                "exponential",
-                "exp",
-                "poisson",
-                "gamma",
-                "beta",
-            }
-            if dist not in valid_dists:
-                raise ValueError(
-                    f"Unsupported distribution '{self.distribution}'. Supported: {sorted(valid_dists)}"
-                )
+            name = normalize_distribution(self.distribution)
             if self.distribution_params is not None:
                 params = {str(k): float(v) for k, v in self.distribution_params.items()}
                 object.__setattr__(self, "distribution_params", params)
-                if dist == "normal":
-                    std = params.get(
-                        "std", params.get("sigma", params.get("scale", 1.0))
-                    )
-                    if std <= 0:
-                        raise ValueError(
-                            f"Normal distribution std must be positive, got {std}"
-                        )
-                elif dist == "lognormal":
-                    std = params.get(
-                        "std", params.get("sigma", params.get("sdlog", 1.0))
-                    )
-                    if std <= 0:
-                        raise ValueError(
-                            f"LogNormal distribution std must be positive, got {std}"
-                        )
-                elif dist in ("exponential", "exp"):
-                    rate = params.get(
-                        "rate", params.get("lambda", params.get("lambda_", 1.0))
-                    )
-                    scale = params.get("scale", 1.0)
-                    if "scale" in params and scale <= 0:
-                        raise ValueError(
-                            f"Exponential distribution scale must be positive, got {scale}"
-                        )
-                    if "scale" not in params and rate <= 0:
-                        raise ValueError(
-                            f"Exponential distribution rate must be positive, got {rate}"
-                        )
-                elif dist == "poisson":
-                    lam = params.get(
-                        "lambda",
-                        params.get(
-                            "lambda_", params.get("rate", params.get("mean", 1.0))
-                        ),
-                    )
-                    if lam <= 0:
-                        raise ValueError(
-                            f"Poisson distribution lambda must be positive, got {lam}"
-                        )
-                elif dist == "gamma":
-                    shape = params.get(
-                        "shape", params.get("alpha", params.get("k", 1.0))
-                    )
-                    scale = params.get(
-                        "scale", params.get("beta", params.get("theta", 1.0))
-                    )
-                    if shape <= 0 or scale <= 0:
-                        raise ValueError(
-                            f"Gamma distribution shape and scale must be positive, got shape={shape}, scale={scale}"
-                        )
-                elif dist == "beta":
-                    alpha = params.get(
-                        "alpha", params.get("a", params.get("shape1", 1.0))
-                    )
-                    beta = params.get(
-                        "beta", params.get("b", params.get("shape2", 1.0))
-                    )
-                    if alpha <= 0 or beta <= 0:
-                        raise ValueError(
-                            f"Beta distribution alpha and beta must be positive, got alpha={alpha}, beta={beta}"
-                        )
+                validate_distribution_params(name, params)
 
+        # A Boolean column takes no distribution, but does accept `p`.
         if self.dtype == pl.Boolean and self.distribution_params is not None:
             params = {str(k): float(v) for k, v in self.distribution_params.items()}
             object.__setattr__(self, "distribution_params", params)
@@ -307,44 +214,87 @@ class ColSpec:
                     f"Boolean distribution_params['p'] must be between 0 and 1, got {params['p']}"
                 )
 
+    def _validate_probabilities(self) -> None:
+        if not 0.0 <= self.null_probability <= 1.0:
+            raise ValueError("null_probability must be between 0 and 1")
+
+    def _validate_bounds_dtype_support(self) -> None:
+        if self.bounds is not None and not (
+            self.dtype.is_integer() or self.dtype.is_float() or self.dtype.is_temporal()
+        ):
+            raise ValueError(
+                f"ColSpec.bounds is only supported for numeric or temporal "
+                f"dtypes, got {self.dtype!r}"
+            )
+
+    def _validate_weights(self) -> None:
+        """Checks weights against whatever defines this column's domain."""
+        if self.weights is None:
+            return
+
+        if self.choices is not None:
+            if len(self.weights) != len(self.choices):
+                raise ValueError(
+                    f"Length of weights ({len(self.weights)}) must match length of choices ({len(self.choices)})"
+                )
+        elif isinstance(self.dtype, pl.Enum):
+            if len(self.weights) != len(self.dtype.categories):
+                raise ValueError(
+                    f"Length of weights ({len(self.weights)}) must match number of Enum categories ({len(self.dtype.categories)})"
+                )
+        elif self.dtype == pl.Boolean:
+            if len(self.weights) != 2:
+                raise ValueError(
+                    "Boolean weights must be a 2-element sequence [p_false, p_true]"
+                )
+        else:
+            raise ValueError(
+                "ColSpec.weights requires 'choices', an Enum dtype, or a Boolean "
+                f"dtype to define the domain weights apply to; got dtype={self.dtype!r} "
+                "with no choices"
+            )
+
+        if any(w < 0 for w in self.weights):
+            raise ValueError("Weights must all be non-negative")
+        if sum(self.weights) <= 0:
+            raise ValueError("Sum of weights must be positive")
+
+    def _validate_choices_against_domain(self) -> None:
+        """Checks this column's choices, and its rules', against its domain.
+
+        A rule's choices are checked here too: a value a rule could assign but
+        the column could never hold is a contradiction worth catching at
+        declaration time rather than at generation.
+        """
         if isinstance(self.dtype, pl.Enum):
-            valid = set(self.dtype.categories.to_list())
-            if self.choices is not None:
-                unknown = [c for c in self.choices if c not in valid]
-                if unknown:
-                    raise ValueError(
-                        f"ColSpec.choices {unknown} are not among this column's Enum categories {sorted(valid)}"
-                    )
-            for rule in self.rules:
-                unknown = [c for c in rule.choices if c not in valid]
-                if unknown:
-                    raise ValueError(
-                        f"ColRule.choices {unknown} are not among this column's "
-                        f"Enum categories {sorted(valid)}"
-                    )
+            categories = set(self.dtype.categories.to_list())
+            self._reject_choices(
+                lambda c: c not in categories,
+                f"are not among this column's Enum categories {sorted(categories)}",
+            )
 
         if self.bounds is not None:
-            b_min, b_max = self.bounds.min, self.bounds.max
+            low, high = self.bounds.min, self.bounds.max
 
-            def _outside(value: Any) -> bool:
-                return (b_min is not None and value < b_min) or (
-                    b_max is not None and value > b_max
+            def outside(value: Any) -> bool:
+                return (low is not None and value < low) or (
+                    high is not None and value > high
                 )
 
-            if self.choices is not None:
-                out_of_bounds = [c for c in self.choices if _outside(c)]
-                if out_of_bounds:
-                    raise ValueError(
-                        f"ColSpec.choices {out_of_bounds} fall outside this column's "
-                        f"bounds {self.bounds}"
-                    )
-            for rule in self.rules:
-                out_of_bounds = [c for c in rule.choices if _outside(c)]
-                if out_of_bounds:
-                    raise ValueError(
-                        f"ColRule.choices {out_of_bounds} fall outside this column's "
-                        f"bounds {self.bounds}"
-                    )
+            self._reject_choices(
+                outside, f"fall outside this column's bounds {self.bounds}"
+            )
+
+    def _reject_choices(self, offends, complaint: str) -> None:
+        """Raises if any of this column's or its rules' choices `offends`."""
+        if self.choices is not None:
+            offending = [c for c in self.choices if offends(c)]
+            if offending:
+                raise ValueError(f"ColSpec.choices {offending} {complaint}")
+        for rule in self.rules:
+            offending = [c for c in rule.choices if offends(c)]
+            if offending:
+                raise ValueError(f"ColRule.choices {offending} {complaint}")
 
     def _validate_bounds_fit_dtype(self) -> None:
         """Rejects bounds the dtype cannot represent.

@@ -645,58 +645,9 @@ class CatSpec:
         str
             The formatted Markdown string.
         """
-        doc_title = title or "Categorical & Enum Registry"
-        lines: list[str] = [
-            f"# {doc_title}",
-            "",
-            "## Summary",
-            f"- **Enums:** {len(self._enums)}",
-            f"- **Categoricals:** {len(self._categoricals)}",
-            "",
-        ]
+        from polspec.report import catspec_to_markdown
 
-        if self._enums:
-            lines.extend(
-                [
-                    "## Enums (`pl.Enum`)",
-                    "",
-                    "| Name | Variants Count | Allowed Variants |",
-                    "|:---|:---|:---|",
-                ]
-            )
-            for k, variants in self._enums.items():
-                var_str = f"[{', '.join(repr(v) for v in variants[:6])}{', ...' if len(variants) > 6 else ''}]"
-                lines.append(f"| `{k}` | {len(variants)} | `{var_str}` |")
-            lines.append("")
-
-        if self._categoricals:
-            lines.extend(
-                [
-                    "## Categoricals (`pl.Categorical`)",
-                    "",
-                    "| Key | Registry Name | Physical Dtype | Namespace | Domain Choices Pool |",
-                    "|:---|:---|:---|:---|:---|",
-                ]
-            )
-            for k, cat in self._categoricals.items():
-                phys = _YAML_DTYPES.get(cat.physical(), str(cat.physical()))
-                ns = cat.namespace() or "-"
-                choices = self._choices.get(k)
-                if choices:
-                    ch_str = f"[{', '.join(repr(c) for c in choices[:6])}{', ...' if len(choices) > 6 else ''}] ({len(choices)} total)"
-                else:
-                    ch_str = "-"
-                lines.append(
-                    f"| `{k}` | `{cat.name()}` | `{phys}` | `{ns}` | `{ch_str}` |"
-                )
-            lines.append("")
-
-        content = "\n".join(lines).rstrip() + "\n"
-        if path is not None:
-            p = Path(path)
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(content, encoding="utf-8")
-        return content
+        return catspec_to_markdown(self, path, title=title)
 
     def to_mermaid(
         self,
@@ -705,48 +656,9 @@ class CatSpec:
         title: str | None = None,
     ) -> str:
         """Generates a Mermaid class diagram definition for this CatSpec registry."""
-        lines: list[str] = [
-            "classDiagram",
-        ]
-        if title:
-            lines.insert(0, f"%% {title}")
+        from polspec.report import catspec_to_mermaid
 
-        for k, variants in self._enums.items():
-            clean_k = "".join(c if c.isalnum() or c == "_" else "_" for c in k)
-            lines.append(f"    class {clean_k} {{")
-            lines.append("        <<enumeration>>")
-            for v in variants[:10]:
-                clean_v = "".join(c if c.isalnum() or c == "_" else "_" for c in str(v))
-                lines.append(f"        +{clean_v}")
-            if len(variants) > 10:
-                lines.append(f"        +... ({len(variants) - 10} more)")
-            lines.append("    }")
-
-        for k, cat in self._categoricals.items():
-            clean_k = "".join(c if c.isalnum() or c == "_" else "_" for c in k)
-            phys = _YAML_DTYPES.get(cat.physical(), str(cat.physical()))
-            lines.append(f"    class {clean_k} {{")
-            lines.append(f"        <<categorical: {phys}>>")
-            ns = cat.namespace()
-            if ns:
-                lines.append(f"        +namespace: {ns}")
-            choices = self._choices.get(k)
-            if choices:
-                for c in choices[:5]:
-                    clean_c = "".join(
-                        c if c.isalnum() or c == "_" else "_" for c in str(c)
-                    )
-                    lines.append(f"        +{clean_c}")
-                if len(choices) > 5:
-                    lines.append(f"        +... ({len(choices) - 5} more)")
-            lines.append("    }")
-
-        content = "\n".join(lines) + "\n"
-        if path is not None:
-            p = Path(path)
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(content, encoding="utf-8")
-        return content
+        return catspec_to_mermaid(self, path, title=title)
 
     def __repr__(self) -> str:
         enum_keys = list(self._enums.keys())

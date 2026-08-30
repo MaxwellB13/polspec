@@ -71,80 +71,95 @@ def _dtype_to_yaml(dtype: pl.DataType) -> str | dict:
     return name
 
 
+def _strip_registry_prefix(name: str) -> str:
+    """`$categories.STATUS` and `categories.STATUS` both name `STATUS`."""
+    return name.removeprefix("$categories.").removeprefix("categories.")
+
+
+def _dtype_from_registry(name: str, categories: CatSpec | None) -> pl.DataType | None:
+    """Resolves a name against a CatSpec, as an Enum or a Categorical.
+
+    Returns None when the registry does not hold it, leaving the caller to
+    decide whether that is an error or just a name to try elsewhere.
+    """
+    if categories is None or name not in categories:
+        return None
+    resolved = categories[name]
+    if isinstance(resolved, pl.Categories):
+        return pl.Categorical(resolved)
+    if isinstance(resolved, (list, tuple)):
+        return pl.Enum(resolved)
+    return None
+
+
+def _enum_from_yaml(payload, categories: CatSpec | None) -> pl.DataType:
+    if not isinstance(payload, str):
+        return pl.Enum(payload)
+    name = _strip_registry_prefix(payload)
+    if categories is not None and name in categories:
+        return pl.Enum(categories.get_enum(name))
+    raise ValueError(
+        f"Enum {payload!r} referenced in YAML but not found in provided CatSpec"
+    )
+
+
+def _categorical_from_yaml(payload, categories: CatSpec | None) -> pl.DataType:
+    if isinstance(payload, str):
+        name = _strip_registry_prefix(payload)
+        if categories is not None and name in categories:
+            return pl.Categorical(categories.get_categorical(name))
+        if name == "Categorical":
+            return pl.Categorical()
+        return pl.Categorical(pl.Categories(name))
+
+    name = payload.get("name", "")
+    if categories is not None and name and name in categories.categoricals:
+        return pl.Categorical(categories.get_categorical(name))
+    return pl.Categorical(
+        pl.Categories(
+            name,
+            namespace=payload.get("namespace", ""),
+            physical=_YAML_NAME_TO_DTYPE.get(
+                payload.get("physical", "UInt32"), pl.UInt32
+            ),
+        )
+    )
+
+
+# Parametrized dtypes arrive as a single-key mapping naming the dtype.
+_YAML_DTYPE_BUILDERS = {
+    "Enum": _enum_from_yaml,
+    "Categorical": _categorical_from_yaml,
+    "Datetime": lambda payload, _: pl.Datetime(
+        time_unit=payload.get("time_unit", "us"), time_zone=payload.get("time_zone")
+    ),
+    "Duration": lambda payload, _: pl.Duration(
+        time_unit=payload.get("time_unit", "us")
+    ),
+}
+
+
 def _dtype_from_yaml(
     value: str | dict, categories: CatSpec | None = None
 ) -> pl.DataType:
+    """Reads a dtype back from YAML, resolving registry references as it goes."""
     if isinstance(value, dict):
-        if "Enum" in value:
-            enum_val = value["Enum"]
-            if isinstance(enum_val, str):
-                clean_name = enum_val.removeprefix("$categories.").removeprefix(
-                    "categories."
-                )
-                if categories is not None and clean_name in categories:
-                    return pl.Enum(categories.get_enum(clean_name))
-                raise ValueError(
-                    f"Enum {enum_val!r} referenced in YAML but not found in provided CatSpec"
-                )
-            return pl.Enum(enum_val)
-        if "Datetime" in value:
-            dt_info = value["Datetime"]
-            return pl.Datetime(
-                time_unit=dt_info.get("time_unit", "us"),
-                time_zone=dt_info.get("time_zone"),
-            )
-        if "Duration" in value:
-            dur_info = value["Duration"]
-            return pl.Duration(time_unit=dur_info.get("time_unit", "us"))
-        if "Categorical" in value:
-            cat_info = value["Categorical"]
-            if isinstance(cat_info, str):
-                clean_name = cat_info.removeprefix("$categories.").removeprefix(
-                    "categories."
-                )
-                if categories is not None and clean_name in categories:
-                    return pl.Categorical(categories.get_categorical(clean_name))
-                if clean_name == "Categorical":
-                    return pl.Categorical()
-                return pl.Categorical(pl.Categories(clean_name))
-            if isinstance(cat_info, dict):
-                cat_name = cat_info.get("name", "")
-                if (
-                    categories is not None
-                    and cat_name
-                    and cat_name in categories.categoricals
-                ):
-                    return pl.Categorical(categories.get_categorical(cat_name))
-                physical = _YAML_NAME_TO_DTYPE.get(
-                    cat_info.get("physical", "UInt32"), pl.UInt32
-                )
-                return pl.Categorical(
-                    pl.Categories(
-                        cat_name,
-                        namespace=cat_info.get("namespace", ""),
-                        physical=physical,
-                    )
-                )
+        for key, build in _YAML_DTYPE_BUILDERS.items():
+            if key in value:
+                return build(value[key], categories)
         raise ValueError(f"Unrecognized dtype mapping in YAML: {value!r}")
+
     if value == "Categorical":
         return pl.Categorical()
+
     if value.startswith(("$categories.", "categories.")):
-        clean_name = value.removeprefix("$categories.").removeprefix("categories.")
-        if categories is not None and clean_name in categories:
-            resolved = categories[clean_name]
-            if isinstance(resolved, pl.Categories):
-                return pl.Categorical(resolved)
-            if isinstance(resolved, (list, tuple)):
-                return pl.Enum(resolved)
+        dtype = _dtype_from_registry(_strip_registry_prefix(value), categories)
+        if dtype is not None:
+            return dtype
         raise ValueError(f"Category reference {value!r} not found in provided CatSpec")
-    dtype = _YAML_NAME_TO_DTYPE.get(value)
+
+    dtype = _YAML_NAME_TO_DTYPE.get(value) or _dtype_from_registry(value, categories)
     if dtype is None:
-        if categories is not None and value in categories:
-            resolved = categories[value]
-            if isinstance(resolved, pl.Categories):
-                return pl.Categorical(resolved)
-            if isinstance(resolved, (list, tuple)):
-                return pl.Enum(resolved)
         raise ValueError(f"Unrecognized dtype name in YAML: {value!r}")
     return dtype
 

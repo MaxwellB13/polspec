@@ -3,18 +3,19 @@ from __future__ import annotations
 import dataclasses
 import random
 import warnings
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, ClassVar, Literal, overload
 
 import polars as pl
 import yaml
 
-from polspec.catspec import CatSpec
+from polspec.catspec import DEFAULT_EXCLUDE_PATTERNS, CatSpec
 from polspec.check import Check
 from polspec.engine import _generate_cartesian, _generate_random
 from polspec.foreign_key import ForeignKey, _apply_foreign_keys
 from polspec.profiler import profile_dataframe
+from polspec.report import framespec_to_markdown, framespec_to_mermaid
 from polspec.rules import _apply_rules
 from polspec.serialization import (
     _colspec_from_yaml,
@@ -23,7 +24,47 @@ from polspec.serialization import (
     _foreignkey_to_yaml,
 )
 from polspec.spec import ColSpec, _column_kind
-from polspec.validation import _validate_dataframe
+from polspec.validation import _Options, _validate_dataframe
+
+
+def _collect_declarations[T](
+    base: type,
+    attr_names: tuple[str, ...],
+    declared_type: type[T],
+    out: list[T],
+) -> None:
+    """Appends `declared_type` declarations found on `base` to `out`, de-duplicated.
+
+    `__checks__` and `__foreign_keys__` are collected identically -- a single
+    instance or a sequence of them, under a dunder name or its bare alias,
+    skipping anything callable so a method of the same name is not mistaken
+    for a declaration. Only the type and the messages differ.
+    """
+    for attr_name in attr_names:
+        if attr_name not in vars(base):
+            continue
+        val = vars(base)[attr_name]
+        if val is None or isinstance(val, (classmethod, staticmethod)) or callable(val):
+            continue
+
+        if isinstance(val, declared_type):
+            items: Sequence[T] = [val]
+        elif isinstance(val, (list, tuple, Sequence)):
+            items = val
+        else:
+            raise TypeError(
+                f"{attr_names[0]} must be a {declared_type.__name__} or sequence "
+                f"of {declared_type.__name__} instances, got {type(val).__name__}"
+            )
+
+        for item in items:
+            if not isinstance(item, declared_type):
+                raise TypeError(
+                    f"Items in {attr_names[0]} must be {declared_type.__name__} "
+                    f"instances, got {type(item).__name__}"
+                )
+            if item not in out:
+                out.append(item)
 
 
 def _retype_column(
@@ -123,59 +164,22 @@ class FrameSpec:
         foreign_keys_list: list[ForeignKey] = []
 
         for base in reversed(cls.__mro__):
-            # Collect checks from base classes
-            for attr_name in ("__checks__", "checks"):
-                if attr_name in vars(base):
-                    val = vars(base)[attr_name]
-                    if isinstance(val, (classmethod, staticmethod)) or callable(val):
-                        continue
-                    if isinstance(val, Check):
-                        if val not in checks_list:
-                            checks_list.append(val)
-                    elif isinstance(val, (list, tuple, Sequence)):
-                        for item in val:
-                            if isinstance(item, Check):
-                                if item not in checks_list:
-                                    checks_list.append(item)
-                            else:
-                                raise TypeError(
-                                    f"Items in __checks__ must be Check instances, got {type(item).__name__}"
-                                )
-                    elif val is not None:
-                        raise TypeError(
-                            f"__checks__ must be a Check or sequence of Check instances, got {type(val).__name__}"
-                        )
+            _collect_declarations(base, ("__checks__", "checks"), Check, checks_list)
+            _collect_declarations(
+                base,
+                ("__foreign_keys__", "foreign_keys"),
+                ForeignKey,
+                foreign_keys_list,
+            )
 
-            # Collect unique_together from base classes
+            # unique_together holds bare strings rather than instances of a
+            # type, so it keeps its own parser.
             for attr_name in ("__unique_together__", "unique_together"):
                 if attr_name in vars(base):
                     val = vars(base)[attr_name]
                     if isinstance(val, (classmethod, staticmethod)) or callable(val):
                         continue
                     cls._parse_unique_together(val, unique_together_list)
-
-            # Collect foreign keys from base classes
-            for attr_name in ("__foreign_keys__", "foreign_keys"):
-                if attr_name in vars(base):
-                    val = vars(base)[attr_name]
-                    if isinstance(val, (classmethod, staticmethod)) or callable(val):
-                        continue
-                    if isinstance(val, ForeignKey):
-                        if val not in foreign_keys_list:
-                            foreign_keys_list.append(val)
-                    elif isinstance(val, (list, tuple, Sequence)):
-                        for item in val:
-                            if isinstance(item, ForeignKey):
-                                if item not in foreign_keys_list:
-                                    foreign_keys_list.append(item)
-                            else:
-                                raise TypeError(
-                                    f"Items in __foreign_keys__ must be ForeignKey instances, got {type(item).__name__}"
-                                )
-                    elif val is not None:
-                        raise TypeError(
-                            f"__foreign_keys__ must be a ForeignKey or sequence of ForeignKey instances, got {type(val).__name__}"
-                        )
 
             # Collect columns declared as ordinary class attributes
             for name, value in vars(base).items():
@@ -465,13 +469,7 @@ class FrameSpec:
         max_categorical_cardinality: int = 10_000,
         max_categorical_ratio: float = 0.20,
         include_columns: Sequence[str] | None = None,
-        exclude_patterns: Sequence[str] | None = (
-            r"(?:^|.*_)id$",
-            r"(?:^|.*_)uuid$",
-            r"(?:^|.*_)hash$",
-            r"(?:^|.*_)url$",
-            r"(?:^|.*_)key$",
-        ),
+        exclude_patterns: Sequence[str] | None = DEFAULT_EXCLUDE_PATTERNS,
         default_physical: pl.DataType | None = None,
     ) -> CatSpec:
         """Infers an optimal CatSpec registry from string columns using heuristic rules."""
@@ -550,13 +548,7 @@ class FrameSpec:
         max_categorical_cardinality: int = 10_000,
         max_categorical_ratio: float = 0.20,
         include_columns: Sequence[str] | None = None,
-        exclude_patterns: Sequence[str] | None = (
-            r"(?:^|.*_)id$",
-            r"(?:^|.*_)uuid$",
-            r"(?:^|.*_)hash$",
-            r"(?:^|.*_)url$",
-            r"(?:^|.*_)key$",
-        ),
+        exclude_patterns: Sequence[str] | None = DEFAULT_EXCLUDE_PATTERNS,
         default_physical: pl.DataType | None = None,
     ) -> type[FrameSpec]:
         """Infers a CatSpec and returns a new FrameSpec subclass with optimized Enum and Categorical columns."""
@@ -917,6 +909,50 @@ class FrameSpec:
             )
 
     @classmethod
+    def _prepare_sink(cls, path: str | Path, n: int, batch_size: int) -> Path:
+        """The argument checks and directory creation every sink_* repeats.
+
+        Kept eager rather than folded into the batch generator so an invalid
+        call fails before any destination file is opened.
+        """
+        if not cls._columns:
+            raise ValueError(f"{cls.__name__} declares no ColSpec columns")
+        if n < 0:
+            raise ValueError("n must be >= 0")
+        if batch_size <= 0:
+            raise ValueError("batch_size must be > 0")
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @staticmethod
+    def _sink_arrow(
+        batches: Iterator[pl.DataFrame],
+        make_writer: Callable[[Any], Any],
+        empty_frame: pl.DataFrame | None = None,
+    ) -> None:
+        """Streams `batches` through an Arrow writer opened from the first batch.
+
+        Shared by the Parquet and IPC sinks, which differ only in how their
+        writer is constructed. Both need a schema before they can open one, and
+        both must still leave a valid, schema-bearing file behind when there
+        are no rows -- hence `empty_frame`, which the caller supplies only for
+        `n == 0` so a mid-stream failure does not quietly produce one.
+        """
+        writer = None
+        try:
+            for batch_df in batches:
+                table = batch_df.to_arrow()
+                if writer is None:
+                    writer = make_writer(table.schema)
+                writer.write_table(table)
+        finally:
+            if writer is not None:
+                writer.close()
+            elif empty_frame is not None:
+                make_writer(empty_frame.to_arrow().schema).close()
+
+    @classmethod
     def sink_parquet(
         cls,
         path: str | Path,
@@ -958,47 +994,20 @@ class FrameSpec:
                 "pyarrow is required for sink_parquet(). Please install pyarrow."
             ) from exc
 
-        if not cls._columns:
-            raise ValueError(f"{cls.__name__} declares no ColSpec columns")
-        if n < 0:
-            raise ValueError("n must be >= 0")
-        if batch_size <= 0:
-            raise ValueError("batch_size must be > 0")
-
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-        writer = None
-        try:
-            for batch_df in cls.generate_batches(
+        path = cls._prepare_sink(path, n, batch_size)
+        cls._sink_arrow(
+            cls.generate_batches(
                 n,
                 batch_size=batch_size,
                 method=method,
                 seed=seed,
                 references=references,
-            ):
-                arrow_table = batch_df.to_arrow()
-                if writer is None:
-                    writer = pq.ParquetWriter(
-                        str(path),
-                        arrow_table.schema,
-                        compression=compression,
-                        **kwargs,
-                    )
-                writer.write_table(arrow_table)
-        finally:
-            if writer is not None:
-                writer.close()
-            elif n == 0:
-                empty_df = cls.generate(0, references=references)
-                empty_table = empty_df.to_arrow()
-                writer = pq.ParquetWriter(
-                    str(path),
-                    empty_table.schema,
-                    compression=compression,
-                    **kwargs,
-                )
-                writer.close()
+            ),
+            lambda schema: pq.ParquetWriter(
+                str(path), schema, compression=compression, **kwargs
+            ),
+            empty_frame=cls.generate(0, references=references) if n == 0 else None,
+        )
 
     @classmethod
     def sink_csv(
@@ -1035,15 +1044,7 @@ class FrameSpec:
         **kwargs
             Additional arguments passed to `pl.DataFrame.write_csv`.
         """
-        if not cls._columns:
-            raise ValueError(f"{cls.__name__} declares no ColSpec columns")
-        if n < 0:
-            raise ValueError("n must be >= 0")
-        if batch_size <= 0:
-            raise ValueError("batch_size must be > 0")
-
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path = cls._prepare_sink(path, n, batch_size)
 
         header_needed = include_header
         with open(path, "wb") as f:
@@ -1105,48 +1106,24 @@ class FrameSpec:
                 "pyarrow is required for sink_ipc(). Please install pyarrow."
             ) from exc
 
-        if not cls._columns:
-            raise ValueError(f"{cls.__name__} declares no ColSpec columns")
-        if n < 0:
-            raise ValueError("n must be >= 0")
-        if batch_size <= 0:
-            raise ValueError("batch_size must be > 0")
-
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-        writer = None
+        path = cls._prepare_sink(path, n, batch_size)
         with open(path, "wb") as f:
-            try:
-                for batch_df in cls.generate_batches(
+            cls._sink_arrow(
+                cls.generate_batches(
                     n,
                     batch_size=batch_size,
                     method=method,
                     seed=seed,
                     references=references,
-                ):
-                    arrow_table = batch_df.to_arrow()
-                    if writer is None:
-                        writer = ipc.new_file(
-                            f,
-                            arrow_table.schema,
-                            options=ipc.IpcWriteOptions(compression=compression),
-                            **kwargs,
-                        )
-                    writer.write_table(arrow_table)
-            finally:
-                if writer is not None:
-                    writer.close()
-                elif n == 0:
-                    empty_df = cls.generate(0, references=references)
-                    empty_table = empty_df.to_arrow()
-                    writer = ipc.new_file(
-                        f,
-                        empty_table.schema,
-                        options=ipc.IpcWriteOptions(compression=compression),
-                        **kwargs,
-                    )
-                    writer.close()
+                ),
+                lambda schema: ipc.new_file(
+                    f,
+                    schema,
+                    options=ipc.IpcWriteOptions(compression=compression),
+                    **kwargs,
+                ),
+                empty_frame=cls.generate(0, references=references) if n == 0 else None,
+            )
 
     @classmethod
     def sink_ndjson(
@@ -1180,15 +1157,7 @@ class FrameSpec:
         **kwargs
             Additional arguments passed to `pl.DataFrame.write_ndjson`.
         """
-        if not cls._columns:
-            raise ValueError(f"{cls.__name__} declares no ColSpec columns")
-        if n < 0:
-            raise ValueError("n must be >= 0")
-        if batch_size <= 0:
-            raise ValueError("batch_size must be > 0")
-
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path = cls._prepare_sink(path, n, batch_size)
 
         with open(path, "wb") as f:
             if n == 0:
@@ -1223,182 +1192,7 @@ class FrameSpec:
         str
             The formatted Markdown string.
         """
-        doc_title = title or cls.__name__
-        lines: list[str] = [
-            f"# {doc_title}",
-            "",
-            "## Overview",
-            f"- **Schema:** `{cls.__name__}`",
-            f"- **Total Columns:** {len(cls._columns)}",
-        ]
-
-        if cls._unique_together:
-            ut_str = ", ".join(f"`{list(g)}`" for g in cls._unique_together)
-            lines.append(f"- **Composite Unique Keys:** {ut_str}")
-
-        if cls._checks:
-            lines.append(
-                f"- **Custom Invariants / Checks:** {len(cls._checks)} check(s)"
-            )
-
-        if cls._foreign_keys:
-            lines.append(f"- **Foreign Keys:** {len(cls._foreign_keys)} key(s)")
-
-        lines.extend(
-            [
-                "",
-                "## Columns",
-                "",
-                "| Column | Type | Nullable | Bounds | Domain / Choices | String Length | Tags | Rules | Unique |",
-                "|:---|:---|:---|:---|:---|:---|:---|:---|:---|",
-            ]
-        )
-
-        for col_name, spec in cls._columns.items():
-            dtype_str = str(spec.dtype)
-            if isinstance(spec.dtype, pl.Enum):
-                cats_preview = list(spec.dtype.categories)
-                if len(cats_preview) <= 4:
-                    dtype_str = f"Enum({cats_preview})"
-                else:
-                    dtype_str = (
-                        f"Enum({cats_preview[:3]} + {len(cats_preview) - 3} more)"
-                    )
-            elif isinstance(spec.dtype, pl.Categorical):
-                cat_obj = getattr(spec.dtype, "categories", None)
-                if cat_obj and hasattr(cat_obj, "name") and cat_obj.name():
-                    dtype_str = f"Categorical({cat_obj.name()})"
-                else:
-                    dtype_str = "Categorical"
-
-            nullable_str = "Yes" if spec.nullable else "No"
-            bounds_str = str(spec.bounds) if spec.bounds else "-"
-
-            if spec.choices is not None:
-                ch_list = list(spec.choices)
-                if len(ch_list) <= 4:
-                    choices_str = str(ch_list)
-                else:
-                    choices_str = f"[{', '.join(str(c) for c in ch_list[:3])}, ... ({len(ch_list)} total)]"
-            else:
-                choices_str = "-"
-
-            str_len_str = (
-                f"[{spec.string_length.min}, {spec.string_length.max}]"
-                if spec.string_length
-                else "-"
-            )
-            tags_str = ", ".join(f"`{t}`" for t in spec.tags) if spec.tags else "-"
-            rules_str = f"{len(spec.rules)} rule(s)" if spec.rules else "-"
-            unique_str = "Yes" if spec.unique else "No"
-
-            lines.append(
-                f"| `{col_name}` | `{dtype_str}` | {nullable_str} | {bounds_str} | {choices_str} | {str_len_str} | {tags_str} | {rules_str} | {unique_str} |"
-            )
-
-        has_constraints = bool(
-            cls._checks
-            or cls._unique_together
-            or cls._foreign_keys
-            or any(s.rules for s in cls._columns.values())
-            or any(s.validators for s in cls._columns.values())
-        )
-        if has_constraints:
-            lines.extend(
-                [
-                    "",
-                    "## Constraints & Invariants",
-                ]
-            )
-
-            if cls._unique_together:
-                lines.extend(
-                    [
-                        "",
-                        "### Composite Uniqueness",
-                    ]
-                )
-                for group in cls._unique_together:
-                    lines.append(f"- Key: `{list(group)}`")
-
-            if cls._checks:
-                lines.extend(
-                    [
-                        "",
-                        "### Multi-Column Checks",
-                    ]
-                )
-                for chk in cls._checks:
-                    desc_line = (
-                        f"\n  - *Description:* {chk.description}"
-                        if chk.description
-                        else ""
-                    )
-                    lines.append(f"- **`{chk.name}`**: `{chk.expr}`{desc_line}")
-
-            if cls._foreign_keys:
-                lines.extend(
-                    [
-                        "",
-                        "### Foreign Keys",
-                    ]
-                )
-                for fk in cls._foreign_keys:
-                    target_label = (
-                        cls.__name__
-                        if fk.references == "self"
-                        else fk.references.__name__
-                    )
-                    lines.append(
-                        f"- **`{fk.name}`**: `{list(fk.columns)}` -> "
-                        f"`{target_label}.{list(fk.ref_columns)}`"
-                    )
-
-            cols_with_rules = [
-                (name, spec) for name, spec in cls._columns.items() if spec.rules
-            ]
-            if cols_with_rules:
-                lines.extend(
-                    [
-                        "",
-                        "### Conditional Rules (`ColRule`)",
-                    ]
-                )
-                for name, spec in cols_with_rules:
-                    lines.append(f"- **Column `{name}`**:")
-                    for r_idx, rule in enumerate(spec.rules, 1):
-                        lines.append(
-                            f"  {r_idx}. When `{rule.when}` -> Choices: `{list(rule.choices)}`"
-                        )
-
-            cols_with_validators = [
-                (name, spec) for name, spec in cls._columns.items() if spec.validators
-            ]
-            if cols_with_validators:
-                lines.extend(
-                    [
-                        "",
-                        "### Column Validators",
-                    ]
-                )
-                for name, spec in cols_with_validators:
-                    lines.append(f"- **Column `{name}`**:")
-                    for validator in spec.validators:
-                        desc_line = (
-                            f" -- {validator.description}"
-                            if validator.description
-                            else ""
-                        )
-                        lines.append(
-                            f"  - **`{validator.name}`**: `{validator.expr}`{desc_line}"
-                        )
-
-        content = "\n".join(lines) + "\n"
-        if path is not None:
-            p = Path(path)
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(content, encoding="utf-8")
-        return content
+        return framespec_to_markdown(cls, path, title=title)
 
     @classmethod
     def to_mermaid(
@@ -1421,92 +1215,7 @@ class FrameSpec:
         str
             The formatted Mermaid diagram definition.
         """
-        entity_name = title or cls.__name__
-        entity_name = "".join(
-            c if c.isalnum() or c == "_" else "_" for c in entity_name
-        )
-
-        fk_columns: dict[str, ForeignKey] = {}
-        for fk in cls._foreign_keys:
-            for col in fk.columns:
-                fk_columns.setdefault(col, fk)
-
-        lines: list[str] = [
-            "erDiagram",
-            f"    {entity_name} {{",
-        ]
-
-        for col_name, spec in cls._columns.items():
-            dtype = spec.dtype
-            if isinstance(dtype, pl.Enum):
-                type_name = "Enum"
-            elif isinstance(dtype, pl.Categorical):
-                type_name = "Categorical"
-            elif isinstance(dtype, pl.Datetime):
-                type_name = "Datetime"
-            elif isinstance(dtype, pl.Duration):
-                type_name = "Duration"
-            elif isinstance(dtype, pl.List):
-                type_name = "List"
-            elif isinstance(dtype, pl.Struct):
-                type_name = "Struct"
-            elif isinstance(dtype, pl.Array):
-                type_name = "Array"
-            else:
-                type_name = type(dtype).__name__
-
-            key_token = ""
-            if spec.unique:
-                key_token = "PK"
-            elif any(col_name in group for group in cls._unique_together):
-                key_token = "UK"
-            elif col_name in fk_columns:
-                key_token = "FK"
-
-            comments: list[str] = []
-            if spec.nullable:
-                comments.append("nullable")
-            if spec.bounds is not None:
-                comments.append(f"bounds: {spec.bounds}")
-            elif spec.choices is not None:
-                ch = list(spec.choices)
-                if len(ch) <= 3:
-                    comments.append(f"choices: [{', '.join(str(c) for c in ch)}]")
-                else:
-                    comments.append(f"choices: [{len(ch)} items]")
-            if spec.tags:
-                comments.append(f"tags: [{', '.join(spec.tags)}]")
-            if spec.string_length is not None:
-                comments.append(
-                    f"len: [{spec.string_length.min}, {spec.string_length.max}]"
-                )
-
-            comment_body = ", ".join(comments).replace('"', "'")
-            comment_str = f' "{comment_body}"' if comments else ""
-            key_str = f" {key_token}" if key_token else ""
-            lines.append(f"        {type_name} {col_name}{key_str}{comment_str}")
-
-        lines.append("    }")
-
-        if cls._foreign_keys:
-            for fk in cls._foreign_keys:
-                if fk.references == "self":
-                    target_name = entity_name
-                else:
-                    target_name = "".join(
-                        c if c.isalnum() or c == "_" else "_"
-                        for c in fk.references.__name__
-                    )
-                fk_label = fk.name.replace('"', "'") if fk.name else "references"
-                lines.append(f'    {target_name} ||--o{{ {entity_name} : "{fk_label}"')
-
-        content = "\n".join(lines) + "\n"
-
-        if path is not None:
-            p = Path(path)
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(content, encoding="utf-8")
-        return content
+        return framespec_to_mermaid(cls, path, title=title)
 
     @overload
     @classmethod
@@ -1644,19 +1353,21 @@ class FrameSpec:
             cls._columns,
             cls.__name__,
             df,
-            extra_cols=extra_cols,
-            missing_cols=missing_cols,
-            strict_dtypes=strict_dtypes,
-            validate_rules=validate_rules,
-            validate_validators=validate_validators,
-            validate_unique=validate_unique,
-            validate_checks=validate_checks,
-            validate_foreign_keys=validate_foreign_keys,
-            checks=cls._checks if validate_checks else None,
-            unique_together=cls._unique_together if validate_unique else None,
-            foreign_keys=resolved_foreign_keys if validate_foreign_keys else None,
-            cast=cast,
-            streaming=streaming,
+            _Options(
+                extra_cols=extra_cols,
+                missing_cols=missing_cols,
+                strict_dtypes=strict_dtypes,
+                rules=validate_rules,
+                validators=validate_validators,
+                unique=validate_unique,
+                checks=validate_checks,
+                foreign_keys=validate_foreign_keys,
+                cast=cast,
+                streaming=streaming,
+            ),
+            checks=cls._checks,
+            unique_together=cls._unique_together,
+            foreign_keys=resolved_foreign_keys,
         )
 
 

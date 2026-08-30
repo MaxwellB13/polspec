@@ -1,3 +1,9 @@
+"""Inferring a spec from data that already exists.
+
+The inverse of generation: given a DataFrame, describe the columns well enough
+that `FrameSpec.generate` could produce something like it again.
+"""
+
 from __future__ import annotations
 
 import polars as pl
@@ -25,138 +31,164 @@ def profile_dataframe(
     if bounds is not None:
         calculate_bounds = bounds
 
-    total_rows = df.height
-    columns: dict[str, ColSpec] = {}
-
-    for col_name in df.columns:
-        s = df[col_name]
-        dtype = s.dtype
-        null_count = s.null_count()
-        nullable = null_count > 0
-        null_probability = (
-            float(null_count / total_rows)
-            if total_rows > 0 and null_count > 0
-            else (_DEFAULT_NULL_PROBABILITY if nullable else 0.0)
+    return {
+        name: _profile_column(
+            df[name],
+            name,
+            total_rows=df.height,
+            with_weights=weights,
+            max_unique_enum=max_unique_enum,
+            calculate_bounds=calculate_bounds,
         )
-        non_null = s.drop_nulls()
-        num_valid = len(non_null)
+        for name in df.columns
+    }
 
-        # Profiling categorical / enum / string types
-        if isinstance(dtype, pl.Enum):
-            categories = dtype.categories.to_list()
-            col_weights: tuple[float, ...] | None = None
-            if weights and num_valid > 0:
-                vc = non_null.value_counts()
-                counts_map = dict(
-                    zip(vc[col_name].to_list(), vc[vc.columns[1]].to_list())
-                )
-                tot = float(num_valid)
-                col_weights = tuple(counts_map.get(cat, 0) / tot for cat in categories)
-            columns[col_name] = ColSpec(
-                dtype=dtype,
-                nullable=nullable,
-                null_probability=null_probability,
-                weights=col_weights,
-            )
-        elif dtype in (pl.String, pl.Utf8) or _is_categorical_dtype(dtype):
-            n_unique = non_null.n_unique()
-            if 0 < n_unique <= max_unique_enum:
-                cats = non_null.unique().sort().to_list()
-                enum_dtype = pl.Enum(cats)
-                col_weights = None
-                if weights and num_valid > 0:
-                    vc = non_null.value_counts()
-                    counts_map = dict(
-                        zip(vc[col_name].to_list(), vc[vc.columns[1]].to_list())
-                    )
-                    tot = float(num_valid)
-                    col_weights = tuple(counts_map.get(cat, 0) / tot for cat in cats)
-                columns[col_name] = ColSpec(
-                    dtype=enum_dtype,
-                    nullable=nullable,
-                    null_probability=null_probability,
-                    weights=col_weights,
-                )
-            else:
-                if _is_categorical_dtype(dtype):
-                    columns[col_name] = ColSpec(
-                        dtype=pl.Categorical(),
-                        nullable=nullable,
-                        null_probability=null_probability,
-                    )
-                else:
-                    str_len: Bound | None = None
-                    if calculate_bounds and num_valid > 0:
-                        lens = non_null.str.len_chars()
-                        str_len = Bound(int(lens.min()), int(lens.max()))
-                    columns[col_name] = ColSpec(
-                        dtype=pl.String,
-                        nullable=nullable,
-                        null_probability=null_probability,
-                        string_length=str_len,
-                    )
-        elif dtype == pl.Boolean:
-            col_weights = None
-            if weights and num_valid > 0:
-                n_false = int((non_null == False).sum())
-                n_true = int((non_null == True).sum())
-                tot_b = n_false + n_true
-                col_weights = (
-                    (n_false / tot_b, n_true / tot_b) if tot_b > 0 else (0.5, 0.5)
-                )
-            columns[col_name] = ColSpec(
-                dtype=pl.Boolean,
-                nullable=nullable,
-                null_probability=null_probability,
-                weights=col_weights,
-            )
-        elif dtype.is_integer():
-            num_bounds: Bound | None = None
-            if calculate_bounds and num_valid > 0:
-                num_bounds = Bound(int(non_null.min()), int(non_null.max()))
-            columns[col_name] = ColSpec(
-                dtype=dtype,
-                nullable=nullable,
-                null_probability=null_probability,
-                bounds=num_bounds,
-            )
-        elif dtype.is_float():
-            num_bounds = None
-            if calculate_bounds and num_valid > 0:
-                num_bounds = Bound(float(non_null.min()), float(non_null.max()))
-            columns[col_name] = ColSpec(
-                dtype=dtype,
-                nullable=nullable,
-                null_probability=null_probability,
-                bounds=num_bounds,
-            )
-        elif dtype.is_temporal():
-            temp_bounds: Bound | None = None
-            if calculate_bounds and num_valid > 0:
-                phys = non_null.to_physical()
-                temp_bounds = Bound(int(phys.min()), int(phys.max()))
-            columns[col_name] = ColSpec(
-                dtype=dtype,
-                nullable=nullable,
-                null_probability=null_probability,
-                bounds=temp_bounds,
-            )
-        elif dtype == pl.Binary:
-            bin_len: Bound | None = None
-            if calculate_bounds and num_valid > 0:
-                lens = non_null.bin.size()
-                bin_len = Bound(int(lens.min()), int(lens.max()))
-            columns[col_name] = ColSpec(
-                dtype=pl.Binary,
-                nullable=nullable,
-                null_probability=null_probability,
-                string_length=bin_len,
-            )
-        else:
-            columns[col_name] = ColSpec(
-                dtype=dtype,
-                nullable=nullable,
-                null_probability=null_probability,
-            )
 
-    return columns
+def _profile_column(
+    series: pl.Series,
+    name: str,
+    *,
+    total_rows: int,
+    with_weights: bool,
+    max_unique_enum: int,
+    calculate_bounds: bool,
+) -> ColSpec:
+    """Describes one column: its nullability, its domain, and its extent."""
+    dtype = series.dtype
+    non_null = series.drop_nulls()
+    nullable, null_probability = _nullability(series, total_rows)
+
+    def spec(**kwargs) -> ColSpec:
+        return ColSpec(nullable=nullable, null_probability=null_probability, **kwargs)
+
+    if isinstance(dtype, pl.Enum):
+        categories = dtype.categories.to_list()
+        return spec(
+            dtype=dtype,
+            weights=_empirical_weights(non_null, name, categories)
+            if with_weights
+            else None,
+        )
+
+    if dtype in (pl.String, pl.Utf8) or _is_categorical_dtype(dtype):
+        return _profile_textual(
+            non_null,
+            name,
+            dtype,
+            spec,
+            with_weights=with_weights,
+            max_unique_enum=max_unique_enum,
+            calculate_bounds=calculate_bounds,
+        )
+
+    if dtype == pl.Boolean:
+        return spec(
+            dtype=pl.Boolean,
+            weights=_boolean_weights(non_null) if with_weights else None,
+        )
+
+    if dtype.is_integer():
+        return spec(dtype=dtype, bounds=_extent(non_null, int, calculate_bounds))
+
+    if dtype.is_float():
+        return spec(dtype=dtype, bounds=_extent(non_null, float, calculate_bounds))
+
+    if dtype.is_temporal():
+        # Temporal bounds are recorded as the physical integer the dtype
+        # stores, matching what the generation path expects back.
+        physical = non_null.to_physical() if len(non_null) else non_null
+        return spec(dtype=dtype, bounds=_extent(physical, int, calculate_bounds))
+
+    if dtype == pl.Binary:
+        return spec(
+            dtype=pl.Binary,
+            string_length=_extent(
+                non_null.bin.size() if len(non_null) else non_null,
+                int,
+                calculate_bounds,
+            ),
+        )
+
+    # A dtype polspec cannot generate. Recorded faithfully so validation still
+    # works; `generate()` is what will object.
+    return spec(dtype=dtype)
+
+
+def _profile_textual(
+    non_null: pl.Series,
+    name: str,
+    dtype: pl.DataType,
+    spec,
+    *,
+    with_weights: bool,
+    max_unique_enum: int,
+    calculate_bounds: bool,
+) -> ColSpec:
+    """A String or Categorical column, narrowed to an Enum when it is small enough."""
+    n_unique = non_null.n_unique()
+
+    if 0 < n_unique <= max_unique_enum:
+        categories = non_null.unique().sort().to_list()
+        return spec(
+            dtype=pl.Enum(categories),
+            weights=_empirical_weights(non_null, name, categories)
+            if with_weights
+            else None,
+        )
+
+    if _is_categorical_dtype(dtype):
+        return spec(dtype=pl.Categorical())
+
+    return spec(
+        dtype=pl.String,
+        string_length=_extent(
+            non_null.str.len_chars() if len(non_null) else non_null,
+            int,
+            calculate_bounds,
+        ),
+    )
+
+
+def _nullability(series: pl.Series, total_rows: int) -> tuple[bool, float]:
+    """Whether the column holds nulls, and how often."""
+    null_count = series.null_count()
+    if null_count == 0:
+        return False, 0.0
+    if total_rows > 0:
+        return True, float(null_count / total_rows)
+    return True, _DEFAULT_NULL_PROBABILITY
+
+
+def _extent(values: pl.Series, cast, calculate_bounds: bool) -> Bound | None:
+    """The observed [min, max] of `values`, or None when not being measured."""
+    if not calculate_bounds or len(values) == 0:
+        return None
+    return Bound(cast(values.min()), cast(values.max()))
+
+
+def _empirical_weights(
+    non_null: pl.Series, name: str, categories: list
+) -> tuple[float, ...] | None:
+    """How often each category actually occurs, in `categories` order.
+
+    Categories absent from the data get a weight of 0, so a round-trip through
+    `generate()` reproduces the observed mix rather than a uniform one.
+    """
+    if len(non_null) == 0:
+        return None
+    counts = non_null.value_counts()
+    observed = dict(zip(counts[name].to_list(), counts[counts.columns[1]].to_list()))
+    total = float(len(non_null))
+    return tuple(observed.get(category, 0) / total for category in categories)
+
+
+def _boolean_weights(non_null: pl.Series) -> tuple[float, float] | None:
+    """The observed [p_false, p_true] split."""
+    if len(non_null) == 0:
+        return None
+    true_count = int(non_null.sum())
+    false_count = len(non_null) - true_count
+    total = false_count + true_count
+    if total == 0:
+        return (0.5, 0.5)
+    return (false_count / total, true_count / total)
