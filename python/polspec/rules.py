@@ -59,6 +59,26 @@ def _validate_condition(condition: dict) -> None:
         )
 
 
+def _reject_colliding_choices(choices: tuple, label: str) -> None:
+    """Rejects choices that are distinct in Python but identical as strings.
+
+    Choices reach the generation engine as `str(choice)` and are mapped back
+    by that string, and validation compares them the same way. Two choices
+    sharing a string form therefore collapse into one -- silently narrowing
+    the domain and sliding every later weight onto the wrong value.
+    """
+    seen: dict[str, object] = {}
+    for choice in choices:
+        key = str(choice)
+        if key in seen:
+            raise ValueError(
+                f"{label} {seen[key]!r} and {choice!r} both render as {key!r}, "
+                "so they cannot be told apart during generation or validation. "
+                "Give each choice a distinct string form."
+            )
+        seen[key] = choice
+
+
 def _condition_to_expr(condition: dict) -> pl.Expr:
     column = pl.col(condition["column"])
     if "equals" in condition:
@@ -135,6 +155,7 @@ class ColRule:
                 )
         if not self.choices:
             raise ValueError("ColRule.choices must not be empty")
+        _reject_colliding_choices(self.choices, "ColRule.choices")
         if self.weights is not None:
             if len(self.weights) != len(self.choices):
                 raise ValueError(

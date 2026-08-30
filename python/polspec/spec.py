@@ -12,7 +12,7 @@ from polspec.bound import Bound
 from polspec.check import Check
 from polspec.constants import _DEFAULT_NULL_PROBABILITY
 from polspec.dtypes import _bound_endpoint_to_physical, _dtype_value_limits
-from polspec.rules import ColRule
+from polspec.rules import ColRule, _reject_colliding_choices
 
 
 def _column_kind(dtype: pl.DataType) -> str:
@@ -151,8 +151,10 @@ class ColSpec:
         elif self.weights is not None:
             object.__setattr__(self, "weights", tuple(float(w) for w in self.weights))
 
-        if self.choices is not None and not self.choices:
-            raise ValueError("ColSpec.choices must not be empty")
+        if self.choices is not None:
+            if not self.choices:
+                raise ValueError("ColSpec.choices must not be empty")
+            _reject_colliding_choices(self.choices, "ColSpec.choices")
 
         if self.weights is not None:
             if self.choices is not None:

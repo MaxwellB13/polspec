@@ -279,8 +279,12 @@ def test_catspec_heuristic_inference():
 
 def test_framespec_infer_catspec_and_transformation():
     class RawOrders(FrameSpec):
+        # 'tag' collides with FrameSpec.tag(), so it is declared through
+        # __columns__ to keep both the column and the method.
+        __columns__ = {
+            "tag": ColSpec(dtype=pl.String, choices=[f"TAG_{i}" for i in range(40)])
+        }
         status = ColSpec(dtype=pl.String, choices=["NEW", "PAID", "CANCELLED"])
-        tag = ColSpec(dtype=pl.String, choices=[f"TAG_{i}" for i in range(40)])
         user_id = ColSpec(dtype=pl.String)
         long_notes = ColSpec(dtype=pl.String, string_length=Bound(0, 1000))
         plain_str = ColSpec(dtype=pl.String)

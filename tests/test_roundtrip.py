@@ -533,15 +533,65 @@ class RetypedSpec(FrameSpec):
     amount = ColSpec(pl.Int64, bounds=(1, 10))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="C10: with_catspec rebuilds each re-typed column from 7 of the 13 "
-    "ColSpec fields, dropping unique/bounds/string_length/distribution",
-)
 def test_with_catspec_preserves_column_constraints():
+    """C10: re-typing changes the dtype and nothing else the column declared."""
+    original = RetypedSpec._columns["code"]
     retyped = RetypedSpec.with_catspec(CatSpec(enums={"code": ["a", "b", "c"]}))
-    assert retyped._columns["code"].unique is True
-    assert retyped._columns["code"].string_length is not None
+    retyped = retyped._columns["code"]
+
+    assert isinstance(retyped.dtype, pl.Enum)
+    for field in ("unique", "string_length", "nullable", "null_probability", "tags"):
+        assert getattr(retyped, field) == getattr(original, field), field
+
+
+def test_with_catspec_leaves_untouched_columns_identical():
+    retyped = RetypedSpec.with_catspec(CatSpec(enums={"code": ["a", "b", "c"]}))
+    assert retyped._columns["amount"] is RetypedSpec._columns["amount"]
+
+
+def test_with_catspec_drops_weights_it_cannot_carry():
+    """Weights are positional over a domain the re-type just resized."""
+
+    class Weighted(FrameSpec):
+        code = ColSpec(pl.String, choices=["a", "b", "c"], weights=[1.0, 1.0, 2.0])
+
+    with pytest.warns(UserWarning) as caught:
+        retyped = Weighted.with_catspec(CatSpec(enums={"code": ["a", "b"]}))
+
+    # Narrowing the domain invalidates both, and each is reported on its own.
+    messages = [str(w.message) for w in caught]
+    assert any("dropping choices ['c']" in m for m in messages), messages
+    assert any("dropping 3 weight" in m for m in messages), messages
+    assert retyped._columns["code"].weights is None
+
+
+def test_with_catspec_drops_choices_the_new_dtype_cannot_hold():
+    """Carrying them into the new ColSpec raised a confusing error instead."""
+
+    class Narrow(FrameSpec):
+        code = ColSpec(pl.String, choices=["a", "b", "c"])
+
+    with pytest.warns(UserWarning, match=r"dropping choices \['c'\]"):
+        retyped = Narrow.with_catspec(CatSpec(enums={"code": ["a", "b"]}))
+    assert retyped._columns["code"].choices is None
+    assert_roundtrip(retyped)
+
+
+def test_with_catspec_keeps_choices_the_new_dtype_still_covers():
+    class Subset(FrameSpec):
+        code = ColSpec(pl.String, choices=["a", "b"])
+
+    retyped = Subset.with_catspec(CatSpec(enums={"code": ["a", "b", "c"]}))
+    assert retyped._columns["code"].choices == ("a", "b")
+    assert set(assert_roundtrip(retyped)["code"].unique()) <= {"a", "b"}
+
+
+def test_with_catspec_keeps_weights_that_still_fit():
+    class Weighted(FrameSpec):
+        code = ColSpec(pl.String, choices=["a", "b", "c"], weights=[1.0, 1.0, 2.0])
+
+    retyped = Weighted.with_catspec(CatSpec(enums={"code": ["a", "b", "c"]}))
+    assert retyped._columns["code"].weights == (1.0, 1.0, 2.0)
 
 
 def test_yaml_roundtrip_preserves_the_property(tmp_path):

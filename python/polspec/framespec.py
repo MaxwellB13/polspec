@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import random
 import warnings
 from collections.abc import Iterator, Mapping, Sequence
@@ -25,6 +26,64 @@ from polspec.spec import ColSpec, _column_kind
 from polspec.validation import _validate_dataframe
 
 
+def _retype_column(
+    col_name: str,
+    spec: ColSpec,
+    dtype: pl.DataType,
+    *,
+    choices: Sequence[Any] | None = None,
+) -> ColSpec:
+    """Re-points a ColSpec at a new dtype, keeping everything else it declared.
+
+    `dataclasses.replace` rather than a field-by-field rebuild: a rebuild
+    silently drops whatever field it forgets to list, and quietly stopped
+    honouring `unique` and `string_length` for every re-typed column.
+
+    Two fields a dtype change can genuinely invalidate are handled explicitly:
+    `choices`, which may name values outside the new dtype's domain, and
+    `weights`, which is positional over a domain that just changed size. Each
+    is dropped with a warning rather than carried into a confusing ColSpec
+    error further down.
+    """
+    updates: dict[str, Any] = {"dtype": dtype}
+
+    new_choices = tuple(choices) if choices is not None else spec.choices
+    if choices is None and new_choices is not None and isinstance(dtype, pl.Enum):
+        valid = set(dtype.categories.to_list())
+        stale = [c for c in new_choices if c not in valid]
+        if stale:
+            warnings.warn(
+                f"Column {col_name!r}: dropping choices {stale} while re-typing "
+                f"to {dtype!r}, whose categories do not include them. The new "
+                "dtype's own categories become the column's domain.",
+                stacklevel=3,
+            )
+            new_choices = None
+    updates["choices"] = new_choices
+
+    if new_choices is not None:
+        new_domain = len(new_choices)
+    elif isinstance(dtype, pl.Enum):
+        new_domain = len(dtype.categories)
+    else:
+        new_domain = None
+
+    if spec.weights is not None and (
+        new_domain is None or new_domain != len(spec.weights)
+    ):
+        warnings.warn(
+            f"Column {col_name!r}: dropping {len(spec.weights)} weight(s) while "
+            f"re-typing to {dtype!r}, which defines "
+            f"{new_domain if new_domain is not None else 'no'} value(s) for them "
+            "to apply to. Re-declare weights against the new domain if the "
+            "distribution mattered.",
+            stacklevel=3,
+        )
+        updates["weights"] = None
+
+    return dataclasses.replace(spec, **updates)
+
+
 class FrameSpec:
     """Base class for declaring a DataFrame/LazyFrame specification.
 
@@ -38,6 +97,17 @@ class FrameSpec:
 
         df = DataSource.generate(1_000_000, seed=42)
         df = DataSource.generate(n=1_000_000, method="cartesian", seed=42)
+
+    Columns whose names cannot be class attributes -- a leading underscore, or
+    a collision with one of this class's own methods such as `schema` -- are
+    declared through `__columns__` instead, which is not looked up as an
+    attribute:
+
+        class DataSource(FrameSpec):
+            __columns__ = {"_id": ColSpec(pl.Int64), "schema": ColSpec(pl.String)}
+
+    `from_dataframe` and `from_yaml` build specs this way, since their column
+    names come from data rather than from a class body.
     """
 
     _columns: ClassVar[dict[str, ColSpec]] = {}
@@ -107,14 +177,49 @@ class FrameSpec:
                             f"__foreign_keys__ must be a ForeignKey or sequence of ForeignKey instances, got {type(val).__name__}"
                         )
 
-            # Collect columns
+            # Collect columns declared as ordinary class attributes
             for name, value in vars(base).items():
                 if name.startswith("_"):
                     continue
                 if isinstance(value, ColSpec):
+                    if name in _RESERVED_ATTRS:
+                        # A warning, not an error: `tag`, `schema` and friends
+                        # are ordinary column names in real data, and polspec's
+                        # choice of method names is no reason to refuse someone
+                        # else's schema. The column works either way -- what
+                        # breaks is only the shadowed accessor, and declaring
+                        # the column through __columns__ keeps both.
+                        warnings.warn(
+                            f"Column {name!r} on {cls.__name__} shadows "
+                            f"FrameSpec.{name}, so {cls.__name__}.{name}() is "
+                            f"no longer callable on this spec. The {name!r} "
+                            "column itself is unaffected. Declare it through "
+                            "__columns__ = {...} to keep the method as well.",
+                            stacklevel=3,
+                        )
                     columns[name] = value
                 elif name in columns:
                     del columns[name]
+
+            # Collect columns declared explicitly. Names here never pass
+            # through attribute lookup, so they may start with an underscore
+            # or match one of this class's own methods -- which is what makes
+            # this the right channel for names that come from data (a profiled
+            # DataFrame, a YAML file) rather than from someone's class body.
+            declared = vars(base).get("__columns__")
+            if declared is not None:
+                if not isinstance(declared, Mapping):
+                    raise TypeError(
+                        "__columns__ must be a mapping of column name to "
+                        f"ColSpec, got {type(declared).__name__}"
+                    )
+                for name, value in declared.items():
+                    if not isinstance(value, ColSpec):
+                        raise TypeError(
+                            f"__columns__[{name!r}] must be a ColSpec, got "
+                            f"{type(value).__name__}"
+                        )
+                    columns[str(name)] = value
 
         cls._columns = columns
         cls._checks = tuple(checks_list)
@@ -411,34 +516,21 @@ class FrameSpec:
             )
 
             if enum_key is not None:
-                enum_dt = pl.Enum(catspec.get_enum(enum_key))
-                new_columns[col_name] = ColSpec(
-                    dtype=enum_dt,
-                    nullable=spec.nullable,
-                    tags=spec.tags,
-                    null_probability=spec.null_probability,
-                    weights=spec.weights,
-                    rules=spec.rules,
-                    validators=spec.validators,
+                new_columns[col_name] = _retype_column(
+                    col_name, spec, pl.Enum(catspec.get_enum(enum_key))
                 )
             elif cat_key is not None:
-                cat_dt = pl.Categorical(catspec.get_categorical(cat_key))
-                choices = catspec.get_choices(cat_key) or spec.choices
-                new_columns[col_name] = ColSpec(
-                    dtype=cat_dt,
-                    nullable=spec.nullable,
-                    tags=spec.tags,
-                    null_probability=spec.null_probability,
-                    choices=choices,
-                    weights=spec.weights,
-                    rules=spec.rules,
-                    validators=spec.validators,
+                new_columns[col_name] = _retype_column(
+                    col_name,
+                    spec,
+                    pl.Categorical(catspec.get_categorical(cat_key)),
+                    choices=catspec.get_choices(cat_key) or spec.choices,
                 )
             else:
                 new_columns[col_name] = spec
 
         subclass_name = name or f"{cls.__name__}WithCatSpec"
-        class_attrs: dict[str, Any] = dict(new_columns)
+        class_attrs: dict[str, Any] = {"__columns__": new_columns}
         if cls._checks:
             class_attrs["__checks__"] = cls._checks
         if cls._unique_together:
@@ -586,7 +678,7 @@ class FrameSpec:
             name: _colspec_from_yaml(col_data, categories=catspec)
             for name, col_data in columns_data.items()
         }
-        class_attrs: dict[str, Any] = dict(columns)
+        class_attrs: dict[str, Any] = {"__columns__": columns}
         if "unique_together" in data:
             class_attrs["__unique_together__"] = data["unique_together"]
         if "foreign_keys" in data:
@@ -637,7 +729,7 @@ class FrameSpec:
             calculate_bounds=calculate_bounds,
             bounds=bounds,
         )
-        return type(name, (FrameSpec,), columns)
+        return type(name, (FrameSpec,), {"__columns__": columns})
 
     @overload
     @classmethod
@@ -1569,5 +1661,11 @@ class FrameSpec:
             streaming=streaming,
         )
 
+
+# Names a ColSpec attribute may not take: assigning one shadows the classmethod
+# it collides with, so MySpec.schema() would resolve to a ColSpec instance.
+_RESERVED_ATTRS = frozenset(
+    name for name in vars(FrameSpec) if not name.startswith("_")
+)
 
 FrameSchema = FrameSpec
