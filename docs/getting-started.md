@@ -10,7 +10,7 @@ import polars as pl
 from polspec import ColSpec, FrameSpec
 
 class Customers(FrameSpec):
-    customer_id = ColSpec(pl.Int64, bounds=(1, 100_000), unique=True)
+    customer_id = ColSpec(pl.Int64, bounds=(1, 100_000))
     name        = ColSpec(pl.String, string_length=(4, 20))
     tier        = ColSpec(pl.Enum(["free", "pro", "enterprise"]))
     signed_up   = ColSpec(pl.Date, bounds=(date(2020, 1, 1), None))
@@ -62,7 +62,7 @@ except ValidationError as err:
 ```
 
 ```text
-Column 'customer_id': unique column contains 3 duplicate value(s). Duplicate samples: [7, 12, 41]
+Column 'customer_id': found 3 value(s) out of bounds [1, 100000] (min found: 100050, max found: 200000). Out of bounds samples: [100050, 150000, 200000]
 Column 'tier': found 2 invalid value(s) not in allowed choices/categories ['free', 'pro', 'enterprise']. Invalid samples: ['trial']
 Column 'name': non-nullable column contains 1 null value(s)
 ```

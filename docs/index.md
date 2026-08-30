@@ -8,13 +8,13 @@ import polars as pl
 from polspec import ColSpec, FrameSpec
 
 class Orders(FrameSpec):
-    order_id = ColSpec(pl.Int64, bounds=(1, None), unique=True)
+    order_id = ColSpec(pl.Int64, bounds=(1, None))
     status   = ColSpec(pl.Enum(["NEW", "PAID", "SHIPPED"]))
     total    = ColSpec(pl.Float64, bounds=(0.0, None))
     placed   = ColSpec(pl.Date, nullable=True)
 
-df = Orders.generate(1_000, seed=42)   # a million rows is just as quick
-Orders.validate(df)                    # raises ValidationError on any breach
+df = Orders.generate(1_000_000, seed=42)   # a million rows in well under a second
+Orders.validate(df)                        # raises ValidationError on any breach
 ```
 
 The generator is written in Rust and runs the columns in parallel, so a spec

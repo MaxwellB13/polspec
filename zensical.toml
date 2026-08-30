@@ -15,10 +15,12 @@ nav = [
     { "YAML specs" = "guide/yaml.md" },
     { "Generated documentation" = "guide/documenting.md" },
     { "Command line" = "guide/cli.md" },
+    { "Testing pipelines" = "guide/testing.md" },
   ] },
   { "Reference" = [
     { "Architecture" = "reference/architecture.md" },
     { "Known limitations" = "reference/limitations.md" },
+    { "Roadmap and stability" = "reference/roadmap.md" },
   ] },
 ]
 
