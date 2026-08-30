@@ -1,0 +1,157 @@
+"""Declaration-time contracts: what a spec accepts, and what it says when it can't.
+
+The round-trip property in `test_roundtrip.py` covers constraints that survive
+into generated data. These are the ones that never get that far -- a column
+that silently fails to exist, a name collision that disables a method, a
+`choices` list that quietly collapses. Each was a place polspec discarded what
+the caller declared without saying so.
+"""
+
+import polars as pl
+import pytest
+from polspec import ColRule, ColSpec, FrameSpec
+
+# ---------------------------------------------------------------------------
+# C8 -- names that cannot be class attributes
+# ---------------------------------------------------------------------------
+
+
+def test_underscore_columns_are_dropped_from_the_class_body():
+    """Documents the limit that makes __columns__ necessary.
+
+    A leading underscore marks a spec's own internals, so the attribute scan
+    has to skip it. Nothing is silently lost here: what the caller wrote is
+    what they get.
+    """
+
+    class Spec(FrameSpec):
+        _id = ColSpec(pl.Int64)
+        val = ColSpec(pl.Int64)
+
+    assert list(Spec._columns) == ["val"]
+
+
+def test_underscore_columns_survive_via_explicit_declaration():
+    class Spec(FrameSpec):
+        __columns__ = {"_id": ColSpec(pl.Int64), "val": ColSpec(pl.Int64)}
+
+    assert list(Spec._columns) == ["_id", "val"]
+    assert Spec.generate(10, seed=1).columns == ["_id", "val"]
+
+
+def test_profiling_keeps_underscore_columns():
+    """C8: from_dataframe takes its names from data, so it must keep all of them."""
+    source = pl.DataFrame({"_id": [1, 2, 3], "val": [1.0, 2.0, 3.0]})
+    spec_cls = FrameSpec.from_dataframe(source)
+
+    assert list(spec_cls._columns) == ["_id", "val"]
+    assert spec_cls.generate(10, seed=1).columns == ["_id", "val"]
+
+
+def test_yaml_roundtrip_keeps_underscore_columns(tmp_path):
+    class Spec(FrameSpec):
+        __columns__ = {"_id": ColSpec(pl.Int64), "val": ColSpec(pl.Int64)}
+
+    path = tmp_path / "spec.yaml"
+    Spec.to_yaml(path)
+    assert list(FrameSpec.from_yaml(path)._columns) == ["_id", "val"]
+
+
+def test_explicit_declarations_must_be_colspecs():
+    with pytest.raises(TypeError, match="must be a ColSpec"):
+
+        class Spec(FrameSpec):
+            __columns__ = {"a": "not a colspec"}
+
+
+def test_explicit_declarations_must_be_a_mapping():
+    with pytest.raises(TypeError, match="must be a mapping"):
+
+        class Spec(FrameSpec):
+            __columns__ = [ColSpec(pl.Int64)]
+
+
+# ---------------------------------------------------------------------------
+# C9 -- names that collide with the FrameSpec API
+# ---------------------------------------------------------------------------
+
+
+def test_column_shadowing_a_method_warns():
+    """C9: the shadowing itself is unavoidable; doing it in silence was the bug."""
+    with pytest.warns(UserWarning, match=r"shadows FrameSpec\.schema"):
+
+        class Spec(FrameSpec):
+            schema = ColSpec(pl.Int64)
+            other = ColSpec(pl.Int64)
+
+    # The column is honoured -- only the accessor is lost.
+    assert list(Spec._columns) == ["schema", "other"]
+    assert Spec.generate(5, seed=1).columns == ["schema", "other"]
+
+
+def test_shadowing_a_method_via_explicit_declaration_keeps_both():
+    class Spec(FrameSpec):
+        __columns__ = {"schema": ColSpec(pl.Int64), "tag": ColSpec(pl.String)}
+
+    assert Spec.generate(5, seed=1).columns == ["schema", "tag"]
+    # Both classmethods still resolve to the method, not to a ColSpec.
+    assert Spec.schema() == pl.Schema({"schema": pl.Int64, "tag": pl.String})
+    assert Spec.tag("anything") == []
+
+
+def test_ordinary_column_names_do_not_warn(recwarn):
+    class Spec(FrameSpec):
+        name = ColSpec(pl.String)
+        value = ColSpec(pl.Int64)
+
+    assert [w for w in recwarn if "shadows" in str(w.message)] == []
+    assert list(Spec._columns) == ["name", "value"]
+
+
+def test_profiling_a_frame_with_reserved_names_does_not_warn(recwarn):
+    """Names arriving from data go through __columns__, so nothing is shadowed."""
+    source = pl.DataFrame({"schema": [1, 2], "tag": ["a", "b"]})
+    spec_cls = FrameSpec.from_dataframe(source)
+
+    assert [w for w in recwarn if "shadows" in str(w.message)] == []
+    assert spec_cls.schema().names() == ["schema", "tag"]
+
+
+# ---------------------------------------------------------------------------
+# M5 -- choices that are distinct in Python but identical as strings
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "choices",
+    [
+        [1, "1", 2],
+        ["a", "a"],
+        [1.0, "1.0"],
+        [True, "True"],
+    ],
+)
+def test_colliding_choices_are_rejected(choices):
+    with pytest.raises(ValueError, match="both render as"):
+        ColSpec(pl.String, choices=choices)
+
+
+def test_colliding_rule_choices_are_rejected():
+    with pytest.raises(ValueError, match="both render as"):
+        ColRule(when={"column": "g", "equals": "x"}, choices=[1, "1"])
+
+
+def test_distinct_string_forms_are_accepted():
+    spec = ColSpec(pl.String, choices=[1, 2, 3])
+    assert spec.choices == (1, 2, 3)
+
+
+def test_colliding_choices_would_have_misapplied_weights():
+    """The reason this is an error and not a de-duplication.
+
+    `[1, "1", 2]` used to collapse to two generated values while three weights
+    were still applied positionally -- so the weight written for 2 landed on
+    whichever of the colliding pair survived.
+    """
+    with pytest.raises(ValueError, match="both render as"):
+        ColSpec(pl.String, choices=[1, "1", 2], weights=[10.0, 10.0, 1.0])
