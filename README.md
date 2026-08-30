@@ -5,8 +5,8 @@ it, and validate data against it — from the same declaration.
 
 > **Early alpha.** The API, the YAML format, and the exact values a given
 > seed produces are all still moving. See
-> [Roadmap and stability](docs/reference/roadmap.md) before depending on any
-> of it.
+> [Roadmap and stability](https://maxwellb13.github.io/polspec/reference/roadmap/)
+> before depending on any of it.
 
 ```python
 import polars as pl
@@ -34,8 +34,8 @@ A validation library tells you when production data drifted. A fixture
 library gives you something to test against. Keeping both behind one
 declaration means the fixtures and the contract can't quietly disagree — and
 where they still can today, it's written down in
-[Known limitations](docs/reference/limitations.md), each backed by a test
-that fails the moment it's fixed.
+[Known limitations](https://maxwellb13.github.io/polspec/reference/limitations/),
+each backed by a test that fails the moment it's fixed.
 
 ## Install
 
@@ -97,18 +97,20 @@ polspec test orders.yaml -o test_orders.py           # generate a round-trip pyt
 The generated test disables whatever `validate()` flags a constraint
 generation can't yet satisfy (`unique=True`, `__checks__`, ...) with a comment
 explaining why, and skips a foreign key that needs parent data it wasn't
-given — see [Command line](docs/guide/cli.md).
+given — see [Command line](https://maxwellb13.github.io/polspec/guide/cli/).
 
 ## Documentation
 
-- [Getting started](docs/getting-started.md)
-- [Declaring columns](docs/guide/columns.md) · [Constraints](docs/guide/constraints.md)
-- [Generating data](docs/guide/generating.md) · [Validating data](docs/guide/validating.md)
-- [Shared categories](docs/guide/categories.md) · [YAML specs](docs/guide/yaml.md)
-- [Testing pipelines](docs/guide/testing.md) · [Command line](docs/guide/cli.md)
-- [Architecture](docs/reference/architecture.md) · [Known limitations](docs/reference/limitations.md) · [Roadmap and stability](docs/reference/roadmap.md)
+Full docs: **[maxwellb13.github.io/polspec](https://maxwellb13.github.io/polspec/)**
 
-Build the full site locally with [zensical](https://pypi.org/project/zensical/):
+- [Getting started](https://maxwellb13.github.io/polspec/getting-started/)
+- [Declaring columns](https://maxwellb13.github.io/polspec/guide/columns/) · [Constraints](https://maxwellb13.github.io/polspec/guide/constraints/)
+- [Generating data](https://maxwellb13.github.io/polspec/guide/generating/) · [Validating data](https://maxwellb13.github.io/polspec/guide/validating/)
+- [Shared categories](https://maxwellb13.github.io/polspec/guide/categories/) · [YAML specs](https://maxwellb13.github.io/polspec/guide/yaml/)
+- [Testing pipelines](https://maxwellb13.github.io/polspec/guide/testing/) · [Command line](https://maxwellb13.github.io/polspec/guide/cli/)
+- [Architecture](https://maxwellb13.github.io/polspec/reference/architecture/) · [Known limitations](https://maxwellb13.github.io/polspec/reference/limitations/) · [Roadmap and stability](https://maxwellb13.github.io/polspec/reference/roadmap/)
+
+To edit and preview the docs locally instead, see [zensical](https://pypi.org/project/zensical/):
 
 ```bash
 zensical serve
