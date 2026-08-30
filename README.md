@@ -136,6 +136,7 @@ Example results (illustrative; your hardware will differ):
 | 1,000,000   | 0.0085s        | 0.4836s | 1.4391s |                    57.8x |
 | 5,000,000   | 0.0318s        | 2.4141s | skipped |                    75.9x |
 | 20,000,000  | 0.0850s        | 9.6097s | skipped |                   113.0x |
+
 *Ran on Intel 13900K + 64GB DDR5 RAM*
 
 Notes
