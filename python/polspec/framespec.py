@@ -121,6 +121,7 @@ class FrameSpec:
         cls._unique_together = tuple(unique_together_list)
         cls._foreign_keys = tuple(foreign_keys_list)
         cls._validate_rules()
+        cls._validate_validators()
         cls._validate_unique_together()
         cls._validate_checks()
         cls._validate_foreign_keys()
@@ -268,6 +269,19 @@ class FrameSpec:
                     )
 
     @classmethod
+    def _validate_validators(cls) -> None:
+        for col_name, spec in cls._columns.items():
+            for validator in spec.validators:
+                other_cols = set(validator.expr.meta.root_names()) - {col_name}
+                if other_cols:
+                    raise ValueError(
+                        f"ColSpec.validators on column {col_name!r} references "
+                        f"other column(s) {sorted(other_cols)}: {validator.expr!r}. "
+                        "A ColSpec validator may only reference its own column -- "
+                        "use FrameSpec.__checks__ for cross-column invariants."
+                    )
+
+    @classmethod
     def schema(cls) -> pl.Schema:
         return pl.Schema({name: spec.dtype for name, spec in cls._columns.items()})
 
@@ -405,6 +419,7 @@ class FrameSpec:
                     null_probability=spec.null_probability,
                     weights=spec.weights,
                     rules=spec.rules,
+                    validators=spec.validators,
                 )
             elif cat_key is not None:
                 cat_dt = pl.Categorical(catspec.get_categorical(cat_key))
@@ -417,6 +432,7 @@ class FrameSpec:
                     choices=choices,
                     weights=spec.weights,
                     rules=spec.rules,
+                    validators=spec.validators,
                 )
             else:
                 new_columns[col_name] = spec
@@ -490,6 +506,21 @@ class FrameSpec:
                 "Only self-referencing ForeignKeys (references='self') survive a "
                 "YAML round-trip; re-declare the others on a subclass of the "
                 "loaded spec.",
+                stacklevel=2,
+            )
+        validator_names = [
+            f"{col_name}.{v.name}"
+            for col_name, spec in cls._columns.items()
+            for v in spec.validators
+        ]
+        if validator_names:
+            warnings.warn(
+                f"{cls.__name__} declares {len(validator_names)} column-level "
+                f"validator(s) ({', '.join(repr(n) for n in validator_names)}) "
+                "that cannot be represented in YAML (a validator wraps an "
+                f"arbitrary polars.Expr) and will NOT be written to {source!s}. "
+                "They will be lost on FrameSpec.from_yaml() unless re-declared "
+                "on a subclass of the loaded spec.",
                 stacklevel=2,
             )
         data: dict[str, Any] = {
@@ -1180,6 +1211,7 @@ class FrameSpec:
             or cls._unique_together
             or cls._foreign_keys
             or any(s.rules for s in cls._columns.values())
+            or any(s.validators for s in cls._columns.values())
         )
         if has_constraints:
             lines.extend(
@@ -1247,6 +1279,28 @@ class FrameSpec:
                     for r_idx, rule in enumerate(spec.rules, 1):
                         lines.append(
                             f"  {r_idx}. When `{rule.when}` -> Choices: `{list(rule.choices)}`"
+                        )
+
+            cols_with_validators = [
+                (name, spec) for name, spec in cls._columns.items() if spec.validators
+            ]
+            if cols_with_validators:
+                lines.extend(
+                    [
+                        "",
+                        "### Column Validators",
+                    ]
+                )
+                for name, spec in cols_with_validators:
+                    lines.append(f"- **Column `{name}`**:")
+                    for validator in spec.validators:
+                        desc_line = (
+                            f" -- {validator.description}"
+                            if validator.description
+                            else ""
+                        )
+                        lines.append(
+                            f"  - **`{validator.name}`**: `{validator.expr}`{desc_line}"
                         )
 
         content = "\n".join(lines) + "\n"
@@ -1374,6 +1428,7 @@ class FrameSpec:
         missing_cols: Literal["add", "allow", "raise"] = "raise",
         strict_dtypes: bool = False,
         validate_rules: bool = True,
+        validate_validators: bool = True,
         validate_unique: bool = True,
         validate_checks: bool = True,
         validate_foreign_keys: bool = True,
@@ -1392,6 +1447,7 @@ class FrameSpec:
         missing_cols: Literal["add", "allow", "raise"] = "raise",
         strict_dtypes: bool = False,
         validate_rules: bool = True,
+        validate_validators: bool = True,
         validate_unique: bool = True,
         validate_checks: bool = True,
         validate_foreign_keys: bool = True,
@@ -1409,6 +1465,7 @@ class FrameSpec:
         missing_cols: Literal["add", "allow", "raise"] = "raise",
         strict_dtypes: bool = False,
         validate_rules: bool = True,
+        validate_validators: bool = True,
         validate_unique: bool = True,
         validate_checks: bool = True,
         validate_foreign_keys: bool = True,
@@ -1437,6 +1494,8 @@ class FrameSpec:
             types like widened integers, floats, or string representations (False).
         validate_rules : bool, default True
             Whether to validate conditional `ColRule` expressions defined on columns.
+        validate_validators : bool, default True
+            Whether to validate single-column `ColSpec.validators` predicates.
         validate_unique : bool, default True
             Whether to validate single-column (`unique=True`) and composite unique constraints (`__unique_together__`).
         validate_checks : bool, default True
@@ -1499,6 +1558,7 @@ class FrameSpec:
             missing_cols=missing_cols,
             strict_dtypes=strict_dtypes,
             validate_rules=validate_rules,
+            validate_validators=validate_validators,
             validate_unique=validate_unique,
             validate_checks=validate_checks,
             validate_foreign_keys=validate_foreign_keys,

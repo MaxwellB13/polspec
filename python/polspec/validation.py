@@ -28,6 +28,7 @@ def _validate_dataframe(
     missing_cols: Literal["add", "allow", "raise"] = "raise",
     strict_dtypes: bool = False,
     validate_rules: bool = True,
+    validate_validators: bool = True,
     validate_unique: bool = True,
     validate_checks: bool = True,
     validate_foreign_keys: bool = True,
@@ -307,6 +308,21 @@ def _validate_dataframe(
                     }
                 )
 
+        # Column-level validators (ColSpec.validators)
+        if validate_validators and spec.validators and is_type_compatible:
+            for v_idx, validator in enumerate(spec.validators):
+                v_cnt_alias = f"__val__{name}__validator_{v_idx}_cnt"
+                fail_mask = validator._failure_mask()
+                agg_exprs.append(fail_mask.sum().alias(v_cnt_alias))
+                expr_metadata.append(
+                    {
+                        "type": "col_validator",
+                        "column": name,
+                        "validator": validator,
+                        "cnt_alias": v_cnt_alias,
+                    }
+                )
+
         # Uniqueness validation (single-column)
         if validate_unique and spec.unique and is_type_compatible:
             uniq_cnt_alias = f"__val__{name}__uniq_cnt"
@@ -433,6 +449,16 @@ def _validate_dataframe(
                     errors.append(
                         f"Column '{col_name}': found {cnt} value(s) violating ColRule(when={rule_obj.when}, "
                         f"choices={rule_obj.choices}). Violating samples: {samples}"
+                    )
+
+            elif m_type == "col_validator":
+                cnt = stats_row[meta["cnt_alias"]][0]
+                if cnt and cnt > 0:
+                    v = meta["validator"]
+                    v_desc = f" ({v.description})" if v.description else ""
+                    errors.append(
+                        f"Column '{col_name}': validator '{v.name}' failed: found "
+                        f"{cnt} row(s) violating condition {v.expr}{v_desc}"
                     )
 
             elif m_type == "unique":

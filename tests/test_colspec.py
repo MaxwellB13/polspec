@@ -1745,3 +1745,118 @@ def test_generate_batches_and_sink_thread_foreign_key_references(tmp_path):
     sunk_vals = [v for v in sunk["customer_id"].to_list() if v is not None]
     assert sunk_vals
     assert all(v in customer_ids for v in sunk_vals)
+
+
+# =====================================================================
+# Column-level validators (ColSpec.validators)
+# =====================================================================
+
+
+def test_colspec_validators_accepts_bare_expr_and_wraps_in_check():
+    spec = ColSpec(pl.Int64, validators=[pl.col("x") % 2 == 0])
+    assert len(spec.validators) == 1
+    assert isinstance(spec.validators[0], Check)
+
+
+def test_colspec_validators_accepts_single_expr_without_a_list():
+    spec = ColSpec(pl.Int64, validators=pl.col("x") > 0)
+    assert len(spec.validators) == 1
+
+
+def test_colspec_validators_accepts_single_check_without_a_list():
+    chk = Check(pl.col("x") > 0, name="positive")
+    spec = ColSpec(pl.Int64, validators=chk)
+    assert spec.validators == (chk,)
+
+
+def test_colspec_validators_accepts_check_with_name_and_description():
+    spec = ColSpec(
+        pl.Float64,
+        nullable=True,
+        validators=[
+            Check(
+                pl.col("score") >= 0,
+                name="score_non_negative",
+                description="Scores can't be negative",
+            )
+        ],
+    )
+    assert spec.validators[0].name == "score_non_negative"
+    assert spec.validators[0].description == "Scores can't be negative"
+
+
+def test_colspec_validators_default_empty():
+    assert ColSpec(pl.Int64).validators == ()
+
+
+def test_colspec_validators_rejects_invalid_item_type():
+    with pytest.raises(TypeError, match="must be a polars Expr or Check"):
+        ColSpec(pl.Int64, validators=["not an expr"])  # type: ignore[list-item]
+
+
+def test_colspec_validators_rejects_duplicate_names():
+    with pytest.raises(ValueError, match="Duplicate validator name 'dup'"):
+        ColSpec(
+            pl.Int64,
+            validators=[
+                Check(pl.col("x") > 0, name="dup"),
+                Check(pl.col("x") < 100, name="dup"),
+            ],
+        )
+
+
+def test_colspec_validators_allows_reusing_identical_check():
+    # Repeating the exact same Check (same name/expr) is allowed -- it's a
+    # duplicate-name collision only when the *definitions* differ.
+    chk = Check(pl.col("x") > 0, name="positive")
+    spec = ColSpec(pl.Int64, validators=[chk, chk])
+    assert spec.validators == (chk, chk)
+
+
+def test_framespec_rejects_validator_referencing_another_column():
+    with pytest.raises(ValueError, match="references other column"):
+
+        class BadSpec(FrameSpec):
+            a = ColSpec(pl.Int64, validators=[pl.col("b") > 0])
+            b = ColSpec(pl.Int64)
+
+
+def test_framespec_allows_validator_referencing_only_its_own_column():
+    class GoodSpec(FrameSpec):
+        a = ColSpec(pl.Int64, validators=[pl.col("a") > 0])
+
+    assert len(GoodSpec._columns["a"].validators) == 1
+
+
+def test_to_yaml_warns_when_column_validators_are_not_persisted(tmp_path):
+    class ValidatedSpec(FrameSpec):
+        price = ColSpec(pl.Float64, validators=[pl.col("price") > 0])
+
+    yaml_path = tmp_path / "validated_spec.yaml"
+    with pytest.warns(UserWarning, match="price"):
+        ValidatedSpec.to_yaml(yaml_path)
+
+    Loaded = FrameSpec.from_yaml(yaml_path)
+    assert Loaded._columns["price"].validators == ()
+
+
+def test_framespec_to_markdown_lists_column_validators():
+    class ValidatedSpec(FrameSpec):
+        price = ColSpec(
+            pl.Float64,
+            validators=[
+                Check(
+                    pl.col("price") > 0,
+                    name="price_positive",
+                    description="Price must be positive",
+                )
+            ],
+        )
+
+    md = ValidatedSpec.to_markdown()
+    assert "### Column Validators" in md
+    assert "Column `price`" in md
+    assert "price_positive" in md
+    assert "Price must be positive" in md
+
+

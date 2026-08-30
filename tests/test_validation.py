@@ -816,3 +816,108 @@ def test_validation_composite_uniqueness_with_nulls():
     )
     with pytest.raises(ValidationError, match="Composite unique key"):
         CompNullSpec.validate(df_dups)
+
+
+# =====================================================================
+# Column-level validators (ColSpec.validators)
+# =====================================================================
+
+
+class ProductValidatorSpec(FrameSpec):
+    price = ColSpec(pl.Float64, validators=[pl.col("price") * 100 % 5 == 0])
+    quantity = ColSpec(pl.Int64, validators=[pl.col("quantity") % 2 == 0])
+
+
+def test_validation_column_validators_success():
+    df = pl.DataFrame({"price": [1.00, 1.05, 2.50], "quantity": [2, 4, 100]})
+    result = ProductValidatorSpec.validate(df)
+    assert result.height == 3
+
+
+def test_validation_column_validators_failure():
+    df = pl.DataFrame({"price": [1.00, 1.03], "quantity": [2, 3]})
+    with pytest.raises(ValidationError) as exc_info:
+        ProductValidatorSpec.validate(df)
+
+    err = exc_info.value
+    assert len(err.errors) == 2
+    err_str = str(err)
+    assert "Column 'price': validator" in err_str
+    assert "Column 'quantity': validator" in err_str
+    assert "found 1 row(s) violating condition" in err_str
+
+
+def test_validation_column_validators_uses_check_name_and_description():
+    class ScoreSpec(FrameSpec):
+        score = ColSpec(
+            pl.Float64,
+            nullable=True,
+            validators=[
+                Check(
+                    pl.col("score") >= 0,
+                    name="score_non_negative",
+                    description="Scores can't be negative",
+                )
+            ],
+        )
+
+    df = pl.DataFrame({"score": [1.0, -5.0, None]})
+    with pytest.raises(ValidationError) as exc_info:
+        ScoreSpec.validate(df)
+
+    err_str = str(exc_info.value)
+    assert "validator 'score_non_negative' failed" in err_str
+    assert "Scores can't be negative" in err_str
+
+
+def test_validation_column_validators_ignore_nulls_behavior():
+    class NullValidatorSpec(FrameSpec):
+        a = ColSpec(pl.Int64, nullable=True)
+
+    class StrictNullValidatorSpec(FrameSpec):
+        a = ColSpec(
+            pl.Int64,
+            nullable=True,
+            validators=[Check(pl.col("a") > 0, name="strict", ignore_nulls=False)],
+        )
+
+    class LenientNullValidatorSpec(FrameSpec):
+        a = ColSpec(
+            pl.Int64,
+            nullable=True,
+            validators=[Check(pl.col("a") > 0, name="lenient", ignore_nulls=True)],
+        )
+
+    df = pl.DataFrame({"a": [1, None]})
+    # Sanity: the base spec (no validators) accepts the null just fine.
+    assert NullValidatorSpec.validate(df).height == 2
+
+    # ignore_nulls=True (default Check semantics): a null passes.
+    assert LenientNullValidatorSpec.validate(df).height == 2
+
+    # ignore_nulls=False: a null is treated as a violation.
+    with pytest.raises(ValidationError, match="strict"):
+        StrictNullValidatorSpec.validate(df)
+
+
+def test_validation_column_validators_false_bypasses_check():
+    df = pl.DataFrame({"price": [1.00, 1.03], "quantity": [2, 3]})
+    result = ProductValidatorSpec.validate(df, validate_validators=False)
+    assert result.height == 2
+
+
+def test_validation_column_validators_combine_with_other_errors():
+    class ComboSpec(FrameSpec):
+        price = ColSpec(
+            pl.Float64, bounds=Bound(0.0, 100.0), validators=[pl.col("price") > 0]
+        )
+
+    df = pl.DataFrame({"price": [-1.0, 200.0]})
+    with pytest.raises(ValidationError) as exc_info:
+        ComboSpec.validate(df)
+
+    err = exc_info.value
+    assert len(err.errors) == 2
+    err_str = str(err)
+    assert "out of bounds" in err_str
+    assert "validator" in err_str

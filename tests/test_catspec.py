@@ -456,6 +456,31 @@ def test_framespec_with_catspec_preserves_foreign_keys():
     assert result.height == 2
 
 
+def test_with_catspec_preserves_column_validators():
+    cats = CatSpec(enums={"TIER": ["BRONZE", "SILVER", "GOLD"]})
+
+    class BaseValidatedSpec(FrameSpec):
+        # `tier` is the column with_catspec() actually retypes (String ->
+        # Enum via the enum_key branch); put the validator there so this
+        # test exercises that branch's `validators=spec.validators`
+        # pass-through rather than trivially passing through an untouched
+        # ColSpec object.
+        tier = ColSpec(
+            pl.String,
+            choices=["BRONZE", "SILVER", "GOLD"],
+            validators=[Check(pl.col("tier") != "", name="tier_non_empty")],
+        )
+        score = ColSpec(pl.Float64)
+
+    Enhanced = BaseValidatedSpec.with_catspec(cats, name="EnhancedValidatedSpec")
+    assert isinstance(Enhanced._columns["tier"].dtype, pl.Enum)
+    assert (
+        Enhanced._columns["tier"].validators
+        == BaseValidatedSpec._columns["tier"].validators
+    )
+    assert len(Enhanced._columns["tier"].validators) == 1
+
+
 def test_catspec_to_yaml_nested_directory_and_utf8(tmp_path):
     cats = CatSpec(
         enums={"GREETING": ["héllo", "bonjour", "🚀"]},

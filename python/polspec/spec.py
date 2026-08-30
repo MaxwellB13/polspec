@@ -8,6 +8,7 @@ from typing import Any
 import polars as pl
 
 from polspec.bound import Bound
+from polspec.check import Check
 from polspec.constants import _DEFAULT_NULL_PROBABILITY
 from polspec.rules import ColRule
 
@@ -68,6 +69,10 @@ class ColSpec:
         selection probabilities.
     :ivar rules: A sequence of rules (`ColRule`) applied to constrain or validate
         the column's values.
+    :ivar validators: A single-column business rule, or sequence of them, each
+        either a `pl.Expr` boolean predicate (referencing only this column) or
+        a `Check` (for a custom name/description/null handling). Unlike
+        `FrameSpec.__checks__`, these travel with the column's own declaration.
     """
 
     dtype: pl.DataType
@@ -82,6 +87,7 @@ class ColSpec:
     choices: tuple | list | dict | None = None
     weights: tuple[float, ...] | list[float] | None = None
     rules: tuple[ColRule, ...] = ()
+    validators: Check | pl.Expr | Sequence[Check | pl.Expr] | None = ()
 
     def __post_init__(self) -> None:
         if isinstance(self.dtype, type) and issubclass(self.dtype, pl.DataType):
@@ -90,6 +96,7 @@ class ColSpec:
         object.__setattr__(self, "bounds", Bound._coerce(self.bounds))
         object.__setattr__(self, "string_length", Bound._coerce(self.string_length))
         object.__setattr__(self, "rules", tuple(self.rules))
+        self._normalize_validators()
         if self.tags is None:
             object.__setattr__(self, "tags", ())
         elif isinstance(self.tags, str):
@@ -301,3 +308,38 @@ class ColSpec:
                         f"ColRule.choices {out_of_bounds} fall outside this column's "
                         f"bounds [{b_min}, {b_max}]"
                     )
+
+    def _normalize_validators(self) -> None:
+        if self.validators is None:
+            object.__setattr__(self, "validators", ())
+            return
+
+        raw = (
+            [self.validators]
+            if isinstance(self.validators, (pl.Expr, Check))
+            else list(self.validators)
+        )
+
+        normalized: list[Check] = []
+        seen: dict[str, Check] = {}
+        for v in raw:
+            if isinstance(v, Check):
+                chk = v
+            elif isinstance(v, pl.Expr):
+                chk = Check(v)
+            else:
+                raise TypeError(
+                    "ColSpec.validators items must be a polars Expr or Check, "
+                    f"got {type(v).__name__}"
+                )
+            prior = seen.get(chk.name)
+            if prior is not None and prior != chk:
+                raise ValueError(
+                    f"Duplicate validator name {chk.name!r} on this ColSpec: "
+                    f"{prior.expr!r} vs {chk.expr!r}. Give each validator a "
+                    "distinct name."
+                )
+            seen[chk.name] = chk
+            normalized.append(chk)
+
+        object.__setattr__(self, "validators", tuple(normalized))
