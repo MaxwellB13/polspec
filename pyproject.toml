@@ -1,6 +1,6 @@
 [project]
 name = "polspec"
-version = "0.1.0"
+version = "0.1.2"
 description = "Declare a Polars schema once, then generate data from it and validate data against it."
 readme = "README.md"
 authors = [
@@ -63,3 +63,4 @@ features = ["pyo3/extension-module"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["RUF012", "DTZ001", "S102"]
+"example/*" = ["RUF012", "DTZ001"]
