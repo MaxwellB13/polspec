@@ -1,11 +1,32 @@
 [project]
 name = "polspec"
 version = "0.1.0"
+description = "Declare a Polars schema once, then generate data from it and validate data against it."
+readme = "README.md"
+authors = [
+    { name = "Maxwell Brown", email = "maxbrown130@gmail.com" },
+]
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
+keywords = ["polars", "schema", "validation", "data-generation", "testing"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Software Development :: Testing",
+    "Typing :: Typed",
+]
 dependencies = [
     "polars>=1.44.1",
     "pyyaml>=6.0.3",
 ]
+
+[project.urls]
+Homepage = "https://maxwellb13.github.io/polspec/"
+Documentation = "https://maxwellb13.github.io/polspec/"
+Repository = "https://github.com/MaxwellB13/polars-spec"
 
 [project.scripts]
 polspec = "polspec.cli:main"
