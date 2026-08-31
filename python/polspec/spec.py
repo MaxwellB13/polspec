@@ -92,7 +92,7 @@ class ColSpec:
         `FrameSpec.__checks__`, these travel with the column's own declaration.
     """
 
-    dtype: pl.DataType
+    dtype: pl.DataType | type[pl.DataType]
     nullable: bool = False
     bounds: Bound | tuple[Any, Any] | list[Any] | None = None
     tags: str | Sequence[str] = ()
