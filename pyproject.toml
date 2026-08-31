@@ -47,6 +47,8 @@ dev = [
     "maturin>=1.7",
     "numpy>=2.5.2",
     "pyarrow>=14.0.0",
+]
+docs = [
     "zensical>=0.0.57",
 ]
 

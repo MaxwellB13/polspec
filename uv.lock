@@ -291,6 +291,8 @@ dev = [
     { name = "numpy" },
     { name = "pyarrow" },
     { name = "pytest" },
+]
+docs = [
     { name = "zensical" },
 ]
 
@@ -311,8 +313,8 @@ dev = [
     { name = "numpy", specifier = ">=2.5.2" },
     { name = "pyarrow", specifier = ">=14.0.0" },
     { name = "pytest", specifier = ">=9.1.1" },
-    { name = "zensical", specifier = ">=0.0.57" },
 ]
+docs = [{ name = "zensical", specifier = ">=0.0.57" }]
 
 [[package]]
 name = "pyarrow"
