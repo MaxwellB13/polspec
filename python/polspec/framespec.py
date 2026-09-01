@@ -159,6 +159,11 @@ class FrameSpec:
     def __init_subclass__(cls, **kwargs) -> None:
         super().__init_subclass__(**kwargs)
         columns: dict[str, ColSpec] = {}
+        # Tracks which attribute name produced which column name, so that
+        # overriding an attribute with a non-ColSpec value (to remove an
+        # inherited column) can find the right key in `columns` even when
+        # `ColSpec.col_name` renamed it away from the attribute name.
+        attr_to_col: dict[str, str] = {}
         checks_list: list[Check] = []
         unique_together_list: list[tuple[str, ...]] = []
         foreign_keys_list: list[ForeignKey] = []
@@ -186,6 +191,22 @@ class FrameSpec:
                 if name.startswith("_"):
                     continue
                 if isinstance(value, ColSpec):
+                    final_name = value.col_name if value.col_name is not None else name
+                    colliding_attr = next(
+                        (
+                            attr
+                            for attr, col in attr_to_col.items()
+                            if col == final_name and attr != name
+                        ),
+                        None,
+                    )
+                    if colliding_attr is not None:
+                        raise ValueError(
+                            f"Columns {colliding_attr!r} and {name!r} on "
+                            f"{cls.__name__} both resolve to the column name "
+                            f"{final_name!r} (via col_name). Give each a "
+                            "distinct col_name, or rename one of the attributes."
+                        )
                     if name in _RESERVED_ATTRS:
                         # A warning, not an error: `tag`, `schema` and friends
                         # are ordinary column names in real data, and polspec's
@@ -201,9 +222,13 @@ class FrameSpec:
                             "__columns__ = {...} to keep the method as well.",
                             stacklevel=3,
                         )
-                    columns[name] = value
-                elif name in columns:
-                    del columns[name]
+                    prior_final = attr_to_col.get(name)
+                    if prior_final is not None and prior_final != final_name:
+                        del columns[prior_final]
+                    columns[final_name] = value
+                    attr_to_col[name] = final_name
+                elif name in attr_to_col:
+                    del columns[attr_to_col.pop(name)]
 
             # Collect columns declared explicitly. Names here never pass
             # through attribute lookup, so they may start with an underscore
@@ -223,7 +248,16 @@ class FrameSpec:
                             f"__columns__[{name!r}] must be a ColSpec, got "
                             f"{type(value).__name__}"
                         )
-                    columns[str(name)] = value
+                    key = str(name)
+                    if value.col_name is not None and value.col_name != key:
+                        raise ValueError(
+                            f"__columns__[{key!r}] declares col_name="
+                            f"{value.col_name!r}, which conflicts with its "
+                            "__columns__ key. col_name only applies to columns "
+                            "declared as class attributes -- for __columns__, "
+                            "the dict key already is the column name."
+                        )
+                    columns[key] = value
 
         cls._columns = columns
         cls._checks = tuple(checks_list)

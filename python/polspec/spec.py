@@ -57,6 +57,14 @@ class ColSpec:
     required for defining the structure and properties of a dataset column.
 
     :ivar dtype: The data type of the column.
+    :ivar col_name: Overrides the column's name in the generated/validated
+        DataFrame. Declaring columns as class attributes on a `FrameSpec`
+        requires a valid Python identifier, which cannot contain spaces or
+        other special characters -- `col_name` lets the attribute keep a
+        clean Python name (`unit_price`) while the actual column is named
+        whatever the data uses (`"Unit Price"`). Everything else that refers
+        to this column by name -- `ColRule`, `unique_together`, tags lookups,
+        `validate()` -- uses `col_name`, not the attribute name.
     :ivar nullable: Whether the column allows null values.
     :ivar bounds: The inclusive range of values allowed in the column, as a
         `Bound` or a 2-sequence. Only supported for numeric and temporal data
@@ -93,6 +101,7 @@ class ColSpec:
     """
 
     dtype: pl.DataType | type[pl.DataType]
+    col_name: str | None = None
     nullable: bool = False
     bounds: Bound | tuple[Any, Any] | list[Any] | None = None
     tags: str | Sequence[str] = ()
@@ -110,6 +119,7 @@ class ColSpec:
         # Order matters: normalization first, so every check below sees the
         # canonical form; then the checks that need only one field; then the
         # ones that compare fields against each other.
+        self._validate_col_name()
         self._normalize_dtype()
         self._normalize_ranges()
         self._normalize_tags()
@@ -123,6 +133,10 @@ class ColSpec:
         self._validate_bounds_fit_dtype()
         self._validate_weights()
         self._validate_choices_against_domain()
+
+    def _validate_col_name(self) -> None:
+        if self.col_name is not None and not self.col_name:
+            raise ValueError("ColSpec.col_name must not be an empty string")
 
     def _normalize_dtype(self) -> None:
         """Instantiates a dtype passed as a class, so `pl.Int64` means `pl.Int64()`."""

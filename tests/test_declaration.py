@@ -278,3 +278,100 @@ def test_generated_docs_render_open_bounds():
 
     assert ">= 0" in Spec.to_markdown()
     assert "bounds: >= 0" in Spec.to_mermaid()
+
+
+# ---------------------------------------------------------------------------
+# col_name -- a class attribute's name diverges from the column's real name
+#
+# Declaring columns as class attributes requires a Python identifier, which
+# can't hold a space or other punctuation a real dataset's header might use.
+# `col_name` lets the attribute stay a clean identifier while the generated/
+# validated DataFrame uses whatever name the data actually has.
+# ---------------------------------------------------------------------------
+
+
+def test_col_name_overrides_the_attribute_name():
+    class Spec(FrameSpec):
+        unit_price = ColSpec(pl.Float64, col_name="Unit Price", bounds=(0, 100))
+        qty = ColSpec(pl.Int64, bounds=(1, 10))
+
+    assert list(Spec._columns) == ["Unit Price", "qty"]
+    df = Spec.generate(50, seed=1)
+    assert df.columns == ["Unit Price", "qty"]
+    Spec.validate(df)
+
+
+def test_col_name_rejects_empty_string():
+    with pytest.raises(ValueError, match="must not be an empty string"):
+        ColSpec(pl.Int64, col_name="")
+
+
+def test_col_name_used_by_rules_and_unique_together():
+    class Spec(FrameSpec):
+        region = ColSpec(
+            pl.String,
+            col_name="Sales Region",
+            choices=["east", "west"],
+        )
+        amount = ColSpec(
+            pl.Int64,
+            col_name="Sale Amount",
+            bounds=(0, 100),
+            rules=(
+                ColRule(
+                    when={"column": "Sales Region", "equals": "east"},
+                    choices=[99],
+                ),
+            ),
+        )
+        __unique_together__ = [("Sales Region", "Sale Amount")]
+
+    df = Spec.generate(200, seed=3)
+    east_amounts = df.filter(pl.col("Sales Region") == "east")["Sale Amount"]
+    assert (east_amounts == 99).all()
+
+
+def test_colliding_col_names_are_rejected():
+    with pytest.raises(ValueError, match="both resolve to the column name 'x'"):
+
+        class Spec(FrameSpec):
+            a = ColSpec(pl.Int64, col_name="x")
+            b = ColSpec(pl.Int64, col_name="x")
+
+
+def test_col_name_conflicting_with_explicit_declaration_key_is_rejected():
+    with pytest.raises(ValueError, match="conflicts with its __columns__ key"):
+
+        class Spec(FrameSpec):
+            __columns__ = {"foo": ColSpec(pl.Int64, col_name="bar")}
+
+
+def test_col_name_matching_explicit_declaration_key_is_redundant_but_fine():
+    class Spec(FrameSpec):
+        __columns__ = {"foo": ColSpec(pl.Int64, col_name="foo")}
+
+    assert list(Spec._columns) == ["foo"]
+
+
+def test_overriding_a_col_name_attribute_removes_the_renamed_column():
+    class Base(FrameSpec):
+        keep = ColSpec(pl.Int64, col_name="Keep Col")
+        drop = ColSpec(pl.Int64, col_name="Drop Col")
+
+    class Child(Base):
+        drop = None
+
+    assert list(Child._columns) == ["Keep Col"]
+
+
+def test_col_name_survives_yaml_roundtrip(tmp_path):
+    """The YAML key already is the real column name, so col_name need not persist."""
+
+    class Spec(FrameSpec):
+        unit_price = ColSpec(pl.Float64, col_name="Unit Price", bounds=(0, 100))
+
+    path = tmp_path / "spec.yaml"
+    Spec.to_yaml(path)
+    loaded = FrameSpec.from_yaml(path)
+    assert list(loaded._columns) == ["Unit Price"]
+    assert loaded.generate(10, seed=1).columns == ["Unit Price"]
