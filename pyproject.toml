@@ -1,6 +1,6 @@
 [project]
 name = "polspec"
-version = "0.1.2"
+version = "0.1.3"
 description = "Declare a Polars schema once, then generate data from it and validate data against it."
 readme = "README.md"
 authors = [
