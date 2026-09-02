@@ -4,10 +4,11 @@ Two things a spec is useful for beyond Python code: turning existing data into
 a starting declaration, and turning a declaration into a test that would have
 caught this session's own round-trip bugs. Both are thin wrappers over
 `FrameSpec` methods that already exist -- `from_dataframe`, `to_yaml`,
-`generate`, `validate` -- so this module's job is argument parsing and
-templating, not new behaviour.
+`to_python`, `generate`, `validate` -- so this module's job is argument
+parsing and templating, not new behaviour.
 
     polspec schema infer orders.parquet -o orders.yaml
+    polspec schema infer orders.parquet -o orders.py
     polspec schema new Orders -o orders.py
     polspec test orders.yaml -o test_orders.py
 """
@@ -161,11 +162,13 @@ def _cmd_schema_infer(args: argparse.Namespace) -> int:
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
+    writer = spec_cls.to_python if output.suffix.lower() == ".py" else spec_cls.to_yaml
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        spec_cls.to_yaml(output)
+        writer(output)
     for warning in caught:
         print(f"warning: {warning.message}", file=sys.stderr)
+    _maybe_format(output)
 
     print(
         f"Inferred {len(spec_cls._columns)} column(s) from "
@@ -480,7 +483,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "infer", help="Profile a data file into a YAML schema"
     )
     infer.add_argument("source", help="Path to a CSV, Parquet, NDJSON or IPC file")
-    infer.add_argument("-o", "--output", required=True, help="YAML file to write")
+    infer.add_argument(
+        "-o",
+        "--output",
+        required=True,
+        help="File to write: .yaml/.yml, or .py for a FrameSpec subclass",
+    )
     infer.add_argument("--name", help="Spec class name (default: derived from source)")
     infer.add_argument(
         "--weights",

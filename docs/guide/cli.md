@@ -15,6 +15,7 @@ polspec test orders.yaml -o test_orders.py
 
 ```bash
 polspec schema infer SOURCE -o OUTPUT.yaml [options]
+polspec schema infer SOURCE -o OUTPUT.py [options]
 ```
 
 `SOURCE` is a `.csv`, `.tsv`, `.parquet`, `.ndjson`/`.jsonl`, `.json`, or Arrow
@@ -22,14 +23,43 @@ IPC (`.arrow`/`.ipc`/`.feather`) file. It is read with the matching Polars
 reader and profiled with `FrameSpec.from_dataframe`, the same function behind
 [Getting started](../getting-started.md#infer-a-spec-instead-of-writing-one).
 
+`OUTPUT`'s extension picks the format: `.yaml`/`.yml` writes a YAML spec via
+`FrameSpec.to_yaml`; `.py` writes a `FrameSpec` subclass via
+`FrameSpec.to_python` — a starting-point module you can edit like any other
+source file, rather than a data file `from_yaml` re-parses.
+
 ```console
 $ polspec schema infer orders.parquet -o orders.yaml --weights
 Inferred 3 column(s) from 12,483 row(s) of orders.parquet -> orders.yaml
+
+$ polspec schema infer orders.parquet -o orders.py --weights
+Inferred 3 column(s) from 12,483 row(s) of orders.parquet -> orders.py
 ```
+
+```python
+"""Declares the Orders schema."""
+
+import polars as pl
+from polspec import ColSpec, FrameSpec
+
+
+class Orders(FrameSpec):
+    __columns__ = {
+        "order_id": ColSpec(pl.Int64, bounds=(1, 12483)),
+        "status": ColSpec(pl.Enum(["NEW", "PAID", "SHIPPED"]), weights=[0.4, 0.3, 0.3]),
+        "total": ColSpec(pl.Float64, bounds=(10.0, 500.0)),
+    }
+```
+
+Columns are declared through `__columns__` rather than as class attributes,
+same as `from_yaml` — see [Column names that are not
+identifiers](columns.md#column-names-that-are-not-identifiers). The `.py`
+output is passed through `ruff format` when it's on `PATH`, same as `schema
+new`.
 
 | Option | Effect |
 |:--|:--|
-| `--name NAME` | Class name in the YAML (default: derived from the file name) |
+| `--name NAME` | Class name (default: derived from the file name) |
 | `--weights` | Record each category's observed frequency |
 | `--max-unique-enum N` | Max distinct values for a string column to become an `Enum` (default 50) |
 | `--no-bounds` | Skip computing numeric/temporal bounds and string lengths |

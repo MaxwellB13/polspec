@@ -19,8 +19,11 @@ from polspec.report import framespec_to_markdown, framespec_to_mermaid
 from polspec.rules import _apply_rules
 from polspec.serialization import (
     _colspec_from_yaml,
+    _colspec_needs_datetime_import,
+    _colspec_to_python,
     _colspec_to_yaml,
     _foreignkey_from_yaml,
+    _foreignkey_to_python,
     _foreignkey_to_yaml,
 )
 from polspec.spec import ColSpec, _column_kind
@@ -655,6 +658,96 @@ class FrameSpec:
         p = Path(source)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    @classmethod
+    def to_python(cls, source: str | Path) -> None:
+        """Writes this spec's columns to a Python source file defining a
+        `FrameSpec` subclass, editable by hand and importable like any other
+        module.
+
+        Columns are declared through `__columns__` rather than as class
+        attributes, since a name straight from data is not always a valid
+        Python identifier -- see [Column names that are not
+        identifiers](../guide/columns.md#column-names-that-are-not-identifiers).
+
+        `__checks__`, cross-spec `ForeignKey`s and `ColSpec.validators` warn
+        and are dropped, same as `to_yaml` -- see its docstring for why.
+        Self-referencing `ForeignKey`s and `__unique_together__` survive.
+        """
+        if not cls._columns:
+            raise ValueError(f"{cls.__name__} declares no ColSpec columns")
+        if cls._checks:
+            check_names = ", ".join(repr(c.name) for c in cls._checks)
+            warnings.warn(
+                f"{cls.__name__} declares {len(cls._checks)} __checks__ "
+                f"({check_names}) that cannot be represented in generated "
+                f"Python (a Check wraps an arbitrary polars.Expr) and will "
+                f"NOT be written to {source!s}. Re-declare them by hand on "
+                "the generated class.",
+                stacklevel=2,
+            )
+        external_fks = [fk for fk in cls._foreign_keys if fk.references != "self"]
+        if external_fks:
+            fk_names = ", ".join(repr(fk.name) for fk in external_fks)
+            warnings.warn(
+                f"{cls.__name__} declares {len(external_fks)} ForeignKey(s) "
+                f"({fk_names}) referencing another FrameSpec class, which "
+                f"to_python() has no stable importable name for and will "
+                f"NOT write to {source!s}. Re-declare them by hand on the "
+                "generated class.",
+                stacklevel=2,
+            )
+        validator_names = [
+            f"{col_name}.{v.name}"
+            for col_name, spec in cls._columns.items()
+            for v in spec.validators
+        ]
+        if validator_names:
+            warnings.warn(
+                f"{cls.__name__} declares {len(validator_names)} column-level "
+                f"validator(s) ({', '.join(repr(n) for n in validator_names)}) "
+                "that cannot be represented in generated Python (a validator "
+                f"wraps an arbitrary polars.Expr) and will NOT be written to "
+                f"{source!s}. Re-declare them by hand on the generated class.",
+                stacklevel=2,
+            )
+
+        self_fks = [fk for fk in cls._foreign_keys if fk.references == "self"]
+        needs_datetime = any(
+            _colspec_needs_datetime_import(spec) for spec in cls._columns.values()
+        )
+
+        polspec_imports = ["ColSpec", "FrameSpec"]
+        if any(spec.rules for spec in cls._columns.values()):
+            polspec_imports.insert(1, "ColRule")
+        if self_fks:
+            polspec_imports.append("ForeignKey")
+
+        lines = [
+            f'"""Declares the {cls.__name__} schema."""',
+            "",
+            "import polars as pl",
+        ]
+        if needs_datetime:
+            lines.append("import datetime")
+        lines.append(f"from polspec import {', '.join(polspec_imports)}")
+        lines.append("")
+        lines.append("")
+        lines.append(f"class {cls.__name__}(FrameSpec):")
+        lines.append("    __columns__ = {")
+        for name, spec in cls._columns.items():
+            lines.append(f"        {name!r}: {_colspec_to_python(spec)},")
+        lines.append("    }")
+        if cls._unique_together:
+            groups = ", ".join(repr(list(group)) for group in cls._unique_together)
+            lines.append(f"    __unique_together__ = [{groups}]")
+        if self_fks:
+            fks = ", ".join(_foreignkey_to_python(fk) for fk in self_fks)
+            lines.append(f"    __foreign_keys__ = [{fks}]")
+
+        p = Path(source)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     @classmethod
     def from_yaml(

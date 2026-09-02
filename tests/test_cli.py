@@ -111,6 +111,27 @@ def test_schema_infer_sample_limits_rows(sample_data, tmp_path):
     assert spec_cls._columns["order_id"].bounds.max == 10
 
 
+def test_schema_infer_py_output_produces_a_generatable_spec(sample_data, tmp_path):
+    out = tmp_path / "orders.py"
+    assert run_cli("schema", "infer", sample_data, "-o", out) == 0
+    assert out.exists()
+
+    namespace: dict = {}
+    exec(compile(out.read_text(encoding="utf-8"), str(out), "exec"), namespace)
+    spec_cls = namespace["Orders"]
+    df = spec_cls.generate(50, seed=1)
+    spec_cls.validate(df)
+    assert set(df.columns) == {"order_id", "status", "total"}
+
+
+def test_schema_infer_py_output_is_ruff_formatted(sample_data, tmp_path):
+    out = tmp_path / "orders.py"
+    run_cli("schema", "infer", sample_data, "-o", out)
+    text = out.read_text(encoding="utf-8")
+    assert "class Orders(FrameSpec):" in text
+    assert "__columns__ = {" in text
+
+
 # ---------------------------------------------------------------------------
 # test -- from YAML
 # ---------------------------------------------------------------------------

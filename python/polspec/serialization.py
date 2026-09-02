@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 from typing import TYPE_CHECKING
 
 import polars as pl
@@ -260,3 +261,128 @@ def _foreignkey_from_yaml(data: dict) -> ForeignKey:
         ref_columns=data.get("ref_columns"),
         name=data.get("name"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Python source (FrameSpec.to_python)
+# ---------------------------------------------------------------------------
+#
+# `repr()` alone already renders every value these fields can hold -- str,
+# int, float, bool, None, and the tuples/lists/dicts wrapping them -- as
+# valid Python source, recursively. `datetime.date`/`datetime`/`time`/
+# `timedelta` are the one case where the value under `repr()` names a type
+# the generated file must import; `_needs_datetime_import` is only here to
+# decide whether that import line belongs in the header.
+
+
+def _needs_datetime_import(value: object) -> bool:
+    if isinstance(value, (datetime.date, datetime.time, datetime.timedelta)):
+        return True
+    if isinstance(value, dict):
+        return any(_needs_datetime_import(v) for v in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_needs_datetime_import(v) for v in value)
+    return False
+
+
+def _colspec_needs_datetime_import(spec: ColSpec) -> bool:
+    values: list = []
+    if spec.bounds is not None:
+        values += [spec.bounds.min, spec.bounds.max]
+    if spec.string_length is not None:
+        values += [spec.string_length.min, spec.string_length.max]
+    if spec.choices is not None:
+        values += list(spec.choices)
+    for rule in spec.rules:
+        values += list(rule.choices)
+        values += list(rule.when.values())
+    return _needs_datetime_import(values)
+
+
+def _dtype_to_python(dtype: pl.DataType) -> str:
+    if isinstance(dtype, pl.Enum):
+        return f"pl.Enum({dtype.categories.to_list()!r})"
+    if isinstance(dtype, pl.Datetime):
+        parts = [f"time_unit={dtype.time_unit!r}"]
+        if dtype.time_zone is not None:
+            parts.append(f"time_zone={dtype.time_zone!r}")
+        return f"pl.Datetime({', '.join(parts)})"
+    if isinstance(dtype, pl.Duration):
+        return f"pl.Duration(time_unit={dtype.time_unit!r})"
+    if _is_categorical_dtype(dtype):
+        if isinstance(dtype, pl.Categorical):
+            cats = dtype.categories
+            cat_name = cats.name()
+            if cat_name:
+                # A named pl.Categories() registry -- see _dtype_to_yaml.
+                parts = [repr(cat_name)]
+                namespace = cats.namespace()
+                if namespace:
+                    parts.append(f"namespace={namespace!r}")
+                physical = cats.physical()
+                if physical != pl.UInt32:
+                    phys_name = _YAML_DTYPES.get(physical, str(physical))
+                    parts.append(f"physical=pl.{phys_name}")
+                return f"pl.Categorical(pl.Categories({', '.join(parts)}))"
+        return "pl.Categorical"
+    name = _YAML_DTYPES.get(dtype)
+    if name is None:
+        raise TypeError(f"polspec cannot write dtype {dtype!r} to Python")
+    return f"pl.{name}"
+
+
+def _colrule_to_python(rule: ColRule) -> str:
+    args = [f"when={dict(rule.when)!r}", f"choices={list(rule.choices)!r}"]
+    if rule.weights is not None:
+        args.append(f"weights={list(rule.weights)!r}")
+    return f"ColRule({', '.join(args)})"
+
+
+def _colspec_to_python(spec: ColSpec) -> str:
+    """Python source for one column's `ColSpec(...)` call.
+
+    Mirrors `_colspec_to_yaml` field-for-field, but the dtype and every
+    argument are rendered as Python source rather than YAML-safe data, since
+    the destination is a `.py` file, not a document `from_yaml` will parse.
+    """
+    args = [_dtype_to_python(spec.dtype)]
+    if spec.nullable:
+        args.append("nullable=True")
+    if spec.bounds is not None:
+        args.append(f"bounds=({spec.bounds.min!r}, {spec.bounds.max!r})")
+    if spec.tags:
+        args.append(
+            f"tags={spec.tags[0]!r}"
+            if len(spec.tags) == 1
+            else f"tags={list(spec.tags)!r}"
+        )
+    if spec.unique:
+        args.append("unique=True")
+    if spec.null_probability != _DEFAULT_NULL_PROBABILITY:
+        args.append(f"null_probability={spec.null_probability!r}")
+    if spec.string_length is not None:
+        args.append(
+            f"string_length=({spec.string_length.min!r}, {spec.string_length.max!r})"
+        )
+    if spec.distribution is not None:
+        args.append(f"distribution={spec.distribution!r}")
+    if spec.distribution_params:
+        args.append(f"distribution_params={dict(spec.distribution_params)!r}")
+    if spec.choices is not None:
+        args.append(f"choices={list(spec.choices)!r}")
+    if spec.weights is not None:
+        args.append(f"weights={list(spec.weights)!r}")
+    if spec.rules:
+        rules_src = ", ".join(_colrule_to_python(rule) for rule in spec.rules)
+        args.append(f"rules=[{rules_src}]")
+    return f"ColSpec({', '.join(args)})"
+
+
+def _foreignkey_to_python(fk: ForeignKey) -> str:
+    """Python source for a self-referencing ForeignKey -- see `_foreignkey_to_yaml`."""
+    args = [f"columns={list(fk.columns)!r}", "references='self'"]
+    if fk.ref_columns != fk.columns:
+        args.append(f"ref_columns={list(fk.ref_columns)!r}")
+    if fk.name != _default_fk_name(fk.columns, "self"):
+        args.append(f"name={fk.name!r}")
+    return f"ForeignKey({', '.join(args)})"
