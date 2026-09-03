@@ -167,7 +167,7 @@ def _cmd_schema_infer(args: argparse.Namespace) -> int:
     _maybe_format(output)
 
     print(
-        f"Inferred {len(spec_cls._columns)} column(s) from "
+        f"Inferred {len(spec_cls.spec.columns)} column(s) from "
         f"{df.height:,} row(s) of {source} -> {output}"
     )
     return 0
@@ -295,8 +295,8 @@ def _skip_reasons(spec_cls: type[FrameSpec]) -> tuple[dict[str, bool], list[str]
     flags: dict[str, bool] = {}
     reasons: list[str] = []
 
-    has_unique = any(c.unique for c in spec_cls._columns.values())
-    has_unique_together = bool(spec_cls._unique_together)
+    has_unique = any(c.unique for c in spec_cls.spec.columns.values())
+    has_unique_together = bool(spec_cls.spec.unique_together)
     if has_unique or has_unique_together:
         flags["validate_unique"] = False
         reasons.append(
@@ -304,14 +304,14 @@ def _skip_reasons(spec_cls: type[FrameSpec]) -> tuple[dict[str, bool], list[str]
             "generated (see docs/reference/limitations.md)"
         )
 
-    if spec_cls._checks:
+    if spec_cls.spec.checks:
         flags["validate_checks"] = False
         reasons.append(
             "__checks__ wraps arbitrary expressions that generation cannot "
             "be made to satisfy"
         )
 
-    if any(c.validators for c in spec_cls._columns.values()):
+    if any(c.validators for c in spec_cls.spec.columns.values()):
         flags["validate_validators"] = False
         reasons.append(
             "ColSpec.validators wraps arbitrary expressions that generation "
@@ -330,7 +330,9 @@ def _render_test_case(
     cartesian: bool,
 ) -> str:
     fn_name = _snake_case(class_name)
-    cross_spec_fks = [fk for fk in spec_cls._foreign_keys if fk.references != "self"]
+    cross_spec_fks = [
+        fk for fk in spec_cls.spec.foreign_keys if fk.references != "self"
+    ]
 
     if cross_spec_fks:
         names = ", ".join(repr(fk.name) for fk in cross_spec_fks)
@@ -435,7 +437,7 @@ def _cmd_test(args: argparse.Namespace) -> int:
     if any(
         fk.references != "self"
         for _, spec_cls, _ in specs
-        for fk in spec_cls._foreign_keys
+        for fk in spec_cls.spec.foreign_keys
     ):
         parts.append("\nimport pytest\n")
 

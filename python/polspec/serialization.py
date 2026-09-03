@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import datetime
-from typing import TYPE_CHECKING
+import warnings
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import polars as pl
+import yaml
 
 from polspec.constants import _DEFAULT_NULL_PROBABILITY
-from polspec.errors import SerializationError
+from polspec.errors import SerializationError, SpecError
 from polspec.foreign_key import ForeignKey, _default_fk_name
 from polspec.rules import ColRule
 from polspec.spec import ColSpec, _is_categorical_dtype
+from polspec.tablespec import TableSpec
 
 if TYPE_CHECKING:
     from polspec.catspec import CatSpec
@@ -389,3 +393,187 @@ def _foreignkey_to_python(fk: ForeignKey) -> str:
     if fk.name != _default_fk_name(fk.columns, "self"):
         args.append(f"name={fk.name!r}")
     return f"ForeignKey({', '.join(args)})"
+
+
+# ---------------------------------------------------------------------------
+# Whole-spec files
+# ---------------------------------------------------------------------------
+
+_LOSS = {
+    "yaml": {
+        "medium": "YAML",
+        "checks_tail": (
+            "They will be lost on FrameSpec.from_yaml() unless re-declared on a "
+            "subclass of the loaded spec."
+        ),
+        "fk_reason": "which has no stable name to persist and will NOT be written to",
+        "fk_tail": (
+            "Only self-referencing ForeignKeys (references='self') survive a YAML "
+            "round-trip; re-declare the others on a subclass of the loaded spec."
+        ),
+    },
+    "python": {
+        "medium": "generated Python",
+        "checks_tail": "Re-declare them by hand on the generated class.",
+        "fk_reason": (
+            "which to_python() has no stable importable name for and will NOT write to"
+        ),
+        "fk_tail": "Re-declare them by hand on the generated class.",
+    },
+}
+
+
+def _warn_unserializable(spec: TableSpec, source: str | Path, kind: str) -> None:
+    """Warns, naming exactly what a file cannot hold and will therefore lose.
+
+    `__checks__` and `ColSpec.validators` wrap arbitrary `polars.Expr`; a
+    `ForeignKey` to another spec names a Python class. None has a
+    representation in a standalone file, so each is dropped loudly.
+    """
+    words = _LOSS[kind]
+    if spec.checks:
+        names = ", ".join(repr(c.name) for c in spec.checks)
+        warnings.warn(
+            f"{spec.name} declares {len(spec.checks)} __checks__ ({names}) that "
+            f"cannot be represented in {words['medium']} (a Check wraps an "
+            f"arbitrary polars.Expr) and will NOT be written to {source!s}. "
+            f"{words['checks_tail']}",
+            stacklevel=3,
+        )
+    external = [fk for fk in spec.foreign_keys if fk.references != "self"]
+    if external:
+        names = ", ".join(repr(fk.name) for fk in external)
+        warnings.warn(
+            f"{spec.name} declares {len(external)} ForeignKey(s) ({names}) "
+            f"referencing another FrameSpec class, {words['fk_reason']} "
+            f"{source!s}. {words['fk_tail']}",
+            stacklevel=3,
+        )
+    validators = [
+        f"{col}.{v.name}" for col, cs in spec.columns.items() for v in cs.validators
+    ]
+    if validators:
+        names = ", ".join(repr(n) for n in validators)
+        warnings.warn(
+            f"{spec.name} declares {len(validators)} column-level validator(s) "
+            f"({names}) that cannot be represented in {words['medium']} (a "
+            f"validator wraps an arbitrary polars.Expr) and will NOT be written "
+            f"to {source!s}. {words['checks_tail']}",
+            stacklevel=3,
+        )
+
+
+def _require_columns(spec: TableSpec) -> None:
+    if not spec.columns:
+        raise SpecError(f"{spec.name} declares no ColSpec columns")
+
+
+def to_yaml(spec: TableSpec, source: str | Path) -> None:
+    """Writes `spec` to a human-readable YAML file at `source`.
+
+    Defaults are omitted so the file shows only what was declared. Checks,
+    validators and cross-spec foreign keys cannot be written and warn.
+    """
+    _require_columns(spec)
+    _warn_unserializable(spec, source, "yaml")
+    data: dict[str, Any] = {
+        "name": spec.name,
+        "columns": {name: _colspec_to_yaml(cs) for name, cs in spec.columns.items()},
+    }
+    if spec.unique_together:
+        data["unique_together"] = [list(group) for group in spec.unique_together]
+    self_fks = [fk for fk in spec.foreign_keys if fk.references == "self"]
+    if self_fks:
+        data["foreign_keys"] = [_foreignkey_to_yaml(fk) for fk in self_fks]
+    p = Path(source)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+
+def from_yaml(
+    source: str | Path,
+    *,
+    categories: CatSpec | str | Path | None = None,
+) -> TableSpec:
+    """Reads a `TableSpec` from a YAML file written by `to_yaml`.
+
+    `categories` is a CatSpec registry, or a path to one, used to resolve
+    shared Enums and Categoricals; when omitted, a `categories:` key in the
+    file is loaded automatically, relative to the file.
+    """
+    from polspec.catspec import CatSpec
+
+    source_path = Path(source)
+    data = yaml.safe_load(source_path.read_text(encoding="utf-8"))
+
+    catspec: CatSpec | None = None
+    if categories is not None:
+        catspec = (
+            CatSpec.from_yaml(categories)
+            if isinstance(categories, (str, Path))
+            else categories
+        )
+    elif "categories" in data:
+        cat_source = data["categories"]
+        if isinstance(cat_source, (str, Path)):
+            cat_path = Path(cat_source)
+            if not cat_path.is_absolute():
+                cat_path = source_path.parent / cat_path
+            catspec = CatSpec.from_yaml(cat_path)
+        elif isinstance(cat_source, dict):
+            catspec = CatSpec.from_dict(cat_source)
+
+    columns_data = data.get("columns") or {}
+    if not columns_data:
+        raise SerializationError(f"{source} declares no columns")
+    columns = {
+        name: _colspec_from_yaml(col_data, categories=catspec)
+        for name, col_data in columns_data.items()
+    }
+    return TableSpec(
+        data.get("name", "LoadedFrameSpec"),
+        columns,
+        unique_together=data.get("unique_together") or (),
+        foreign_keys=[_foreignkey_from_yaml(fk) for fk in data.get("foreign_keys", [])],
+    )
+
+
+def to_python(spec: TableSpec, source: str | Path) -> None:
+    """Writes `spec` as a Python module defining a `FrameSpec` subclass.
+
+    Columns are declared through `__columns__`, since a name straight from
+    data is not always a valid identifier. Checks, validators and cross-spec
+    foreign keys cannot be written and warn; self-referencing foreign keys
+    and `__unique_together__` survive.
+    """
+    _require_columns(spec)
+    _warn_unserializable(spec, source, "python")
+
+    self_fks = [fk for fk in spec.foreign_keys if fk.references == "self"]
+    needs_datetime = any(
+        _colspec_needs_datetime_import(cs) for cs in spec.columns.values()
+    )
+    polspec_imports = ["ColSpec", "FrameSpec"]
+    if any(cs.rules for cs in spec.columns.values()):
+        polspec_imports.insert(1, "ColRule")
+    if self_fks:
+        polspec_imports.append("ForeignKey")
+
+    lines = [f'"""Declares the {spec.name} schema."""', "", "import polars as pl"]
+    if needs_datetime:
+        lines.append("import datetime")
+    lines.append(f"from polspec import {', '.join(polspec_imports)}")
+    lines.extend(["", "", f"class {spec.name}(FrameSpec):", "    __columns__ = {"])
+    for name, cs in spec.columns.items():
+        lines.append(f"        {name!r}: {_colspec_to_python(cs)},")
+    lines.append("    }")
+    if spec.unique_together:
+        groups = ", ".join(repr(list(group)) for group in spec.unique_together)
+        lines.append(f"    __unique_together__ = [{groups}]")
+    if self_fks:
+        fks = ", ".join(_foreignkey_to_python(fk) for fk in self_fks)
+        lines.append(f"    __foreign_keys__ = [{fks}]")
+
+    p = Path(source)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")

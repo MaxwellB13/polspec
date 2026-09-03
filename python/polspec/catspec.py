@@ -4,7 +4,7 @@ import re
 import warnings
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import polars as pl
 import yaml
@@ -12,6 +12,7 @@ import yaml
 from polspec.errors import SpecError
 from polspec.serialization import _YAML_DTYPES, _YAML_NAME_TO_DTYPE
 from polspec.spec import _is_categorical_dtype
+from polspec.tablespec import TableSpec, as_table_spec
 
 if TYPE_CHECKING:
     from polspec.framespec import FrameSpec
@@ -309,6 +310,22 @@ class CatSpec:
         """Accessor for pl.Categorical dtypes."""
         return self._cat_accessor
 
+    def resolve_key(
+        self, name: str
+    ) -> tuple[Literal["enum", "categorical"], str] | None:
+        """Which registry entry a column name binds to, if any.
+
+        Exact match first, then upper- and lower-case forms. Enums win over
+        categoricals of the same name.
+        """
+        key = self._resolve_enum_key(name)
+        if key is not None:
+            return ("enum", key)
+        key = self._resolve_cat_key(name)
+        if key is not None:
+            return ("categorical", key)
+        return None
+
     def _resolve_enum_key(self, name: str) -> str | None:
         if name in self._enums:
             return name
@@ -447,17 +464,15 @@ class CatSpec:
         return cls(enums=enums, categoricals=categoricals, choices=choices)
 
     @classmethod
-    def from_framespec(cls, spec: type[FrameSpec] | FrameSpec) -> CatSpec:
-        """Constructs a CatSpec from a declared FrameSpec class or instance."""
-        spec_cls = spec if isinstance(spec, type) else type(spec)
-        if not hasattr(spec_cls, "_columns"):
-            raise TypeError(f"Expected FrameSpec subclass, got {spec_cls.__name__}")
+    def from_framespec(cls, spec: TableSpec | type[FrameSpec]) -> CatSpec:
+        """Constructs a CatSpec from a TableSpec or a FrameSpec subclass."""
+        table = as_table_spec(spec)
 
         enums: dict[str, list[str]] = {}
         categoricals: dict[str, Any] = {}
         choices: dict[str, list[Any]] = {}
 
-        for col_name, col_spec in spec_cls._columns.items():
+        for col_name, col_spec in table.columns.items():
             dtype = col_spec.dtype
             if isinstance(dtype, pl.Enum):
                 enums[col_name] = dtype.categories.to_list()
@@ -556,7 +571,7 @@ class CatSpec:
     @classmethod
     def infer_from_framespec(
         cls,
-        spec: type[FrameSpec] | FrameSpec,
+        spec: TableSpec | type[FrameSpec],
         *,
         max_enum_cardinality: int = 30,
         max_categorical_cardinality: int = 10_000,
@@ -564,17 +579,15 @@ class CatSpec:
         exclude_patterns: Sequence[str] | None = DEFAULT_EXCLUDE_PATTERNS,
         default_physical: pl.DataType | None = None,
     ) -> CatSpec:
-        """Infers an optimal CatSpec from a declared FrameSpec class using schema definitions."""
-        spec_cls = spec if isinstance(spec, type) else type(spec)
-        if not hasattr(spec_cls, "_columns"):
-            raise TypeError(f"Expected FrameSpec subclass, got {spec_cls.__name__}")
+        """Infers an optimal CatSpec from a TableSpec or FrameSpec subclass's declarations."""
+        table = as_table_spec(spec)
 
         enums: dict[str, list[str]] = {}
         categoricals: dict[str, Any] = {}
         choices: dict[str, list[Any]] = {}
         include_set = set(include_columns) if include_columns is not None else None
 
-        for col_name, col_spec in spec_cls._columns.items():
+        for col_name, col_spec in table.columns.items():
             dtype = col_spec.dtype
             if isinstance(dtype, pl.Enum):
                 enums[col_name] = dtype.categories.to_list()
@@ -631,7 +644,7 @@ class CatSpec:
     @classmethod
     def infer(
         cls,
-        target: pl.DataFrame | pl.LazyFrame | type[FrameSpec] | FrameSpec,
+        target: pl.DataFrame | pl.LazyFrame | TableSpec | type[FrameSpec],
         *,
         max_enum_cardinality: int = 30,
         max_categorical_cardinality: int = 10_000,

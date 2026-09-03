@@ -49,7 +49,7 @@ def test_from_dataframe_basic():
     )
     assert Profiled.__name__ == "StoreProfile"
 
-    cols = Profiled._columns
+    cols = Profiled.spec.columns
     assert cols["id"].dtype == pl.Int64
     assert cols["id"].bounds.min == 1
     assert cols["id"].bounds.max == 5
@@ -92,7 +92,7 @@ def test_from_dataframe_weights_and_enums():
     )
 
     ProfiledWeighted = FrameSpec.from_dataframe(df, weights=True, max_unique_enum=10)
-    cols = ProfiledWeighted._columns
+    cols = ProfiledWeighted.spec.columns
 
     # Species should be converted to Enum with categories ["cat", "dog"] and weights [0.8, 0.2]
     assert isinstance(cols["species"].dtype, pl.Enum)
@@ -121,13 +121,13 @@ def test_from_dataframe_max_unique_threshold():
 
     # max_unique = 5 -> low_card (3 unique) becomes Enum, high_card (100 unique) stays String
     Spec1 = FrameSpec.from_dataframe(df, max_unique_enum=5)
-    assert isinstance(Spec1._columns["low_card"].dtype, pl.Enum)
-    assert Spec1._columns["high_card"].dtype == pl.String
+    assert isinstance(Spec1.spec.columns["low_card"].dtype, pl.Enum)
+    assert Spec1.spec.columns["high_card"].dtype == pl.String
 
     # Using alias max_unique
-    Spec2 = FrameSpec.from_dataframe(df, max_unique=2)
+    Spec2 = FrameSpec.from_dataframe(df, max_unique_enum=2)
     # low_card has 3 unique > 2, so it remains String
-    assert Spec2._columns["low_card"].dtype == pl.String
+    assert Spec2.spec.columns["low_card"].dtype == pl.String
 
 
 def test_from_dataframe_calculate_bounds_toggle():
@@ -141,19 +141,14 @@ def test_from_dataframe_calculate_bounds_toggle():
     SpecWithBounds = FrameSpec.from_dataframe(
         df, calculate_bounds=True, max_unique_enum=0
     )
-    assert SpecWithBounds._columns["num"].bounds == Bound(10, 50)
-    assert SpecWithBounds._columns["txt"].string_length == Bound(1, 16)
+    assert SpecWithBounds.spec.columns["num"].bounds == Bound(10, 50)
+    assert SpecWithBounds.spec.columns["txt"].string_length == Bound(1, 16)
 
     SpecNoBounds = FrameSpec.from_dataframe(
         df, calculate_bounds=False, max_unique_enum=0
     )
-    assert SpecNoBounds._columns["num"].bounds is None
-    assert SpecNoBounds._columns["txt"].string_length is None
-
-    # Test alias bounds=False
-    SpecNoBoundsAlias = FrameSpec.from_dataframe(df, bounds=False, max_unique_enum=0)
-    assert SpecNoBoundsAlias._columns["num"].bounds is None
-    assert SpecNoBoundsAlias._columns["txt"].string_length is None
+    assert SpecNoBounds.spec.columns["num"].bounds is None
+    assert SpecNoBounds.spec.columns["txt"].string_length is None
 
 
 def test_from_dataframe_nullability_and_edge_cases():
@@ -167,7 +162,7 @@ def test_from_dataframe_nullability_and_edge_cases():
     )
 
     Spec = FrameSpec.from_dataframe(df)
-    cols = Spec._columns
+    cols = Spec.spec.columns
 
     assert cols["with_nulls"].nullable is True
     assert cols["with_nulls"].null_probability == pytest.approx(0.4, abs=1e-4)
@@ -189,7 +184,7 @@ def test_from_dataframe_nullability_and_edge_cases():
     empty_df = pl.DataFrame({"a": [], "b": []}, schema={"a": pl.Int32, "b": pl.String})
     EmptySpec = FrameSpec.from_dataframe(empty_df)
     assert EmptySpec.schema() == empty_df.schema
-    assert not EmptySpec._columns["a"].nullable
+    assert not EmptySpec.spec.columns["a"].nullable
 
 
 def test_from_dataframe_temporal_and_binary(tmp_path):
@@ -213,7 +208,7 @@ def test_from_dataframe_temporal_and_binary(tmp_path):
     )
 
     Spec = FrameSpec.from_dataframe(df)
-    cols = Spec._columns
+    cols = Spec.spec.columns
 
     assert cols["t"].dtype == pl.Time
     assert cols["t"].bounds is not None

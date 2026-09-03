@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import polars as pl
 
@@ -12,17 +12,11 @@ from polspec.spec import ColSpec
 
 if TYPE_CHECKING:
     from polspec.framespec import FrameSpec
+    from polspec.tablespec import TableSpec
 
 
-def _default_fk_name(
-    columns: tuple[str, ...], references: type[FrameSpec] | str
-) -> str:
-    ref_label = (
-        references
-        if references == "self"
-        else getattr(references, "__name__", str(references))
-    )
-    return f"fk_{'_'.join(columns)}__{ref_label}"
+def _default_fk_name(columns: tuple[str, ...], references: str) -> str:
+    return f"fk_{'_'.join(columns)}__{references}"
 
 
 @dataclass(eq=False, frozen=True, slots=True)
@@ -34,12 +28,17 @@ class ForeignKey:
     ----------
     columns : str | Sequence[str]
         The local column(s) that must reference existing parent values.
-    references : type[FrameSpec] | "self"
-        The FrameSpec subclass this key references, or the literal string
-        "self" for a self-referencing key (e.g. an `employee.manager_id`
-        pointing back at `employee.id`). "self" always resolves to whichever
-        FrameSpec the ForeignKey ends up declared/inherited on, not
-        necessarily the class it was first written in.
+    references : type[FrameSpec] | TableSpec | str
+        The spec this key references -- a `FrameSpec` subclass, a
+        `TableSpec`, or a spec's *name* -- or the literal string "self" for a
+        self-referencing key (an `employee.manager_id` pointing back at
+        `employee.id`). "self" always resolves to whichever spec the key ends
+        up declared or inherited on, not the class it was first written in.
+
+        After construction `references` is always a string: the target's
+        name. When a spec object was given, it is kept as `target`, so its
+        columns can be checked at declaration; a bare name has no `target`
+        until a registry resolves it.
     ref_columns : str | Sequence[str] | None, optional
         The referenced column(s) on the target, in the same order as
         `columns`. Defaults to `columns` (same names on both sides).
@@ -66,9 +65,10 @@ class ForeignKey:
     """
 
     columns: str | Sequence[str]
-    references: type[FrameSpec] | Literal["self"]
+    references: type[FrameSpec] | TableSpec | str
     ref_columns: str | Sequence[str] | None = None
     name: str | None = None
+    target: TableSpec | None = None
 
     def __post_init__(self) -> None:
         cols = (self.columns,) if isinstance(self.columns, str) else tuple(self.columns)
@@ -89,14 +89,28 @@ class ForeignKey:
             )
         object.__setattr__(self, "ref_columns", ref_cols)
 
-        if not (self.references == "self" or isinstance(self.references, type)):
+        from polspec.tablespec import TableSpec  # local: tablespec imports this module
+
+        ref = self.references
+        target: TableSpec | None = self.target
+        if isinstance(ref, TableSpec):
+            target, ref = ref, ref.name
+        elif isinstance(ref, type) and isinstance(
+            getattr(ref, "spec", None), TableSpec
+        ):
+            target, ref = ref.spec, ref.spec.name
+        elif not isinstance(ref, str) or not ref:
             raise SpecError(
-                "ForeignKey.references must be a FrameSpec subclass or the literal "
-                f"string 'self', got {self.references!r}"
+                "ForeignKey.references must be a FrameSpec subclass, a TableSpec, "
+                f"a spec name, or the literal string 'self', got {self.references!r}"
             )
+        if ref == "self":
+            target = None
+        object.__setattr__(self, "references", ref)
+        object.__setattr__(self, "target", target)
 
         if self.name is None:
-            object.__setattr__(self, "name", _default_fk_name(cols, self.references))
+            object.__setattr__(self, "name", _default_fk_name(cols, ref))
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, ForeignKey):
@@ -109,10 +123,7 @@ class ForeignKey:
         )
 
     def __hash__(self) -> int:
-        ref = (
-            self.references if isinstance(self.references, str) else id(self.references)
-        )
-        return hash((self.name, self.columns, self.ref_columns, ref))
+        return hash((self.name, self.columns, self.ref_columns, self.references))
 
 
 def _apply_foreign_keys(

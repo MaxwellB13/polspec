@@ -32,7 +32,8 @@ def test_foreign_key_declaration_variations():
     fk = SameNameFk.foreign_keys()[0]
     assert fk.columns == ("id",)
     assert fk.ref_columns == ("id",)
-    assert fk.references is CustomerFkSpec
+    assert fk.references == "CustomerFkSpec"
+    assert fk.target is CustomerFkSpec.spec
     assert fk.name == "fk_id__CustomerFkSpec"
 
     # Explicit ref_columns and name

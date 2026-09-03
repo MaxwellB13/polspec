@@ -102,7 +102,7 @@ FrameSpec.from_yaml("orders.yaml", categories="categories.yaml")
 A spec can also emit the registry its own columns imply:
 
 ```python
-Orders.write_catspec("categories.yaml")
+Orders.catspec().to_yaml("categories.yaml")
 ```
 
 ## Python instead of YAML

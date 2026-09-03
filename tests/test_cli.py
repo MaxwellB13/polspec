@@ -108,7 +108,7 @@ def test_schema_infer_sample_limits_rows(sample_data, tmp_path):
     run_cli("schema", "infer", sample_data, "-o", out, "--sample", "10")
     spec_cls = FrameSpec.from_yaml(out)
     # order_id bounds should reflect only the first 10 rows (1..10), not 200.
-    assert spec_cls._columns["order_id"].bounds.max == 10
+    assert spec_cls.spec.columns["order_id"].bounds.max == 10
 
 
 def test_schema_infer_py_output_produces_a_generatable_spec(sample_data, tmp_path):

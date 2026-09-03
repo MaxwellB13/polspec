@@ -234,9 +234,11 @@ spec that came from a file never needs `col_name`.
 
 ### `__columns__`: the name is an identifier but cannot be an attribute
 
-A leading underscore is skipped by the class-body scan, and a name that
-matches one of `FrameSpec`'s own methods (`schema`, `tag`, `generate`,
-`validate`, …) would shadow it. Declare those through the explicit mapping:
+A leading underscore is skipped by the class-body scan, so a column called
+`_id` needs the explicit mapping. A name that matches one of `FrameSpec`'s
+methods (`schema`, `tag`, …) is fine either way: the method keeps working and
+the column is reachable as `Spec.col("schema")` -- see
+[Specs as values](tablespec.md#column-names-and-method-names).
 
 ```python
 class Raw(FrameSpec):
@@ -252,5 +254,3 @@ disagrees with its key is rejected. `from_dataframe`, `from_yaml` and
 `to_python` all declare columns this way, since their names come from data
 rather than from someone's class body.
 
-Declaring a colliding name as a plain attribute still works, but warns that the
-shadowed method is no longer callable on that spec.

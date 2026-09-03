@@ -136,7 +136,7 @@ registry's types:
 
 ```python
 Optimized = Orders.with_catspec(categories)
-Optimized = Orders.with_inferred_catspec(data=df)   # infer, then apply
+Optimized = Orders.with_catspec(CatSpec.infer(df))   # infer, then apply
 ```
 
 Re-typing changes the dtype and nothing else a column declared — `unique`,

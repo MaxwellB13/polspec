@@ -36,14 +36,14 @@ def test_underscore_columns_are_dropped_from_the_class_body():
         _id = ColSpec(pl.Int64)
         val = ColSpec(pl.Int64)
 
-    assert list(Spec._columns) == ["val"]
+    assert list(Spec.spec.columns) == ["val"]
 
 
 def test_underscore_columns_survive_via_explicit_declaration():
     class Spec(FrameSpec):
         __columns__ = {"_id": ColSpec(pl.Int64), "val": ColSpec(pl.Int64)}
 
-    assert list(Spec._columns) == ["_id", "val"]
+    assert list(Spec.spec.columns) == ["_id", "val"]
     assert Spec.generate(10, seed=1).columns == ["_id", "val"]
 
 
@@ -52,7 +52,7 @@ def test_profiling_keeps_underscore_columns():
     source = pl.DataFrame({"_id": [1, 2, 3], "val": [1.0, 2.0, 3.0]})
     spec_cls = FrameSpec.from_dataframe(source)
 
-    assert list(spec_cls._columns) == ["_id", "val"]
+    assert list(spec_cls.spec.columns) == ["_id", "val"]
     assert spec_cls.generate(10, seed=1).columns == ["_id", "val"]
 
 
@@ -62,7 +62,7 @@ def test_yaml_roundtrip_keeps_underscore_columns(tmp_path):
 
     path = tmp_path / "spec.yaml"
     Spec.to_yaml(path)
-    assert list(FrameSpec.from_yaml(path)._columns) == ["_id", "val"]
+    assert list(FrameSpec.from_yaml(path).spec.columns) == ["_id", "val"]
 
 
 def test_explicit_declarations_must_be_colspecs():
@@ -84,45 +84,62 @@ def test_explicit_declarations_must_be_a_mapping():
 # ---------------------------------------------------------------------------
 
 
-def test_column_shadowing_a_method_warns():
-    """C9: the shadowing itself is unavoidable; doing it in silence was the bug."""
-    with pytest.warns(UserWarning, match=r"shadows FrameSpec\.schema"):
+def test_column_named_after_a_method_keeps_both():
+    """C9: the column is a column and the method is still the method.
 
-        class Spec(FrameSpec):
-            schema = ColSpec(pl.Int64)
-            other = ColSpec(pl.Int64)
+    The metaclass takes ColSpec attributes out of the class namespace before
+    the class exists, so nothing is shadowed and nothing needs to warn.
+    """
 
-    # The column is honoured -- only the accessor is lost.
-    assert list(Spec._columns) == ["schema", "other"]
+    class Spec(FrameSpec):
+        schema = ColSpec(pl.Int64)
+        other = ColSpec(pl.Int64)
+
+    assert list(Spec.spec.columns) == ["schema", "other"]
     assert Spec.generate(5, seed=1).columns == ["schema", "other"]
+    # The method wins on attribute access; the column is reachable by name.
+    assert Spec.schema() == pl.Schema({"schema": pl.Int64, "other": pl.Int64})
+    assert Spec.col("schema") == ColSpec(pl.Int64)
+    assert Spec.spec["schema"] == ColSpec(pl.Int64)
+    # An ordinary column is still an attribute.
+    assert Spec.other == ColSpec(pl.Int64)
 
 
-def test_shadowing_a_method_via_explicit_declaration_keeps_both():
+def test_declaring_a_method_name_via_explicit_declaration_keeps_both():
     class Spec(FrameSpec):
         __columns__ = {"schema": ColSpec(pl.Int64), "tag": ColSpec(pl.String)}
 
     assert Spec.generate(5, seed=1).columns == ["schema", "tag"]
-    # Both classmethods still resolve to the method, not to a ColSpec.
     assert Spec.schema() == pl.Schema({"schema": pl.Int64, "tag": pl.String})
     assert Spec.tag("anything") == []
 
 
-def test_ordinary_column_names_do_not_warn(recwarn):
+def test_no_column_name_warns(recwarn):
     class Spec(FrameSpec):
+        schema = ColSpec(pl.Int64)
+        validate = ColSpec(pl.String)
         name = ColSpec(pl.String)
-        value = ColSpec(pl.Int64)
 
-    assert [w for w in recwarn if "shadows" in str(w.message)] == []
-    assert list(Spec._columns) == ["name", "value"]
+    assert [w for w in recwarn if "shadow" in str(w.message)] == []
+    assert list(Spec.spec.columns) == ["schema", "validate", "name"]
+    assert Spec.validate(Spec.generate(3, seed=1)).height == 3
 
 
-def test_profiling_a_frame_with_reserved_names_does_not_warn(recwarn):
-    """Names arriving from data go through __columns__, so nothing is shadowed."""
+def test_profiling_a_frame_with_reserved_names(recwarn):
     source = pl.DataFrame({"schema": [1, 2], "tag": ["a", "b"]})
     spec_cls = FrameSpec.from_dataframe(source)
 
-    assert [w for w in recwarn if "shadows" in str(w.message)] == []
+    assert [w for w in recwarn if "shadow" in str(w.message)] == []
     assert spec_cls.schema().names() == ["schema", "tag"]
+
+
+def test_unknown_attribute_is_still_an_attribute_error():
+    class Spec(FrameSpec):
+        a = ColSpec(pl.Int64)
+
+    with pytest.raises(AttributeError, match="no attribute 'nope'"):
+        Spec.nope  # noqa: B018
+    assert not hasattr(Spec, "nope")
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +274,7 @@ def test_open_bounds_survive_yaml_roundtrip(tmp_path):
 
     path = tmp_path / "spec.yaml"
     Spec.to_yaml(path)
-    assert FrameSpec.from_yaml(path)._columns["n"].bounds == Bound(0, None)
+    assert FrameSpec.from_yaml(path).spec.columns["n"].bounds == Bound(0, None)
 
 
 @pytest.mark.parametrize(
@@ -295,7 +312,7 @@ def test_col_name_overrides_the_attribute_name():
         unit_price = ColSpec(pl.Float64, col_name="Unit Price", bounds=(0, 100))
         qty = ColSpec(pl.Int64, bounds=(1, 10))
 
-    assert list(Spec._columns) == ["Unit Price", "qty"]
+    assert list(Spec.spec.columns) == ["Unit Price", "qty"]
     df = Spec.generate(50, seed=1)
     assert df.columns == ["Unit Price", "qty"]
     Spec.validate(df)
@@ -350,7 +367,7 @@ def test_col_name_matching_explicit_declaration_key_is_redundant_but_fine():
     class Spec(FrameSpec):
         __columns__ = {"foo": ColSpec(pl.Int64, col_name="foo")}
 
-    assert list(Spec._columns) == ["foo"]
+    assert list(Spec.spec.columns) == ["foo"]
 
 
 def test_overriding_a_col_name_attribute_removes_the_renamed_column():
@@ -361,7 +378,7 @@ def test_overriding_a_col_name_attribute_removes_the_renamed_column():
     class Child(Base):
         drop = None
 
-    assert list(Child._columns) == ["Keep Col"]
+    assert list(Child.spec.columns) == ["Keep Col"]
 
 
 def test_col_name_survives_yaml_roundtrip(tmp_path):
@@ -373,5 +390,5 @@ def test_col_name_survives_yaml_roundtrip(tmp_path):
     path = tmp_path / "spec.yaml"
     Spec.to_yaml(path)
     loaded = FrameSpec.from_yaml(path)
-    assert list(loaded._columns) == ["Unit Price"]
+    assert list(loaded.spec.columns) == ["Unit Price"]
     assert loaded.generate(10, seed=1).columns == ["Unit Price"]

@@ -12,6 +12,7 @@ nav = [
   { "Comparison" = "comparison.md" },
   { "Guide" = [
     { "Declaring columns" = "guide/columns.md" },
+    { "Specs as values" = "guide/tablespec.md" },
     { "Constraints" = "guide/constraints.md" },
     { "Generating data" = "guide/generating.md" },
     { "Validating data" = "guide/validating.md" },

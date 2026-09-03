@@ -1,754 +1,283 @@
+"""`FrameSpec` -- declaring a `TableSpec` as a class body, and the facade over it.
+
+    class Orders(FrameSpec):
+        order_id = ColSpec(pl.Int64, unique=True)
+        status = ColSpec(pl.Enum(["NEW", "PAID"]))
+        __checks__ = [Check(...)]
+
+    Orders.spec            # the TableSpec the class body built
+    Orders.generate(1_000) # every verb forwards to a function over `Orders.spec`
+
+The metaclass takes the `ColSpec` attributes and the dunder declarations out
+of the class namespace *before* the class exists, so a column can be named
+`schema` or `tag` without shadowing the method of the same name. Column
+attributes are still reachable as `Orders.order_id`, through a fallback that
+only runs when ordinary attribute lookup fails; `Orders.col("schema")` and
+`Orders.spec["schema"]` reach a column whatever it is called.
+"""
+
 from __future__ import annotations
 
-import dataclasses
-import random
-import warnings
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, ClassVar, Literal, overload
 
 import polars as pl
-import yaml
 
-from polspec.catspec import DEFAULT_EXCLUDE_PATTERNS, CatSpec
+from polspec import generation, serialization, validation
+from polspec.catspec import CatSpec
 from polspec.check import Check
-from polspec.engine import _generate_cartesian, _generate_random
-from polspec.errors import SerializationError, SpecError
-from polspec.foreign_key import ForeignKey, _apply_foreign_keys
+from polspec.errors import SpecError
+from polspec.foreign_key import ForeignKey
 from polspec.profiler import profile_dataframe
 from polspec.report import framespec_to_markdown, framespec_to_mermaid
-from polspec.rules import _apply_rules
-from polspec.serialization import (
-    _colspec_from_yaml,
-    _colspec_needs_datetime_import,
-    _colspec_to_python,
-    _colspec_to_yaml,
-    _foreignkey_from_yaml,
-    _foreignkey_to_python,
-    _foreignkey_to_yaml,
-)
-from polspec.spec import ColSpec, _column_kind
-from polspec.validation import _Options, _validate_dataframe
+from polspec.spec import ColSpec
+from polspec.tablespec import TableSpec, _parse_unique_together
+
+References = Mapping[Any, pl.DataFrame | pl.LazyFrame] | None
 
 
-def _collect_declarations[T](
-    base: type,
-    attr_names: tuple[str, ...],
-    declared_type: type[T],
-    out: list[T],
-) -> None:
-    """Appends `declared_type` declarations found on `base` to `out`, de-duplicated.
+def _is_declaration_value(value: Any) -> bool:
+    """Whether a class-body value under a declaration name is data, not code.
 
-    `__checks__` and `__foreign_keys__` are collected identically -- a single
-    instance or a sequence of them, under a dunder name or its bare alias,
-    skipping anything callable so a method of the same name is not mistaken
-    for a declaration. Only the type and the messages differ.
+    `checks`, `foreign_keys` and `unique_together` double as accessor names,
+    so a method or descriptor under one of them is left alone.
     """
-    for attr_name in attr_names:
-        if attr_name not in vars(base):
-            continue
-        val = vars(base)[attr_name]
-        if val is None or isinstance(val, (classmethod, staticmethod)) or callable(val):
-            continue
+    return not (
+        value is None
+        or callable(value)
+        or isinstance(value, (classmethod, staticmethod, property))
+    )
 
-        if isinstance(val, declared_type):
-            items: Sequence[T] = [val]
-        elif isinstance(val, (list, tuple, Sequence)):
-            items = val
+
+def _pop_declaration[T](
+    ns: dict[str, Any], names: tuple[str, ...], kind: type[T]
+) -> list[T]:
+    """Removes `__checks__`/`checks`-style declarations from a namespace.
+
+    Accepts a single instance or a sequence of them, under either spelling.
+    """
+    out: list[T] = []
+    for attr in names:
+        if attr not in ns or not _is_declaration_value(ns[attr]):
+            continue
+        value = ns.pop(attr)
+        if isinstance(value, kind):
+            items: Sequence[T] = [value]
+        elif isinstance(value, Sequence) and not isinstance(value, str):
+            items = value
         else:
             raise SpecError(
-                f"{attr_names[0]} must be a {declared_type.__name__} or sequence "
-                f"of {declared_type.__name__} instances, got {type(val).__name__}"
+                f"{names[0]} must be a {kind.__name__} or sequence of "
+                f"{kind.__name__} instances, got {type(value).__name__}"
             )
-
         for item in items:
-            if not isinstance(item, declared_type):
+            if not isinstance(item, kind):
                 raise SpecError(
-                    f"Items in {attr_names[0]} must be {declared_type.__name__} "
-                    f"instances, got {type(item).__name__}"
+                    f"Items in {names[0]} must be {kind.__name__} instances, got "
+                    f"{type(item).__name__}"
                 )
             if item not in out:
                 out.append(item)
+    return out
 
 
-def _retype_column(
-    col_name: str,
-    spec: ColSpec,
-    dtype: pl.DataType,
-    *,
-    choices: Sequence[Any] | None = None,
-) -> ColSpec:
-    """Re-points a ColSpec at a new dtype, keeping everything else it declared.
+def _pop_unique_together(ns: dict[str, Any]) -> Any:
+    for attr in ("__unique_together__", "unique_together"):
+        if attr in ns and _is_declaration_value(ns[attr]):
+            return ns.pop(attr)
+    return None
 
-    `dataclasses.replace` rather than a field-by-field rebuild: a rebuild
-    silently drops whatever field it forgets to list, and quietly stopped
-    honouring `unique` and `string_length` for every re-typed column.
 
-    Two fields a dtype change can genuinely invalidate are handled explicitly:
-    `choices`, which may name values outside the new dtype's domain, and
-    `weights`, which is positional over a domain that just changed size. Each
-    is dropped with a warning rather than carried into a confusing ColSpec
-    error further down.
+def _build_table_spec(
+    name: str,
+    parents: Sequence[_FrameSpecMeta],
+    own_columns: dict[str, ColSpec],
+    declared: Mapping[Any, Any] | None,
+    removed: set[str],
+    checks: Sequence[Check],
+    foreign_keys: Sequence[ForeignKey],
+    unique_together: Any,
+) -> tuple[TableSpec, dict[str, str]]:
+    """Merges inherited specs with a class body's own declarations.
+
+    Returns the spec and the attribute-name to column-name mapping that a
+    subclass needs in order to override or remove a column by attribute.
     """
-    updates: dict[str, Any] = {"dtype": dtype}
+    columns: dict[str, ColSpec] = {}
+    attr_to_col: dict[str, str] = {}
+    all_checks: list[Check] = []
+    all_fks: list[ForeignKey] = []
+    all_unique: list[tuple[str, ...]] = []
 
-    new_choices = tuple(choices) if choices is not None else spec.choices
-    if choices is None and new_choices is not None and isinstance(dtype, pl.Enum):
-        valid = set(dtype.categories.to_list())
-        stale = [c for c in new_choices if c not in valid]
-        if stale:
-            warnings.warn(
-                f"Column {col_name!r}: dropping choices {stale} while re-typing "
-                f"to {dtype!r}, whose categories do not include them. The new "
-                "dtype's own categories become the column's domain.",
-                stacklevel=3,
-            )
-            new_choices = None
-    updates["choices"] = new_choices
+    for parent in reversed(parents):
+        columns.update(parent.spec.columns)
+        attr_to_col.update(parent._attr_to_col)
+        for check in parent.spec.checks:
+            if check not in all_checks:
+                all_checks.append(check)
+        for fk in parent.spec.foreign_keys:
+            if fk not in all_fks:
+                all_fks.append(fk)
+        for group in parent.spec.unique_together:
+            if tuple(group) not in all_unique:
+                all_unique.append(tuple(group))
 
-    if new_choices is not None:
-        new_domain = len(new_choices)
-    elif isinstance(dtype, pl.Enum):
-        new_domain = len(dtype.categories)
-    else:
-        new_domain = None
+    for attr in removed:
+        columns.pop(attr_to_col.pop(attr), None)
 
-    if spec.weights is not None and (
-        new_domain is None or new_domain != len(spec.weights)
-    ):
-        warnings.warn(
-            f"Column {col_name!r}: dropping {len(spec.weights)} weight(s) while "
-            f"re-typing to {dtype!r}, which defines "
-            f"{new_domain if new_domain is not None else 'no'} value(s) for them "
-            "to apply to. Re-declare weights against the new domain if the "
-            "distribution mattered.",
-            stacklevel=3,
+    for attr, colspec in own_columns.items():
+        final = colspec.col_name if colspec.col_name is not None else attr
+        colliding = next(
+            (a for a, c in attr_to_col.items() if c == final and a != attr), None
         )
-        updates["weights"] = None
+        if colliding is not None:
+            raise SpecError(
+                f"Columns {colliding!r} and {attr!r} on {name} both resolve to "
+                f"the column name {final!r} (via col_name). Give each a distinct "
+                "col_name, or rename one of the attributes."
+            )
+        prior = attr_to_col.get(attr)
+        if prior is not None and prior != final:
+            del columns[prior]
+        columns[final] = colspec
+        attr_to_col[attr] = final
 
-    return dataclasses.replace(spec, **updates)
+    if declared is not None:
+        if not isinstance(declared, Mapping):
+            raise SpecError(
+                "__columns__ must be a mapping of column name to ColSpec, got "
+                f"{type(declared).__name__}"
+            )
+        for raw_key, value in declared.items():
+            key = str(raw_key)
+            if not isinstance(value, ColSpec):
+                raise SpecError(
+                    f"__columns__[{key!r}] must be a ColSpec, got {type(value).__name__}"
+                )
+            if value.col_name is not None and value.col_name != key:
+                raise SpecError(
+                    f"__columns__[{key!r}] declares col_name={value.col_name!r}, "
+                    "which conflicts with its __columns__ key. col_name only "
+                    "applies to columns declared as class attributes -- for "
+                    "__columns__, the dict key already is the column name."
+                )
+            columns[key] = value
+
+    for check in checks:
+        if check not in all_checks:
+            all_checks.append(check)
+    for fk in foreign_keys:
+        if fk not in all_fks:
+            all_fks.append(fk)
+    for group in _parse_unique_together(unique_together):
+        if group not in all_unique:
+            all_unique.append(group)
+
+    spec = TableSpec(
+        name,
+        columns,
+        checks=all_checks,
+        unique_together=all_unique,
+        foreign_keys=all_fks,
+    )
+    return spec, attr_to_col
 
 
-class FrameSpec:
+class _FrameSpecMeta(type):
+    """Builds `cls.spec` from a class body, keeping columns off the class itself."""
+
+    spec: TableSpec
+    _attr_to_col: dict[str, str]
+
+    def __new__(
+        mcls, name: str, bases: tuple[type, ...], ns: dict[str, Any], **kwargs: Any
+    ) -> _FrameSpecMeta:
+        prebuilt: TableSpec | None = ns.pop("__tablespec__", None)
+        parents = [b for b in bases if isinstance(b, _FrameSpecMeta)]
+
+        own_columns: dict[str, ColSpec] = {}
+        for attr in list(ns):
+            if not attr.startswith("_") and isinstance(ns[attr], ColSpec):
+                own_columns[attr] = ns.pop(attr)
+        declared = ns.pop("__columns__", None)
+        checks = _pop_declaration(ns, ("__checks__", "checks"), Check)
+        foreign_keys = _pop_declaration(
+            ns, ("__foreign_keys__", "foreign_keys"), ForeignKey
+        )
+        unique_together = _pop_unique_together(ns)
+        # A non-ColSpec value assigned over an inherited column attribute
+        # removes that column; the value itself stays an ordinary attribute.
+        removed = {
+            attr
+            for attr in ns
+            if not attr.startswith("_") and any(attr in p._attr_to_col for p in parents)
+        }
+
+        cls = super().__new__(mcls, name, bases, ns, **kwargs)
+        if prebuilt is not None:
+            cls.spec = prebuilt if prebuilt.name == name else prebuilt.with_name(name)
+            cls._attr_to_col = {}
+        else:
+            cls.spec, cls._attr_to_col = _build_table_spec(
+                name,
+                parents,
+                own_columns,
+                declared,
+                removed,
+                checks,
+                foreign_keys,
+                unique_together,
+            )
+        return cls
+
+    def __getattr__(cls, item: str) -> Any:
+        # Reached only when ordinary lookup fails, so a method always wins
+        # over a column of the same name.
+        if not item.startswith("__"):
+            spec = cls.__dict__.get("spec")
+            if spec is not None:
+                col = spec.columns.get(item)
+                if col is not None:
+                    return col
+        raise AttributeError(f"type object {cls.__name__!r} has no attribute {item!r}")
+
+
+class FrameSpec(metaclass=_FrameSpecMeta):
     """Base class for declaring a DataFrame/LazyFrame specification.
 
-    Subclass it and assign `ColSpec` instances as class attributes, in the
-    order columns should appear:
+    Subclass it and assign a `ColSpec` per column, in the order columns should
+    appear:
 
         class DataSource(FrameSpec):
-            string_1 = ColSpec(dtype=pl.String, nullable=False)
-            enum_1 = ColSpec(dtype=pl.Enum(["mammal", "reptile", "insect"]), nullable=True)
-            int_1 = ColSpec(dtype=pl.Int64, bounds=Bound(-100, 100), nullable=True)
+            string_1 = ColSpec(pl.String)
+            enum_1 = ColSpec(pl.Enum(["mammal", "reptile"]), nullable=True)
+            int_1 = ColSpec(pl.Int64, bounds=(-100, 100), nullable=True)
 
         df = DataSource.generate(1_000_000, seed=42)
-        df = DataSource.generate(n=1_000_000, method="cartesian", seed=42)
 
-    Columns whose names cannot be class attributes -- a leading underscore, or
-    a collision with one of this class's own methods such as `schema` -- are
-    declared through `__columns__` instead, which is not looked up as an
-    attribute:
+    The class body builds `DataSource.spec`, a `TableSpec`; every classmethod
+    here forwards to a function over it. A column may take any name: one that
+    collides with a method (`schema`, `tag`, ...) is reachable as
+    `DataSource.col("schema")` while the method keeps working. Names that
+    cannot be attributes at all -- a leading underscore, or one straight from
+    data -- go through `__columns__`:
 
-        class DataSource(FrameSpec):
-            __columns__ = {"_id": ColSpec(pl.Int64), "schema": ColSpec(pl.String)}
-
-    `from_dataframe` and `from_yaml` build specs this way, since their column
-    names come from data rather than from a class body.
+        class Raw(FrameSpec):
+            __columns__ = {"_id": ColSpec(pl.Int64), "Unit Price": ColSpec(pl.Float64)}
     """
 
-    _columns: ClassVar[dict[str, ColSpec]] = {}
-    _checks: ClassVar[tuple[Check, ...]] = ()
-    _unique_together: ClassVar[tuple[tuple[str, ...], ...]] = ()
-    _foreign_keys: ClassVar[tuple[ForeignKey, ...]] = ()
+    spec: ClassVar[TableSpec]
+    _attr_to_col: ClassVar[dict[str, str]]
 
-    def __init_subclass__(cls, **kwargs) -> None:
-        super().__init_subclass__(**kwargs)
-        columns: dict[str, ColSpec] = {}
-        # Tracks which attribute name produced which column name, so that
-        # overriding an attribute with a non-ColSpec value (to remove an
-        # inherited column) can find the right key in `columns` even when
-        # `ColSpec.col_name` renamed it away from the attribute name.
-        attr_to_col: dict[str, str] = {}
-        checks_list: list[Check] = []
-        unique_together_list: list[tuple[str, ...]] = []
-        foreign_keys_list: list[ForeignKey] = []
-
-        for base in reversed(cls.__mro__):
-            _collect_declarations(base, ("__checks__", "checks"), Check, checks_list)
-            _collect_declarations(
-                base,
-                ("__foreign_keys__", "foreign_keys"),
-                ForeignKey,
-                foreign_keys_list,
-            )
-
-            # unique_together holds bare strings rather than instances of a
-            # type, so it keeps its own parser.
-            for attr_name in ("__unique_together__", "unique_together"):
-                if attr_name in vars(base):
-                    val = vars(base)[attr_name]
-                    if isinstance(val, (classmethod, staticmethod)) or callable(val):
-                        continue
-                    cls._parse_unique_together(val, unique_together_list)
-
-            # Collect columns declared as ordinary class attributes
-            for name, value in vars(base).items():
-                if name.startswith("_"):
-                    continue
-                if isinstance(value, ColSpec):
-                    final_name = value.col_name if value.col_name is not None else name
-                    colliding_attr = next(
-                        (
-                            attr
-                            for attr, col in attr_to_col.items()
-                            if col == final_name and attr != name
-                        ),
-                        None,
-                    )
-                    if colliding_attr is not None:
-                        raise SpecError(
-                            f"Columns {colliding_attr!r} and {name!r} on "
-                            f"{cls.__name__} both resolve to the column name "
-                            f"{final_name!r} (via col_name). Give each a "
-                            "distinct col_name, or rename one of the attributes."
-                        )
-                    if name in _RESERVED_ATTRS:
-                        # A warning, not an error: `tag`, `schema` and friends
-                        # are ordinary column names in real data, and polspec's
-                        # choice of method names is no reason to refuse someone
-                        # else's schema. The column works either way -- what
-                        # breaks is only the shadowed accessor, and declaring
-                        # the column through __columns__ keeps both.
-                        warnings.warn(
-                            f"Column {name!r} on {cls.__name__} shadows "
-                            f"FrameSpec.{name}, so {cls.__name__}.{name}() is "
-                            f"no longer callable on this spec. The {name!r} "
-                            "column itself is unaffected. Declare it through "
-                            "__columns__ = {...} to keep the method as well.",
-                            stacklevel=3,
-                        )
-                    prior_final = attr_to_col.get(name)
-                    if prior_final is not None and prior_final != final_name:
-                        del columns[prior_final]
-                    columns[final_name] = value
-                    attr_to_col[name] = final_name
-                elif name in attr_to_col:
-                    del columns[attr_to_col.pop(name)]
-
-            # Collect columns declared explicitly. Names here never pass
-            # through attribute lookup, so they may start with an underscore
-            # or match one of this class's own methods -- which is what makes
-            # this the right channel for names that come from data (a profiled
-            # DataFrame, a YAML file) rather than from someone's class body.
-            declared = vars(base).get("__columns__")
-            if declared is not None:
-                if not isinstance(declared, Mapping):
-                    raise SpecError(
-                        "__columns__ must be a mapping of column name to "
-                        f"ColSpec, got {type(declared).__name__}"
-                    )
-                for name, value in declared.items():
-                    if not isinstance(value, ColSpec):
-                        raise SpecError(
-                            f"__columns__[{name!r}] must be a ColSpec, got "
-                            f"{type(value).__name__}"
-                        )
-                    key = str(name)
-                    if value.col_name is not None and value.col_name != key:
-                        raise SpecError(
-                            f"__columns__[{key!r}] declares col_name="
-                            f"{value.col_name!r}, which conflicts with its "
-                            "__columns__ key. col_name only applies to columns "
-                            "declared as class attributes -- for __columns__, "
-                            "the dict key already is the column name."
-                        )
-                    columns[key] = value
-
-        cls._columns = columns
-        cls._checks = tuple(checks_list)
-        cls._unique_together = tuple(unique_together_list)
-        cls._foreign_keys = tuple(foreign_keys_list)
-        cls._validate_rules()
-        cls._validate_validators()
-        cls._validate_unique_together()
-        cls._validate_checks()
-        cls._validate_foreign_keys()
+    # ------------------------------------------------------------------
+    # Construction
+    # ------------------------------------------------------------------
 
     @classmethod
-    def _parse_unique_together(
-        cls,
-        val: Any,
-        out: list[tuple[str, ...]],
-    ) -> None:
-        if val is None:
-            return
-        if isinstance(val, str):
-            t = (val,)
-            if t not in out:
-                out.append(t)
-        elif isinstance(val, (list, tuple, Sequence)):
-            if not val:
-                return
-            if all(isinstance(x, str) for x in val):
-                t = tuple(val)
-                if t not in out:
-                    out.append(t)
-            else:
-                for item in val:
-                    if isinstance(item, str):
-                        t = (item,)
-                        if t not in out:
-                            out.append(t)
-                    elif isinstance(item, (list, tuple, Sequence)):
-                        t = tuple(str(x) for x in item)
-                        if t not in out:
-                            out.append(t)
-                    else:
-                        raise SpecError(
-                            f"Elements of unique_together must be strings or sequences of strings, got {type(item).__name__}"
-                        )
-        else:
-            raise SpecError(
-                f"unique_together must be a sequence of column names or sequence of sequences, got {type(val).__name__}"
-            )
-
-    @classmethod
-    def _validate_unique_together(cls) -> None:
-        for group in cls._unique_together:
-            for col_name in group:
-                if col_name not in cls._columns:
-                    raise SpecError(
-                        f"Composite unique key {group} references unknown column {col_name!r}"
-                    )
-
-    @classmethod
-    def _validate_checks(cls) -> None:
-        seen: dict[str, Check] = {}
-        for check in cls._checks:
-            prior = seen.get(check.name)
-            if prior is not None:
-                raise SpecError(
-                    f"Duplicate Check name {check.name!r} on {cls.__name__}: "
-                    f"{prior.expr!r} vs {check.expr!r}. Give each Check a "
-                    "distinct name, or reuse the exact same Check instance/"
-                    "definition to inherit it unchanged."
-                )
-            seen[check.name] = check
-
-    @staticmethod
-    def _fk_kind_bucket(kind: str) -> str:
-        # String/Enum/Categorical columns are all textual domains that can
-        # reasonably reference one another (e.g. a plain String FK column
-        # pointing at an Enum primary key), so they share one bucket here.
-        return "string" if kind in ("string", "enum", "categorical") else kind
-
-    @classmethod
-    def _validate_foreign_keys(cls) -> None:
-        seen: dict[str, ForeignKey] = {}
-        for fk in cls._foreign_keys:
-            prior = seen.get(fk.name)
-            if prior is not None and prior != fk:
-                raise SpecError(
-                    f"Duplicate ForeignKey name {fk.name!r} on {cls.__name__} "
-                    f"points at two different targets/columns. Give each "
-                    "ForeignKey a distinct name."
-                )
-            seen[fk.name] = fk
-
-            for col in fk.columns:
-                if col not in cls._columns:
-                    raise SpecError(
-                        f"ForeignKey {fk.name!r} on {cls.__name__!r} references "
-                        f"unknown local column {col!r}"
-                    )
-
-            target = cls if fk.references == "self" else fk.references
-            if not (isinstance(target, type) and hasattr(target, "_columns")):
-                raise SpecError(
-                    f"ForeignKey {fk.name!r} on {cls.__name__!r}: references must "
-                    f"be a FrameSpec subclass or 'self', got {fk.references!r}"
-                )
-            target_name = "self" if fk.references == "self" else target.__name__
-            target_columns: dict[str, ColSpec] = target._columns
-
-            for ref_col in fk.ref_columns:
-                if ref_col not in target_columns:
-                    raise SpecError(
-                        f"ForeignKey {fk.name!r} on {cls.__name__!r} references "
-                        f"unknown column {ref_col!r} on {target_name!r}"
-                    )
-
-            for col, ref_col in zip(fk.columns, fk.ref_columns, strict=True):
-                local_kind = cls._fk_kind_bucket(_column_kind(cls._columns[col].dtype))
-                ref_kind = cls._fk_kind_bucket(
-                    _column_kind(target_columns[ref_col].dtype)
-                )
-                if local_kind != ref_kind:
-                    raise SpecError(
-                        f"ForeignKey {fk.name!r} on {cls.__name__!r}: column "
-                        f"{col!r} ({cls._columns[col].dtype}) is not "
-                        f"dtype-compatible with referenced column {ref_col!r} "
-                        f"({target_columns[ref_col].dtype}) on {target_name!r}"
-                    )
-
-    @classmethod
-    def checks(cls) -> tuple[Check, ...]:
-        """Returns the tuple of Check constraints defined on this FrameSpec."""
-        return cls._checks
-
-    @classmethod
-    def foreign_keys(cls) -> tuple[ForeignKey, ...]:
-        """Returns the tuple of ForeignKey constraints defined on this FrameSpec."""
-        return cls._foreign_keys
-
-    @classmethod
-    def unique_together(cls) -> tuple[tuple[str, ...], ...]:
-        """Returns the tuple of composite unique column groups defined on this FrameSpec."""
-        return cls._unique_together
-
-    @classmethod
-    def _validate_rules(cls) -> None:
-        for col_name, spec in cls._columns.items():
-            for rule in spec.rules:
-                ref_col = rule.when.get("column")
-                if ref_col not in cls._columns:
-                    raise SpecError(
-                        f"ColRule on column {col_name!r} references unknown column {ref_col!r}"
-                    )
-
-    @classmethod
-    def _validate_validators(cls) -> None:
-        for col_name, spec in cls._columns.items():
-            for validator in spec.validators:
-                other_cols = set(validator.expr.meta.root_names()) - {col_name}
-                if other_cols:
-                    raise SpecError(
-                        f"ColSpec.validators on column {col_name!r} references "
-                        f"other column(s) {sorted(other_cols)}: {validator.expr!r}. "
-                        "A ColSpec validator may only reference its own column -- "
-                        "use FrameSpec.__checks__ for cross-column invariants."
-                    )
-
-    @classmethod
-    def schema(cls) -> pl.Schema:
-        return pl.Schema({name: spec.dtype for name, spec in cls._columns.items()})
-
-    @classmethod
-    def tag(
-        cls,
-        *tags: str | Sequence[str],
-        match: Literal["any", "all"] = "any",
-    ) -> list[str]:
-        """Returns the list of column names matching the specified tag or tags.
-
-        Parameters
-        ----------
-        *tags : str | Sequence[str]
-            One or more tag names or sequences of tag names to match.
-        match : {"any", "all"}, default "any"
-            Whether to match columns having any of the given tags ("any")
-            or all of the given tags ("all").
-
-        Returns
-        -------
-        list[str]
-            List of column names with matching tags, in declaration order.
-        """
-        flattened: list[str] = []
-        for t in tags:
-            if isinstance(t, str):
-                flattened.append(t)
-            elif isinstance(t, Sequence):
-                flattened.extend(str(item) for item in t)
-            else:
-                raise TypeError(
-                    f"Tag must be a string or sequence of strings, got {type(t).__name__}"
-                )
-
-        if not flattened:
-            return []
-
-        target_tags = set(flattened)
-        if match == "any":
-            return [
-                name
-                for name, spec in cls._columns.items()
-                if any(t in spec.tags for t in target_tags)
-            ]
-        elif match == "all":
-            return [
-                name
-                for name, spec in cls._columns.items()
-                if target_tags.issubset(spec.tags)
-            ]
-        else:
-            raise ValueError(f"Invalid match mode: {match!r}. Expected 'any' or 'all'.")
-
-    @classmethod
-    def catspec(cls) -> CatSpec:
-        """Extracts a CatSpec registry from this FrameSpec's column definitions."""
-        return CatSpec.from_framespec(cls)
-
-    @classmethod
-    def generate_catspec(cls) -> CatSpec:
-        """Extracts a CatSpec registry from this FrameSpec's column definitions (alias for `catspec`)."""
-        return cls.catspec()
-
-    @classmethod
-    def write_catspec(cls, source: str | Path) -> None:
-        """Extracts and writes a CatSpec YAML registry for this FrameSpec to `source`."""
-        cls.catspec().to_yaml(source)
-
-    @classmethod
-    def infer_catspec(
-        cls,
-        data: pl.DataFrame | pl.LazyFrame | None = None,
-        *,
-        max_enum_cardinality: int = 30,
-        max_categorical_cardinality: int = 10_000,
-        max_categorical_ratio: float = 0.20,
-        include_columns: Sequence[str] | None = None,
-        exclude_patterns: Sequence[str] | None = DEFAULT_EXCLUDE_PATTERNS,
-        default_physical: pl.DataType | None = None,
-    ) -> CatSpec:
-        """Infers an optimal CatSpec registry from string columns using heuristic rules."""
-        if data is not None:
-            return CatSpec.infer_from_dataframe(
-                data,
-                max_enum_cardinality=max_enum_cardinality,
-                max_categorical_cardinality=max_categorical_cardinality,
-                max_categorical_ratio=max_categorical_ratio,
-                include_columns=include_columns,
-                exclude_patterns=exclude_patterns,
-                default_physical=default_physical,
-            )
-        return CatSpec.infer_from_framespec(
-            cls,
-            max_enum_cardinality=max_enum_cardinality,
-            max_categorical_cardinality=max_categorical_cardinality,
-            include_columns=include_columns,
-            exclude_patterns=exclude_patterns,
-            default_physical=default_physical,
-        )
-
-    @classmethod
-    def with_catspec(
-        cls,
-        catspec: CatSpec,
-        *,
-        name: str | None = None,
-    ) -> type[FrameSpec]:
-        """Creates a new FrameSpec subclass with columns re-typed using the provided CatSpec."""
-        new_columns: dict[str, ColSpec] = {}
-        for col_name, spec in cls._columns.items():
-            enum_key = (
-                catspec._resolve_enum_key(col_name)
-                if hasattr(catspec, "_resolve_enum_key")
-                else (col_name if col_name in catspec.enums else None)
-            )
-            cat_key = (
-                catspec._resolve_cat_key(col_name)
-                if hasattr(catspec, "_resolve_cat_key")
-                else (col_name if col_name in catspec.categoricals else None)
-            )
-
-            if enum_key is not None:
-                new_columns[col_name] = _retype_column(
-                    col_name, spec, pl.Enum(catspec.get_enum(enum_key))
-                )
-            elif cat_key is not None:
-                new_columns[col_name] = _retype_column(
-                    col_name,
-                    spec,
-                    pl.Categorical(catspec.get_categorical(cat_key)),
-                    choices=catspec.get_choices(cat_key) or spec.choices,
-                )
-            else:
-                new_columns[col_name] = spec
-
-        subclass_name = name or f"{cls.__name__}WithCatSpec"
-        class_attrs: dict[str, Any] = {"__columns__": new_columns}
-        if cls._checks:
-            class_attrs["__checks__"] = cls._checks
-        if cls._unique_together:
-            class_attrs["__unique_together__"] = cls._unique_together
-        if cls._foreign_keys:
-            class_attrs["__foreign_keys__"] = cls._foreign_keys
-        return type(subclass_name, (FrameSpec,), class_attrs)
-
-    @classmethod
-    def with_inferred_catspec(
-        cls,
-        catspec: CatSpec | None = None,
-        *,
-        data: pl.DataFrame | pl.LazyFrame | None = None,
-        name: str | None = None,
-        max_enum_cardinality: int = 30,
-        max_categorical_cardinality: int = 10_000,
-        max_categorical_ratio: float = 0.20,
-        include_columns: Sequence[str] | None = None,
-        exclude_patterns: Sequence[str] | None = DEFAULT_EXCLUDE_PATTERNS,
-        default_physical: pl.DataType | None = None,
-    ) -> type[FrameSpec]:
-        """Infers a CatSpec and returns a new FrameSpec subclass with optimized Enum and Categorical columns."""
-        if catspec is None:
-            catspec = cls.infer_catspec(
-                data=data,
-                max_enum_cardinality=max_enum_cardinality,
-                max_categorical_cardinality=max_categorical_cardinality,
-                max_categorical_ratio=max_categorical_ratio,
-                include_columns=include_columns,
-                exclude_patterns=exclude_patterns,
-                default_physical=default_physical,
-            )
-        subclass_name = name or f"{cls.__name__}Optimized"
-        return cls.with_catspec(catspec, name=subclass_name)
-
-    @classmethod
-    def to_yaml(cls, source: str | Path) -> None:
-        """Writes this spec's columns to a human-readable YAML file at `source`."""
-        if not cls._columns:
-            raise SpecError(f"{cls.__name__} declares no ColSpec columns")
-        if cls._checks:
-            check_names = ", ".join(repr(c.name) for c in cls._checks)
-            warnings.warn(
-                f"{cls.__name__} declares {len(cls._checks)} __checks__ "
-                f"({check_names}) that cannot be represented in YAML (a Check "
-                "wraps an arbitrary polars.Expr) and will NOT be written to "
-                f"{source!s}. They will be lost on FrameSpec.from_yaml() unless "
-                "re-declared on a subclass of the loaded spec.",
-                stacklevel=2,
-            )
-        external_fks = [fk for fk in cls._foreign_keys if fk.references != "self"]
-        if external_fks:
-            fk_names = ", ".join(repr(fk.name) for fk in external_fks)
-            warnings.warn(
-                f"{cls.__name__} declares {len(external_fks)} ForeignKey(s) "
-                f"({fk_names}) referencing another FrameSpec class, which has no "
-                f"stable name to persist and will NOT be written to {source!s}. "
-                "Only self-referencing ForeignKeys (references='self') survive a "
-                "YAML round-trip; re-declare the others on a subclass of the "
-                "loaded spec.",
-                stacklevel=2,
-            )
-        validator_names = [
-            f"{col_name}.{v.name}"
-            for col_name, spec in cls._columns.items()
-            for v in spec.validators
-        ]
-        if validator_names:
-            warnings.warn(
-                f"{cls.__name__} declares {len(validator_names)} column-level "
-                f"validator(s) ({', '.join(repr(n) for n in validator_names)}) "
-                "that cannot be represented in YAML (a validator wraps an "
-                f"arbitrary polars.Expr) and will NOT be written to {source!s}. "
-                "They will be lost on FrameSpec.from_yaml() unless re-declared "
-                "on a subclass of the loaded spec.",
-                stacklevel=2,
-            )
-        data: dict[str, Any] = {
-            "name": cls.__name__,
-            "columns": {
-                name: _colspec_to_yaml(spec) for name, spec in cls._columns.items()
-            },
-        }
-        if cls._unique_together:
-            data["unique_together"] = [list(group) for group in cls._unique_together]
-        self_fks = [fk for fk in cls._foreign_keys if fk.references == "self"]
-        if self_fks:
-            data["foreign_keys"] = [_foreignkey_to_yaml(fk) for fk in self_fks]
-        p = Path(source)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
-
-    @classmethod
-    def to_python(cls, source: str | Path) -> None:
-        """Writes this spec's columns to a Python source file defining a
-        `FrameSpec` subclass, editable by hand and importable like any other
-        module.
-
-        Columns are declared through `__columns__` rather than as class
-        attributes, since a name straight from data is not always a valid
-        Python identifier -- see [Column names that are not
-        identifiers](../guide/columns.md#column-names-that-are-not-identifiers).
-
-        `__checks__`, cross-spec `ForeignKey`s and `ColSpec.validators` warn
-        and are dropped, same as `to_yaml` -- see its docstring for why.
-        Self-referencing `ForeignKey`s and `__unique_together__` survive.
-        """
-        if not cls._columns:
-            raise SpecError(f"{cls.__name__} declares no ColSpec columns")
-        if cls._checks:
-            check_names = ", ".join(repr(c.name) for c in cls._checks)
-            warnings.warn(
-                f"{cls.__name__} declares {len(cls._checks)} __checks__ "
-                f"({check_names}) that cannot be represented in generated "
-                f"Python (a Check wraps an arbitrary polars.Expr) and will "
-                f"NOT be written to {source!s}. Re-declare them by hand on "
-                "the generated class.",
-                stacklevel=2,
-            )
-        external_fks = [fk for fk in cls._foreign_keys if fk.references != "self"]
-        if external_fks:
-            fk_names = ", ".join(repr(fk.name) for fk in external_fks)
-            warnings.warn(
-                f"{cls.__name__} declares {len(external_fks)} ForeignKey(s) "
-                f"({fk_names}) referencing another FrameSpec class, which "
-                f"to_python() has no stable importable name for and will "
-                f"NOT write to {source!s}. Re-declare them by hand on the "
-                "generated class.",
-                stacklevel=2,
-            )
-        validator_names = [
-            f"{col_name}.{v.name}"
-            for col_name, spec in cls._columns.items()
-            for v in spec.validators
-        ]
-        if validator_names:
-            warnings.warn(
-                f"{cls.__name__} declares {len(validator_names)} column-level "
-                f"validator(s) ({', '.join(repr(n) for n in validator_names)}) "
-                "that cannot be represented in generated Python (a validator "
-                f"wraps an arbitrary polars.Expr) and will NOT be written to "
-                f"{source!s}. Re-declare them by hand on the generated class.",
-                stacklevel=2,
-            )
-
-        self_fks = [fk for fk in cls._foreign_keys if fk.references == "self"]
-        needs_datetime = any(
-            _colspec_needs_datetime_import(spec) for spec in cls._columns.values()
-        )
-
-        polspec_imports = ["ColSpec", "FrameSpec"]
-        if any(spec.rules for spec in cls._columns.values()):
-            polspec_imports.insert(1, "ColRule")
-        if self_fks:
-            polspec_imports.append("ForeignKey")
-
-        lines = [
-            f'"""Declares the {cls.__name__} schema."""',
-            "",
-            "import polars as pl",
-        ]
-        if needs_datetime:
-            lines.append("import datetime")
-        lines.append(f"from polspec import {', '.join(polspec_imports)}")
-        lines.append("")
-        lines.append("")
-        lines.append(f"class {cls.__name__}(FrameSpec):")
-        lines.append("    __columns__ = {")
-        for name, spec in cls._columns.items():
-            lines.append(f"        {name!r}: {_colspec_to_python(spec)},")
-        lines.append("    }")
-        if cls._unique_together:
-            groups = ", ".join(repr(list(group)) for group in cls._unique_together)
-            lines.append(f"    __unique_together__ = [{groups}]")
-        if self_fks:
-            fks = ", ".join(_foreignkey_to_python(fk) for fk in self_fks)
-            lines.append(f"    __foreign_keys__ = [{fks}]")
-
-        p = Path(source)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    def from_spec(cls, spec: TableSpec, *, name: str | None = None) -> type[FrameSpec]:
+        """A `FrameSpec` subclass wrapping an existing `TableSpec`."""
+        return _FrameSpecMeta(name or spec.name, (FrameSpec,), {"__tablespec__": spec})
 
     @classmethod
     def from_yaml(
@@ -759,53 +288,11 @@ class FrameSpec:
     ) -> type[FrameSpec]:
         """Builds a new FrameSpec subclass from a YAML file written by `to_yaml`.
 
-        Parameters
-        ----------
-        source : str | Path
-            Path to the YAML specification file.
-        categories : CatSpec | str | Path | None, optional
-            A CatSpec registry or file path to resolve shared Enums and Categoricals.
-            If omitted and the YAML specifies a `categories` property, it is loaded automatically.
-
-        Examples
-        --------
-        >>> DataSource = FrameSpec.from_yaml(source="spec.yaml")
-        >>> df = DataSource.generate(1_000, seed=42)
+        `categories` is a CatSpec registry, or a path to one, used to resolve
+        shared Enums and Categoricals; when omitted, a `categories:` key in
+        the file is loaded automatically.
         """
-        source_path = Path(source)
-        data = yaml.safe_load(source_path.read_text(encoding="utf-8"))
-
-        catspec: CatSpec | None = None
-        if categories is not None:
-            if isinstance(categories, (str, Path)):
-                catspec = CatSpec.from_yaml(categories)
-            else:
-                catspec = categories
-        elif "categories" in data:
-            cat_source = data["categories"]
-            if isinstance(cat_source, (str, Path)):
-                cat_path = Path(cat_source)
-                if not cat_path.is_absolute():
-                    cat_path = source_path.parent / cat_path
-                catspec = CatSpec.from_yaml(cat_path)
-            elif isinstance(cat_source, dict):
-                catspec = CatSpec.from_dict(cat_source)
-
-        columns_data = data.get("columns") or {}
-        if not columns_data:
-            raise SerializationError(f"{source} declares no columns")
-        columns = {
-            name: _colspec_from_yaml(col_data, categories=catspec)
-            for name, col_data in columns_data.items()
-        }
-        class_attrs: dict[str, Any] = {"__columns__": columns}
-        if "unique_together" in data:
-            class_attrs["__unique_together__"] = data["unique_together"]
-        if "foreign_keys" in data:
-            class_attrs["__foreign_keys__"] = [
-                _foreignkey_from_yaml(fk_data) for fk_data in data["foreign_keys"]
-            ]
-        return type(data.get("name", "LoadedFrameSpec"), (FrameSpec,), class_attrs)
+        return cls.from_spec(serialization.from_yaml(source, categories=categories))
 
     @classmethod
     def from_dataframe(
@@ -815,41 +302,99 @@ class FrameSpec:
         name: str = "ProfiledFrameSpec",
         weights: bool = False,
         max_unique_enum: int = 50,
-        max_unique: int | None = None,
         calculate_bounds: bool = True,
-        bounds: bool | None = None,
     ) -> type[FrameSpec]:
-        """Infers and builds a new FrameSpec subclass by profiling an existing DataFrame.
+        """Infers a spec by profiling an existing DataFrame.
 
-        Parameters
-        ----------
-        df : pl.DataFrame
-            The DataFrame to profile.
-        name : str, default "ProfiledFrameSpec"
-            The name of the generated FrameSpec subclass.
-        weights : bool, default False
-            If True, calculates empirical frequency weights for categorical, enum,
-            and boolean columns.
-        max_unique_enum : int, default 50
-            Maximum number of unique non-null values for a string or categorical
-            column to be converted into an Enum. Can also be set via `max_unique`.
-        max_unique : int | None, optional
-            Alias for `max_unique_enum`.
-        calculate_bounds : bool, default True
-            If True, computes (min, max) bounds for numeric and temporal columns,
-            and (min_len, max_len) for string and binary columns. Can also be set via `bounds`.
-        bounds : bool | None, optional
-            Alias for `calculate_bounds`.
+        `weights=True` records empirical frequencies for categorical, enum and
+        boolean columns. A string or categorical column with at most
+        `max_unique_enum` distinct values becomes an `Enum`. `calculate_bounds`
+        records observed `(min, max)` for numeric and temporal columns and
+        `(min_len, max_len)` for strings and binary.
         """
         columns = profile_dataframe(
             df,
             weights=weights,
             max_unique_enum=max_unique_enum,
-            max_unique=max_unique,
             calculate_bounds=calculate_bounds,
-            bounds=bounds,
         )
-        return type(name, (FrameSpec,), {"__columns__": columns})
+        return cls.from_spec(TableSpec(name, columns))
+
+    # ------------------------------------------------------------------
+    # Introspection
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def col(cls, name: str) -> ColSpec:
+        """The declaration of one column, whatever it is called."""
+        return cls.spec[name]
+
+    @classmethod
+    def schema(cls) -> pl.Schema:
+        return cls.spec.schema()
+
+    @classmethod
+    def tag(
+        cls,
+        *tags: str | Sequence[str],
+        match: Literal["any", "all"] = "any",
+    ) -> list[str]:
+        """Column names carrying any (or all) of the tags, in declaration order."""
+        return cls.spec.tag(*tags, match=match)
+
+    @classmethod
+    def checks(cls) -> tuple[Check, ...]:
+        """The Check constraints defined on this FrameSpec."""
+        return tuple(cls.spec.checks)
+
+    @classmethod
+    def foreign_keys(cls) -> tuple[ForeignKey, ...]:
+        """The ForeignKey constraints defined on this FrameSpec."""
+        return tuple(cls.spec.foreign_keys)
+
+    @classmethod
+    def unique_together(cls) -> tuple[tuple[str, ...], ...]:
+        """The composite unique column groups defined on this FrameSpec."""
+        return tuple(tuple(g) for g in cls.spec.unique_together)
+
+    # ------------------------------------------------------------------
+    # Shared categories
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def catspec(cls) -> CatSpec:
+        """The CatSpec registry this spec's Enum and Categorical columns imply."""
+        return CatSpec.from_framespec(cls.spec)
+
+    @classmethod
+    def with_catspec(
+        cls,
+        catspec: CatSpec,
+        *,
+        name: str | None = None,
+    ) -> type[FrameSpec]:
+        """A new FrameSpec subclass with columns re-typed against `catspec`."""
+        return cls.from_spec(
+            cls.spec.with_catspec(catspec), name=name or f"{cls.__name__}WithCatSpec"
+        )
+
+    # ------------------------------------------------------------------
+    # Files
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def to_yaml(cls, source: str | Path) -> None:
+        """Writes this spec to a human-readable YAML file at `source`."""
+        serialization.to_yaml(cls.spec, source)
+
+    @classmethod
+    def to_python(cls, source: str | Path) -> None:
+        """Writes this spec as an importable Python module defining a subclass."""
+        serialization.to_python(cls.spec, source)
+
+    # ------------------------------------------------------------------
+    # Generation
+    # ------------------------------------------------------------------
 
     @overload
     @classmethod
@@ -859,7 +404,7 @@ class FrameSpec:
         *,
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
+        references: References = None,
         lazy: Literal[False] = False,
     ) -> pl.DataFrame: ...
 
@@ -871,7 +416,7 @@ class FrameSpec:
         *,
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
+        references: References = None,
         lazy: Literal[True],
     ) -> pl.LazyFrame: ...
 
@@ -882,77 +427,16 @@ class FrameSpec:
         *,
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
+        references: References = None,
         lazy: bool = False,
     ) -> pl.DataFrame | pl.LazyFrame:
         """Generates a DataFrame (or LazyFrame) matching this spec.
 
-        method="random" (default): `n` rows, each column drawn independently.
-
-        method="cartesian": guarantees a minimum level of coverage. Builds
-        the cartesian product of every Enum/Boolean column's full set of
-        values, crossed with the negative/zero/positive/null partitions of
-        every bounded numeric column -- so every enum combination appears
-        alongside every numeric sign/null case. `n` is then a *minimum*: if
-        that coverage set has fewer than `n` rows, it's padded with ordinary
-        random rows up to `n`; if it already has more, all of it is kept.
-
-        Any ColSpec.rules are applied next, as a vectorized overwrite pass
-        over the fully-generated DataFrame (see ColRule), regardless of
-        method.
-
-        Any `ForeignKey` this spec declares is then made referentially
-        consistent, but only where data for its target is actually
-        available: self-referencing keys (`references="self"`) always are,
-        sampled from this same generated DataFrame; a key referencing
-        another FrameSpec only is if a matching entry is supplied via
-        `references={OtherSpec: other_df}` -- otherwise that column is left
-        exactly as freely generated, same as before this existed. Composite
-        keys are sampled as one joint pick per row so multi-column keys stay
-        internally consistent; a single-column key whose ColSpec is
-        `unique=True` samples without replacement when the parent has enough
-        distinct rows to cover `n` (a one-to-one relationship), otherwise
-        (or for composite keys) sampling is with replacement.
-
-        lazy=True returns a `pl.LazyFrame` around the generated DataFrame.
+        See `polspec.generation.generate` for the full contract.
         """
-        if not cls._columns:
-            raise SpecError(f"{cls.__name__} declares no ColSpec columns")
-        if n < 0:
-            raise ValueError("n must be >= 0")
-
-        rng = random.Random(seed)
-        gen_seed = rng.randrange(2**63)
-        if method == "random":
-            df = _generate_random(cls._columns, n, gen_seed)
-        elif method == "cartesian":
-            df = _generate_cartesian(cls._columns, n, gen_seed)
-        else:
-            raise ValueError(
-                f"Unknown method {method!r}; expected 'random' or 'cartesian'"
-            )
-
-        res = _apply_rules(df, cls._columns, rng.randrange(2**63))
-
-        if cls._foreign_keys:
-            resolved_foreign_keys: list[tuple[ForeignKey, pl.DataFrame | None]] = []
-            for fk in cls._foreign_keys:
-                if fk.references == "self":
-                    resolved_foreign_keys.append((fk, res))
-                    continue
-                parent = references.get(fk.references) if references else None
-                if parent is None:
-                    resolved_foreign_keys.append((fk, None))
-                    continue
-                parent_df = (
-                    parent.collect() if isinstance(parent, pl.LazyFrame) else parent
-                )
-                resolved_foreign_keys.append((fk, parent_df))
-            res = _apply_foreign_keys(
-                res, cls._columns, resolved_foreign_keys, rng.randrange(2**63)
-            )
-
-        return res.lazy() if lazy else res
+        return generation.generate(
+            cls.spec, n, method=method, seed=seed, references=references, lazy=lazy
+        )
 
     @classmethod
     def generate_batches(
@@ -962,547 +446,79 @@ class FrameSpec:
         batch_size: int = 100_000,
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
+        references: References = None,
     ) -> Iterator[pl.DataFrame]:
-        """Yields chunks of generated DataFrames without holding all rows in memory.
-
-        Parameters
-        ----------
-        n : int
-            Total number of rows to generate across all batches.
-        batch_size : int, default 100_000
-            Maximum number of rows per batch. Must be > 0.
-        method : Literal["random", "cartesian"], default "random"
-            Generation strategy ("random" or "cartesian").
-        seed : int | None, optional
-            Random seed for reproducible batch generation.
-        references : Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None, optional
-            Parent DataFrames/LazyFrames for any `ForeignKey` referencing
-            another FrameSpec, as in `generate()`. Note each batch samples
-            independently, so a `unique=True` FK column is only sampled
-            without replacement *within* a batch, not across the whole `n`.
-
-        Yields
-        ------
-        pl.DataFrame
-            Batches of generated DataFrames matching the spec schema.
-        """
-        if not cls._columns:
-            raise SpecError(f"{cls.__name__} declares no ColSpec columns")
-        if n < 0:
-            raise ValueError("n must be >= 0")
-        if batch_size <= 0:
-            raise ValueError("batch_size must be > 0")
-        if n == 0:
-            return
-
-        rng = random.Random(seed)
-
-        if method == "cartesian":
-            first_batch = cls.generate(
-                min(n, batch_size),
-                method="cartesian",
-                seed=rng.randrange(2**63),
-                references=references,
-            )
-            # The coverage set built for the first batch can be far larger
-            # than batch_size (it's a cross-product, not a row count cap), so
-            # slice it before yielding to honor the per-batch memory bound.
-            for offset in range(0, first_batch.height, batch_size):
-                yield first_batch.slice(offset, batch_size)
-            rows_remaining = max(0, n - first_batch.height)
-            while rows_remaining > 0:
-                current_batch_size = min(rows_remaining, batch_size)
-                yield cls.generate(
-                    current_batch_size,
-                    method="random",
-                    seed=rng.randrange(2**63),
-                    references=references,
-                )
-                rows_remaining -= current_batch_size
-        elif method == "random":
-            rows_remaining = n
-            while rows_remaining > 0:
-                current_batch_size = min(rows_remaining, batch_size)
-                yield cls.generate(
-                    current_batch_size,
-                    method="random",
-                    seed=rng.randrange(2**63),
-                    references=references,
-                )
-                rows_remaining -= current_batch_size
-        else:
-            raise ValueError(
-                f"Unknown method {method!r}; expected 'random' or 'cartesian'"
-            )
-
-    @classmethod
-    def _prepare_sink(cls, path: str | Path, n: int, batch_size: int) -> Path:
-        """The argument checks and directory creation every sink_* repeats.
-
-        Kept eager rather than folded into the batch generator so an invalid
-        call fails before any destination file is opened.
-        """
-        if not cls._columns:
-            raise SpecError(f"{cls.__name__} declares no ColSpec columns")
-        if n < 0:
-            raise ValueError("n must be >= 0")
-        if batch_size <= 0:
-            raise ValueError("batch_size must be > 0")
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        return path
-
-    @staticmethod
-    def _sink_arrow(
-        batches: Iterator[pl.DataFrame],
-        make_writer: Callable[[Any], Any],
-        empty_frame: pl.DataFrame | None = None,
-    ) -> None:
-        """Streams `batches` through an Arrow writer opened from the first batch.
-
-        Shared by the Parquet and IPC sinks, which differ only in how their
-        writer is constructed. Both need a schema before they can open one, and
-        both must still leave a valid, schema-bearing file behind when there
-        are no rows -- hence `empty_frame`, which the caller supplies only for
-        `n == 0` so a mid-stream failure does not quietly produce one.
-        """
-        writer = None
-        try:
-            for batch_df in batches:
-                table = batch_df.to_arrow()
-                if writer is None:
-                    writer = make_writer(table.schema)
-                writer.write_table(table)
-        finally:
-            if writer is not None:
-                writer.close()
-            elif empty_frame is not None:
-                make_writer(empty_frame.to_arrow().schema).close()
-
-    @classmethod
-    def sink_parquet(
-        cls,
-        path: str | Path,
-        n: int,
-        *,
-        batch_size: int = 100_000,
-        compression: str = "zstd",
-        method: Literal["random", "cartesian"] = "random",
-        seed: int | None = None,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
-        **kwargs,
-    ) -> None:
-        """Generates `n` rows and streams them directly to a Parquet file in batches.
-
-        Parameters
-        ----------
-        path : str | Path
-            Destination file path.
-        n : int
-            Total number of rows to generate and sink.
-        batch_size : int, default 100_000
-            Number of rows per generated batch.
-        compression : str, default "zstd"
-            Parquet compression codec (e.g. "zstd", "snappy", "gzip", "none").
-        method : Literal["random", "cartesian"], default "random"
-            Generation strategy ("random" or "cartesian").
-        seed : int | None, optional
-            Random seed for reproducibility.
-        references : Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None, optional
-            Parent DataFrames/LazyFrames for any `ForeignKey` referencing
-            another FrameSpec, as in `generate()`.
-        **kwargs
-            Additional arguments passed to `pyarrow.parquet.ParquetWriter`.
-        """
-        try:
-            import pyarrow.parquet as pq
-        except ImportError as exc:
-            raise ImportError(
-                "pyarrow is required for sink_parquet(). Please install pyarrow."
-            ) from exc
-
-        path = cls._prepare_sink(path, n, batch_size)
-        cls._sink_arrow(
-            cls.generate_batches(
-                n,
-                batch_size=batch_size,
-                method=method,
-                seed=seed,
-                references=references,
-            ),
-            lambda schema: pq.ParquetWriter(
-                str(path), schema, compression=compression, **kwargs
-            ),
-            empty_frame=cls.generate(0, references=references) if n == 0 else None,
+        """Yields chunks of generated rows without holding all `n` in memory."""
+        return generation.generate_batches(
+            cls.spec,
+            n,
+            batch_size=batch_size,
+            method=method,
+            seed=seed,
+            references=references,
         )
 
     @classmethod
-    def sink_csv(
-        cls,
-        path: str | Path,
-        n: int,
-        *,
-        batch_size: int = 100_000,
-        include_header: bool = True,
-        method: Literal["random", "cartesian"] = "random",
-        seed: int | None = None,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
-        **kwargs,
-    ) -> None:
-        """Generates `n` rows and streams them directly to a CSV file in batches.
-
-        Parameters
-        ----------
-        path : str | Path
-            Destination file path.
-        n : int
-            Total number of rows to generate and sink.
-        batch_size : int, default 100_000
-            Number of rows per generated batch.
-        include_header : bool, default True
-            Whether to include the CSV header row.
-        method : Literal["random", "cartesian"], default "random"
-            Generation strategy ("random" or "cartesian").
-        seed : int | None, optional
-            Random seed for reproducibility.
-        references : Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None, optional
-            Parent DataFrames/LazyFrames for any `ForeignKey` referencing
-            another FrameSpec, as in `generate()`.
-        **kwargs
-            Additional arguments passed to `pl.DataFrame.write_csv`.
-        """
-        path = cls._prepare_sink(path, n, batch_size)
-
-        header_needed = include_header
-        with open(path, "wb") as f:
-            if n == 0:
-                empty_df = cls.generate(0, references=references)
-                if include_header:
-                    empty_df.write_csv(f, include_header=True, **kwargs)
-                return
-
-            for batch_df in cls.generate_batches(
-                n,
-                batch_size=batch_size,
-                method=method,
-                seed=seed,
-                references=references,
-            ):
-                batch_df.write_csv(f, include_header=header_needed, **kwargs)
-                header_needed = False
+    def sink_parquet(cls, path: str | Path, n: int, **kwargs: Any) -> None:
+        """Generates `n` rows and streams them to a Parquet file in batches."""
+        generation.sink_parquet(cls.spec, path, n, **kwargs)
 
     @classmethod
-    def sink_ipc(
-        cls,
-        path: str | Path,
-        n: int,
-        *,
-        batch_size: int = 100_000,
-        compression: str | None = "zstd",
-        method: Literal["random", "cartesian"] = "random",
-        seed: int | None = None,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
-        **kwargs,
-    ) -> None:
-        """Generates `n` rows and streams them directly to an Arrow IPC / Feather file in batches.
-
-        Parameters
-        ----------
-        path : str | Path
-            Destination file path.
-        n : int
-            Total number of rows to generate and sink.
-        batch_size : int, default 100_000
-            Number of rows per generated batch.
-        compression : str | None, default "zstd"
-            Compression codec (e.g. "zstd", "lz4", "uncompressed", None).
-        method : Literal["random", "cartesian"], default "random"
-            Generation strategy ("random" or "cartesian").
-        seed : int | None, optional
-            Random seed for reproducibility.
-        references : Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None, optional
-            Parent DataFrames/LazyFrames for any `ForeignKey` referencing
-            another FrameSpec, as in `generate()`.
-        **kwargs
-            Additional arguments passed to `pyarrow.ipc.new_file`.
-        """
-        try:
-            from pyarrow import ipc
-        except ImportError as exc:
-            raise ImportError(
-                "pyarrow is required for sink_ipc(). Please install pyarrow."
-            ) from exc
-
-        path = cls._prepare_sink(path, n, batch_size)
-        with open(path, "wb") as f:
-            cls._sink_arrow(
-                cls.generate_batches(
-                    n,
-                    batch_size=batch_size,
-                    method=method,
-                    seed=seed,
-                    references=references,
-                ),
-                lambda schema: ipc.new_file(
-                    f,
-                    schema,
-                    options=ipc.IpcWriteOptions(compression=compression),
-                    **kwargs,
-                ),
-                empty_frame=cls.generate(0, references=references) if n == 0 else None,
-            )
+    def sink_csv(cls, path: str | Path, n: int, **kwargs: Any) -> None:
+        """Generates `n` rows and streams them to a CSV file in batches."""
+        generation.sink_csv(cls.spec, path, n, **kwargs)
 
     @classmethod
-    def sink_ndjson(
-        cls,
-        path: str | Path,
-        n: int,
-        *,
-        batch_size: int = 100_000,
-        method: Literal["random", "cartesian"] = "random",
-        seed: int | None = None,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
-        **kwargs,
-    ) -> None:
-        """Generates `n` rows and streams them directly to a newline-delimited JSON (NDJSON) file in batches.
+    def sink_ipc(cls, path: str | Path, n: int, **kwargs: Any) -> None:
+        """Generates `n` rows and streams them to an Arrow IPC file in batches."""
+        generation.sink_ipc(cls.spec, path, n, **kwargs)
 
-        Parameters
-        ----------
-        path : str | Path
-            Destination file path.
-        n : int
-            Total number of rows to generate and sink.
-        batch_size : int, default 100_000
-            Number of rows per generated batch.
-        method : Literal["random", "cartesian"], default "random"
-            Generation strategy ("random" or "cartesian").
-        seed : int | None, optional
-            Random seed for reproducibility.
-        references : Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None, optional
-            Parent DataFrames/LazyFrames for any `ForeignKey` referencing
-            another FrameSpec, as in `generate()`.
-        **kwargs
-            Additional arguments passed to `pl.DataFrame.write_ndjson`.
-        """
-        path = cls._prepare_sink(path, n, batch_size)
+    @classmethod
+    def sink_ndjson(cls, path: str | Path, n: int, **kwargs: Any) -> None:
+        """Generates `n` rows and streams them to an NDJSON file in batches."""
+        generation.sink_ndjson(cls.spec, path, n, **kwargs)
 
-        with open(path, "wb") as f:
-            if n == 0:
-                return
-            for batch_df in cls.generate_batches(
-                n,
-                batch_size=batch_size,
-                method=method,
-                seed=seed,
-                references=references,
-            ):
-                batch_df.write_ndjson(f, **kwargs)
+    # ------------------------------------------------------------------
+    # Documentation
+    # ------------------------------------------------------------------
 
     @classmethod
     def to_markdown(
-        cls,
-        path: str | Path | None = None,
-        *,
-        title: str | None = None,
+        cls, path: str | Path | None = None, *, title: str | None = None
     ) -> str:
-        """Generates a Markdown data dictionary document for this FrameSpec.
-
-        Parameters
-        ----------
-        path : str | Path | None, optional
-            If specified, writes the generated Markdown to this file path.
-        title : str | None, optional
-            Custom title for the data dictionary. Defaults to the FrameSpec class name.
-
-        Returns
-        -------
-        str
-            The formatted Markdown string.
-        """
-        return framespec_to_markdown(cls, path, title=title)
+        """A Markdown data dictionary for this spec, written to `path` if given."""
+        return framespec_to_markdown(cls.spec, path, title=title)
 
     @classmethod
     def to_mermaid(
-        cls,
-        path: str | Path | None = None,
-        *,
-        title: str | None = None,
+        cls, path: str | Path | None = None, *, title: str | None = None
     ) -> str:
-        """Generates a Mermaid Entity-Relationship (ER) diagram for this FrameSpec.
+        """A Mermaid entity-relationship diagram for this spec."""
+        return framespec_to_mermaid(cls.spec, path, title=title)
 
-        Parameters
-        ----------
-        path : str | Path | None, optional
-            If specified, writes the generated Mermaid diagram to this file path.
-        title : str | None, optional
-            Entity name in the diagram. Defaults to the FrameSpec class name.
-
-        Returns
-        -------
-        str
-            The formatted Mermaid diagram definition.
-        """
-        return framespec_to_mermaid(cls, path, title=title)
+    # ------------------------------------------------------------------
+    # Validation
+    # ------------------------------------------------------------------
 
     @overload
     @classmethod
-    def validate(
-        cls,
-        df: pl.DataFrame,
-        *,
-        extra_cols: Literal["drop", "allow", "raise"] = "raise",
-        missing_cols: Literal["add", "allow", "raise"] = "raise",
-        strict_dtypes: bool = False,
-        validate_rules: bool = True,
-        validate_validators: bool = True,
-        validate_unique: bool = True,
-        validate_checks: bool = True,
-        validate_foreign_keys: bool = True,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
-        cast: bool = False,
-        streaming: bool = False,
-    ) -> pl.DataFrame: ...
+    def validate(cls, df: pl.DataFrame, **options: Any) -> pl.DataFrame: ...
 
     @overload
     @classmethod
-    def validate(
-        cls,
-        df: pl.LazyFrame,
-        *,
-        extra_cols: Literal["drop", "allow", "raise"] = "raise",
-        missing_cols: Literal["add", "allow", "raise"] = "raise",
-        strict_dtypes: bool = False,
-        validate_rules: bool = True,
-        validate_validators: bool = True,
-        validate_unique: bool = True,
-        validate_checks: bool = True,
-        validate_foreign_keys: bool = True,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
-        cast: bool = False,
-        streaming: bool = False,
-    ) -> pl.LazyFrame: ...
+    def validate(cls, df: pl.LazyFrame, **options: Any) -> pl.LazyFrame: ...
 
     @classmethod
     def validate(
-        cls,
-        df: pl.DataFrame | pl.LazyFrame,
-        *,
-        extra_cols: Literal["drop", "allow", "raise"] = "raise",
-        missing_cols: Literal["add", "allow", "raise"] = "raise",
-        strict_dtypes: bool = False,
-        validate_rules: bool = True,
-        validate_validators: bool = True,
-        validate_unique: bool = True,
-        validate_checks: bool = True,
-        validate_foreign_keys: bool = True,
-        references: Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None = None,
-        cast: bool = False,
-        streaming: bool = False,
+        cls, df: pl.DataFrame | pl.LazyFrame, **options: Any
     ) -> pl.DataFrame | pl.LazyFrame:
-        """Validates a DataFrame or LazyFrame against this spec's schema and constraints.
+        """Validates a DataFrame or LazyFrame against this spec.
 
-        Parameters
-        ----------
-        df : pl.DataFrame | pl.LazyFrame
-            The DataFrame or LazyFrame to validate.
-        extra_cols : Literal["drop", "allow", "raise"], default "raise"
-            How to handle columns present in `df` but not declared in this spec:
-            - "raise": raise a ValidationError containing all extra columns.
-            - "drop": drop extra columns from the returned DataFrame/LazyFrame.
-            - "allow": retain extra columns in the returned DataFrame/LazyFrame.
-        missing_cols : Literal["add", "allow", "raise"], default "raise"
-            How to handle columns declared in this spec but missing from `df`:
-            - "raise": raise a ValidationError containing all missing columns.
-            - "add": add missing columns populated with nulls of the declared dtype.
-            - "allow": skip missing columns without raising an error.
-        strict_dtypes : bool, default False
-            Whether to strictly enforce identical data types (True) or allow compatible
-            types like widened integers, floats, or string representations (False).
-        validate_rules : bool, default True
-            Whether to validate conditional `ColRule` expressions defined on columns.
-        validate_validators : bool, default True
-            Whether to validate single-column `ColSpec.validators` predicates.
-        validate_unique : bool, default True
-            Whether to validate single-column (`unique=True`) and composite unique constraints (`__unique_together__`).
-        validate_checks : bool, default True
-            Whether to validate multi-column `Check` constraints (`__checks__`).
-        validate_foreign_keys : bool, default True
-            Whether to validate `ForeignKey` referential-integrity constraints
-            (`__foreign_keys__`).
-        references : Mapping[type[FrameSpec], pl.DataFrame | pl.LazyFrame] | None, optional
-            Parent DataFrames/LazyFrames for any `ForeignKey` that references
-            another FrameSpec, keyed by that FrameSpec class. Not needed for
-            self-referencing ForeignKeys (`references="self"`), which are
-            checked against `df` itself.
-        cast : bool, default False
-            If True, casts validated columns to the declared `ColSpec.dtype`.
-        streaming : bool, default False
-            If True, uses Polars' streaming execution engine for evaluating LazyFrames.
-
-        Returns
-        -------
-        pl.DataFrame | pl.LazyFrame
-            The validated (and optionally transformed) DataFrame or LazyFrame.
-
-        Raises
-        ------
-        ValidationError
-            If any structural or column-level constraints are violated, collecting
-            all violations across all columns before raising.
-        ValueError
-            If invalid options are supplied for `extra_cols` or `missing_cols`, or if
-            a declared ForeignKey references another FrameSpec but no matching
-            DataFrame was supplied via `references`.
+        Raises `ValidationError` collecting every violation, or returns the
+        (optionally transformed) frame. See `polspec.validation.validate` for
+        every option: `extra_cols`, `missing_cols`, `strict_dtypes`,
+        `validate_rules`, `validate_validators`, `validate_unique`,
+        `validate_checks`, `validate_foreign_keys`, `references`, `cast`,
+        `streaming`.
         """
-        if not cls._columns:
-            raise SpecError(f"{cls.__name__} declares no ColSpec columns")
-
-        resolved_foreign_keys: list[tuple[ForeignKey, pl.LazyFrame | None]] = []
-        if validate_foreign_keys:
-            for fk in cls._foreign_keys:
-                if fk.references == "self":
-                    resolved_foreign_keys.append((fk, None))
-                    continue
-                target = fk.references
-                parent = references.get(target) if references else None
-                if parent is None:
-                    raise ValueError(
-                        f"{cls.__name__}.validate(): ForeignKey {fk.name!r} "
-                        f"references {target.__name__!r}, but no DataFrame for it "
-                        "was supplied via validate(references={...})"
-                    )
-                parent_lf = (
-                    parent.lazy() if isinstance(parent, pl.DataFrame) else parent
-                )
-                resolved_foreign_keys.append((fk, parent_lf))
-
-        return _validate_dataframe(
-            cls._columns,
-            cls.__name__,
-            df,
-            _Options(
-                extra_cols=extra_cols,
-                missing_cols=missing_cols,
-                strict_dtypes=strict_dtypes,
-                rules=validate_rules,
-                validators=validate_validators,
-                unique=validate_unique,
-                checks=validate_checks,
-                foreign_keys=validate_foreign_keys,
-                cast=cast,
-                streaming=streaming,
-            ),
-            checks=cls._checks,
-            unique_together=cls._unique_together,
-            foreign_keys=resolved_foreign_keys,
-        )
-
-
-# Names a ColSpec attribute may not take: assigning one shadows the classmethod
-# it collides with, so MySpec.schema() would resolve to a ColSpec instance.
-_RESERVED_ATTRS = frozenset(
-    name for name in vars(FrameSpec) if not name.startswith("_")
-)
-
-FrameSchema = FrameSpec
+        return validation.validate(cls.spec, df, **options)

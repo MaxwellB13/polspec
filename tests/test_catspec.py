@@ -209,7 +209,7 @@ def test_catspec_from_dataframe_and_framespec():
     cats_from_lazy = CatSpec.from_dataframe(df.lazy())
     assert cats_from_lazy.status == ["OPEN", "CLOSED"]
 
-    # from_framespec & FrameSpec.catspec / generate_catspec / write_catspec
+    # from_framespec & FrameSpec.catspec
     class MySpec(FrameSpec):
         status = ColSpec(dtype=pl.Enum(["PENDING", "COMPLETED"]))
         currency = ColSpec(
@@ -224,13 +224,13 @@ def test_catspec_from_dataframe_and_framespec():
     assert cats_from_spec.currency.physical() == pl.UInt16
     assert cats_from_spec.get_choices("currency") == ["USD", "EUR"]
 
-    # Alias check
-    assert MySpec.generate_catspec().enums == cats_from_spec.enums
+    # The same registry, from the TableSpec rather than the class
+    assert CatSpec.from_framespec(MySpec.spec).enums == cats_from_spec.enums
 
-    # write_catspec check
+    # persisting the registry a spec implies
     with tempfile.TemporaryDirectory() as tmpdir:
         out_yaml = Path(tmpdir) / "extracted.yaml"
-        MySpec.write_catspec(out_yaml)
+        MySpec.catspec().to_yaml(out_yaml)
         loaded = CatSpec.from_yaml(out_yaml)
         assert loaded.status == ["PENDING", "COMPLETED"]
         assert loaded.currency.physical() == pl.UInt16
@@ -291,7 +291,7 @@ def test_framespec_infer_catspec_and_transformation():
         plain_str = ColSpec(dtype=pl.String)
 
     # 1. Infer CatSpec from FrameSpec schema
-    cats = RawOrders.infer_catspec(max_enum_cardinality=10)
+    cats = CatSpec.infer(RawOrders, max_enum_cardinality=10)
     assert "status" in cats.enums
     assert cats.status == ["NEW", "PAID", "CANCELLED"]
 
@@ -304,8 +304,8 @@ def test_framespec_infer_catspec_and_transformation():
     # long_notes max > 255 -> skipped
     assert "long_notes" not in cats
 
-    # 2. Transform FrameSpec using with_inferred_catspec
-    OptimizedOrders = RawOrders.with_inferred_catspec(catspec=cats)
+    # 2. Transform FrameSpec using with_catspec
+    OptimizedOrders = RawOrders.with_catspec(cats)
     assert OptimizedOrders.schema()["status"] == pl.Enum(["NEW", "PAID", "CANCELLED"])
     assert isinstance(OptimizedOrders.schema()["tag"], pl.Categorical)
     assert OptimizedOrders.schema()["user_id"] == pl.String
@@ -355,14 +355,14 @@ def test_framespec_infer_with_live_dataframe():
         region = ColSpec(dtype=pl.String)
         uuid = ColSpec(dtype=pl.String)
 
-    # Infer using DataFrame data through FrameSpec.infer_catspec(data=df)
-    cats = SchemaSpec.infer_catspec(data=df, max_enum_cardinality=3)
+    # Infer from live data
+    cats = CatSpec.infer(df, max_enum_cardinality=3)
     assert "status" in cats.enums
     assert "region" in cats.categoricals  # 4 unique > max_enum_cardinality (3)
     assert "uuid" not in cats
 
-    # with_inferred_catspec with live data
-    Optimized = SchemaSpec.with_inferred_catspec(data=df, max_enum_cardinality=3)
+    # Apply a registry inferred from live data
+    Optimized = SchemaSpec.with_catspec(CatSpec.infer(df, max_enum_cardinality=3))
     assert isinstance(Optimized.schema()["status"], pl.Enum)
     assert isinstance(Optimized.schema()["region"], pl.Categorical)
     assert Optimized.schema()["uuid"] == pl.String
@@ -422,7 +422,7 @@ def test_framespec_with_catspec_preserves_checks_and_diagrams():
     EnhancedSpec = BaseSpec.with_catspec(cats, name="EnhancedSpec")
     assert EnhancedSpec.checks() == BaseSpec.checks()
     assert EnhancedSpec.unique_together() == BaseSpec.unique_together()
-    assert isinstance(EnhancedSpec._columns["tier"].dtype, pl.Enum)
+    assert isinstance(EnhancedSpec.spec.columns["tier"].dtype, pl.Enum)
 
     md = EnhancedSpec.to_markdown()
     assert "# EnhancedSpec" in md
@@ -451,7 +451,7 @@ def test_framespec_with_catspec_preserves_foreign_keys():
 
     EnhancedOrderSpec = BaseOrderSpec.with_catspec(cats, name="EnhancedOrderSpec")
     assert EnhancedOrderSpec.foreign_keys() == BaseOrderSpec.foreign_keys()
-    assert isinstance(EnhancedOrderSpec._columns["tier"].dtype, pl.Enum)
+    assert isinstance(EnhancedOrderSpec.spec.columns["tier"].dtype, pl.Enum)
 
     customers_df = pl.DataFrame({"id": [1, 2]})
     orders_ok = pl.DataFrame({"customer_id": [1, 2], "tier": ["BRONZE", "GOLD"]})
@@ -478,12 +478,12 @@ def test_with_catspec_preserves_column_validators():
         score = ColSpec(pl.Float64)
 
     Enhanced = BaseValidatedSpec.with_catspec(cats, name="EnhancedValidatedSpec")
-    assert isinstance(Enhanced._columns["tier"].dtype, pl.Enum)
+    assert isinstance(Enhanced.spec.columns["tier"].dtype, pl.Enum)
     assert (
-        Enhanced._columns["tier"].validators
-        == BaseValidatedSpec._columns["tier"].validators
+        Enhanced.spec.columns["tier"].validators
+        == BaseValidatedSpec.spec.columns["tier"].validators
     )
-    assert len(Enhanced._columns["tier"].validators) == 1
+    assert len(Enhanced.spec.columns["tier"].validators) == 1
 
 
 def test_catspec_to_yaml_nested_directory_and_utf8(tmp_path):
