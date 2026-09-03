@@ -444,7 +444,7 @@ def _rule_constraints(
     claimed = pl.lit(False)
 
     for index, rule in enumerate(spec.rules):
-        if rule.when.get("column") not in df_col_names:
+        if not rule.when.root_names() <= set(df_col_names):
             continue  # reported through missing_cols instead
         applies = rule._expr() & ~claimed
         claimed = claimed | rule._expr()

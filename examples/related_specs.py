@@ -13,6 +13,7 @@ from polspec import (
     ColSpec,
     ForeignKey,
     FrameSpec,
+    col,
 )
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
@@ -31,7 +32,7 @@ class Customers(FrameSpec):
         pl.String,
         string_length=(10, 60),
         tags="pii",
-        validators=[Check(pl.col("email").str.contains("@"), name="email_has_at")],
+        validators=[Check(col("email").str.contains("@"), name="email_has_at")],
     )
     country = ColSpec(pl.Enum(["UK", "US", "DE", "FR", "AU"]))
     signed_up = ColSpec(pl.Date, bounds=(dt.date(2020, 1, 1), dt.date(2026, 1, 1)))
@@ -72,9 +73,9 @@ class Orders(FrameSpec):
     carrier = ColSpec(
         pl.Enum(["RoyalMail", "UPS", "DHL"]),
         rules=[
-            ColRule(when={"column": "region", "equals": "UK"}, choices=["RoyalMail"]),
+            ColRule(when=col("region") == "UK", choices=["RoyalMail"]),
             ColRule(
-                when={"column": "region", "in": ["US", "EU"]},
+                when=col("region").is_in(["US", "EU"]),
                 choices={"UPS": 3.0, "DHL": 1.0},
             ),
         ],
@@ -96,7 +97,7 @@ class Orders(FrameSpec):
     dispatch_sla = ColSpec(pl.Duration("us"), bounds=(3_600_000_000, 432_000_000_000))
 
     __checks__ = [
-        Check(pl.col("total") >= pl.col("subtotal"), name="total_covers_subtotal"),
+        Check(col("total") >= col("subtotal"), name="total_covers_subtotal"),
     ]
     __foreign_keys__ = [
         ForeignKey("customer_id", references=Customers, ref_columns="id"),
@@ -154,9 +155,10 @@ if __name__ == "__main__":
     )
     print("Cartesian coverage rows:", coverage_sample.height)
 
-    # Checks and cross-spec ForeignKeys wrap a polars.Expr or point at a
-    # Python class with no stable name in a standalone file, so to_yaml()
-    # warns about both and drops them; from_yaml() recovers by subclassing.
+    # Checks, validators and rules written with col() are written to the
+    # file and read back. A cross-spec ForeignKey points at a Python class
+    # with no stable name in a standalone file, so to_yaml() warns about it
+    # and drops it; from_yaml() recovers by subclassing and re-declaring it.
     # Written to a temporary directory so running this script never dirties
     # the repository.
     scratch = Path(tempfile.mkdtemp(prefix="polspec-example-"))
@@ -164,9 +166,6 @@ if __name__ == "__main__":
     LoadedOrders = FrameSpec.from_yaml(scratch / "orders_generated.yaml")
 
     class OrdersFromYaml(LoadedOrders):
-        __checks__ = [
-            Check(pl.col("total") >= pl.col("subtotal"), name="total_covers_subtotal")
-        ]
         __foreign_keys__ = [
             ForeignKey("customer_id", references=Customers, ref_columns="id"),
         ]

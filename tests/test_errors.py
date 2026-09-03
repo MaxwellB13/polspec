@@ -47,7 +47,7 @@ def test_subclasses_keep_the_builtin_types_they_replaced():
 def test_bad_declaration_is_a_spec_error():
     with pytest.raises(SpecError, match="outside the range Int8 can represent"):
         ColSpec(pl.Int8, bounds=(0, 1_000))
-    with pytest.raises(SpecError, match="must be a dict"):
+    with pytest.raises(SpecError, match="must be a predicate"):
         ColRule(when="not a dict", choices=["X"])
     with pytest.raises(SpecError, match="must have the same length"):
         ForeignKey(["a", "b"], references="self", ref_columns="a")

@@ -119,7 +119,7 @@ def test_colrule_rejects_choices_outside_enum_categories():
 
 
 def test_colrule_rejects_malformed_when():
-    with pytest.raises(TypeError, match="must be a dict"):
+    with pytest.raises(TypeError, match="must be a predicate"):
         ColRule(when="not a dict", choices=["X"])
 
 

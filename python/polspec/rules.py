@@ -8,6 +8,7 @@ import polars as pl
 
 from polspec._ffi import generate_dataframe as _generate_dataframe
 from polspec.errors import SpecError
+from polspec.expr import Pred, col
 
 if TYPE_CHECKING:
     from polspec.spec import ColSpec
@@ -80,8 +81,10 @@ def _reject_colliding_choices(choices: tuple, label: str) -> None:
         seen[key] = choice
 
 
-def _condition_to_expr(condition: dict) -> pl.Expr:
-    column = pl.col(condition["column"])
+def _condition_to_pred(condition: dict) -> Pred:
+    """The predicate a legacy `{"column": ..., <op>: ...}` condition means."""
+    _validate_condition(condition)
+    column = col(condition["column"])
     if "equals" in condition:
         return column == condition["equals"]
     if "not_equals" in condition:
@@ -93,13 +96,11 @@ def _condition_to_expr(condition: dict) -> pl.Expr:
     if "lt" in condition:
         return column < condition["lt"]
     if "lte" in condition or "le" in condition:
-        val = condition.get("lte", condition.get("le"))
-        return column <= val
+        return column <= condition.get("lte", condition.get("le"))
     if "gt" in condition:
         return column > condition["gt"]
     if "gte" in condition or "ge" in condition:
-        val = condition.get("gte", condition.get("ge"))
-        return column >= val
+        return column >= condition.get("gte", condition.get("ge"))
     if "between" in condition:
         lo, hi = condition["between"]
         return column.is_between(lo, hi)
@@ -110,7 +111,7 @@ def _condition_to_expr(condition: dict) -> pl.Expr:
     raise SpecError(f"Unrecognized condition: {condition}")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class ColRule:
     """Restricts a column's generated values on rows where `when` matches.
 
@@ -122,23 +123,37 @@ class ColRule:
     independent of declaration order. Multiple rules on the *same* column are
     checked in declaration order, first match wins (like SQL CASE/WHEN).
 
-    `when` is a small dict, not an arbitrary polars expression, so that
-    every rule can round-trip through FrameSpec.to_yaml/from_yaml:
-        {"column": "enum_1", "equals": "A"}
-        {"column": "enum_1", "not_equals": "A"}
-        {"column": "enum_1", "in": ["A", "B"]}
-        {"column": "enum_1", "not_in": ["A", "B"]}
+    `when` is a predicate built with `polspec.col()`, not an arbitrary polars
+    expression, so that every rule can round-trip through a spec file:
 
-    Example: ColRule(when={"column": "enum_1", "in": ["A", "B"]}, choices=["X", "Y"])
+        ColRule(when=col("region") == "UK", choices=["RoyalMail"])
+        ColRule(when=col("region").is_in(["US", "EU"]) & (col("qty") > 10), choices=["UPS"])
+
+    The original one-column dict form is still accepted and converted:
+
+        {"column": "enum_1", "equals": "A"}       {"column": "enum_1", "in": ["A", "B"]}
+        {"column": "enum_1", "not_equals": "A"}   {"column": "enum_1", "not_in": ["A", "B"]}
+        {"column": "n", "lt" | "le" | "gt" | "ge": 5}   {"column": "n", "between": [1, 5]}
+        {"column": "n", "is_null": True}          {"column": "n", "is_not_null": True}
     """
 
-    when: dict
+    when: Pred | dict
     choices: tuple
     weights: tuple[float, ...] | None = None
 
     def __post_init__(self) -> None:
-        _validate_condition(self.when)
-        object.__setattr__(self, "when", dict(self.when))
+        if isinstance(self.when, dict):
+            object.__setattr__(self, "when", _condition_to_pred(self.when))
+        elif not isinstance(self.when, Pred):
+            raise SpecError(
+                "ColRule.when must be a predicate built with col(), or a dict like "
+                "{'column': 'enum_1', 'in': ['A', 'B']}, got "
+                f"{type(self.when).__name__}"
+            )
+        if not self.when.root_names():
+            raise SpecError(
+                f"ColRule.when must reference at least one column, got {self.when!r}"
+            )
         if isinstance(self.choices, dict):
             if self.weights is not None:
                 raise SpecError(
@@ -167,8 +182,21 @@ class ColRule:
             if sum(self.weights) <= 0:
                 raise SpecError("Sum of weights must be positive")
 
+    def __eq__(self, other: object) -> bool:
+        # `when` is a Pred, whose `==` builds a predicate; compare its data form.
+        if not isinstance(other, ColRule):
+            return False
+        return (
+            self.when.equals(other.when)
+            and self.choices == other.choices
+            and self.weights == other.weights
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.when, self.choices, self.weights))
+
     def _expr(self) -> pl.Expr:
-        return _condition_to_expr(self.when)
+        return self.when.to_expr()
 
 
 def _sample_choices(

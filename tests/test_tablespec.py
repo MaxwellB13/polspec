@@ -15,6 +15,7 @@ from polspec import (
     FrameSpec,
     SpecError,
     TableSpec,
+    col,
 )
 from polspec.tablespec import as_spec_name, as_table_spec
 
@@ -208,7 +209,7 @@ def test_select_keeps_columns_in_the_order_given():
 def test_rename_rewrites_every_constraint():
     spec = Orders.spec.rename({"customer_id": "cust", "region": "area"})
     assert list(spec) == ["order_id", "cust", "area", "carrier", "total"]
-    assert spec["carrier"].rules[0].when == {"column": "area", "equals": "UK"}
+    assert spec["carrier"].rules[0].when.equals(col("area") == "UK")
     assert spec.unique_together == (("cust", "order_id"),)
     fk = spec.foreign_keys[0]
     assert fk.columns == ("cust",)

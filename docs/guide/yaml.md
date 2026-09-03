@@ -46,12 +46,13 @@ An open-ended bound writes as `null` and reads back unchanged.
 | `__unique_together__` | yes |
 | `__foreign_keys__` with `references="self"` | yes |
 | `__foreign_keys__` referencing another spec | **no** |
-| `__checks__` | **no** |
-| `ColSpec.validators` | **no** |
+| `__checks__` and `ColSpec.validators` written with `col()` | yes |
+| `__checks__` and `ColSpec.validators` over a raw `pl.Expr` | **no** |
 
-The three that cannot be written all wrap an arbitrary `polars.Expr` or a
-Python class with no stable name in a standalone file. `to_yaml()` warns about
-each, naming exactly what will be lost:
+What cannot be written is either an arbitrary `polars.Expr`, which Polars
+cannot serialize stably, or a Python class with no stable name in a
+standalone file. `to_yaml()` warns about each, naming exactly what will be
+lost:
 
 ```text
 UserWarning: Orders declares 1 __checks__ ('total_covers_subtotal') that cannot
@@ -69,8 +70,18 @@ class Orders(Loaded):
     __checks__ = [Check(pl.col("total") >= pl.col("subtotal"), name="total_covers_subtotal")]
 ```
 
-Columns, rules and unique keys come from the file; the expression-valued parts
-are re-declared in Python where they can actually live.
+Columns, rules, unique keys, and any check or validator written with `col()`
+come from the file; only raw-expression parts need re-declaring in Python.
+A check in YAML is its predicate in data form:
+
+```yaml
+checks:
+- expr:
+    ge:
+    - col: total
+    - col: subtotal
+  name: total_covers_subtotal
+```
 
 ## Sharing categories between files
 
