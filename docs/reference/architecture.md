@@ -23,6 +23,7 @@ owns only the inner loop that fills arrays with values.
 | `serialization` | The YAML representation |
 | `profiler` | Inferring a spec from an existing DataFrame |
 | `report` | Rendering a spec as Markdown or Mermaid |
+| `cli` | The `polspec` command: profiling data into a spec, blank specs, and generated tests |
 
 The dependency direction is one-way: `spec` knows nothing about `framespec`,
 and `report` is not reachable from either the generation or validation path.
@@ -94,6 +95,7 @@ tables so the pair can be compared at a glance; they must be changed together.
 | `test_validation.py` | Validation behaviour and error reporting |
 | `test_catspec.py` | Shared category registries |
 | `test_streaming.py` | Batching and the file sinks |
+| `test_cli.py` | The command line, including running a generated test file under pytest |
 
 The round-trip file carries `xfail(strict=True)` markers for known gaps, so a
 fix turns the marker into a failure rather than passing unnoticed. See

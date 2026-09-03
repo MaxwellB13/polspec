@@ -35,6 +35,10 @@ seed produces; see
 
 - Repository URL in package metadata pointed at the repository's old name.
 - README claimed the license was unspecified; it is MIT.
+- Documentation: `ColSpec(col_name=...)` is now described in *Declaring
+  columns*, `FrameSpec.to_python()` in *YAML specs*, the getting-started
+  example imports `date`, and the architecture page lists the `cli` module
+  and its tests.
 
 ## [0.1.4] - 2026-09-02
 

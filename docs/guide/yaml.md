@@ -105,8 +105,46 @@ A spec can also emit the registry its own columns imply:
 Orders.write_catspec("categories.yaml")
 ```
 
+## Python instead of YAML
+
+The same spec can be written as an importable Python module. It is the right
+choice when the spec will be edited by hand from now on, or when it needs the
+parts YAML cannot hold:
+
+```python
+Orders.to_python("orders_spec.py")
+```
+
+```python
+"""Declares the Orders schema."""
+
+import polars as pl
+from polspec import ColSpec, FrameSpec
+
+
+class Orders(FrameSpec):
+    __columns__ = {
+        'order_id': ColSpec(pl.Int64, bounds=(1, 100000), unique=True),
+        'status': ColSpec(pl.Enum(['NEW', 'PAID', 'SHIPPED'])),
+        'total': ColSpec(pl.Float64, bounds=(0.0, None)),
+        'placed': ColSpec(pl.Date, nullable=True),
+    }
+    __unique_together__ = [['order_id', 'status']]
+```
+
+Columns are declared through `__columns__` because a name straight from data
+is not always a valid identifier. What survives is exactly the
+[round-trip table](#what-survives-a-round-trip) above: `__checks__`,
+cross-spec `ForeignKey`s and `ColSpec.validators` warn and are dropped, and
+the file is where you then add them back by hand. `polspec schema infer` uses
+this path when its output ends in `.py`; see
+[Command line](cli.md).
+
 ## Column names from data
 
-`from_yaml` declares columns through `__columns__`, so names that could not be
-class attributes — a leading underscore, or a collision with a method name like
-`schema` — load correctly.
+`from_yaml` and `to_python` declare columns through `__columns__`, so names
+that could not be class attributes — a leading underscore, a collision with a
+method name like `schema`, or a name with spaces — load correctly. The YAML
+key is the column's real name; a `col_name` set in a class body is not
+written, because the key already carries it. See
+[Column names that are not identifiers](columns.md#column-names-that-are-not-identifiers).
