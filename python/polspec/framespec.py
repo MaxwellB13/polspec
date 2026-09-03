@@ -285,14 +285,18 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         source: str | Path,
         *,
         categories: CatSpec | str | Path | None = None,
+        strict: bool = True,
     ) -> type[FrameSpec]:
         """Builds a new FrameSpec subclass from a YAML file written by `to_yaml`.
 
         `categories` is a CatSpec registry, or a path to one, used to resolve
         shared Enums and Categoricals; when omitted, a `categories:` key in
-        the file is loaded automatically.
+        the file is loaded automatically. An unknown key in the file is an
+        error unless `strict=False`, which downgrades it to a warning.
         """
-        return cls.from_spec(serialization.from_yaml(source, categories=categories))
+        return cls.from_spec(
+            serialization.from_yaml(source, categories=categories, strict=strict)
+        )
 
     @classmethod
     def from_dataframe(

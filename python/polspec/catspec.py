@@ -7,10 +7,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import polars as pl
-import yaml
 
 from polspec.errors import SpecError
-from polspec.serialization import _YAML_DTYPES, _YAML_NAME_TO_DTYPE
+from polspec.serialization.dtypes import categories_from_data, physical_from_name
 from polspec.spec import _is_categorical_dtype
 from polspec.tablespec import TableSpec, as_table_spec
 
@@ -257,25 +256,13 @@ class CatSpec:
                 if isinstance(v, pl.Categories):
                     self._categoricals[k_str] = v
                 elif isinstance(v, str):
-                    phys = _YAML_NAME_TO_DTYPE.get(v, pl.UInt32)
-                    self._categoricals[k_str] = pl.Categories(k_str, physical=phys)
+                    self._categoricals[k_str] = pl.Categories(
+                        k_str, physical=physical_from_name(v)
+                    )
                 elif isinstance(v, pl.DataType):
                     self._categoricals[k_str] = pl.Categories(k_str, physical=v)
                 elif isinstance(v, dict):
-                    cat_name = str(v.get("name", k_str))
-                    phys_raw = v.get("physical", "UInt32")
-                    if isinstance(phys_raw, str):
-                        phys = _YAML_NAME_TO_DTYPE.get(phys_raw, pl.UInt32)
-                    elif isinstance(phys_raw, pl.DataType):
-                        phys = phys_raw
-                    else:
-                        phys = pl.UInt32
-                    namespace = str(v.get("namespace", ""))
-                    self._categoricals[k_str] = pl.Categories(
-                        cat_name,
-                        namespace=namespace,
-                        physical=phys,
-                    )
+                    self._categoricals[k_str] = categories_from_data(v, None, k_str)
                     if "categories" in v:
                         self._choices[k_str] = list(v["categories"])
                 else:
@@ -674,83 +661,39 @@ class CatSpec:
         )
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> CatSpec:
-        """Constructs a CatSpec from a dictionary."""
+    def from_dict(cls, data: dict[str, Any], *, strict: bool = True) -> CatSpec:
+        """Constructs a CatSpec from its data form (any format version)."""
+        from polspec.serialization import catspec_from_dict
+
         if not isinstance(data, dict):
             raise TypeError(
                 f"Expected dict for CatSpec data, got {type(data).__name__}"
             )
-
-        if "enums" in data or "categoricals" in data:
-            return cls(
-                enums=data.get("enums"),
-                categoricals=data.get("categoricals"),
-                choices=data.get("choices"),
-            )
-
-        # Smart inference for flat format
-        enums: dict[str, list[str]] = {}
-        categoricals: dict[str, Any] = {}
-        choices: dict[str, list[Any]] = {}
-
-        for k, v in data.items():
-            if isinstance(v, (list, tuple)):
-                enums[k] = list(v)
-            elif isinstance(v, (dict, str, pl.Categories, pl.DataType)):
-                categoricals[k] = v
-            else:
-                enums[k] = [str(v)]
-
-        return cls(enums=enums, categoricals=categoricals, choices=choices)
+        return catspec_from_dict(data, strict=strict)
 
     @classmethod
-    def from_yaml(cls, source: str | Path) -> CatSpec:
+    def from_yaml(cls, source: str | Path, *, strict: bool = True) -> CatSpec:
         """Loads a CatSpec from a YAML file."""
-        path = Path(source)
-        if not path.exists():
-            raise FileNotFoundError(f"CatSpec file not found: {source}")
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-        if raw is None:
-            return cls()
-        return cls.from_dict(raw)
+        from polspec.serialization import catspec_from_yaml
+
+        return catspec_from_yaml(source, strict=strict)
+
+    @property
+    def choices(self) -> dict[str, list[Any]]:
+        """Every recorded choices list, keyed by column or registry name."""
+        return {k: list(v) for k, v in self._choices.items()}
 
     def to_dict(self) -> dict[str, Any]:
-        """Serializes the CatSpec to a dictionary structure."""
-        out: dict[str, Any] = {}
-        if self._enums:
-            out["enums"] = {k: list(v) for k, v in self._enums.items()}
-        if self._categoricals:
-            cats_dict = {}
-            for k, cat in self._categoricals.items():
-                cat_info: dict[str, Any] = {"name": cat.name()}
-                ns = cat.namespace()
-                if ns:
-                    cat_info["namespace"] = ns
-                phys = cat.physical()
-                if phys != pl.UInt32:
-                    cat_info["physical"] = _YAML_DTYPES.get(phys, str(phys))
-                if k in self._choices:
-                    cat_info["categories"] = list(self._choices[k])
-                cats_dict[k] = cat_info
-            out["categoricals"] = cats_dict
-        return out
+        """The data form of this registry, without the file's `version` key."""
+        from polspec.serialization import catspec_to_dict
+
+        return catspec_to_dict(self)
 
     def to_yaml(self, source: str | Path | None = None) -> str | None:
-        """Serializes the CatSpec to YAML format.
+        """Writes this registry as YAML to `source`, or returns the text when no path is given."""
+        from polspec.serialization import catspec_to_yaml
 
-        Parameters
-        ----------
-        source : str | Path | None, optional
-            File destination. If None, returns the YAML text string.
-        """
-        data = self.to_dict()
-        dumped = yaml.safe_dump(data, sort_keys=False)
-        if source is not None:
-            p = Path(source)
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(dumped, encoding="utf-8")
-            return None
-        return dumped
+        return catspec_to_yaml(self, source)
 
     def to_markdown(
         self,

@@ -24,7 +24,7 @@ owns only the inner loop that fills arrays with values.
 | `framespec` | `FrameSpec` — the metaclass that builds a `TableSpec` from a class body, and the facade forwarding every verb to it |
 | `generation` | `generate`, `generate_batches` and the file sinks, as functions over a `TableSpec` |
 | `catspec` | `CatSpec` — a shared registry of enums and categoricals |
-| `serialization` | The YAML representation |
+| `serialization` | Spec files: a field registry (`fields.py`) that YAML, generated Python and the `import datetime` decision all derive from; the dtype codec table (`dtypes.py`); format versions and migrations (`migrations.py`) |
 | `profiler` | Inferring a spec from an existing DataFrame |
 | `report` | Rendering a spec as Markdown or Mermaid |
 | `cli` | The `polspec` command: profiling data into a spec, blank specs, and generated tests |

@@ -29,75 +29,97 @@ DISTRIBUTION_NAMES: dict[str, str] = {
 
 
 @dataclass(frozen=True, slots=True)
-class _PositiveParam:
-    """A distribution parameter that must be > 0, and the names it answers to."""
+class Param:
+    """One distribution parameter: its canonical name, its aliases, its default."""
 
-    label: str
+    name: str
     aliases: tuple[str, ...]
-    default: float = 1.0
-    # Exponential is parameterised by *either* a scale or a rate. Whichever the
-    # caller actually supplied is the one that has to be positive; the other
-    # falls back to a default that is never used.
-    only_if_present: str | None = None
-    only_if_absent: str | None = None
-
-    def applies_to(self, params: dict[str, float]) -> bool:
-        if self.only_if_present is not None and self.only_if_present not in params:
-            return False
-        return not (self.only_if_absent is not None and self.only_if_absent in params)
-
-    def resolve(self, params: dict[str, float]) -> float:
-        for alias in self.aliases:
-            if alias in params:
-                return params[alias]
-        return self.default
+    default: float
+    positive: bool = False
 
 
-_POSITIVE_PARAMS: dict[str, tuple[_PositiveParam, ...]] = {
+# Canonical distribution name -> its parameters. The Rust engine accepts the
+# canonical names (`DistKind::from_spec` in `src/lib.rs`); Python is the only
+# place aliases are resolved, at declaration, so a spec file is always
+# canonical.
+DISTRIBUTIONS: dict[str, tuple[Param, ...]] = {
     "uniform": (),
-    "normal": (_PositiveParam("std", ("std", "sigma", "scale")),),
-    "lognormal": (_PositiveParam("std", ("std", "sigma", "sdlog")),),
-    "exponential": (
-        _PositiveParam("scale", ("scale",), only_if_present="scale"),
-        _PositiveParam("rate", ("rate", "lambda", "lambda_"), only_if_absent="scale"),
+    "normal": (
+        Param("mean", ("mean", "mu", "loc"), 0.0),
+        Param("std", ("std", "sigma", "scale"), 1.0, positive=True),
     ),
-    "poisson": (_PositiveParam("lambda", ("lambda", "lambda_", "rate", "mean")),),
+    "lognormal": (
+        Param("mean", ("mean", "mu", "meanlog"), 0.0),
+        Param("std", ("std", "sigma", "sdlog"), 1.0, positive=True),
+    ),
+    # Exponential is parameterised by *either* a scale or a rate. Whichever
+    # the caller gives is kept; the engine derives the other.
+    "exponential": (
+        Param("scale", ("scale",), 1.0, positive=True),
+        Param("rate", ("rate", "lambda", "lambda_"), 1.0, positive=True),
+    ),
+    "poisson": (
+        Param("lambda", ("lambda", "lambda_", "rate", "mean"), 1.0, positive=True),
+    ),
     "gamma": (
-        _PositiveParam("shape", ("shape", "alpha", "k")),
-        _PositiveParam("scale", ("scale", "beta", "theta")),
+        Param("shape", ("shape", "alpha", "k"), 1.0, positive=True),
+        Param("scale", ("scale", "beta", "theta"), 1.0, positive=True),
     ),
     "beta": (
-        _PositiveParam("alpha", ("alpha", "a", "shape1")),
-        _PositiveParam("beta", ("beta", "b", "shape2")),
+        Param("alpha", ("alpha", "a", "shape1"), 1.0, positive=True),
+        Param("beta", ("beta", "b", "shape2"), 1.0, positive=True),
     ),
 }
-_POSITIVE_PARAMS["exp"] = _POSITIVE_PARAMS["exponential"]
+
+_CANONICAL_NAME: dict[str, str] = {"exp": "exponential"}
 
 
 def normalize_distribution(distribution: str) -> str:
     """Returns the canonical lowercase name, or raises if polspec cannot sample it."""
-    name = distribution.lower()
+    name = distribution.strip().lower()
     if name not in DISTRIBUTION_NAMES:
         raise SpecError(
             f"Unsupported distribution '{distribution}'. "
             f"Supported: {sorted(DISTRIBUTION_NAMES)}"
         )
-    return name
+    return _CANONICAL_NAME.get(name, name)
+
+
+def canonicalize_params(name: str, params: dict[str, float]) -> dict[str, float]:
+    """Rewrites parameter keys to their canonical names.
+
+    `name` must already be canonical. The first alias present wins; a key no
+    parameter answers to is kept as written, since the engine ignores it and
+    rejecting it would break callers sharing one parameter dict across
+    columns of different distributions.
+    """
+    out: dict[str, float] = {}
+    claimed: set[str] = set()
+    for param in DISTRIBUTIONS[name]:
+        for alias in param.aliases:
+            if alias in params:
+                out[param.name] = params[alias]
+                claimed.update(param.aliases)
+                break
+    for key, value in params.items():
+        if key not in claimed and key not in out:
+            out[key] = value
+    return out
 
 
 def validate_distribution_params(name: str, params: dict[str, float]) -> None:
     """Raises when a parameter that has to be positive is not.
 
-    `name` must already be normalized. Unknown keys are left alone: the engine
-    ignores them, and rejecting them here would break callers who pass one
-    parameter dict to several columns.
+    `name` and `params` must already be canonical.
     """
     display = DISTRIBUTION_NAMES[name]
-    for param in _POSITIVE_PARAMS[name]:
-        if not param.applies_to(params):
+    for param in DISTRIBUTIONS[name]:
+        if not param.positive or param.name not in params:
             continue
-        value = param.resolve(params)
+        if name == "exponential" and param.name == "rate" and "scale" in params:
+            continue  # scale takes precedence; rate is then unused
+        value = params[param.name]
         if value <= 0:
             raise SpecError(
-                f"{display} distribution {param.label} must be positive, got {value}"
+                f"{display} distribution {param.name} must be positive, got {value}"
             )

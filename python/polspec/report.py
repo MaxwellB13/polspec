@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from polspec.serialization import _YAML_DTYPES
+from polspec.serialization.dtypes import DTYPE_NAMES
 from polspec.tablespec import TableSpec, as_table_spec
 
 if TYPE_CHECKING:
@@ -347,7 +347,7 @@ def catspec_to_markdown(
             ]
         )
         for k, cat in spec._categoricals.items():
-            phys = _YAML_DTYPES.get(cat.physical(), str(cat.physical()))
+            phys = DTYPE_NAMES.get(cat.physical(), str(cat.physical()))
             ns = cat.namespace() or "-"
             choices = spec._choices.get(k)
             if choices:
@@ -391,7 +391,7 @@ def catspec_to_mermaid(
 
     for k, cat in spec._categoricals.items():
         clean_k = "".join(c if c.isalnum() or c == "_" else "_" for c in k)
-        phys = _YAML_DTYPES.get(cat.physical(), str(cat.physical()))
+        phys = DTYPE_NAMES.get(cat.physical(), str(cat.physical()))
         lines.append(f"    class {clean_k} {{")
         lines.append(f"        <<categorical: {phys}>>")
         ns = cat.namespace()
