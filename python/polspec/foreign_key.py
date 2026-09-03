@@ -164,7 +164,7 @@ def _apply_foreign_keys(
             n=n, with_replacement=with_replacement, seed=rng.randrange(2**63)
         )
 
-        for local_col, ref_col in zip(local_cols, ref_cols):
+        for local_col, ref_col in zip(local_cols, ref_cols, strict=True):
             sampled_col = sampled_rows[ref_col].cast(df.schema[local_col])
             exprs.append(
                 pl.when(pl.col(local_col).is_not_null())

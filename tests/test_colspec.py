@@ -982,7 +982,7 @@ def test_from_dataframe_nullability_and_edge_cases():
     assert cols["all_nulls"].bounds is None
 
     # Non-dataframe raises TypeError
-    with pytest.raises(TypeError, match="Expected pl.DataFrame"):
+    with pytest.raises(TypeError, match=r"Expected pl\.DataFrame"):
         FrameSpec.from_dataframe([{"a": 1}])  # type: ignore[arg-type]
 
     # Empty dataframe (0 rows)
@@ -1098,7 +1098,7 @@ def test_colspec_and_framespec_tags(tmp_path):
     c6 = ColSpec(pl.Time, tags=["dup", "dup", "unique"])
     assert c6.tags == ("dup", "unique")
 
-    with pytest.raises(TypeError, match="ColSpec.tags must be a string or sequence"):
+    with pytest.raises(TypeError, match=r"ColSpec\.tags must be a string or sequence"):
         ColSpec(pl.Int64, tags=123)  # type: ignore[arg-type]
 
     # 2. FrameSpec.tag query
@@ -1666,7 +1666,9 @@ def test_generate_foreign_key_composite_samples_jointly():
     valid_pairs = {(1, 10), (1, 20), (2, 10)}
 
     stores = StoreGenSpec.generate(100, seed=4, references={RegionGenSpec: regions})
-    pairs = set(zip(stores["tenant"].to_list(), stores["region_id"].to_list()))
+    pairs = set(
+        zip(stores["tenant"].to_list(), stores["region_id"].to_list(), strict=True)
+    )
     assert pairs <= valid_pairs
     StoreGenSpec.validate(stores, references={RegionGenSpec: regions})
 

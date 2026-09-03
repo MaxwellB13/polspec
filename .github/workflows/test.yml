@@ -4,19 +4,66 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
 jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+
+      # The project itself is not installed: linting needs no Rust build.
+      - name: Sync dev dependencies
+        run: uv sync --no-install-project
+
+      - name: ruff check
+        run: uv run --no-sync ruff check .
+
+  rust:
+    name: Rust (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Python (the pyo3 build script needs an interpreter)
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: cargo fmt
+        run: cargo fmt --check
+
+      - name: cargo clippy
+        run: cargo clippy --release -- -D warnings
+
+      - name: cargo test
+        run: cargo test --release
+
   test:
     name: Test (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.12", "3.13", "3.14"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -25,7 +72,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -40,3 +87,37 @@ jobs:
 
       - name: Run the worked example as a smoke test
         run: uv run python examples/related_specs.py
+
+  polars-latest:
+    # uv.lock pins one Polars release; this job catches a break in the newest
+    # release that still satisfies the bound declared in pyproject.toml.
+    name: Test (ubuntu, py3.13, newest polars)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+
+      - name: Upgrade polars within the declared bound
+        run: uv lock --upgrade-package polars
+
+      - name: Sync dependencies
+        run: uv sync --all-extras
+
+      - name: Report polars version
+        run: uv run python -c "import polars; print(polars.__version__)"
+
+      - name: Build extension (maturin develop)
+        run: uv run maturin develop --release
+
+      - name: Run tests
+        run: uv run pytest

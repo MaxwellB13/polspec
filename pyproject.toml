@@ -54,6 +54,7 @@ dev = [
     "maturin>=1.7",
     "numpy>=2.5.2",
     "pyarrow>=14.0.0",
+    "ruff>=0.16.5",
 ]
 docs = [
     "zensical>=0.0.57",
@@ -68,6 +69,32 @@ python-source = "python"
 module-name = "polspec._polspec"
 features = ["pyo3/extension-module"]
 
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",   # pycodestyle, pyflakes
+    "I",             # import order
+    "UP",            # modern syntax
+    "B",             # bugbear
+    "BLE",           # blind `except Exception` needs a noqa with a reason
+    "SIM",           # simplifications
+    "C4",            # comprehensions
+    "PIE",
+    "RUF",
+    "DTZ",           # naive datetimes
+    "S",             # bandit
+]
+ignore = [
+    "E501",  # line length is the formatter's job; long strings are allowed
+    "S311",  # `random` is the right tool for non-cryptographic sampling
+]
+
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["RUF012", "DTZ001", "S102"]
+"tests/*" = ["RUF012", "DTZ001", "S101", "S102", "S603"]
 "examples/*" = ["RUF012", "DTZ001"]
+"benchmarks/*" = ["S101"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

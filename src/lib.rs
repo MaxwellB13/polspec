@@ -1,14 +1,16 @@
-use std::collections::HashMap;
+use polars::prelude::*;
+use polars_core::chunked_array::builder::{
+    BooleanChunkedBuilder, PrimitiveChunkedBuilder, StringChunkedBuilder,
+};
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
-use polars::prelude::*;
-use polars_core::chunked_array::builder::{BooleanChunkedBuilder, PrimitiveChunkedBuilder, StringChunkedBuilder};
 use rand::distributions::{Distribution, Uniform, WeightedIndex};
 use rand::prelude::*;
 use rand_distr::{Beta, Exp, Gamma, LogNormal, Normal, Poisson};
-use rand_xoshiro::rand_core::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
+use rand_xoshiro::rand_core::SeedableRng;
 use rayon::prelude::*;
+use std::collections::HashMap;
 
 const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 const DEFAULT_WIDE_INT_BOUND: i64 = 1_000_000;
@@ -125,12 +127,14 @@ impl DistKind {
                         spec.name
                     )));
                 }
-                LogNormal::new(mean, std).map(DistKind::LogNormal).map_err(|e| {
-                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "Invalid lognormal distribution parameters for column '{}': {e}",
-                        spec.name
-                    ))
-                })
+                LogNormal::new(mean, std)
+                    .map(DistKind::LogNormal)
+                    .map_err(|e| {
+                        PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                            "Invalid lognormal distribution parameters for column '{}': {e}",
+                            spec.name
+                        ))
+                    })
             }
             "exponential" | "exp" => {
                 let rate = if let Some(map) = params {
@@ -212,7 +216,11 @@ enum CategorySampler {
 }
 
 impl CategorySampler {
-    fn new(categories_len: usize, weights: Option<&Vec<f64>>, col_name: &str) -> PyResult<Option<Self>> {
+    fn new(
+        categories_len: usize,
+        weights: Option<&Vec<f64>>,
+        col_name: &str,
+    ) -> PyResult<Option<Self>> {
         if categories_len == 0 {
             return Ok(None);
         }
@@ -233,7 +241,10 @@ impl CategorySampler {
             })?;
             Ok(Some(CategorySampler::Weighted(weighted)))
         } else {
-            Ok(Some(CategorySampler::Uniform(Uniform::new(0, categories_len))))
+            Ok(Some(CategorySampler::Uniform(Uniform::new(
+                0,
+                categories_len,
+            ))))
         }
     }
 
@@ -254,12 +265,20 @@ fn chunk_size_for(_n: usize) -> usize {
 }
 
 fn seed_for_chunk(base_seed: u64, chunk_index: usize) -> u64 {
-    base_seed ^ (chunk_index as u64).wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(0x1)
+    base_seed
+        ^ (chunk_index as u64)
+            .wrapping_mul(0x9E3779B97F4A7C15)
+            .wrapping_add(0x1)
 }
 
 macro_rules! impl_gen_int_column {
     ($fn_name:ident, $polars_type:ident, $native_type:ty, $default_min:expr, $default_max:expr) => {
-        fn $fn_name(spec: &ColumnSpec, dist_kind: DistKind, n: usize, seed: u64) -> ChunkedArray<$polars_type> {
+        fn $fn_name(
+            spec: &ColumnSpec,
+            dist_kind: DistKind,
+            n: usize,
+            seed: u64,
+        ) -> ChunkedArray<$polars_type> {
             let name = PlSmallStr::from(spec.name.as_str());
             if n == 0 {
                 return PrimitiveChunkedBuilder::<$polars_type>::new(name, 0).finish();
@@ -277,7 +296,8 @@ macro_rules! impl_gen_int_column {
                     let start = i * chunk_size;
                     let end = (start + chunk_size).min(n);
                     let len = end - start;
-                    let mut builder = PrimitiveChunkedBuilder::<$polars_type>::new(name.clone(), len);
+                    let mut builder =
+                        PrimitiveChunkedBuilder::<$polars_type>::new(name.clone(), len);
                     let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed_for_chunk(seed, i));
 
                     let sample_val = |rng: &mut Xoshiro256PlusPlus| -> $native_type {
@@ -285,11 +305,7 @@ macro_rules! impl_gen_int_column {
                             DistKind::Uniform => uniform_dist.sample(rng),
                             _ => {
                                 let val = dist_kind.sample(rng);
-                                let rounded = if val.is_nan() {
-                                    lo as f64
-                                } else {
-                                    val.round()
-                                };
+                                let rounded = if val.is_nan() { lo as f64 } else { val.round() };
                                 let clamped = rounded.clamp(lo as f64, hi as f64);
                                 clamped as $native_type
                             }
@@ -316,7 +332,9 @@ macro_rules! impl_gen_int_column {
 
             let mut result = per_chunk.remove(0);
             for ca in per_chunk {
-                result.append_owned(ca).expect("all chunks share the same dtype");
+                result
+                    .append_owned(ca)
+                    .expect("all chunks share the same dtype");
             }
             result
         }
@@ -326,21 +344,44 @@ macro_rules! impl_gen_int_column {
 impl_gen_int_column!(gen_int8_column, Int8Type, i8, i8::MIN, i8::MAX);
 impl_gen_int_column!(gen_int16_column, Int16Type, i16, i16::MIN, i16::MAX);
 impl_gen_int_column!(gen_int32_column, Int32Type, i32, i32::MIN, i32::MAX);
-impl_gen_int_column!(gen_int64_column, Int64Type, i64, -DEFAULT_WIDE_INT_BOUND, DEFAULT_WIDE_INT_BOUND);
+impl_gen_int_column!(
+    gen_int64_column,
+    Int64Type,
+    i64,
+    -DEFAULT_WIDE_INT_BOUND,
+    DEFAULT_WIDE_INT_BOUND
+);
 impl_gen_int_column!(gen_uint8_column, UInt8Type, u8, u8::MIN, u8::MAX);
 impl_gen_int_column!(gen_uint16_column, UInt16Type, u16, u16::MIN, u16::MAX);
 impl_gen_int_column!(gen_uint32_column, UInt32Type, u32, u32::MIN, u32::MAX);
-impl_gen_int_column!(gen_uint64_column, UInt64Type, u64, 0, DEFAULT_WIDE_UINT_BOUND);
+impl_gen_int_column!(
+    gen_uint64_column,
+    UInt64Type,
+    u64,
+    0,
+    DEFAULT_WIDE_UINT_BOUND
+);
 
 macro_rules! impl_gen_float_column {
     ($fn_name:ident, $polars_type:ident, $native_type:ty, $default_bound:expr) => {
-        fn $fn_name(spec: &ColumnSpec, dist_kind: DistKind, n: usize, seed: u64) -> ChunkedArray<$polars_type> {
+        fn $fn_name(
+            spec: &ColumnSpec,
+            dist_kind: DistKind,
+            n: usize,
+            seed: u64,
+        ) -> ChunkedArray<$polars_type> {
             let name = PlSmallStr::from(spec.name.as_str());
             if n == 0 {
                 return PrimitiveChunkedBuilder::<$polars_type>::new(name, 0).finish();
             }
-            let lo = spec.min.map(|v| v as $native_type).unwrap_or(-$default_bound);
-            let hi = spec.max.map(|v| v as $native_type).unwrap_or($default_bound);
+            let lo = spec
+                .min
+                .map(|v| v as $native_type)
+                .unwrap_or(-$default_bound);
+            let hi = spec
+                .max
+                .map(|v| v as $native_type)
+                .unwrap_or($default_bound);
             let (lo, hi) = if lo <= hi { (lo, hi) } else { (hi, lo) };
             let uniform_dist = Uniform::new_inclusive(lo, hi);
             let chunk_size = chunk_size_for(n);
@@ -352,7 +393,8 @@ macro_rules! impl_gen_float_column {
                     let start = i * chunk_size;
                     let end = (start + chunk_size).min(n);
                     let len = end - start;
-                    let mut builder = PrimitiveChunkedBuilder::<$polars_type>::new(name.clone(), len);
+                    let mut builder =
+                        PrimitiveChunkedBuilder::<$polars_type>::new(name.clone(), len);
                     let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed_for_chunk(seed, i));
 
                     let sample_val = |rng: &mut Xoshiro256PlusPlus| -> $native_type {
@@ -360,11 +402,7 @@ macro_rules! impl_gen_float_column {
                             DistKind::Uniform => uniform_dist.sample(rng),
                             _ => {
                                 let val = dist_kind.sample(rng) as $native_type;
-                                if val.is_nan() {
-                                    lo
-                                } else {
-                                    val.clamp(lo, hi)
-                                }
+                                if val.is_nan() { lo } else { val.clamp(lo, hi) }
                             }
                         }
                     };
@@ -389,7 +427,9 @@ macro_rules! impl_gen_float_column {
 
             let mut result = per_chunk.remove(0);
             for ca in per_chunk {
-                result.append_owned(ca).expect("all chunks share the same dtype");
+                result
+                    .append_owned(ca)
+                    .expect("all chunks share the same dtype");
             }
             result
         }
@@ -435,7 +475,9 @@ fn gen_bool_column(spec: &ColumnSpec, p_true: f64, n: usize, seed: u64) -> Boole
 
     let mut result = per_chunk.remove(0);
     for ca in per_chunk {
-        result.append_owned(ca).expect("all chunks share the same dtype");
+        result
+            .append_owned(ca)
+            .expect("all chunks share the same dtype");
     }
     result
 }
@@ -452,7 +494,10 @@ fn gen_string_column(
     }
     let categories = spec.categories.clone();
     let min_len = spec.str_min_len.unwrap_or(DEFAULT_STR_MIN_LEN).max(0) as usize;
-    let max_len = spec.str_max_len.unwrap_or(DEFAULT_STR_MAX_LEN).max(min_len as i64) as usize;
+    let max_len = spec
+        .str_max_len
+        .unwrap_or(DEFAULT_STR_MAX_LEN)
+        .max(min_len as i64) as usize;
 
     let len_dist = (max_len > min_len).then(|| Uniform::new_inclusive(min_len, max_len));
 
@@ -497,10 +542,12 @@ fn gen_string_column(
                         if rng.gen_bool(null_p) {
                             builder.append_null();
                         } else {
-                            let str_len = len_dist.as_ref().map_or(min_len, |dist| dist.sample(&mut rng));
+                            let str_len = len_dist
+                                .as_ref()
+                                .map_or(min_len, |dist| dist.sample(&mut rng));
                             let mut rand_val = rng.next_u64();
                             let mut bits_left = 64;
-                            for j in 0..str_len {
+                            for slot in scratch.iter_mut().take(str_len) {
                                 if bits_left < 6 {
                                     rand_val = rng.next_u64();
                                     bits_left = 64;
@@ -511,7 +558,7 @@ fn gen_string_column(
                                 if idx >= 62 {
                                     idx = (rng.next_u32() as usize) % 62;
                                 }
-                                scratch[j] = CHARSET[idx];
+                                *slot = CHARSET[idx];
                             }
                             // SAFETY: CHARSET contains only ASCII bytes (A-Z, a-z, 0-9).
                             let s = unsafe { std::str::from_utf8_unchecked(&scratch[..str_len]) };
@@ -520,10 +567,12 @@ fn gen_string_column(
                     }
                 } else {
                     for _ in 0..len {
-                        let str_len = len_dist.as_ref().map_or(min_len, |dist| dist.sample(&mut rng));
+                        let str_len = len_dist
+                            .as_ref()
+                            .map_or(min_len, |dist| dist.sample(&mut rng));
                         let mut rand_val = rng.next_u64();
                         let mut bits_left = 64;
-                        for j in 0..str_len {
+                        for slot in scratch.iter_mut().take(str_len) {
                             if bits_left < 6 {
                                 rand_val = rng.next_u64();
                                 bits_left = 64;
@@ -534,7 +583,7 @@ fn gen_string_column(
                             if idx >= 62 {
                                 idx = (rng.next_u32() as usize) % 62;
                             }
-                            scratch[j] = CHARSET[idx];
+                            *slot = CHARSET[idx];
                         }
                         // SAFETY: CHARSET contains only ASCII bytes (A-Z, a-z, 0-9).
                         let s = unsafe { std::str::from_utf8_unchecked(&scratch[..str_len]) };
@@ -548,7 +597,9 @@ fn gen_string_column(
 
     let mut result = per_chunk.remove(0);
     for ca in per_chunk {
-        result.append_owned(ca).expect("all chunks share the same dtype");
+        result
+            .append_owned(ca)
+            .expect("all chunks share the same dtype");
     }
     result
 }
@@ -567,7 +618,7 @@ fn check_finite_bounds(spec: &ColumnSpec) -> PyResult<()> {
                 return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                     "Bound {label} for column '{}' must be finite, got {v}",
                     spec.name
-                )))
+                )));
             }
             _ => {}
         }
@@ -615,7 +666,7 @@ fn generate_series(spec: &ColumnSpec, n: usize, seed: u64) -> PyResult<Series> {
             return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
                 "Unsupported column kind '{other}' for column '{}'",
                 spec.name
-            )))
+            )));
         }
     };
     Ok(series)

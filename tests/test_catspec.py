@@ -70,8 +70,8 @@ def test_catspec_dtype_accessors():
     assert cat_dt.categories.name() == "CURRENCY"
 
     # Attribute property access
-    assert cats.enum.STATUS == enum_dt
-    assert cats.categorical.CURRENCY == cat_dt
+    assert enum_dt == cats.enum.STATUS
+    assert cat_dt == cats.categorical.CURRENCY
 
     # Subscript access
     assert cats.enum["STATUS"] == enum_dt
@@ -523,10 +523,10 @@ def test_class_body_declares_enum_and_categorical():
         STATUS = pl.Enum(["NEW", "PAID", "SHIPPED"])
         CURRENCY = pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt8))
 
-    assert Categories.STATUS == pl.Enum(["NEW", "PAID", "SHIPPED"])
-    assert Categories.CURRENCY == pl.Categorical(
+    assert pl.Enum(["NEW", "PAID", "SHIPPED"]) == Categories.STATUS
+    assert pl.Categorical(
         pl.Categories("CURRENCY", physical=pl.UInt8)
-    )
+    ) == Categories.CURRENCY
     assert Categories._declared_enums == {"STATUS": ["NEW", "PAID", "SHIPPED"]}
     assert set(Categories._declared_categoricals) == {"CURRENCY"}
 
@@ -562,10 +562,10 @@ def test_class_body_instance_still_supports_full_registry_api():
 
     cats = Categories()
     assert cats.get_enum("STATUS") == ["NEW", "PAID", "SHIPPED"]
-    assert cats.enum.STATUS == pl.Enum(["NEW", "PAID", "SHIPPED"])
-    assert cats.categorical.CURRENCY == pl.Categorical(
+    assert pl.Enum(["NEW", "PAID", "SHIPPED"]) == cats.enum.STATUS
+    assert pl.Categorical(
         pl.Categories("CURRENCY", physical=pl.UInt8)
-    )
+    ) == cats.categorical.CURRENCY
     assert "STATUS" in cats
     assert len(cats) == 2
 

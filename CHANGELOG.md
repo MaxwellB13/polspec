@@ -17,6 +17,14 @@ seed produces; see
   runs in CI as a smoke test.
 - A release-workflow job that refuses a `vX.Y.Z` tag whose version does not
   match `Cargo.toml`.
+- CI now runs `ruff check` with a wider rule set, `cargo fmt --check`,
+  `cargo clippy -D warnings` and `cargo test`, tests on macOS as well as
+  Linux and Windows, and tests against the newest Polars release inside the
+  declared bound. The docs build runs strictly on pull requests.
+- Release builds now produce wheels for Linux aarch64 and macOS (x86_64 and
+  arm64) alongside Linux and Windows x86_64, plus an sdist, and only publish
+  when the test workflow is green.
+- An optional `.pre-commit-config.yaml` with ruff and cargo fmt hooks.
 
 ### Changed
 
