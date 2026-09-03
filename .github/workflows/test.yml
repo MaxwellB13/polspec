@@ -37,3 +37,6 @@ jobs:
 
       - name: Run tests
         run: uv run pytest
+
+      - name: Run the worked example as a smoke test
+        run: uv run python examples/related_specs.py

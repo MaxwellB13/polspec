@@ -1,0 +1,43 @@
+name: Products
+categories: categories.yaml
+columns:
+  product_id:
+    dtype: Int64
+    bounds: [1, 10000000]
+    unique: true
+  sku:
+    dtype: String
+    string_length: [8, 8]
+    unique: true
+  barcode_number:
+    dtype: UInt64
+    bounds: [1, 999999999999]
+    unique: true
+  category:
+    dtype:
+      Enum: CATEGORY
+  currency:
+    dtype:
+      Categorical: CURRENCY
+    choices: [GBP, USD, EUR]
+  price:
+    dtype: Float64
+    bounds: [0.0, null]
+    distribution: gamma
+    distribution_params:
+      shape: 2.0
+      scale: 25.0
+  weight_kg:
+    dtype: Float32
+    bounds: [0.01, 50.0]
+  in_stock:
+    dtype: Boolean
+    weights: [0.1, 0.9]
+  related_product_id:
+    dtype: Int64
+    nullable: true
+    bounds: [1, 10000000]
+foreign_keys:
+  - columns: [related_product_id]
+    references: self
+    ref_columns: [product_id]

@@ -17,14 +17,15 @@ hand back a usable frame," not raw loop speed in isolation.
 
 | n_rows     | polspec (Rust) |     NumPy |    Python |
 |-----------:|---------------:|----------:|----------:|
-| 1,000      |        0.0004s |   0.0008s |   0.0016s |
-| 10,000     |        0.0005s |   0.0054s |   0.0147s |
-| 100,000    |        0.0025s |   0.0493s |   0.1491s |
-| 1,000,000  |        0.0112s |   0.4932s |   1.4918s |
-| 5,000,000  |        0.0293s |   2.4706s |   skipped |
-| 20,000,000 |        0.0835s |   9.8463s |   skipped |
+|      1,000 |        0.0003s |   0.0008s |   0.0016s |
+|     10,000 |        0.0006s |   0.0052s |   0.0145s |
+|    100,000 |        0.0027s |   0.0480s |   0.1447s |
+|  1,000,000 |        0.0083s |   0.4867s |   1.4862s |
+|  5,000,000 |        0.0256s |   2.4326s |   skipped |
+| 20,000,000 |        0.0827s |   9.7523s |   skipped |
 
-Measured on this machine; yours will differ, and the shape matters more than
+Measured 2026-09-03 on an Intel 13900K with 64GB DDR5 (the same run as the README
+table); yours will differ, and the shape matters more than
 the absolute numbers. Two things worth reading off it:
 
 - **The gap widens with size, not just the ratio.** At 1,000 rows all three

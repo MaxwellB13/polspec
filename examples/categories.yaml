@@ -1,0 +1,8 @@
+enums:
+  STATUS: [NEW, PAID, SHIPPED, CANCELLED]
+  CATEGORY: [ELECTRONICS, APPAREL, HOME, TOYS, GROCERY]
+categoricals:
+  CURRENCY:
+    name: CURRENCY
+    physical: UInt8
+    categories: [GBP, USD, EUR]
