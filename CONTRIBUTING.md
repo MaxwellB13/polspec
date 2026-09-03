@@ -68,12 +68,18 @@ uv run --group docs zensical build --strict  # what the docs workflow runs
 
 ## Releasing
 
-The version lives in exactly one place: `version` in `Cargo.toml`.
-`pyproject.toml` declares `dynamic = ["version"]` and maturin reads it from
-there.
+The version lives in exactly one place: `project.version` in
+`pyproject.toml`. maturin prefers it over the crate version in `Cargo.toml`,
+which is a placeholder.
 
-1. Bump `version` in `Cargo.toml`, run `uv lock`, and move the *Unreleased*
-   section of `CHANGELOG.md` under the new version.
+1. Bump it and refresh the lock file:
+
+   ```bash
+   uv version --bump patch   # or minor / major
+   uv lock
+   ```
+
+   Then move the *Unreleased* section of `CHANGELOG.md` under the new version.
 2. Commit, then tag `vX.Y.Z` and push the tag.
-3. The release workflow checks the tag matches `Cargo.toml`, builds wheels,
+3. The release workflow checks the tag matches `pyproject.toml`, builds wheels,
    publishes to PyPI, and attaches the wheels to a GitHub release.

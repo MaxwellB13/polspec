@@ -1,8 +1,8 @@
 [package]
 name = "polspec"
-# Single source of truth for the package version: pyproject.toml declares
-# `dynamic = ["version"]` and maturin reads this field.
-version = "0.1.4"
+# Placeholder. The released version is `project.version` in pyproject.toml,
+# which maturin prefers over this field; nothing consumes the crate version.
+version = "0.0.0"
 edition = "2024"
 
 [lib]
