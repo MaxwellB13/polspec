@@ -71,7 +71,7 @@ def test_generate_batches_deterministic():
     batches_1 = list(StreamDataSource.generate_batches(500, batch_size=150, seed=999))
     batches_2 = list(StreamDataSource.generate_batches(500, batch_size=150, seed=999))
     assert len(batches_1) == len(batches_2)
-    for b1, b2 in zip(batches_1, batches_2):
+    for b1, b2 in zip(batches_1, batches_2, strict=True):
         assert b1.equals(b2)
 
 

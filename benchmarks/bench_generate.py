@@ -144,7 +144,7 @@ def run_benchmark() -> list[Result]:
 
     # Warm up each implementation once so first-call overhead (imports,
     # RNG init) doesn't pollute the smallest timed size.
-    for name, fn in IMPLEMENTATIONS:
+    for _name, fn in IMPLEMENTATIONS:
         fn(10, seed=0)
 
     for n in SIZES + LARGE_SIZES_FAST_ONLY:

@@ -177,7 +177,9 @@ def _empirical_weights(
     if len(non_null) == 0:
         return None
     counts = non_null.value_counts()
-    observed = dict(zip(counts[name].to_list(), counts[counts.columns[1]].to_list()))
+    observed = dict(
+        zip(counts[name].to_list(), counts[counts.columns[1]].to_list(), strict=True)
+    )
     total = float(len(non_null))
     return tuple(observed.get(category, 0) / total for category in categories)
 

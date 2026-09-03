@@ -148,7 +148,8 @@ class _Bounds(_Constraint):
     def aggregations(self) -> list[pl.Expr]:
         # The observed extremes make an out-of-bounds report actionable, so
         # they are gathered alongside the violating samples.
-        return super().aggregations() + [
+        return [
+            *super().aggregations(),
             pl.col(self.column).min().alias(self._alias("min")),
             pl.col(self.column).max().alias(self._alias("max")),
         ]

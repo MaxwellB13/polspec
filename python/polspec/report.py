@@ -239,13 +239,13 @@ def framespec_to_mermaid(
         else:
             type_name = type(dtype).__name__
 
-        key_token = ""
+        key_label = ""
         if spec.unique:
-            key_token = "PK"
+            key_label = "PK"
         elif any(col_name in group for group in cls._unique_together):
-            key_token = "UK"
+            key_label = "UK"
         elif col_name in fk_columns:
-            key_token = "FK"
+            key_label = "FK"
 
         comments: list[str] = []
         if spec.nullable:
@@ -267,7 +267,7 @@ def framespec_to_mermaid(
 
         comment_body = ", ".join(comments).replace('"', "'")
         comment_str = f' "{comment_body}"' if comments else ""
-        key_str = f" {key_token}" if key_token else ""
+        key_str = f" {key_label}" if key_label else ""
         lines.append(f"        {type_name} {col_name}{key_str}{comment_str}")
 
     lines.append("    }")

@@ -34,6 +34,13 @@ cargo clippy --release
 uv run python examples/related_specs.py      # worked example, doubles as a smoke test
 ```
 
+Optionally, install the pre-commit hooks so ruff and `cargo fmt` run on
+every commit:
+
+```bash
+uv run --with pre-commit pre-commit install
+```
+
 The docs build with [zensical](https://pypi.org/project/zensical/):
 
 ```bash

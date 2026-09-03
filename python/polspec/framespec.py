@@ -376,7 +376,7 @@ class FrameSpec:
                         f"unknown column {ref_col!r} on {target_name!r}"
                     )
 
-            for col, ref_col in zip(fk.columns, fk.ref_columns):
+            for col, ref_col in zip(fk.columns, fk.ref_columns, strict=True):
                 local_kind = cls._fk_kind_bucket(_column_kind(cls._columns[col].dtype))
                 ref_kind = cls._fk_kind_bucket(
                     _column_kind(target_columns[ref_col].dtype)

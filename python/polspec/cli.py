@@ -16,6 +16,7 @@ parsing and templating, not new behaviour.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
 import os
 import re
@@ -125,14 +126,12 @@ def _maybe_format(path: Path) -> None:
     """
     if path.suffix != ".py":
         return
-    try:
-        subprocess.run(
+    with contextlib.suppress(OSError):
+        subprocess.run(  # noqa: S603 - fixed argv, no shell, path came from our own writer
             [sys.executable, "-m", "ruff", "format", str(path)],
             check=False,
             capture_output=True,
         )
-    except OSError:
-        pass
 
 
 # ---------------------------------------------------------------------------
