@@ -524,9 +524,10 @@ def test_class_body_declares_enum_and_categorical():
         CURRENCY = pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt8))
 
     assert pl.Enum(["NEW", "PAID", "SHIPPED"]) == Categories.STATUS
-    assert pl.Categorical(
-        pl.Categories("CURRENCY", physical=pl.UInt8)
-    ) == Categories.CURRENCY
+    assert (
+        pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt8))
+        == Categories.CURRENCY
+    )
     assert Categories._declared_enums == {"STATUS": ["NEW", "PAID", "SHIPPED"]}
     assert set(Categories._declared_categoricals) == {"CURRENCY"}
 
@@ -563,9 +564,10 @@ def test_class_body_instance_still_supports_full_registry_api():
     cats = Categories()
     assert cats.get_enum("STATUS") == ["NEW", "PAID", "SHIPPED"]
     assert pl.Enum(["NEW", "PAID", "SHIPPED"]) == cats.enum.STATUS
-    assert pl.Categorical(
-        pl.Categories("CURRENCY", physical=pl.UInt8)
-    ) == cats.categorical.CURRENCY
+    assert (
+        pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt8))
+        == cats.categorical.CURRENCY
+    )
     assert "STATUS" in cats
     assert len(cats) == 2
 

@@ -25,6 +25,9 @@ jobs:
       - name: ruff check
         run: uv run --no-sync ruff check .
 
+      - name: ruff format
+        run: uv run --no-sync ruff format --check .
+
   rust:
     name: Rust (fmt, clippy, test)
     runs-on: ubuntu-latest
