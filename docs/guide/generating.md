@@ -75,7 +75,7 @@ Orders.sink_ndjson("orders.ndjson", 1_000_000)
 
 All four take `batch_size`, `method`, `seed` and `references`, create the
 parent directory if needed, and pass extra keyword arguments through to the
-underlying writer. Parquet and IPC need PyArrow — `pip install "polspec[all]"`.
+underlying writer. Parquet and IPC need PyArrow — `pip install "polspec[arrow]"`.
 
 With `n=0`, Parquet, IPC and CSV still write a valid schema-bearing file.
 

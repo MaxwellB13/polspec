@@ -6,8 +6,23 @@ on:
       - "v*"
 
 jobs:
+  check-version:
+    name: Tag matches Cargo.toml version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare tag to Cargo.toml
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          crate="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)"
+          if [ "$tag" != "$crate" ]; then
+            echo "Tag v$tag does not match Cargo.toml version $crate" >&2
+            exit 1
+          fi
+
   build:
     name: Build wheel (${{ matrix.os }})
+    needs: check-version
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
