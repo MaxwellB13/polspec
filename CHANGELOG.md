@@ -25,6 +25,10 @@ seed produces; see
   arm64) alongside Linux and Windows x86_64, plus an sdist, and only publish
   when the test workflow is green.
 - An optional `.pre-commit-config.yaml` with ruff and cargo fmt hooks.
+- `tests/test_colspec.py` (2,000 lines, unsectioned) is split into
+  `test_generation.py`, `test_rules.py`, `test_serialization.py`,
+  `test_profiler.py`, `test_framespec.py`, `test_report.py` and
+  `test_foreign_key.py`, each with a docstring saying what it covers.
 
 ### Changed
 

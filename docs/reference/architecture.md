@@ -91,7 +91,13 @@ tables so the pair can be compared at a glance; they must be changed together.
 |:--|:--|
 | `test_roundtrip.py` | The property tying the two directions together: anything `generate()` produces, `validate()` accepts |
 | `test_declaration.py` | Declaration-time contracts that never reach generated data |
-| `test_colspec.py` | Column declarations, generation, YAML |
+| `test_generation.py` | Random and cartesian generation, dtype coverage, distributions, weights |
+| `test_rules.py` | `ColRule`: what a rule may declare and which rows it touches |
+| `test_serialization.py` | `to_yaml`/`from_yaml` and `to_python`, and what they warn about and drop |
+| `test_profiler.py` | `from_dataframe` inference |
+| `test_framespec.py` | The class body: inheritance, tags, `__checks__`, `__unique_together__`, validators |
+| `test_report.py` | Markdown data dictionaries and Mermaid diagrams |
+| `test_foreign_key.py` | `ForeignKey` declaration, persistence and generation |
 | `test_validation.py` | Validation behaviour and error reporting |
 | `test_catspec.py` | Shared category registries |
 | `test_streaming.py` | Batching and the file sinks |
