@@ -14,6 +14,35 @@ The last two rows are validation-only by design: they wrap arbitrary Polars
 expressions, and nothing can produce data satisfying an arbitrary predicate.
 Generation makes no attempt, and that boundary is pinned down by tests.
 
+## Writing conditions — `col()`
+
+Rules, validators and checks all take a condition. Write it with `col()`,
+which builds a small predicate tree rather than a Polars expression:
+
+```python
+from polspec import col
+
+col("total") >= col("subtotal")
+col("email").str.contains("@")
+col("status").is_in(["NEW", "PAID"]) & (col("qty") > 0)
+col("shipped").is_null() | (col("shipped") >= col("placed"))
+```
+
+Supported: comparisons (`== != < <= > >=`), arithmetic (`+ - * /`),
+`&`, `|`, `~`, `is_in`, `is_null`, `is_not_null`, `is_between`, and the
+string operations `str.contains` (a literal substring), `str.starts_with`,
+`str.ends_with`, `str.matches` (a regular expression) and `str.len_chars`.
+Scalars, dates and datetimes are fine as operands.
+
+A predicate evaluates exactly as the Polars expression it stands for, and
+unlike one it can be written to a spec file and read back, so rules, checks
+and validators written this way survive `to_yaml` and `to_python`. A raw
+`pl.Expr` is still accepted everywhere a predicate is, for anything the
+predicate language cannot say; it just cannot be persisted.
+
+Comparison operators build predicates, as they do on `pl.Expr`, so a
+predicate has no truth value. Compare two structurally with `Pred.equals`.
+
 ## Conditional values — `ColRule`
 
 A rule overwrites a column on the rows where its condition matches.

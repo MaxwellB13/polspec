@@ -164,12 +164,12 @@ class TableSpec:
     def _validate_rules(self) -> None:
         for col_name, spec in self.columns.items():
             for rule in spec.rules:
-                ref_col = rule.when.get("column")
-                if ref_col not in self.columns:
-                    raise SpecError(
-                        f"ColRule on column {col_name!r} references unknown column "
-                        f"{ref_col!r}"
-                    )
+                for ref_col in sorted(rule.when.root_names()):
+                    if ref_col not in self.columns:
+                        raise SpecError(
+                            f"ColRule on column {col_name!r} references unknown "
+                            f"column {ref_col!r}"
+                        )
 
     def _validate_validators(self) -> None:
         for col_name, spec in self.columns.items():
@@ -413,11 +413,9 @@ class TableSpec:
             updates: dict[str, Any] = {}
             if spec.col_name is not None:
                 updates["col_name"] = None
-            if any(r.when.get("column") in mapping for r in spec.rules):
+            if any(r.when.root_names() & set(mapping) for r in spec.rules):
                 updates["rules"] = tuple(
-                    dataclasses.replace(
-                        r, when={**r.when, "column": new_name(r.when["column"])}
-                    )
+                    dataclasses.replace(r, when=r.when.rename(mapping))
                     for r in spec.rules
                 )
             columns[new_name(key)] = (

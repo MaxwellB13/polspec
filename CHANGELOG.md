@@ -10,6 +10,16 @@ seed produces; see
 
 ### Added
 
+- `polspec.col()`, a small predicate language for rules, validators and
+  checks: `col("total") >= col("subtotal")`, `col("email").str.contains("@")`,
+  `is_in`, `is_between`, `is_null`, `&`/`|`/`~`, arithmetic, and string
+  operations. A predicate evaluates like the Polars expression it stands
+  for and, unlike one, is written to and read from YAML and generated
+  Python. `__checks__` and `ColSpec.validators` written with `col()` now
+  round-trip through `to_yaml`/`from_yaml` and `to_python`. Raw `pl.Expr`
+  is still accepted and still warns on export.
+- `ColRule.when` accepts a predicate, so a rule may depend on several
+  columns. The one-column dict form is still accepted and converted.
 - `TableSpec`: the spec as an immutable value. A `FrameSpec` class body now
   builds one, reachable as `Spec.spec`, and every verb (`generate`,
   `validate`, `to_yaml`, `to_markdown`, ...) is a function over it in
@@ -31,6 +41,10 @@ seed produces; see
 
 ### Changed
 
+- **Breaking.** `ColRule.when` is a predicate after construction rather
+  than a dict (`rule.when.root_names()` lists the columns it reads); rules
+  in YAML are written in the predicate data form, and the old dict form is
+  still read.
 - **Breaking.** A column may now share a name with a `FrameSpec` method:
   the metaclass takes `ColSpec` attributes out of the class namespace, so
   `schema`, `tag` and friends no longer shadow anything and no longer warn.

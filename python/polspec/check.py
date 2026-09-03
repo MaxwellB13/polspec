@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import polars as pl
 
 from polspec.errors import SpecError
+from polspec.expr import Pred
 
 
 @dataclass(eq=False, frozen=True, slots=True)
@@ -13,8 +14,10 @@ class Check:
 
     Parameters
     ----------
-    expr : pl.Expr
-        The Polars boolean expression that each row must satisfy (evaluating to True).
+    expr : pl.Expr | Pred
+        The boolean condition each row must satisfy: a Polars expression, or a
+        predicate built with `polspec.col()`. A predicate can be written to a
+        YAML or Python spec file; a raw expression cannot.
     name : str | None, optional
         A human-readable identifier for the check constraint (e.g. 'total_gte_subtotal').
         If omitted, defaults to the string representation of the expression.
@@ -29,18 +32,24 @@ class Check:
     >>> check = Check(pl.col("total") >= pl.col("subtotal"), name="total_gte_subtotal")
     """
 
-    expr: pl.Expr
+    expr: pl.Expr | Pred
     name: str | None = None
     description: str | None = None
     ignore_nulls: bool = True
+    pred: Pred | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.expr, pl.Expr):
+        if isinstance(self.expr, Pred):
+            object.__setattr__(self, "pred", self.expr)
+            object.__setattr__(self, "expr", self.expr.to_expr())
+        elif not isinstance(self.expr, pl.Expr):
             raise SpecError(
-                f"Check expr must be a polars Expr (pl.Expr), got {type(self.expr).__name__}"
+                "Check expr must be a polars Expr or a polspec predicate "
+                f"(built with col()), got {type(self.expr).__name__}"
             )
         if self.name is None:
-            object.__setattr__(self, "name", str(self.expr))
+            default = repr(self.pred) if self.pred is not None else str(self.expr)
+            object.__setattr__(self, "name", default)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Check):

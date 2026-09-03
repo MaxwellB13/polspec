@@ -8,8 +8,10 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 import yaml
 
+from polspec.check import Check
 from polspec.constants import _DEFAULT_NULL_PROBABILITY
 from polspec.errors import SerializationError, SpecError
+from polspec.expr import Pred, from_data
 from polspec.foreign_key import ForeignKey, _default_fk_name
 from polspec.rules import ColRule
 from polspec.spec import ColSpec, _is_categorical_dtype
@@ -197,12 +199,49 @@ def _colspec_to_yaml(spec: ColSpec) -> dict:
     if spec.rules:
         rule_list = []
         for rule in spec.rules:
-            rule_dict = {"when": dict(rule.when), "choices": list(rule.choices)}
+            rule_dict = {"when": rule.when.to_data(), "choices": list(rule.choices)}
             if rule.weights is not None:
                 rule_dict["weights"] = list(rule.weights)
             rule_list.append(rule_dict)
         data["rules"] = rule_list
+    persistable = [v for v in spec.validators if v.pred is not None]
+    if persistable:
+        data["validators"] = [_check_to_yaml(v) for v in persistable]
     return data
+
+
+def _check_to_yaml(check: Check) -> dict:
+    """The data form of a predicate-backed Check; a raw Expr cannot be written."""
+    if check.pred is None:
+        raise SerializationError(f"Check {check.name!r} wraps a raw polars.Expr")
+    data: dict = {"expr": check.pred.to_data()}
+    if check.name != repr(check.pred):
+        data["name"] = check.name
+    if check.description is not None:
+        data["description"] = check.description
+    if not check.ignore_nulls:
+        data["ignore_nulls"] = False
+    return data
+
+
+def _check_from_yaml(data: dict) -> Check:
+    if not isinstance(data, dict) or "expr" not in data:
+        raise SerializationError(
+            f"A check or validator in YAML needs an 'expr' key, got {data!r}"
+        )
+    return Check(
+        from_data(data["expr"]),
+        name=data.get("name"),
+        description=data.get("description"),
+        ignore_nulls=data.get("ignore_nulls", True),
+    )
+
+
+def _when_from_yaml(when: object) -> Pred | dict:
+    """A rule condition from YAML: the predicate data form, or the legacy dict."""
+    if isinstance(when, dict) and "column" in when:
+        return when
+    return from_data(when)
 
 
 def _colspec_from_yaml(data: dict, categories: CatSpec | None = None) -> ColSpec:
@@ -234,12 +273,14 @@ def _colspec_from_yaml(data: dict, categories: CatSpec | None = None) -> ColSpec
     if "rules" in data:
         kwargs["rules"] = tuple(
             ColRule(
-                when=rule["when"],
+                when=_when_from_yaml(rule["when"]),
                 choices=rule["choices"],
                 weights=rule.get("weights"),
             )
             for rule in data["rules"]
         )
+    if "validators" in data:
+        kwargs["validators"] = tuple(_check_from_yaml(v) for v in data["validators"])
     return ColSpec(
         dtype=_dtype_from_yaml(data["dtype"], categories=categories), **kwargs
     )
@@ -302,7 +343,10 @@ def _colspec_needs_datetime_import(spec: ColSpec) -> bool:
         values += list(spec.choices)
     for rule in spec.rules:
         values += list(rule.choices)
-        values += list(rule.when.values())
+        values += rule.when.literals()
+    for validator in spec.validators:
+        if validator.pred is not None:
+            values += validator.pred.literals()
     return _needs_datetime_import(values)
 
 
@@ -339,7 +383,7 @@ def _dtype_to_python(dtype: pl.DataType) -> str:
 
 
 def _colrule_to_python(rule: ColRule) -> str:
-    args = [f"when={dict(rule.when)!r}", f"choices={list(rule.choices)!r}"]
+    args = [f"when={rule.when.to_source()}", f"choices={list(rule.choices)!r}"]
     if rule.weights is not None:
         args.append(f"weights={list(rule.weights)!r}")
     return f"ColRule({', '.join(args)})"
@@ -382,7 +426,31 @@ def _colspec_to_python(spec: ColSpec) -> str:
     if spec.rules:
         rules_src = ", ".join(_colrule_to_python(rule) for rule in spec.rules)
         args.append(f"rules=[{rules_src}]")
+    persistable = [v for v in spec.validators if v.pred is not None]
+    if persistable:
+        validators_src = ", ".join(_check_to_python(v) for v in persistable)
+        args.append(f"validators=[{validators_src}]")
     return f"ColSpec({', '.join(args)})"
+
+
+def _check_to_python(check: Check) -> str:
+    if check.pred is None:
+        raise SerializationError(f"Check {check.name!r} wraps a raw polars.Expr")
+    args = [check.pred.to_source()]
+    if check.name != repr(check.pred):
+        args.append(f"name={check.name!r}")
+    if check.description is not None:
+        args.append(f"description={check.description!r}")
+    if not check.ignore_nulls:
+        args.append("ignore_nulls=False")
+    return f"Check({', '.join(args)})"
+
+
+def _uses_predicates(spec: TableSpec) -> bool:
+    return any(
+        cs.rules or any(v.pred is not None for v in cs.validators)
+        for cs in spec.columns.values()
+    ) or any(c.pred is not None for c in spec.checks)
 
 
 def _foreignkey_to_python(fk: ForeignKey) -> str:
@@ -431,13 +499,14 @@ def _warn_unserializable(spec: TableSpec, source: str | Path, kind: str) -> None
     representation in a standalone file, so each is dropped loudly.
     """
     words = _LOSS[kind]
-    if spec.checks:
-        names = ", ".join(repr(c.name) for c in spec.checks)
+    raw_checks = [c for c in spec.checks if c.pred is None]
+    if raw_checks:
+        names = ", ".join(repr(c.name) for c in raw_checks)
         warnings.warn(
-            f"{spec.name} declares {len(spec.checks)} __checks__ ({names}) that "
-            f"cannot be represented in {words['medium']} (a Check wraps an "
-            f"arbitrary polars.Expr) and will NOT be written to {source!s}. "
-            f"{words['checks_tail']}",
+            f"{spec.name} declares {len(raw_checks)} __checks__ ({names}) that "
+            f"cannot be represented in {words['medium']} (a Check over a raw "
+            f"polars.Expr; write it with polspec.col() to persist it) and will "
+            f"NOT be written to {source!s}. {words['checks_tail']}",
             stacklevel=3,
         )
     external = [fk for fk in spec.foreign_keys if fk.references != "self"]
@@ -450,15 +519,19 @@ def _warn_unserializable(spec: TableSpec, source: str | Path, kind: str) -> None
             stacklevel=3,
         )
     validators = [
-        f"{col}.{v.name}" for col, cs in spec.columns.items() for v in cs.validators
+        f"{col}.{v.name}"
+        for col, cs in spec.columns.items()
+        for v in cs.validators
+        if v.pred is None
     ]
     if validators:
         names = ", ".join(repr(n) for n in validators)
         warnings.warn(
             f"{spec.name} declares {len(validators)} column-level validator(s) "
             f"({names}) that cannot be represented in {words['medium']} (a "
-            f"validator wraps an arbitrary polars.Expr) and will NOT be written "
-            f"to {source!s}. {words['checks_tail']}",
+            f"validator over a raw polars.Expr; write it with polspec.col() to "
+            f"persist it) and will NOT be written to {source!s}. "
+            f"{words['checks_tail']}",
             stacklevel=3,
         )
 
@@ -485,6 +558,9 @@ def to_yaml(spec: TableSpec, source: str | Path) -> None:
     self_fks = [fk for fk in spec.foreign_keys if fk.references == "self"]
     if self_fks:
         data["foreign_keys"] = [_foreignkey_to_yaml(fk) for fk in self_fks]
+    persistable_checks = [c for c in spec.checks if c.pred is not None]
+    if persistable_checks:
+        data["checks"] = [_check_to_yaml(c) for c in persistable_checks]
     p = Path(source)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
@@ -533,6 +609,7 @@ def from_yaml(
     return TableSpec(
         data.get("name", "LoadedFrameSpec"),
         columns,
+        checks=[_check_from_yaml(c) for c in data.get("checks", [])],
         unique_together=data.get("unique_together") or (),
         foreign_keys=[_foreignkey_from_yaml(fk) for fk in data.get("foreign_keys", [])],
     )
@@ -553,11 +630,19 @@ def to_python(spec: TableSpec, source: str | Path) -> None:
     needs_datetime = any(
         _colspec_needs_datetime_import(cs) for cs in spec.columns.values()
     )
+    persistable_checks = [c for c in spec.checks if c.pred is not None]
+    has_validators = any(
+        v.pred is not None for cs in spec.columns.values() for v in cs.validators
+    )
     polspec_imports = ["ColSpec", "FrameSpec"]
+    if persistable_checks or has_validators:
+        polspec_imports.insert(0, "Check")
     if any(cs.rules for cs in spec.columns.values()):
-        polspec_imports.insert(1, "ColRule")
+        polspec_imports.insert(polspec_imports.index("ColSpec"), "ColRule")
     if self_fks:
         polspec_imports.append("ForeignKey")
+    if _uses_predicates(spec):
+        polspec_imports.append("col")
 
     lines = [f'"""Declares the {spec.name} schema."""', "", "import polars as pl"]
     if needs_datetime:
@@ -573,6 +658,9 @@ def to_python(spec: TableSpec, source: str | Path) -> None:
     if self_fks:
         fks = ", ".join(_foreignkey_to_python(fk) for fk in self_fks)
         lines.append(f"    __foreign_keys__ = [{fks}]")
+    if persistable_checks:
+        checks_src = ", ".join(_check_to_python(c) for c in persistable_checks)
+        lines.append(f"    __checks__ = [{checks_src}]")
 
     p = Path(source)
     p.parent.mkdir(parents=True, exist_ok=True)

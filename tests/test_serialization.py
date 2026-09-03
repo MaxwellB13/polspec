@@ -17,6 +17,7 @@ from polspec import (
     ForeignKey,
     FrameSpec,
     ValidationError,
+    col,
 )
 from polspec.serialization import _colspec_to_yaml
 
@@ -397,3 +398,131 @@ def test_dtype_to_python_renders_time_zone():
 
     src = _dtype_to_python(pl.Datetime(time_unit="us", time_zone="UTC"))
     assert src == "pl.Datetime(time_unit='us', time_zone='UTC')"
+
+
+# ---------------------------------------------------------------------------
+# predicates survive both writers
+# ---------------------------------------------------------------------------
+
+
+class PredicateSource(FrameSpec):
+    order_id = ColSpec(pl.Int64, bounds=(1, 1_000))
+    subtotal = ColSpec(pl.Float64, bounds=(0.0, 500.0))
+    total = ColSpec(pl.Float64, bounds=(0.0, 1_000.0))
+    email = ColSpec(
+        pl.String,
+        string_length=(5, 20),
+        validators=[Check(col("email").str.contains("@"), name="has_at")],
+    )
+    region = ColSpec(pl.Enum(["UK", "US"]))
+    carrier = ColSpec(
+        pl.Enum(["RM", "UPS"]),
+        rules=[
+            ColRule(when=(col("region") == "UK") & (col("total") > 10), choices=["RM"])
+        ],
+    )
+    __checks__ = [
+        Check(
+            col("total") >= col("subtotal"),
+            name="total_covers_subtotal",
+            description="never discount below cost",
+        ),
+        Check(col("order_id") > 0, ignore_nulls=False),
+    ]
+
+
+def _assert_predicates_survived(loaded):
+    spec = loaded.spec
+    assert [c.name for c in spec.checks] == [
+        "total_covers_subtotal",
+        "col('order_id') > 0",
+    ]
+    assert spec.checks[0].pred.equals(col("total") >= col("subtotal"))
+    assert spec.checks[0].description == "never discount below cost"
+    assert spec.checks[1].ignore_nulls is False
+    assert spec["email"].validators[0].name == "has_at"
+    assert spec["email"].validators[0].pred.equals(col("email").str.contains("@"))
+    assert (
+        spec["carrier"]
+        .rules[0]
+        .when.equals((col("region") == "UK") & (col("total") > 10))
+    )
+
+
+def test_checks_validators_and_predicate_rules_round_trip_through_yaml(
+    tmp_path, recwarn
+):
+    path = tmp_path / "spec.yaml"
+    PredicateSource.to_yaml(path)
+    assert [w for w in recwarn if "will NOT be written" in str(w.message)] == []
+    text = path.read_text()
+    assert "checks:" in text and "validators:" in text
+    loaded = FrameSpec.from_yaml(path)
+    _assert_predicates_survived(loaded)
+    df = PredicateSource.generate(200, seed=5)
+    assert loaded.generate(200, seed=5).equals(df)
+    # Re-writing the loaded spec produces the same file.
+    again = tmp_path / "again.yaml"
+    loaded.to_yaml(again)
+    assert again.read_text() == text
+
+
+def test_checks_validators_and_predicate_rules_round_trip_through_python(
+    tmp_path, recwarn
+):
+    path = tmp_path / "spec.py"
+    PredicateSource.to_python(path)
+    assert [w for w in recwarn if "will NOT be written" in str(w.message)] == []
+    source = path.read_text()
+    assert "from polspec import Check, ColRule, ColSpec, FrameSpec, col" in source
+    assert "__checks__ = [" in source
+    loaded = _exec_python_spec(path)["PredicateSource"]
+    _assert_predicates_survived(loaded)
+    assert loaded.generate(200, seed=5).equals(PredicateSource.generate(200, seed=5))
+
+
+def test_raw_expressions_still_warn_and_drop(tmp_path):
+    class Mixed(FrameSpec):
+        a = ColSpec(pl.Int64, validators=[pl.col("a") > 0])
+        b = ColSpec(pl.Int64, validators=[col("b") > 0])
+        __checks__ = [
+            Check(pl.col("a") > pl.col("b"), name="raw"),
+            Check(col("a") >= col("b"), name="pred"),
+        ]
+
+    path = tmp_path / "mixed.yaml"
+    with pytest.warns(UserWarning, match=r"write it with polspec.col\(\)") as caught:
+        Mixed.to_yaml(path)
+    messages = " ".join(str(w.message) for w in caught)
+    assert "'raw'" in messages and "'a.col(\"a\") > dyn int: 0'" not in messages
+    loaded = FrameSpec.from_yaml(path)
+    assert [c.name for c in loaded.spec.checks] == ["pred"]
+    assert loaded.spec["a"].validators == ()
+    assert len(loaded.spec["b"].validators) == 1
+
+
+def test_legacy_dict_rules_in_yaml_still_load(tmp_path):
+    path = tmp_path / "legacy.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "name": "Legacy",
+                "columns": {
+                    "region": {"dtype": {"Enum": ["UK", "US"]}},
+                    "carrier": {
+                        "dtype": {"Enum": ["RM", "UPS"]},
+                        "rules": [
+                            {
+                                "when": {"column": "region", "equals": "UK"},
+                                "choices": ["RM"],
+                            }
+                        ],
+                    },
+                },
+            }
+        )
+    )
+    loaded = FrameSpec.from_yaml(path)
+    assert loaded.spec["carrier"].rules[0].when.equals(col("region") == "UK")
+    df = loaded.generate(100, seed=1)
+    assert df.filter(pl.col("region") == "UK")["carrier"].unique().to_list() == ["RM"]

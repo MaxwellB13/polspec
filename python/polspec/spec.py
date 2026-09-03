@@ -17,6 +17,7 @@ from polspec.distributions import (
 )
 from polspec.dtypes import _bound_endpoint_to_physical, _dtype_value_limits
 from polspec.errors import SpecError
+from polspec.expr import Pred
 from polspec.rules import ColRule, _reject_colliding_choices
 
 
@@ -114,7 +115,7 @@ class ColSpec:
     choices: tuple | list | dict | None = None
     weights: tuple[float, ...] | list[float] | None = None
     rules: tuple[ColRule, ...] = ()
-    validators: Check | pl.Expr | Sequence[Check | pl.Expr] | None = ()
+    validators: Check | pl.Expr | Pred | Sequence[Check | pl.Expr | Pred] | None = ()
 
     def __post_init__(self) -> None:
         # Order matters: normalization first, so every check below sees the
@@ -347,7 +348,7 @@ class ColSpec:
 
         raw = (
             [self.validators]
-            if isinstance(self.validators, (pl.Expr, Check))
+            if isinstance(self.validators, (pl.Expr, Pred, Check))
             else list(self.validators)
         )
 
@@ -356,11 +357,12 @@ class ColSpec:
         for v in raw:
             if isinstance(v, Check):
                 chk = v
-            elif isinstance(v, pl.Expr):
+            elif isinstance(v, (pl.Expr, Pred)):
                 chk = Check(v)
             else:
                 raise SpecError(
-                    "ColSpec.validators items must be a polars Expr or Check, "
+                    "ColSpec.validators items must be a polars Expr, a predicate "
+                    "built with col(), or a Check, "
                     f"got {type(v).__name__}"
                 )
             prior = seen.get(chk.name)

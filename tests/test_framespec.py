@@ -270,7 +270,7 @@ def test_colspec_validators_default_empty():
 
 
 def test_colspec_validators_rejects_invalid_item_type():
-    with pytest.raises(TypeError, match="must be a polars Expr or Check"):
+    with pytest.raises(TypeError, match="must be a polars Expr, a predicate"):
         ColSpec(pl.Int64, validators=["not an expr"])  # type: ignore[list-item]
 
 

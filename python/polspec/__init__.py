@@ -11,6 +11,7 @@ from polspec.errors import (
     SpecError,
     ValidationError,
 )
+from polspec.expr import Pred, col
 from polspec.foreign_key import ForeignKey
 from polspec.framespec import FrameSpec
 from polspec.profiler import profile_dataframe
@@ -28,10 +29,12 @@ __all__ = [
     "FrameSpec",
     "GenerationError",
     "PolspecError",
+    "Pred",
     "RegistryError",
     "SerializationError",
     "SpecError",
     "TableSpec",
     "ValidationError",
+    "col",
     "profile_dataframe",
 ]
