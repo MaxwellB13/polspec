@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Literal
 
 import polars as pl
 
+from polspec.errors import GenerationError, SpecError
 from polspec.spec import ColSpec
 
 if TYPE_CHECKING:
@@ -72,7 +73,7 @@ class ForeignKey:
     def __post_init__(self) -> None:
         cols = (self.columns,) if isinstance(self.columns, str) else tuple(self.columns)
         if not cols:
-            raise ValueError("ForeignKey.columns must not be empty")
+            raise SpecError("ForeignKey.columns must not be empty")
         object.__setattr__(self, "columns", cols)
 
         if self.ref_columns is None:
@@ -82,14 +83,14 @@ class ForeignKey:
         else:
             ref_cols = tuple(self.ref_columns)
         if len(ref_cols) != len(cols):
-            raise ValueError(
+            raise SpecError(
                 f"ForeignKey.ref_columns ({ref_cols}) must have the same length as "
                 f"columns ({cols})"
             )
         object.__setattr__(self, "ref_columns", ref_cols)
 
         if not (self.references == "self" or isinstance(self.references, type)):
-            raise TypeError(
+            raise SpecError(
                 "ForeignKey.references must be a FrameSpec subclass or the literal "
                 f"string 'self', got {self.references!r}"
             )
@@ -153,7 +154,7 @@ def _apply_foreign_keys(
 
         parent_keys = parent_df.select(ref_cols).drop_nulls().unique()
         if parent_keys.height == 0:
-            raise ValueError(
+            raise GenerationError(
                 f"ForeignKey '{fk.name}' cannot generate values: the referenced "
                 f"parent has no non-null rows for columns {ref_cols}"
             )

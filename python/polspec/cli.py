@@ -28,6 +28,7 @@ from pathlib import Path
 import polars as pl
 
 from polspec import FrameSpec
+from polspec.errors import CliError, PolspecError
 
 try:
     from importlib.metadata import version as _pkg_version
@@ -48,10 +49,6 @@ _DATA_READERS = {
     ".ipc": pl.read_ipc,
     ".feather": pl.read_ipc,
 }
-
-
-class CliError(Exception):
-    """A problem worth reporting as `error: ...` rather than a traceback."""
 
 
 # ---------------------------------------------------------------------------
@@ -404,6 +401,7 @@ This file is only overwritten by running that command again -- edit freely.
 from pathlib import Path
 
 from polspec import FrameSpec
+
 '''
 
 _PY_LOADER_HELPER = """
@@ -555,7 +553,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except CliError as exc:
+    except PolspecError as exc:
+        # The library's own complaints are the user's to fix, and their messages
+        # already say how; a traceback would only bury that.
         print(f"error: {exc}", file=sys.stderr)
         return 1
     except Exception as exc:  # noqa: BLE001 - top-level CLI error boundary

@@ -24,7 +24,8 @@ except ValidationError as err:
         print(problem)
 ```
 
-`ValidationError` subclasses `ValueError`. `err.errors` is the list of
+`ValidationError` is a `PolspecError` (and still a `ValueError`); see
+[Errors](../reference/errors.md). `err.errors` is the list of
 individual messages; `str(err)` is the same list formatted as a report.
 
 ## Options

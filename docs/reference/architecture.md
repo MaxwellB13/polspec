@@ -17,6 +17,8 @@ owns only the inner loop that fills arrays with values.
 | `rules` | `ColRule` — conditional values, and the pass that applies them |
 | `foreign_key` | `ForeignKey` — declaration, and the pass that makes generated keys consistent |
 | `engine` | Turning a spec into the tuple the Rust extension takes, and casting the result back |
+| `_ffi` | The one call into the Rust extension, with its errors re-raised as `GenerationError` |
+| `errors` | The `PolspecError` hierarchy |
 | `validation` | Checking a frame against a spec |
 | `framespec` | `FrameSpec` — collecting columns from a class body, and the public API |
 | `catspec` | `CatSpec` — a shared registry of enums and categoricals |

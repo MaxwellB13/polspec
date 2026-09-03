@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 import polars as pl
 
+from polspec.errors import SpecError
+
 
 @dataclass(eq=False, frozen=True, slots=True)
 class Check:
@@ -34,7 +36,7 @@ class Check:
 
     def __post_init__(self) -> None:
         if not isinstance(self.expr, pl.Expr):
-            raise TypeError(
+            raise SpecError(
                 f"Check expr must be a polars Expr (pl.Expr), got {type(self.expr).__name__}"
             )
         if self.name is None:

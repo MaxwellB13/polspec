@@ -6,7 +6,7 @@ import random
 
 import polars as pl
 
-from polspec import _polspec
+from polspec._ffi import generate_dataframe as _generate_dataframe
 from polspec.bound import Bound
 from polspec.constants import (
     _CATEGORICAL_PHYSICAL_CAPACITY,
@@ -21,6 +21,7 @@ from polspec.dtypes import (
     _bound_endpoint_to_physical,
     _generation_clamp_limits,
 )
+from polspec.errors import GenerationError
 from polspec.spec import ColSpec, _column_kind, _is_categorical_dtype
 
 
@@ -80,7 +81,7 @@ def _resolve_bounded_categorical(spec: ColSpec, seed: int) -> ColSpec:
         None,
         None,
     )
-    pool_df = _polspec.generate_dataframe([pool_spec], capacity, pool_seed)
+    pool_df = _generate_dataframe([pool_spec], capacity, pool_seed)
     # maintain_order=True: unique()'s default order isn't stable across calls,
     # which would make the same seed silently pick different pool[i] -> string
     # mappings and break reproducibility.
@@ -346,7 +347,7 @@ def _generate_random(
         for name, spec in columns.items()
     }
     rust_specs = [_to_rust_spec(name, spec) for name, spec in columns.items()]
-    raw_df = _polspec.generate_dataframe(rust_specs, n, seed)
+    raw_df = _generate_dataframe(rust_specs, n, seed)
     cast_exprs = [_cast_expr(name, spec) for name, spec in columns.items()]
     return raw_df.select(cast_exprs)
 
@@ -371,7 +372,7 @@ def _generate_cartesian(
             coverage_values[name] = values
 
     if not coverage_values:
-        raise ValueError(
+        raise GenerationError(
             "method='cartesian' needs at least one Enum, Boolean, or bounded "
             "numeric column to build coverage from"
         )
@@ -381,7 +382,7 @@ def _generate_cartesian(
         coverage_size *= len(values)
     if coverage_size > _MAX_CARTESIAN_ROWS:
         breakdown = ", ".join(f"{name}={len(v)}" for name, v in coverage_values.items())
-        raise ValueError(
+        raise GenerationError(
             f"cartesian coverage would need {coverage_size:,} rows ({breakdown}), "
             f"which exceeds the {_MAX_CARTESIAN_ROWS:,}-row safety cap"
         )

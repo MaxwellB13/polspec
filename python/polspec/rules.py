@@ -6,7 +6,8 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from polspec import _polspec
+from polspec._ffi import generate_dataframe as _generate_dataframe
+from polspec.errors import SpecError
 
 if TYPE_CHECKING:
     from polspec.spec import ColSpec
@@ -31,30 +32,30 @@ _CONDITION_OPS = (
 
 def _validate_condition(condition: dict) -> None:
     if not isinstance(condition, dict) or "column" not in condition:
-        raise TypeError(
+        raise SpecError(
             "ColRule.when must be a dict like {'column': 'enum_1', 'in': ['A', 'B']} "
             f"(supported condition keys: {', '.join(_CONDITION_OPS)})"
         )
     ops_present = [op for op in _CONDITION_OPS if op in condition]
     if len(ops_present) != 1:
-        raise ValueError(
+        raise SpecError(
             f"ColRule.when for column {condition['column']!r} must have exactly one of "
             f"{_CONDITION_OPS}, got {ops_present}"
         )
     if "between" in condition:
         b = condition["between"]
         if not (isinstance(b, (list, tuple)) and len(b) == 2 and b[0] <= b[1]):
-            raise ValueError(
+            raise SpecError(
                 f"ColRule.when 'between' condition requires a 2-element sequence [min, max] where min <= max, got {b!r}"
             )
     if "in" in condition and not isinstance(condition["in"], (list, tuple, set)):
-        raise TypeError(
+        raise SpecError(
             f"ColRule.when 'in' condition requires a collection, got {type(condition['in']).__name__}"
         )
     if "not_in" in condition and not isinstance(
         condition["not_in"], (list, tuple, set)
     ):
-        raise TypeError(
+        raise SpecError(
             f"ColRule.when 'not_in' condition requires a collection, got {type(condition['not_in']).__name__}"
         )
 
@@ -71,7 +72,7 @@ def _reject_colliding_choices(choices: tuple, label: str) -> None:
     for choice in choices:
         key = str(choice)
         if key in seen:
-            raise ValueError(
+            raise SpecError(
                 f"{label} {seen[key]!r} and {choice!r} both render as {key!r}, "
                 "so they cannot be told apart during generation or validation. "
                 "Give each choice a distinct string form."
@@ -106,7 +107,7 @@ def _condition_to_expr(condition: dict) -> pl.Expr:
         return column.is_null() if condition["is_null"] else column.is_not_null()
     if "is_not_null" in condition:
         return column.is_not_null() if condition["is_not_null"] else column.is_null()
-    raise ValueError(f"Unrecognized condition: {condition}")
+    raise SpecError(f"Unrecognized condition: {condition}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,7 +141,7 @@ class ColRule:
         object.__setattr__(self, "when", dict(self.when))
         if isinstance(self.choices, dict):
             if self.weights is not None:
-                raise ValueError(
+                raise SpecError(
                     "Cannot specify both a dict for choices and an explicit weights parameter"
                 )
             object.__setattr__(
@@ -154,17 +155,17 @@ class ColRule:
                     self, "weights", tuple(float(w) for w in self.weights)
                 )
         if not self.choices:
-            raise ValueError("ColRule.choices must not be empty")
+            raise SpecError("ColRule.choices must not be empty")
         _reject_colliding_choices(self.choices, "ColRule.choices")
         if self.weights is not None:
             if len(self.weights) != len(self.choices):
-                raise ValueError(
+                raise SpecError(
                     f"Length of weights ({len(self.weights)}) must match length of choices ({len(self.choices)})"
                 )
             if any(w < 0 for w in self.weights):
-                raise ValueError("Weights must all be non-negative")
+                raise SpecError("Weights must all be non-negative")
             if sum(self.weights) <= 0:
-                raise ValueError("Sum of weights must be positive")
+                raise SpecError("Sum of weights must be positive")
 
     def _expr(self) -> pl.Expr:
         return _condition_to_expr(self.when)
@@ -198,7 +199,7 @@ def _sample_choices(
         None,
         None,
     )
-    idx_df = _polspec.generate_dataframe([idx_spec], n, seed)
+    idx_df = _generate_dataframe([idx_spec], n, seed)
     idx_series = idx_df["__idx"].cast(pl.UInt32)
     return pl.Series(list(choices)).gather(idx_series)
 

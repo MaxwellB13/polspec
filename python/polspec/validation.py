@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import polars as pl
 
+from polspec.errors import ValidationError
+
 if TYPE_CHECKING:
     from polspec.bound import Bound
     from polspec.check import Check
@@ -27,14 +29,6 @@ if TYPE_CHECKING:
     from polspec.spec import ColSpec
 
 _MAX_SAMPLES = 5
-
-
-class ValidationError(ValueError):
-    """Raised when a DataFrame or LazyFrame fails validation against a FrameSpec/FrameSchema."""
-
-    def __init__(self, message: str, errors: list[str] | None = None) -> None:
-        super().__init__(message)
-        self.errors = errors or []
 
 
 @dataclass(frozen=True, slots=True)
