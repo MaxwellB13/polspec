@@ -72,6 +72,11 @@ features = ["pyo3/extension-module"]
 [tool.ruff]
 target-version = "py312"
 
+[tool.ruff.format]
+# Code fences in the docs align assignments and trailing comments on purpose;
+# leave prose alone and format only real Python.
+exclude = ["*.md"]
+
 [tool.ruff.lint]
 select = [
     "E", "F", "W",   # pycodestyle, pyflakes
