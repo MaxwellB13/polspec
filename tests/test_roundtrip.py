@@ -540,9 +540,9 @@ class RetypedSpec(FrameSpec):
 
 def test_with_catspec_preserves_column_constraints():
     """C10: re-typing changes the dtype and nothing else the column declared."""
-    original = RetypedSpec._columns["code"]
+    original = RetypedSpec.spec.columns["code"]
     retyped = RetypedSpec.with_catspec(CatSpec(enums={"code": ["a", "b", "c"]}))
-    retyped = retyped._columns["code"]
+    retyped = retyped.spec.columns["code"]
 
     assert isinstance(retyped.dtype, pl.Enum)
     for field in ("unique", "string_length", "nullable", "null_probability", "tags"):
@@ -551,7 +551,7 @@ def test_with_catspec_preserves_column_constraints():
 
 def test_with_catspec_leaves_untouched_columns_identical():
     retyped = RetypedSpec.with_catspec(CatSpec(enums={"code": ["a", "b", "c"]}))
-    assert retyped._columns["amount"] is RetypedSpec._columns["amount"]
+    assert retyped.spec.columns["amount"] is RetypedSpec.spec.columns["amount"]
 
 
 def test_with_catspec_drops_weights_it_cannot_carry():
@@ -567,7 +567,7 @@ def test_with_catspec_drops_weights_it_cannot_carry():
     messages = [str(w.message) for w in caught]
     assert any("dropping choices ['c']" in m for m in messages), messages
     assert any("dropping 3 weight" in m for m in messages), messages
-    assert retyped._columns["code"].weights is None
+    assert retyped.spec.columns["code"].weights is None
 
 
 def test_with_catspec_drops_choices_the_new_dtype_cannot_hold():
@@ -578,7 +578,7 @@ def test_with_catspec_drops_choices_the_new_dtype_cannot_hold():
 
     with pytest.warns(UserWarning, match=r"dropping choices \['c'\]"):
         retyped = Narrow.with_catspec(CatSpec(enums={"code": ["a", "b"]}))
-    assert retyped._columns["code"].choices is None
+    assert retyped.spec.columns["code"].choices is None
     assert_roundtrip(retyped)
 
 
@@ -587,7 +587,7 @@ def test_with_catspec_keeps_choices_the_new_dtype_still_covers():
         code = ColSpec(pl.String, choices=["a", "b"])
 
     retyped = Subset.with_catspec(CatSpec(enums={"code": ["a", "b", "c"]}))
-    assert retyped._columns["code"].choices == ("a", "b")
+    assert retyped.spec.columns["code"].choices == ("a", "b")
     assert set(assert_roundtrip(retyped)["code"].unique()) <= {"a", "b"}
 
 
@@ -596,7 +596,7 @@ def test_with_catspec_keeps_weights_that_still_fit():
         code = ColSpec(pl.String, choices=["a", "b", "c"], weights=[1.0, 1.0, 2.0])
 
     retyped = Weighted.with_catspec(CatSpec(enums={"code": ["a", "b", "c"]}))
-    assert retyped._columns["code"].weights == (1.0, 1.0, 2.0)
+    assert retyped.spec.columns["code"].weights == (1.0, 1.0, 2.0)
 
 
 def test_yaml_roundtrip_preserves_the_property(tmp_path):

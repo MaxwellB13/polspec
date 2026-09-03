@@ -90,7 +90,7 @@ def test_rust_engine_complaints_surface_as_generation_error():
     from polspec._ffi import generate_dataframe
     from polspec.engine import _to_rust_spec
 
-    rust_spec = list(_to_rust_spec("a", Spec._columns["a"]))
+    rust_spec = list(_to_rust_spec("a", Spec.spec.columns["a"]))
     rust_spec[-1] = {"mean": 0.0, "std": -1.0}
     with pytest.raises(GenerationError) as info:
         generate_dataframe([tuple(rust_spec)], 5, 1)

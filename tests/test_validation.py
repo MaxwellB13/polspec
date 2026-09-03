@@ -8,13 +8,12 @@ from polspec import (
     ColRule,
     ColSpec,
     ForeignKey,
-    FrameSchema,
     FrameSpec,
     ValidationError,
 )
 
 
-class ProduceInventory(FrameSchema):
+class ProduceInventory(FrameSpec):
     id = ColSpec(dtype=pl.Int64, bounds=Bound(1, 10_000), nullable=False)
     category = ColSpec(
         dtype=pl.Enum(["fruit", "vegetable", "meat"]),

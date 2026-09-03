@@ -20,14 +20,16 @@ owns only the inner loop that fills arrays with values.
 | `_ffi` | The one call into the Rust extension, with its errors re-raised as `GenerationError` |
 | `errors` | The `PolspecError` hierarchy |
 | `validation` | Checking a frame against a spec |
-| `framespec` | `FrameSpec` — collecting columns from a class body, and the public API |
+| `tablespec` | `TableSpec` — a spec as an immutable value, with its declaration-time checks and structural operations |
+| `framespec` | `FrameSpec` — the metaclass that builds a `TableSpec` from a class body, and the facade forwarding every verb to it |
+| `generation` | `generate`, `generate_batches` and the file sinks, as functions over a `TableSpec` |
 | `catspec` | `CatSpec` — a shared registry of enums and categoricals |
 | `serialization` | The YAML representation |
 | `profiler` | Inferring a spec from an existing DataFrame |
 | `report` | Rendering a spec as Markdown or Mermaid |
 | `cli` | The `polspec` command: profiling data into a spec, blank specs, and generated tests |
 
-The dependency direction is one-way: `spec` knows nothing about `framespec`,
+The dependency direction is one-way: `spec` and `tablespec` know nothing about `framespec`,
 and `report` is not reachable from either the generation or validation path.
 
 ## Generating

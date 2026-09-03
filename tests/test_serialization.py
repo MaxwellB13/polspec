@@ -59,13 +59,13 @@ def test_yaml_roundtrip_preserves_column_order():
             "name": "X",
             "columns": {
                 name: _colspec_to_yaml(spec)
-                for name, spec in YamlSource._columns.items()
+                for name, spec in YamlSource.spec.columns.items()
             },
         },
         sort_keys=False,
     )
     parsed = yaml.safe_load(yaml_text)
-    assert list(parsed["columns"].keys()) == list(YamlSource._columns.keys())
+    assert list(parsed["columns"].keys()) == list(YamlSource.spec.columns.keys())
 
 
 def test_yaml_roundtrip_preserves_rule_behavior(tmp_path):
@@ -183,7 +183,7 @@ def test_yaml_roundtrip_preserves_unique_together(tmp_path):
 
     LoadedCompound = FrameSpec.from_yaml(yaml_path)
     assert LoadedCompound.unique_together() == (("tenant_id", "user_id"),)
-    assert LoadedCompound._columns["email"].unique is True
+    assert LoadedCompound.spec.columns["email"].unique is True
 
     # Test validation with loaded spec
     df_valid = pl.DataFrame(
@@ -217,7 +217,7 @@ def test_yaml_nested_directory_creation_and_utf8(tmp_path):
     assert nested_file.exists()
 
     LoadedSpec = FrameSpec.from_yaml(nested_file)
-    assert LoadedSpec._columns["comment"].choices == ("café", "naïve", "🚀")
+    assert LoadedSpec.spec.columns["comment"].choices == ("café", "naïve", "🚀")
 
 
 def test_to_yaml_warns_when_column_validators_are_not_persisted(tmp_path):
@@ -229,7 +229,7 @@ def test_to_yaml_warns_when_column_validators_are_not_persisted(tmp_path):
         ValidatedSpec.to_yaml(yaml_path)
 
     Loaded = FrameSpec.from_yaml(yaml_path)
-    assert Loaded._columns["price"].validators == ()
+    assert Loaded.spec.columns["price"].validators == ()
 
 
 def _exec_python_spec(path):
@@ -283,7 +283,7 @@ def test_to_python_handles_non_identifier_column_names(tmp_path):
     RawNamed.to_python(py_path)
     Loaded = _exec_python_spec(py_path)["RawNamed"]
 
-    assert set(Loaded._columns) == {"Unit Price", "_id"}
+    assert set(Loaded.spec.columns) == {"Unit Price", "_id"}
     df = Loaded.generate(10, seed=1)
     Loaded.validate(df)
 
@@ -337,7 +337,7 @@ def test_to_python_warns_when_column_validators_are_not_persisted(tmp_path):
         ValidatedSpec.to_python(py_path)
 
     Loaded = _exec_python_spec(py_path)["ValidatedSpec"]
-    assert Loaded._columns["price"].validators == ()
+    assert Loaded.spec.columns["price"].validators == ()
 
 
 def test_to_python_preserves_unique_together_and_self_foreign_keys(tmp_path):

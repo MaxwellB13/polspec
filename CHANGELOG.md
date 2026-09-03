@@ -10,6 +10,17 @@ seed produces; see
 
 ### Added
 
+- `TableSpec`: the spec as an immutable value. A `FrameSpec` class body now
+  builds one, reachable as `Spec.spec`, and every verb (`generate`,
+  `validate`, `to_yaml`, `to_markdown`, ...) is a function over it in
+  `polspec.generation`, `polspec.validation`, `polspec.serialization` and
+  `polspec.report`. `TableSpec` offers `with_columns`, `drop`, `select`,
+  `rename`, `with_checks`, `with_foreign_keys`, `with_unique_together`,
+  `with_name` and `with_catspec`; `FrameSpec.from_spec` wraps one in a class.
+  See the new *Specs as values* guide.
+- `FrameSpec.col(name)` reaches a column whatever it is called.
+- `ForeignKey.references` may be a spec's name, for keys whose target is not
+  importable where the key is declared.
 - An exception hierarchy under `PolspecError`: `SpecError` for declarations
   that cannot mean anything, `ValidationError` for data that fails its spec,
   `GenerationError` when a spec cannot be turned into data (including every
@@ -20,6 +31,23 @@ seed produces; see
 
 ### Changed
 
+- **Breaking.** A column may now share a name with a `FrameSpec` method:
+  the metaclass takes `ColSpec` attributes out of the class namespace, so
+  `schema`, `tag` and friends no longer shadow anything and no longer warn.
+  The private `_columns`, `_checks`, `_unique_together` and `_foreign_keys`
+  class attributes are gone; read `Spec.spec.columns` and friends instead.
+- **Breaking.** `ForeignKey.references` is the target's *name* after
+  construction (the bound spec is available as `ForeignKey.target`), and
+  `references={...}` on `generate`/`validate` accepts the class, the
+  `TableSpec` or the name as key.
+- **Breaking.** Removed: the `FrameSchema` alias; `FrameSpec.generate_catspec`,
+  `write_catspec`, `infer_catspec` and `with_inferred_catspec` (use
+  `catspec()`, `catspec().to_yaml()`, `CatSpec.infer(...)` and
+  `with_catspec(CatSpec.infer(...))`); the `max_unique` and `bounds` alias
+  keyword arguments of `from_dataframe` (use `max_unique_enum` and
+  `calculate_bounds`).
+- `to_yaml` and `to_python` share one set of warnings about what a file
+  cannot hold.
 - **Breaking, mildly.** Errors that were bare `ValueError` or `TypeError`
   are now the subclass above. Each keeps the built-in type it replaced, so
   `except ValueError` still catches it; only code matching on the exact type

@@ -18,18 +18,11 @@ def profile_dataframe(
     *,
     weights: bool = False,
     max_unique_enum: int = 50,
-    max_unique: int | None = None,
     calculate_bounds: bool = True,
-    bounds: bool | None = None,
 ) -> dict[str, ColSpec]:
     """Infers ColSpec column definitions by profiling an existing DataFrame."""
     if not isinstance(df, pl.DataFrame):
         raise TypeError(f"Expected pl.DataFrame, got {type(df).__name__}")
-
-    if max_unique is not None:
-        max_unique_enum = max_unique
-    if bounds is not None:
-        calculate_bounds = bounds
 
     return {
         name: _profile_column(

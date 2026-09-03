@@ -13,13 +13,14 @@ a new kind of check is a new class rather than an edit in two distant places.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 import polars as pl
 
-from polspec.errors import ValidationError
+from polspec.errors import SpecError, ValidationError
+from polspec.tablespec import TableSpec, resolve_references
 
 if TYPE_CHECKING:
     from polspec.bound import Bound
@@ -553,11 +554,7 @@ def _foreign_key_errors(
         if not count:
             continue
         raw_samples = stats["samples"][0]
-        target_label = (
-            "self"
-            if target_lf is None
-            else getattr(fk.references, "__name__", str(fk.references))
-        )
+        target_label = "self" if target_lf is None else fk.references
         errors.append(
             f"ForeignKey '{fk.name}' violated ({local_cols} -> "
             f"{target_label}.{ref_cols}): found {count} row(s) with no "
@@ -699,3 +696,107 @@ def _apply_transformations(
     present = lf.collect_schema().names()
     declared = [c for c in columns if c in present]
     return lf.select(declared + [c for c in present if c not in columns])
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+
+
+@overload
+def validate(spec: TableSpec, df: pl.DataFrame, **options: Any) -> pl.DataFrame: ...
+
+
+@overload
+def validate(spec: TableSpec, df: pl.LazyFrame, **options: Any) -> pl.LazyFrame: ...
+
+
+def validate(
+    spec: TableSpec,
+    df: pl.DataFrame | pl.LazyFrame,
+    *,
+    extra_cols: Literal["drop", "allow", "raise"] = "raise",
+    missing_cols: Literal["add", "allow", "raise"] = "raise",
+    strict_dtypes: bool = False,
+    validate_rules: bool = True,
+    validate_validators: bool = True,
+    validate_unique: bool = True,
+    validate_checks: bool = True,
+    validate_foreign_keys: bool = True,
+    references: Mapping[Any, pl.DataFrame | pl.LazyFrame] | None = None,
+    cast: bool = False,
+    streaming: bool = False,
+) -> pl.DataFrame | pl.LazyFrame:
+    """Validates a DataFrame or LazyFrame against `spec`.
+
+    Parameters
+    ----------
+    df : pl.DataFrame | pl.LazyFrame
+        The frame to validate. A LazyFrame comes back as a LazyFrame.
+    extra_cols : {"drop", "allow", "raise"}
+        Columns present in `df` but not declared: raise a ValidationError
+        naming them, drop them from the returned frame, or keep them.
+    missing_cols : {"add", "allow", "raise"}
+        Declared columns absent from `df`: raise, add them as nulls of the
+        declared dtype, or skip them.
+    strict_dtypes : bool
+        Require identical dtypes, rather than accepting a compatible one
+        (a narrower integer, a String where an Enum was declared).
+    validate_rules, validate_validators, validate_unique, validate_checks,
+    validate_foreign_keys : bool
+        Switch off individual kinds of check.
+    references : mapping
+        Parent frames for foreign keys that reference another spec, keyed by
+        that spec, its FrameSpec class, or its name. Not needed for
+        `references="self"` keys, which are checked against `df` itself.
+    cast : bool
+        Cast validated columns to their declared dtype in the returned frame.
+    streaming : bool
+        Use Polars' streaming engine for the aggregation.
+
+    Returns the validated, optionally transformed frame. Raises
+    `ValidationError` collecting every violation across every column, or
+    `ValueError` for an invalid option or a cross-spec foreign key with no
+    entry in `references`.
+    """
+    if not spec.columns:
+        raise SpecError(f"{spec.name} declares no ColSpec columns")
+
+    resolved: list[tuple[ForeignKey, pl.LazyFrame | None]] = []
+    if validate_foreign_keys:
+        parents = resolve_references(
+            references, lambda f: f.lazy() if isinstance(f, pl.DataFrame) else f
+        )
+        for fk in spec.foreign_keys:
+            if fk.references == "self":
+                resolved.append((fk, None))
+                continue
+            parent = parents.get(fk.references)
+            if parent is None:
+                raise ValueError(
+                    f"{spec.name}.validate(): ForeignKey {fk.name!r} references "
+                    f"{fk.references!r}, but no DataFrame for it was supplied via "
+                    "validate(references={...})"
+                )
+            resolved.append((fk, parent))
+
+    return _validate_dataframe(
+        dict(spec.columns),
+        spec.name,
+        df,
+        _Options(
+            extra_cols=extra_cols,
+            missing_cols=missing_cols,
+            strict_dtypes=strict_dtypes,
+            rules=validate_rules,
+            validators=validate_validators,
+            unique=validate_unique,
+            checks=validate_checks,
+            foreign_keys=validate_foreign_keys,
+            cast=cast,
+            streaming=streaming,
+        ),
+        checks=spec.checks,
+        unique_together=spec.unique_together,
+        foreign_keys=resolved,
+    )

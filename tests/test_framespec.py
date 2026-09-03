@@ -31,8 +31,8 @@ def test_subclass_attribute_overriding():
         b = None  # removes column b
         c = ColSpec(dtype=pl.Float64)
 
-    assert "b" not in DerivedSpec._columns
-    assert set(DerivedSpec._columns.keys()) == {"a", "c"}
+    assert "b" not in DerivedSpec.spec.columns
+    assert set(DerivedSpec.spec.columns.keys()) == {"a", "c"}
     df = DerivedSpec.generate(100, seed=42)
     assert set(df.columns) == {"a", "c"}
 
@@ -40,15 +40,11 @@ def test_subclass_attribute_overriding():
 def test_modular_subpackage_imports():
     from polspec import (
         ColSpec,
-        FrameSchema,
         FrameSpec,
         profile_dataframe,
     )
     from polspec.bound import Bound as BoundDirect
     from polspec.engine import _generate_cartesian, _generate_random
-    from polspec.framespec import (
-        FrameSchema as FrameSchemaDirect,
-    )
     from polspec.framespec import (
         FrameSpec as FrameSpecDirect,
     )
@@ -67,8 +63,6 @@ def test_modular_subpackage_imports():
     assert ColRule is ColRuleDirect
     assert ColSpec is ColSpecDirect
     assert FrameSpec is FrameSpecDirect
-    assert FrameSchema is FrameSchemaDirect
-    assert FrameSchema is FrameSpec
     assert ValidationError is ValidationErrorDirect
     assert profile_dataframe is profile_dataframe_direct
     assert callable(_colspec_to_yaml)
@@ -166,8 +160,8 @@ def test_colspec_and_framespec_tags(tmp_path):
         "total_sum",
         "feature_1",
     ]
-    assert LoadedTagged._columns["id_col"].tags == ("index",)
-    assert LoadedTagged._columns["agg_val"].tags == ("aggregate", "metric")
+    assert LoadedTagged.spec.columns["id_col"].tags == ("index",)
+    assert LoadedTagged.spec.columns["agg_val"].tags == ("aggregate", "metric")
 
 
 # ---------------------------------------------------------------------------
@@ -311,4 +305,4 @@ def test_framespec_allows_validator_referencing_only_its_own_column():
     class GoodSpec(FrameSpec):
         a = ColSpec(pl.Int64, validators=[pl.col("a") > 0])
 
-    assert len(GoodSpec._columns["a"].validators) == 1
+    assert len(GoodSpec.spec.columns["a"].validators) == 1

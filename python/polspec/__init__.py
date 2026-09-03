@@ -12,10 +12,11 @@ from polspec.errors import (
     ValidationError,
 )
 from polspec.foreign_key import ForeignKey
-from polspec.framespec import FrameSchema, FrameSpec
+from polspec.framespec import FrameSpec
 from polspec.profiler import profile_dataframe
 from polspec.rules import ColRule
 from polspec.spec import ColSpec
+from polspec.tablespec import TableSpec
 
 __all__ = [
     "Bound",
@@ -24,13 +25,13 @@ __all__ = [
     "ColRule",
     "ColSpec",
     "ForeignKey",
-    "FrameSchema",
     "FrameSpec",
     "GenerationError",
     "PolspecError",
     "RegistryError",
     "SerializationError",
     "SpecError",
+    "TableSpec",
     "ValidationError",
     "profile_dataframe",
 ]
