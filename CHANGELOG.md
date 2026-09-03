@@ -10,6 +10,17 @@ seed produces; see
 
 ### Added
 
+- Spec files carry a `version:` (now 2). Files from version 1 are migrated
+  on read; a file from a newer polspec is refused with a clear message. A
+  key the reader does not know is an error naming the closest known key;
+  `from_yaml(..., strict=False)` downgrades it to a warning.
+- Foreign keys to other specs are written to YAML and Python as the target's
+  name and read back unresolved, instead of being dropped with a warning.
+- `polspec.serialization` is a package driven by one field registry
+  (`fields.py`): YAML in both directions, generated Python, and the
+  `import datetime` decision all derive from it, and a test asserts every
+  dataclass field has an entry. `to_dict`/`from_dict` are public.
+- `CatSpec` files keep choices recorded for plain string columns.
 - `polspec.col()`, a small predicate language for rules, validators and
   checks: `col("total") >= col("subtotal")`, `col("email").str.contains("@")`,
   `is_in`, `is_between`, `is_null`, `&`/`|`/`~`, arithmetic, and string
@@ -41,6 +52,12 @@ seed produces; see
 
 ### Changed
 
+- **Breaking.** `ColSpec.distribution` and `distribution_params` are stored
+  in canonical form (`"exp"` becomes `"exponential"`, `mu`/`sigma` become
+  `mean`/`std`, and so on), so spec files are canonical. Every alias is
+  still accepted when declaring.
+- **Breaking.** An unrecognised physical dtype in a `CatSpec` entry is now a
+  `SerializationError` instead of silently becoming `UInt32`.
 - **Breaking.** `ColRule.when` is a predicate after construction rather
   than a dict (`rule.when.root_names()` lists the columns it reads); rules
   in YAML are written in the predicate data form, and the old dict form is

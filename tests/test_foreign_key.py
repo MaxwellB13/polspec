@@ -195,19 +195,28 @@ def test_foreign_key_yaml_roundtrip_self_reference(tmp_path):
         Loaded.validate(df_invalid)
 
 
-def test_to_yaml_warns_when_foreign_keys_to_other_specs_are_not_persisted(tmp_path):
-    class ChildSpec(FrameSpec):
+def test_to_yaml_persists_foreign_keys_to_other_specs_by_name(tmp_path, recwarn):
+    class Orders(FrameSpec):
+        order_id = ColSpec(pl.Int64, unique=True)
         customer_id = ColSpec(pl.Int64)
         __foreign_keys__ = [
             ForeignKey("customer_id", references=CustomerFkSpec, ref_columns="id")
         ]
 
-    yaml_path = tmp_path / "child_spec.yaml"
-    with pytest.warns(UserWarning, match="fk_customer_id__CustomerFkSpec"):
-        ChildSpec.to_yaml(yaml_path)
+    path = tmp_path / "orders.yaml"
+    Orders.to_yaml(path)
+    assert [w for w in recwarn if "ForeignKey" in str(w.message)] == []
+    assert "references: CustomerFkSpec" in path.read_text()
 
-    Loaded = FrameSpec.from_yaml(yaml_path)
-    assert Loaded.foreign_keys() == ()
+    loaded = FrameSpec.from_yaml(path)
+    fk = loaded.spec.foreign_keys[0]
+    assert fk.references == "CustomerFkSpec"
+    assert fk.ref_columns == ("id",)
+    assert fk.target is None  # a name, until a spec of that name is supplied
+    parent = CustomerFkSpec.generate(20, seed=1)
+    child = loaded.generate(50, seed=2, references={"CustomerFkSpec": parent})
+    assert set(child["customer_id"].to_list()) <= set(parent["id"].to_list())
+    loaded.validate(child, references={CustomerFkSpec: parent})
 
 
 # ---------------------------------------------------------------------------

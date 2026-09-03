@@ -155,24 +155,19 @@ if __name__ == "__main__":
     )
     print("Cartesian coverage rows:", coverage_sample.height)
 
-    # Checks, validators and rules written with col() are written to the
-    # file and read back. A cross-spec ForeignKey points at a Python class
-    # with no stable name in a standalone file, so to_yaml() warns about it
-    # and drops it; from_yaml() recovers by subclassing and re-declaring it.
-    # Written to a temporary directory so running this script never dirties
-    # the repository.
+    # Everything Orders declares survives a trip through a file: rules,
+    # the check and the validator (written with col()), and the foreign key,
+    # which is written as the *name* of the spec it points at. Loading gives
+    # it back unresolved, and supplying Customers by name, class or spec at
+    # generate/validate time binds it again.
     scratch = Path(tempfile.mkdtemp(prefix="polspec-example-"))
     Orders.to_yaml(scratch / "orders_generated.yaml")
     LoadedOrders = FrameSpec.from_yaml(scratch / "orders_generated.yaml")
+    print("Loaded foreign key target:", LoadedOrders.spec.foreign_keys[0].references)
 
-    class OrdersFromYaml(LoadedOrders):
-        __foreign_keys__ = [
-            ForeignKey("customer_id", references=Customers, ref_columns="id"),
-        ]
-
-    OrdersFromYaml.validate(
-        OrdersFromYaml.generate(100, seed=7, references={Customers: customers}),
-        references={Customers: customers},
+    LoadedOrders.validate(
+        LoadedOrders.generate(100, seed=7, references={Customers: customers}),
+        references={"Customers": customers},
         validate_checks=False,
     )
 

@@ -120,8 +120,6 @@ produce nothing.
   fewer nulls than `null_probability` suggests.
 - **`generate()` silently ignores a foreign key it has no parent data for**,
   while `validate()` raises for the same key.
-- **`CatSpec.to_dict()` drops choices not attached to a categorical**, so
-  choices recorded for plain string columns do not survive a YAML round-trip.
 - **Case-insensitive registry lookup** means a column named `status` binds to a
   registry entry named `STATUS`; entries differing only in case are ambiguous.
 - **`to_mermaid` marks every `unique=True` column `PK`**, so several unique

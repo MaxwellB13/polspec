@@ -12,6 +12,7 @@ from polspec.bound import Bound
 from polspec.check import Check
 from polspec.constants import _DEFAULT_NULL_PROBABILITY
 from polspec.distributions import (
+    canonicalize_params,
     normalize_distribution,
     validate_distribution_params,
 )
@@ -216,8 +217,12 @@ class ColSpec:
                     f"dtypes, got {self.dtype!r}"
                 )
             name = normalize_distribution(self.distribution)
+            object.__setattr__(self, "distribution", name)
             if self.distribution_params is not None:
-                params = {str(k): float(v) for k, v in self.distribution_params.items()}
+                params = canonicalize_params(
+                    name,
+                    {str(k): float(v) for k, v in self.distribution_params.items()},
+                )
                 object.__setattr__(self, "distribution_params", params)
                 validate_distribution_params(name, params)
 

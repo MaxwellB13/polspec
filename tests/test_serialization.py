@@ -311,22 +311,26 @@ def test_to_python_warns_when_checks_are_not_persisted(tmp_path):
     assert Loaded.checks() == ()
 
 
-def test_to_python_warns_when_foreign_keys_to_other_specs_are_not_persisted(tmp_path):
-    class ParentSpec(FrameSpec):
+def test_to_python_persists_foreign_keys_to_other_specs_by_name(tmp_path, recwarn):
+    class Parent(FrameSpec):
         id = ColSpec(pl.Int64, unique=True)
 
-    class ChildSpec(FrameSpec):
-        customer_id = ColSpec(pl.Int64)
+    class Child(FrameSpec):
+        parent_id = ColSpec(pl.Int64)
         __foreign_keys__ = [
-            ForeignKey("customer_id", references=ParentSpec, ref_columns="id")
+            ForeignKey("parent_id", references=Parent, ref_columns="id")
         ]
 
-    py_path = tmp_path / "child_spec.py"
-    with pytest.warns(UserWarning, match="fk_customer_id__ParentSpec"):
-        ChildSpec.to_python(py_path)
-
-    Loaded = _exec_python_spec(py_path)["ChildSpec"]
-    assert Loaded.foreign_keys() == ()
+    path = tmp_path / "child.py"
+    Child.to_python(path)
+    assert [w for w in recwarn if "ForeignKey" in str(w.message)] == []
+    source = path.read_text()
+    assert (
+        "ForeignKey(columns=['parent_id'], references='Parent', ref_columns=['id'])"
+        in source
+    )
+    loaded = _exec_python_spec(path)["Child"]
+    assert loaded.spec.foreign_keys[0].references == "Parent"
 
 
 def test_to_python_warns_when_column_validators_are_not_persisted(tmp_path):

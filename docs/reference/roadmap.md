@@ -86,11 +86,11 @@ That ordering is already implied by the foreign keys those specs declare.
 Walking the graph and returning the whole consistent set from one call is
 probably the single most useful thing on this page.
 
-**Cross-spec foreign keys cannot be persisted.** `to_yaml()` warns and drops
-them, because a `FrameSpec` subclass has no stable name a standalone file could
-resolve later — one of only three entries marked **no** in the round-trip table
-in [YAML specs](../guide/yaml.md). A registry of a project's specs is precisely
-the missing name.
+**Cross-spec foreign keys are written by name and resolved by nothing.**
+`to_yaml()` writes `references: Customers`; a spec loaded from that file
+carries the name and checks nothing about it until a spec called `Customers`
+is supplied by hand. A registry of a project's specs is what would resolve
+it automatically.
 
 **`to_mermaid()` draws one entity.** The relationships *between* specs — the
 reason to draw an ER diagram at all — aren't available to a method that can

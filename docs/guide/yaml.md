@@ -14,6 +14,7 @@ The output is plain, readable YAML — defaults are omitted so the file shows
 only what you actually declared:
 
 ```yaml
+version: 2
 name: Orders
 columns:
   order_id:
@@ -35,6 +36,13 @@ unique_together:
 
 An open-ended bound writes as `null` and reads back unchanged.
 
+`version:` records the file format that wrote the file. A file from an
+earlier version is migrated on the way in; a file from a later polspec is
+refused with a message saying so. A key the reader does not know is an
+error naming the closest known key, since silently reading a misspelt option
+as its default is the worst outcome -- pass `strict=False` to
+`from_yaml` to downgrade that to a warning.
+
 ## What survives a round-trip
 
 | | Round-trips |
@@ -44,15 +52,15 @@ An open-ended bound writes as `null` and reads back unchanged.
 | `choices`, `weights`, `distribution`, `distribution_params` | yes |
 | `rules` (`ColRule`) | yes |
 | `__unique_together__` | yes |
-| `__foreign_keys__` with `references="self"` | yes |
-| `__foreign_keys__` referencing another spec | **no** |
+| `__foreign_keys__`, self-referencing or to another spec (by name) | yes |
 | `__checks__` and `ColSpec.validators` written with `col()` | yes |
 | `__checks__` and `ColSpec.validators` over a raw `pl.Expr` | **no** |
 
-What cannot be written is either an arbitrary `polars.Expr`, which Polars
-cannot serialize stably, or a Python class with no stable name in a
-standalone file. `to_yaml()` warns about each, naming exactly what will be
-lost:
+A foreign key to another spec is written as that spec's *name*; nothing
+checks it until a spec of that name is supplied, through `references=` on
+`generate`/`validate` or a registry. What cannot be written is an arbitrary
+`polars.Expr`, which Polars cannot serialize stably. `to_yaml()` warns about
+each, naming exactly what will be lost:
 
 ```text
 UserWarning: Orders declares 1 __checks__ ('total_covers_subtotal') that cannot
@@ -70,8 +78,9 @@ class Orders(Loaded):
     __checks__ = [Check(pl.col("total") >= pl.col("subtotal"), name="total_covers_subtotal")]
 ```
 
-Columns, rules, unique keys, and any check or validator written with `col()`
-come from the file; only raw-expression parts need re-declaring in Python.
+Columns, rules, unique keys, foreign keys, and any check or validator
+written with `col()` come from the file; only raw-expression parts need
+re-declaring in Python.
 A check in YAML is its predicate in data form:
 
 ```yaml
