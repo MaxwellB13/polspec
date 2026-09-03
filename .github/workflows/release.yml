@@ -7,16 +7,16 @@ on:
 
 jobs:
   check-version:
-    name: Tag matches Cargo.toml version
+    name: Tag matches pyproject.toml version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Compare tag to Cargo.toml
+      - name: Compare tag to pyproject.toml
         run: |
           tag="${GITHUB_REF_NAME#v}"
-          crate="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)"
-          if [ "$tag" != "$crate" ]; then
-            echo "Tag v$tag does not match Cargo.toml version $crate" >&2
+          declared="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          if [ "$tag" != "$declared" ]; then
+            echo "Tag v$tag does not match pyproject.toml version $declared" >&2
             exit 1
           fi
 

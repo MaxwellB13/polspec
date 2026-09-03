@@ -1,8 +1,8 @@
 [project]
 name = "polspec"
-# The version is read from Cargo.toml (maturin honours `dynamic = ["version"]`),
-# so there is exactly one place to bump it.
-dynamic = ["version"]
+# The one place the version is set. Bump with `uv version --bump patch|minor|major`.
+# maturin gives this field precedence over Cargo.toml's, which stays a placeholder.
+version = "0.1.5"
 description = "Declare a Polars schema once, then generate data from it and validate data against it."
 readme = "README.md"
 authors = [

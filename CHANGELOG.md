@@ -8,6 +8,8 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-09-03
+
 ### Added
 
 - `python/polspec/py.typed`, so type checkers use the package's annotations.
@@ -16,7 +18,7 @@ seed produces; see
   (foreign keys, shared categories, rules, checks, a YAML-declared spec). It
   runs in CI as a smoke test.
 - A release-workflow job that refuses a `vX.Y.Z` tag whose version does not
-  match `Cargo.toml`.
+  match `pyproject.toml`.
 - CI now runs `ruff check` with a wider rule set, `ruff format --check`, `cargo fmt --check`,
   `cargo clippy -D warnings` and `cargo test`, tests on macOS as well as
   Linux and Windows, and tests against the newest Polars release inside the
@@ -32,8 +34,8 @@ seed produces; see
 
 ### Changed
 
-- The package version is read from `Cargo.toml`; `pyproject.toml` declares
-  `dynamic = ["version"]`.
+- The crate version in `Cargo.toml` is a placeholder; `pyproject.toml` is the
+  only place the version is set, so `uv version --bump` works.
 - The `parquet`, `ipc` and `all` extras (all identical) are replaced by a
   single `arrow` extra. Install with `polspec[arrow]` for the Parquet and
   Arrow IPC sinks.
@@ -102,7 +104,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/MaxwellB13/polspec/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/MaxwellB13/polspec/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/MaxwellB13/polspec/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/MaxwellB13/polspec/compare/v0.1.1...v0.1.2
