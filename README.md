@@ -132,14 +132,15 @@ Example results (illustrative; your hardware will differ):
 
 | n_rows      | polspec (Rust) |   NumPy |  Python |  Polspec v NumPy Speedup |
 |-------------|----------------|--------:|--------:|-------------------------:|
-| 1,000       | 0.0003s        | 0.0008s |  0.016s |                     2.6x |  
-| 10,000      | 0.0007s        | 0.0052s |  0.153s |                     8.4x |
-| 100,000     | 0.0026s        | 0.0488s |  0.900s |                    18.7x |
-| 1,000,000   | 0.0085s        | 0.4836s | 1.4391s |                    57.8x |
-| 5,000,000   | 0.0318s        | 2.4141s | skipped |                    75.9x |
-| 20,000,000  | 0.0850s        | 9.6097s | skipped |                   113.0x |
+| 1,000       | 0.0003s        | 0.0008s | 0.0016s |                     2.7x |
+| 10,000      | 0.0006s        | 0.0052s | 0.0145s |                     8.7x |
+| 100,000     | 0.0027s        | 0.0480s | 0.1447s |                    17.8x |
+| 1,000,000   | 0.0083s        | 0.4867s | 1.4862s |                    58.6x |
+| 5,000,000   | 0.0256s        | 2.4326s | skipped |                    95.0x |
+| 20,000,000  | 0.0827s        | 9.7523s | skipped |                   117.9x |
 
-*Ran on Intel 13900K + 64GB DDR5 RAM*
+*Measured 2026-09-03 on an Intel 13900K with 64GB DDR5; the same run backs the table in
+[Comparison](https://maxwellb13.github.io/polspec/comparison/).*
 
 Notes
 - All three implementations emit a Polars `DataFrame` with the same schema to keep the comparison fair. The NumPy version uses a fixed-width trick for strings (since vectorized ragged strings are not available), and the pure-Python version builds lists then constructs a `DataFrame`.
@@ -150,11 +151,15 @@ Notes
 After the install steps above:
 
 ```bash
-pytest
-ruff check . && ruff format --check .
-cargo clippy --release
+uv run pytest
+uv run ruff check . && uv run ruff format --check .
+cargo test --release && cargo clippy --release
+uv run python examples/related_specs.py
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for conventions and the release
+process, and [CHANGELOG.md](CHANGELOG.md) for what changed.
 
 ## License
 
-Not yet specified.
+[MIT](LICENSE).

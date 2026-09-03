@@ -35,6 +35,7 @@ Homepage = "https://maxwellb13.github.io/polspec/"
 Documentation = "https://maxwellb13.github.io/polspec/"
 Repository = "https://github.com/MaxwellB13/polspec"
 Issues = "https://github.com/MaxwellB13/polspec/issues"
+Changelog = "https://github.com/MaxwellB13/polspec/blob/main/CHANGELOG.md"
 
 [project.scripts]
 polspec = "polspec.cli:main"
@@ -69,4 +70,4 @@ features = ["pyo3/extension-module"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["RUF012", "DTZ001", "S102"]
-"example/*" = ["RUF012", "DTZ001"]
+"examples/*" = ["RUF012", "DTZ001"]
