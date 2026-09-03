@@ -1,6 +1,8 @@
 [project]
 name = "polspec"
-version = "0.1.4"
+# The version is read from Cargo.toml (maturin honours `dynamic = ["version"]`),
+# so there is exactly one place to bump it.
+dynamic = ["version"]
 description = "Declare a Polars schema once, then generate data from it and validate data against it."
 readme = "README.md"
 authors = [
@@ -14,29 +16,33 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Rust",
     "Topic :: Software Development :: Testing",
     "Typing :: Typed",
 ]
 dependencies = [
-    "polars>=1.44.1",
+    # Upper bound: the Rust extension links pyo3-polars, which is coupled to a
+    # specific Polars release line. Raise the bound deliberately, not by accident.
+    "polars>=1.44.1,<2",
     "pyyaml>=6.0.3",
 ]
 
 [project.urls]
 Homepage = "https://maxwellb13.github.io/polspec/"
 Documentation = "https://maxwellb13.github.io/polspec/"
-Repository = "https://github.com/MaxwellB13/polars-spec"
+Repository = "https://github.com/MaxwellB13/polspec"
+Issues = "https://github.com/MaxwellB13/polspec/issues"
 
 [project.scripts]
 polspec = "polspec.cli:main"
 
 [project.optional-dependencies]
-parquet = ["pyarrow>=14.0.0"]
-ipc = ["pyarrow>=14.0.0"]
-all = [
-    "pyarrow>=14.0.0",
-]
+# PyArrow backs the incremental Parquet and Arrow IPC sinks; everything else
+# runs on Polars alone.
+arrow = ["pyarrow>=14.0.0"]
 
 [dependency-groups]
 bench = [

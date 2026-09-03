@@ -85,13 +85,13 @@ compiled Rust extension, so this needs a Rust toolchain and
 ```bash
 git clone https://github.com/MaxwellB13/polspec.git
 cd polspec
-uv sync --group dev        # or: pip install -e ".[all]" && pip install maturin
+uv sync --group dev        # or: pip install -e ".[arrow]" && pip install maturin
 maturin develop --release
 ```
 
 `maturin develop` builds the extension and installs the package into your
 active environment, editable. Writing Parquet or Arrow IPC needs PyArrow,
-included via `[all]`/the `dev` group above.
+included via `[arrow]`/the `dev` group above.
 
 ## Where to go next
 

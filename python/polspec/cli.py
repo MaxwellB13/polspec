@@ -68,7 +68,7 @@ def _read_data_file(path: Path, sample: int | None) -> pl.DataFrame:
     try:
         df = reader(path)
     except ImportError as exc:
-        hint = ' Try: pip install "polspec[all]"' if "pyarrow" in str(exc) else ""
+        hint = ' Try: pip install "polspec[arrow]"' if "pyarrow" in str(exc) else ""
         raise CliError(f"could not read {path}: {exc}.{hint}") from exc
     except Exception as exc:
         raise CliError(f"could not read {path}: {exc}") from exc
