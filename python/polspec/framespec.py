@@ -13,6 +13,7 @@ import yaml
 from polspec.catspec import DEFAULT_EXCLUDE_PATTERNS, CatSpec
 from polspec.check import Check
 from polspec.engine import _generate_cartesian, _generate_random
+from polspec.errors import SerializationError, SpecError
 from polspec.foreign_key import ForeignKey, _apply_foreign_keys
 from polspec.profiler import profile_dataframe
 from polspec.report import framespec_to_markdown, framespec_to_mermaid
@@ -55,14 +56,14 @@ def _collect_declarations[T](
         elif isinstance(val, (list, tuple, Sequence)):
             items = val
         else:
-            raise TypeError(
+            raise SpecError(
                 f"{attr_names[0]} must be a {declared_type.__name__} or sequence "
                 f"of {declared_type.__name__} instances, got {type(val).__name__}"
             )
 
         for item in items:
             if not isinstance(item, declared_type):
-                raise TypeError(
+                raise SpecError(
                     f"Items in {attr_names[0]} must be {declared_type.__name__} "
                     f"instances, got {type(item).__name__}"
                 )
@@ -204,7 +205,7 @@ class FrameSpec:
                         None,
                     )
                     if colliding_attr is not None:
-                        raise ValueError(
+                        raise SpecError(
                             f"Columns {colliding_attr!r} and {name!r} on "
                             f"{cls.__name__} both resolve to the column name "
                             f"{final_name!r} (via col_name). Give each a "
@@ -241,19 +242,19 @@ class FrameSpec:
             declared = vars(base).get("__columns__")
             if declared is not None:
                 if not isinstance(declared, Mapping):
-                    raise TypeError(
+                    raise SpecError(
                         "__columns__ must be a mapping of column name to "
                         f"ColSpec, got {type(declared).__name__}"
                     )
                 for name, value in declared.items():
                     if not isinstance(value, ColSpec):
-                        raise TypeError(
+                        raise SpecError(
                             f"__columns__[{name!r}] must be a ColSpec, got "
                             f"{type(value).__name__}"
                         )
                     key = str(name)
                     if value.col_name is not None and value.col_name != key:
-                        raise ValueError(
+                        raise SpecError(
                             f"__columns__[{key!r}] declares col_name="
                             f"{value.col_name!r}, which conflicts with its "
                             "__columns__ key. col_name only applies to columns "
@@ -302,11 +303,11 @@ class FrameSpec:
                         if t not in out:
                             out.append(t)
                     else:
-                        raise TypeError(
+                        raise SpecError(
                             f"Elements of unique_together must be strings or sequences of strings, got {type(item).__name__}"
                         )
         else:
-            raise TypeError(
+            raise SpecError(
                 f"unique_together must be a sequence of column names or sequence of sequences, got {type(val).__name__}"
             )
 
@@ -315,7 +316,7 @@ class FrameSpec:
         for group in cls._unique_together:
             for col_name in group:
                 if col_name not in cls._columns:
-                    raise ValueError(
+                    raise SpecError(
                         f"Composite unique key {group} references unknown column {col_name!r}"
                     )
 
@@ -325,7 +326,7 @@ class FrameSpec:
         for check in cls._checks:
             prior = seen.get(check.name)
             if prior is not None:
-                raise ValueError(
+                raise SpecError(
                     f"Duplicate Check name {check.name!r} on {cls.__name__}: "
                     f"{prior.expr!r} vs {check.expr!r}. Give each Check a "
                     "distinct name, or reuse the exact same Check instance/"
@@ -346,7 +347,7 @@ class FrameSpec:
         for fk in cls._foreign_keys:
             prior = seen.get(fk.name)
             if prior is not None and prior != fk:
-                raise ValueError(
+                raise SpecError(
                     f"Duplicate ForeignKey name {fk.name!r} on {cls.__name__} "
                     f"points at two different targets/columns. Give each "
                     "ForeignKey a distinct name."
@@ -355,14 +356,14 @@ class FrameSpec:
 
             for col in fk.columns:
                 if col not in cls._columns:
-                    raise ValueError(
+                    raise SpecError(
                         f"ForeignKey {fk.name!r} on {cls.__name__!r} references "
                         f"unknown local column {col!r}"
                     )
 
             target = cls if fk.references == "self" else fk.references
             if not (isinstance(target, type) and hasattr(target, "_columns")):
-                raise TypeError(
+                raise SpecError(
                     f"ForeignKey {fk.name!r} on {cls.__name__!r}: references must "
                     f"be a FrameSpec subclass or 'self', got {fk.references!r}"
                 )
@@ -371,7 +372,7 @@ class FrameSpec:
 
             for ref_col in fk.ref_columns:
                 if ref_col not in target_columns:
-                    raise ValueError(
+                    raise SpecError(
                         f"ForeignKey {fk.name!r} on {cls.__name__!r} references "
                         f"unknown column {ref_col!r} on {target_name!r}"
                     )
@@ -382,7 +383,7 @@ class FrameSpec:
                     _column_kind(target_columns[ref_col].dtype)
                 )
                 if local_kind != ref_kind:
-                    raise ValueError(
+                    raise SpecError(
                         f"ForeignKey {fk.name!r} on {cls.__name__!r}: column "
                         f"{col!r} ({cls._columns[col].dtype}) is not "
                         f"dtype-compatible with referenced column {ref_col!r} "
@@ -410,7 +411,7 @@ class FrameSpec:
             for rule in spec.rules:
                 ref_col = rule.when.get("column")
                 if ref_col not in cls._columns:
-                    raise ValueError(
+                    raise SpecError(
                         f"ColRule on column {col_name!r} references unknown column {ref_col!r}"
                     )
 
@@ -420,7 +421,7 @@ class FrameSpec:
             for validator in spec.validators:
                 other_cols = set(validator.expr.meta.root_names()) - {col_name}
                 if other_cols:
-                    raise ValueError(
+                    raise SpecError(
                         f"ColSpec.validators on column {col_name!r} references "
                         f"other column(s) {sorted(other_cols)}: {validator.expr!r}. "
                         "A ColSpec validator may only reference its own column -- "
@@ -606,7 +607,7 @@ class FrameSpec:
     def to_yaml(cls, source: str | Path) -> None:
         """Writes this spec's columns to a human-readable YAML file at `source`."""
         if not cls._columns:
-            raise ValueError(f"{cls.__name__} declares no ColSpec columns")
+            raise SpecError(f"{cls.__name__} declares no ColSpec columns")
         if cls._checks:
             check_names = ", ".join(repr(c.name) for c in cls._checks)
             warnings.warn(
@@ -675,7 +676,7 @@ class FrameSpec:
         Self-referencing `ForeignKey`s and `__unique_together__` survive.
         """
         if not cls._columns:
-            raise ValueError(f"{cls.__name__} declares no ColSpec columns")
+            raise SpecError(f"{cls.__name__} declares no ColSpec columns")
         if cls._checks:
             check_names = ", ".join(repr(c.name) for c in cls._checks)
             warnings.warn(
@@ -792,7 +793,7 @@ class FrameSpec:
 
         columns_data = data.get("columns") or {}
         if not columns_data:
-            raise ValueError(f"{source} declares no columns")
+            raise SerializationError(f"{source} declares no columns")
         columns = {
             name: _colspec_from_yaml(col_data, categories=catspec)
             for name, col_data in columns_data.items()
@@ -916,7 +917,7 @@ class FrameSpec:
         lazy=True returns a `pl.LazyFrame` around the generated DataFrame.
         """
         if not cls._columns:
-            raise ValueError(f"{cls.__name__} declares no ColSpec columns")
+            raise SpecError(f"{cls.__name__} declares no ColSpec columns")
         if n < 0:
             raise ValueError("n must be >= 0")
 
@@ -987,7 +988,7 @@ class FrameSpec:
             Batches of generated DataFrames matching the spec schema.
         """
         if not cls._columns:
-            raise ValueError(f"{cls.__name__} declares no ColSpec columns")
+            raise SpecError(f"{cls.__name__} declares no ColSpec columns")
         if n < 0:
             raise ValueError("n must be >= 0")
         if batch_size <= 0:
@@ -1043,7 +1044,7 @@ class FrameSpec:
         call fails before any destination file is opened.
         """
         if not cls._columns:
-            raise ValueError(f"{cls.__name__} declares no ColSpec columns")
+            raise SpecError(f"{cls.__name__} declares no ColSpec columns")
         if n < 0:
             raise ValueError("n must be >= 0")
         if batch_size <= 0:
@@ -1455,7 +1456,7 @@ class FrameSpec:
             DataFrame was supplied via `references`.
         """
         if not cls._columns:
-            raise ValueError(f"{cls.__name__} declares no ColSpec columns")
+            raise SpecError(f"{cls.__name__} declares no ColSpec columns")
 
         resolved_foreign_keys: list[tuple[ForeignKey, pl.LazyFrame | None]] = []
         if validate_foreign_keys:

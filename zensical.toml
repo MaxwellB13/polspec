@@ -23,6 +23,7 @@ nav = [
   ] },
   { "Reference" = [
     { "Architecture" = "reference/architecture.md" },
+    { "Errors" = "reference/errors.md" },
     { "Known limitations" = "reference/limitations.md" },
     { "Roadmap and stability" = "reference/roadmap.md" },
   ] },

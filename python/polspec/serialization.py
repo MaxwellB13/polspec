@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 import polars as pl
 
 from polspec.constants import _DEFAULT_NULL_PROBABILITY
+from polspec.errors import SerializationError
 from polspec.foreign_key import ForeignKey, _default_fk_name
 from polspec.rules import ColRule
 from polspec.spec import ColSpec, _is_categorical_dtype
@@ -68,7 +69,7 @@ def _dtype_to_yaml(dtype: pl.DataType) -> str | dict:
         return "Categorical"
     name = _YAML_DTYPES.get(dtype)
     if name is None:
-        raise TypeError(f"polspec cannot write dtype {dtype!r} to YAML")
+        raise SerializationError(f"polspec cannot write dtype {dtype!r} to YAML")
     return name
 
 
@@ -99,7 +100,7 @@ def _enum_from_yaml(payload, categories: CatSpec | None) -> pl.DataType:
     name = _strip_registry_prefix(payload)
     if categories is not None and name in categories:
         return pl.Enum(categories.get_enum(name))
-    raise ValueError(
+    raise SerializationError(
         f"Enum {payload!r} referenced in YAML but not found in provided CatSpec"
     )
 
@@ -148,7 +149,7 @@ def _dtype_from_yaml(
         for key, build in _YAML_DTYPE_BUILDERS.items():
             if key in value:
                 return build(value[key], categories)
-        raise ValueError(f"Unrecognized dtype mapping in YAML: {value!r}")
+        raise SerializationError(f"Unrecognized dtype mapping in YAML: {value!r}")
 
     if value == "Categorical":
         return pl.Categorical()
@@ -157,11 +158,13 @@ def _dtype_from_yaml(
         dtype = _dtype_from_registry(_strip_registry_prefix(value), categories)
         if dtype is not None:
             return dtype
-        raise ValueError(f"Category reference {value!r} not found in provided CatSpec")
+        raise SerializationError(
+            f"Category reference {value!r} not found in provided CatSpec"
+        )
 
     dtype = _YAML_NAME_TO_DTYPE.get(value) or _dtype_from_registry(value, categories)
     if dtype is None:
-        raise ValueError(f"Unrecognized dtype name in YAML: {value!r}")
+        raise SerializationError(f"Unrecognized dtype name in YAML: {value!r}")
     return dtype
 
 
@@ -327,7 +330,7 @@ def _dtype_to_python(dtype: pl.DataType) -> str:
         return "pl.Categorical"
     name = _YAML_DTYPES.get(dtype)
     if name is None:
-        raise TypeError(f"polspec cannot write dtype {dtype!r} to Python")
+        raise SerializationError(f"polspec cannot write dtype {dtype!r} to Python")
     return f"pl.{name}"
 
 

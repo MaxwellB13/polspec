@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import polars as pl
 import yaml
 
+from polspec.errors import SpecError
 from polspec.serialization import _YAML_DTYPES, _YAML_NAME_TO_DTYPE
 from polspec.spec import _is_categorical_dtype
 
@@ -202,7 +203,7 @@ class CatSpec:
                     if categories_obj is None:
                         continue
                     if not categories_obj.name():
-                        raise ValueError(
+                        raise SpecError(
                             f"{cls.__name__}.{name} has no name, but a CatSpec "
                             "entry needs one to act as a shared registry key -- "
                             f"give it one: pl.Categories({name!r}, ...)"
@@ -277,7 +278,7 @@ class CatSpec:
                     if "categories" in v:
                         self._choices[k_str] = list(v["categories"])
                 else:
-                    raise TypeError(
+                    raise SpecError(
                         f"Unsupported categorical specification for {k!r}: {v!r}"
                     )
 

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from polspec.errors import SpecError
+
 # Distribution name (as written by the caller, lowercased) -> display name used
 # in error messages. Several names are aliases for one distribution.
 DISTRIBUTION_NAMES: dict[str, str] = {
@@ -76,7 +78,7 @@ def normalize_distribution(distribution: str) -> str:
     """Returns the canonical lowercase name, or raises if polspec cannot sample it."""
     name = distribution.lower()
     if name not in DISTRIBUTION_NAMES:
-        raise ValueError(
+        raise SpecError(
             f"Unsupported distribution '{distribution}'. "
             f"Supported: {sorted(DISTRIBUTION_NAMES)}"
         )
@@ -96,6 +98,6 @@ def validate_distribution_params(name: str, params: dict[str, float]) -> None:
             continue
         value = param.resolve(params)
         if value <= 0:
-            raise ValueError(
+            raise SpecError(
                 f"{display} distribution {param.label} must be positive, got {value}"
             )

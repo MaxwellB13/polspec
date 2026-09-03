@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from polspec.errors import SpecError
+
 
 @dataclass(frozen=True, slots=True)
 class Bound[T]:
@@ -17,7 +19,7 @@ class Bound[T]:
 
     def __post_init__(self) -> None:
         if self.min is not None and self.max is not None and self.min > self.max:
-            raise ValueError(f"Bound min ({self.min}) must be <= max ({self.max})")
+            raise SpecError(f"Bound min ({self.min}) must be <= max ({self.max})")
 
     @property
     def is_open(self) -> bool:

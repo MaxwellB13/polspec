@@ -8,6 +8,26 @@ seed produces; see
 
 ## [Unreleased]
 
+### Added
+
+- An exception hierarchy under `PolspecError`: `SpecError` for declarations
+  that cannot mean anything, `ValidationError` for data that fails its spec,
+  `GenerationError` when a spec cannot be turned into data (including every
+  error raised inside the Rust engine), `SerializationError` for files that
+  cannot be written or read, and `RegistryError`, reserved for the spec
+  registry. All are exported from `polspec`; see the new *Errors* reference
+  page.
+
+### Changed
+
+- **Breaking, mildly.** Errors that were bare `ValueError` or `TypeError`
+  are now the subclass above. Each keeps the built-in type it replaced, so
+  `except ValueError` still catches it; only code matching on the exact type
+  (`type(exc) is ValueError`) sees a difference. Plain argument misuse
+  (`n < 0`, an unknown `method=`) is unchanged.
+- The command line prints any `PolspecError` as a one-line `error: ...`
+  instead of a `TypeName: message` line.
+
 ## [0.1.5] - 2026-09-03
 
 ### Added
