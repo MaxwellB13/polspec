@@ -6,6 +6,8 @@ A spec is a class. Subclass `FrameSpec` and assign a `ColSpec` per column, in
 the order the columns should appear.
 
 ```python
+from datetime import date
+
 import polars as pl
 from polspec import ColSpec, FrameSpec
 

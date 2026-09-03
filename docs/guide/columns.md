@@ -204,9 +204,39 @@ Events.tag("pii", "key", match="all")  # ['user_id']
 
 ## Column names that are not identifiers
 
-Column names come from a class body, so a leading underscore or a collision
-with one of `FrameSpec`'s own methods (`schema`, `tag`, `generate`, `validate`,
-…) needs the explicit channel:
+A column declared as a class attribute takes the attribute's name, and an
+attribute name has to be a valid Python identifier. Real data is not so
+polite. There are two ways out, for two different situations.
+
+### `col_name`: the data's name has spaces or punctuation
+
+Keep a clean attribute name and tell the `ColSpec` what the column is really
+called:
+
+```python
+class Sales(FrameSpec):
+    unit_price = ColSpec(pl.Float64, col_name="Unit Price", bounds=(0, None))
+    region     = ColSpec(pl.Enum(["UK", "US"]), col_name="Sales Region")
+
+Sales.schema()              # Schema({'Unit Price': Float64, 'Sales Region': Enum(...)})
+Sales.generate(3).columns   # ['Unit Price', 'Sales Region']
+```
+
+`col_name` is the column's name everywhere the spec is used: in the generated
+frame, in `validate()`, in `ColRule.when={"column": ...}`, in
+`__unique_together__`, in `ForeignKey` columns and in `tag()` results. The
+attribute name exists only in the class body. Two attributes that resolve to
+the same `col_name` are rejected at declaration, and overriding an attribute
+on a subclass removes the column it named, whatever `col_name` it carried.
+
+`to_yaml()` and `to_python()` write the real column name as the key, so a
+spec that came from a file never needs `col_name`.
+
+### `__columns__`: the name is an identifier but cannot be an attribute
+
+A leading underscore is skipped by the class-body scan, and a name that
+matches one of `FrameSpec`'s own methods (`schema`, `tag`, `generate`,
+`validate`, …) would shadow it. Declare those through the explicit mapping:
 
 ```python
 class Raw(FrameSpec):
@@ -217,8 +247,10 @@ class Raw(FrameSpec):
 ```
 
 `__columns__` is never looked up as an attribute, so both the column and the
-method survive. `from_dataframe` and `from_yaml` build specs this way, since
-their names come from data rather than from someone's class body.
+method survive. The dict key already is the column name, so a `col_name` that
+disagrees with its key is rejected. `from_dataframe`, `from_yaml` and
+`to_python` all declare columns this way, since their names come from data
+rather than from someone's class body.
 
 Declaring a colliding name as a plain attribute still works, but warns that the
 shadowed method is no longer callable on that spec.
