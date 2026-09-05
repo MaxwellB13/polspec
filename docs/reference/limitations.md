@@ -1,36 +1,19 @@
 # Known limitations
 
-polspec implements each constraint twice — once to generate data and once to
-validate it — and there is no structural guarantee the two agree. The gaps
-below are the places they currently do not.
+polspec generates data and validates it from one declaration. Where both
+sides read the same definition they cannot drift: what values a column may
+hold, and the order the passes that rewrite a generated frame run in, both
+live in `polspec.constraints`. What is left below is what generation does not
+attempt at all, plus a few edges worth knowing about.
 
-Each is pinned by a test in `tests/test_roundtrip.py` carrying
-`xfail(strict=True)`. While the gap exists the test reports XFAIL and the suite
-stays green; the moment it is fixed pytest turns the XPASS into a failure. So
-this page cannot quietly go stale — closing a gap forces the test to be updated.
+Each is pinned by a test in `tests/test_roundtrip.py`. A gap meant to close
+one day carries `xfail(strict=True)`: the suite stays green while it exists,
+and the moment it is fixed pytest turns the XPASS into a failure. A boundary
+that is deliberate is pinned by an ordinary passing test instead. Either way
+this page cannot quietly go stale — changing what polspec does forces the test
+to be updated.
 
 ## Generation does not enforce these
-
-### `unique=True` is validated but not generated
-
-A `unique` column whose domain is smaller than `n` emits duplicates that its own
-spec rejects.
-
-```python
-class A(FrameSpec):
-    id = ColSpec(pl.Int8, unique=True)
-
-A.validate(A.generate(200, seed=1))
-# ValidationError: Column 'id': unique column contains 110 duplicate value(s)
-```
-
-**Work around it** by giving the column a domain comfortably larger than `n`, or
-by validating with `validate_unique=False`.
-
-### `__unique_together__` is validated but not generated
-
-The composite sibling of the above, with the same workaround
-(`validate_unique=False`).
 
 ### `__checks__` and `ColSpec.validators` are validation-only
 
@@ -38,50 +21,6 @@ This one is by design, not a defect: both wrap arbitrary Polars expressions,
 and nothing can generate data satisfying an arbitrary predicate. Validate
 generated data with `validate_checks=False` / `validate_validators=False`, or
 construct the rows those invariants describe yourself.
-
-## Interactions that do not round-trip
-
-### Chained `ColRule`s
-
-`_apply_rules` evaluates every `when` against the *pre-rule* frame, so rules on
-different columns need no dependency ordering. Validation evaluates the same
-`when` against the *final* frame. A rule keyed on a column that is itself
-rule-targeted therefore fails its own validation.
-
-```python
-b = ColSpec(pl.Enum(["x", "y"]), rules=[ColRule(when={"column": "a", "equals": "x"}, choices=["y"])])
-c = ColSpec(pl.Enum(["x", "y"]), rules=[ColRule(when={"column": "b", "equals": "y"}, choices=["x"])])
-# rows where b == "y" but c != "x"
-```
-
-**Avoid** keying a rule on a column that carries rules of its own.
-
-### Several foreign keys touching the same column
-
-Every key's replacement is computed against the original frame and applied in
-one pass, so a key referencing a column that another key rewrites samples
-values that no longer exist.
-
-**Avoid** chaining a self-referencing key onto a column that is itself
-foreign-keyed.
-
-### A foreign key against its column's own bounds
-
-A key overwrites its column with parent values regardless of that column's
-declared `bounds` or `choices`. Declaring `bounds=(1, 50)` on a column
-referencing keys in `100..200` produces data that fails validation, and nothing
-flags the contradiction when you declare it.
-
-**Keep** the two declarations compatible.
-
-### Textual foreign keys across `Enum` and `String`
-
-A `String` key may reference an `Enum` key — the declaration-time check allows
-it deliberately, and generation handles it. Validation anti-joins the columns
-without casting, and Polars raises `SchemaError` rather than a
-`ValidationError`.
-
-**Work around it** by declaring both sides with the same dtype.
 
 ## Cartesian generation
 
@@ -104,6 +43,16 @@ produce nothing.
   columns are added after validation runs, including for non-nullable columns.
 - **Rules overwrite nulls**, so a nullable column with a rule ends up with
   fewer nulls than `null_probability` suggests.
+- **Uniqueness holds within a batch, not across one.** `generate_batches` and
+  the `sink_*` functions sample each batch independently, so a `unique=True`
+  column or a `__unique_together__` group is only distinct inside each batch.
+- **A `unique` column ignores `weights` and a non-uniform `distribution`** --
+  both are refused at declaration rather than silently dropped, since neither
+  has anything to say about a draw without replacement.
+- **A foreign key still overwrites its column's distribution.** The parent's
+  domain has to fit inside the column's own — a contradiction is refused at
+  declaration — but within it, values come from the parent, so a declared
+  `distribution` or `weights` on a foreign-keyed column is not what you get.
 - **Case-insensitive registry lookup** means a column named `status` binds to a
   registry entry named `STATUS`; entries differing only in case are ambiguous.
 - **`to_mermaid` marks every `unique=True` column `PK`**, so several unique

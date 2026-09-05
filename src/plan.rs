@@ -143,6 +143,8 @@ pub struct ColumnPlan {
     pub distribution: Distribution,
     /// Probability of `true` for a `Bool` column.
     pub p_true: f64,
+    /// Whether every non-null value must differ from every other.
+    pub unique: bool,
 }
 
 pub const DEFAULT_STR_MIN_LEN: usize = 5;
@@ -164,6 +166,7 @@ impl ColumnPlan {
         str_max_len: Option<usize>,
         distribution: Option<&str>,
         params: Option<&HashMap<String, f64>>,
+        unique: bool,
     ) -> Result<Self, String> {
         let kind = Kind::parse(kind).ok_or_else(|| {
             format!(
@@ -265,6 +268,7 @@ impl ColumnPlan {
             str_max_len,
             distribution,
             p_true,
+            unique,
         })
     }
 }
@@ -275,7 +279,7 @@ impl ColumnPlan {
     #[pyo3(signature = (
         name, kind, *, nullable=false, null_probability=0.0, min=None, max=None,
         n_categories=None, weights=None, str_min_len=None, str_max_len=None,
-        distribution=None, params=None,
+        distribution=None, params=None, unique=false,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -291,6 +295,7 @@ impl ColumnPlan {
         str_max_len: Option<usize>,
         distribution: Option<&str>,
         params: Option<HashMap<String, f64>>,
+        unique: bool,
     ) -> PyResult<Self> {
         ColumnPlan::build(
             name,
@@ -305,6 +310,7 @@ impl ColumnPlan {
             str_max_len,
             distribution,
             params.as_ref(),
+            unique,
         )
         .map_err(PyValueError::new_err)
     }
@@ -312,6 +318,11 @@ impl ColumnPlan {
     #[getter]
     fn name(&self) -> &str {
         &self.name
+    }
+
+    #[getter]
+    fn unique(&self) -> bool {
+        self.unique
     }
 
     #[getter]
@@ -402,6 +413,7 @@ mod tests {
             None,
             None,
             None,
+            false,
         )
     }
 
@@ -438,6 +450,7 @@ mod tests {
             None,
             None,
             None,
+            false,
         );
         assert!(bad.unwrap_err().contains("must match number of categories"));
     }
@@ -466,6 +479,7 @@ mod tests {
             None,
             None,
             None,
+            false,
         )
         .unwrap();
         assert!((from_weights.p_true - 0.75).abs() < 1e-12);
@@ -484,6 +498,7 @@ mod tests {
             None,
             None,
             Some(&params),
+            false,
         )
         .unwrap();
         assert!((from_params.p_true - 0.2).abs() < 1e-12);
@@ -505,6 +520,7 @@ mod tests {
             None,
             None,
             None,
+            false,
         )
         .unwrap();
         assert_eq!(p.null_probability, 0.0);

@@ -7,10 +7,10 @@ into two groups worth keeping straight:
 |:--|:--:|:--:|
 | `ColRule` | yes | yes |
 | `ForeignKey` | yes, when given parent data | yes |
-| `unique=True`, `__unique_together__` | no | yes |
+| `unique=True`, `__unique_together__` | yes | yes |
 | `ColSpec.validators`, `__checks__` | no | yes |
 
-The last two rows are validation-only by design: they wrap arbitrary Polars
+The last row is validation-only by design: both wrap arbitrary Polars
 expressions, and nothing can produce data satisfying an arbitrary predicate.
 Generation makes no attempt, and that boundary is pinned down by tests.
 
@@ -80,12 +80,29 @@ round-trip. The supported forms:
 {"column": "c", "is_null": True}        {"column": "c", "is_not_null": True}
 ```
 
-!!! note "Rules see the pre-rule frame"
+!!! note "Rules see the frame as it stands"
 
-    Every `when` is evaluated against the freely-generated values, never
-    another rule's output, so rules on different columns need no dependency
-    ordering. The cost is that a rule keyed on a *rule-targeted* column does
-    not round-trip — see [Known limitations](../reference/limitations.md).
+    Every `when` is evaluated against the values the column actually holds
+    when the rule runs, and the passes run in dependency order: a rule keyed
+    on a column that another rule or a foreign key rewrites reads the
+    rewritten values — the same ones `validate()` will check the rule
+    against. So rules chain:
+
+    ```python
+    class Orders(FrameSpec):
+        region  = ColSpec(pl.Enum(["UK", "US"]))
+        carrier = ColSpec(
+            pl.Enum(["RoyalMail", "UPS"]),
+            rules=[ColRule(when=col("region") == "UK", choices=["RoyalMail"])],
+        )
+        tracked = ColSpec(  # keyed on a column that carries rules of its own
+            pl.Enum(["yes", "no"]),
+            rules=[ColRule(when=col("carrier") == "RoyalMail", choices=["yes"])],
+        )
+    ```
+
+    Two columns whose rules each read what the other writes have no such
+    order, and are refused at declaration with `SpecError`.
 
 A rule also overwrites nulls on matching rows, so a nullable column with a rule
 ends up with fewer nulls than `null_probability` suggests.
@@ -141,16 +158,45 @@ is what an error message points at.
 
 ## Composite uniqueness — `__unique_together__`
 
-```python
-class Memberships(FrameSpec):
-    user_id = ColSpec(pl.Int64)
-    team_id = ColSpec(pl.Int64)
+A composite key declares that a *combination* of columns is distinct, even
+where each column on its own repeats.
 
-    __unique_together__ = [["user_id", "team_id"]]
+```python
+class Assignments(FrameSpec):
+    employee_id = ColSpec(pl.Int64, bounds=(1, 500))
+    project_id  = ColSpec(pl.Int64, bounds=(1, 200))
+
+    __unique_together__ = [["employee_id", "project_id"]]
 ```
 
-Rows where any constituent column is null are exempt. A flat list of strings is
-read as one composite key; a list of lists declares several.
+`generate()` satisfies it by resampling the rows that repeat a combination an
+earlier row already used. Only the repeats move, so on a roomy domain almost
+every row keeps the value it was generated with, along with whatever weights
+or bounds shaped it. Rows where any member is null are exempt, matching how
+the key is validated.
+
+A group whose columns cannot take enough distinct combinations between them is
+refused, naming the group:
+
+```python
+class TooTight(FrameSpec):
+    a = ColSpec(pl.Enum(["x", "y"]))
+    b = ColSpec(pl.Enum(["p", "q"]))
+    __unique_together__ = [["a", "b"]]
+
+TooTight.generate(300, seed=1)
+# GenerationError: Composite unique key ['a', 'b'] cannot be satisfied: the
+# columns take 4 distinct combination(s) between them and 300 row(s) need one.
+```
+
+A member column may not also carry `rules`: a rule assigns from a fixed set,
+which is how two rows come to share a combination, and the repair would
+overwrite what the rule put there. Declare one or the other.
+
+A foreign-keyed member is never resampled — that would break the key — so the
+repair works with the other members. If *every* member is foreign-keyed there
+is nothing it can move, and generation says so rather than returning data that
+fails its own validation.
 
 ## Referential integrity — `ForeignKey`
 
@@ -211,9 +257,28 @@ class Employees(FrameSpec):
 `"self"` resolves to whichever spec the key ends up declared on, and needs no
 `references` entry in either call.
 
-!!! warning "Declare the same domain on both sides"
+!!! warning "The parent's domain has to fit inside the column's own"
 
-    A foreign key overwrites its column with values from the parent, ignoring
-    that column's own `bounds` or `choices`. Declaring `bounds=(1, 50)` on a
-    column that references keys in `100..200` produces data that fails
-    validation. Keep the two declarations compatible.
+    A foreign key overwrites its column with values from the parent, so the
+    parent's `bounds` or `choices` have to be ones the column itself declares
+    it can hold. Declaring `bounds=(1, 50)` on a column referencing keys in
+    `100..200` would produce data that fails its own validation, so it is
+    refused when you declare it:
+
+    ```python
+    class Orders(FrameSpec):
+        customer_id = ColSpec(pl.Int64, bounds=(1, 50))
+        __foreign_keys__ = [
+            ForeignKey("customer_id", references=Customers, ref_columns="id")
+        ]
+    # SpecError: ... column 'customer_id' is declared bounds [1, 50], but the
+    # key fills it with values from 'id' on 'Customers', where bounds
+    # [1, 10000] do not fit inside [1, 50].
+    ```
+
+    A column that declares no `bounds` or `choices` accepts anything, so the
+    check only fires on a genuine contradiction. Widen or drop the child's
+    declaration, or narrow the parent's.
+
+    The check needs both specs, so a key naming its target as a string is
+    checked when a [`Registry`](registry.md) resolves it, not before.

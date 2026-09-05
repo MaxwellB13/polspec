@@ -45,14 +45,16 @@ these as generation is asked to handle larger and stranger specs: sanity
 limits on distribution parameters, on cartesian dimensionality, on batch
 sizing.
 
-**Constraints `generate()` doesn't enforce yet**, which is a different, more
-interesting problem. `unique=True`, `__unique_together__`, chained `ColRule`s,
-and a few other interactions are validated but not (yet) satisfied by
-generation — see [Known limitations](limitations.md) for the exact list, each
-backed by a test that will fail the moment it's fixed. Making generation
-smarter about actually satisfying these — sampling without replacement for a
-`unique` domain, resolving rule dependencies instead of asserting they don't
-exist — is the other half of "improving generation," and the harder half.
+**Constraints `generate()` doesn't enforce**, which is a different, more
+interesting problem. What is left of it is `__checks__` and
+`ColSpec.validators`, and that one is by design: both wrap arbitrary Polars
+expressions, and nothing can generate data satisfying an arbitrary predicate.
+Everything else on this list has been worked through — rule and foreign-key
+dependencies by ordering the passes rather than asserting the dependencies
+don't exist, and uniqueness by drawing without replacement instead of hoping a
+wide domain would do. What remains is narrowing the gap from the other end:
+letting a column *describe* its values well enough that a validator becomes
+generatable.
 
 **Domains generation cannot currently express.** A `String` column generates
 random characters within its `string_length`, and there is no way to say more

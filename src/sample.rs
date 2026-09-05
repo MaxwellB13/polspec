@@ -21,7 +21,7 @@ use rayon::prelude::*;
 use crate::dist::Distribution;
 use crate::plan::{ColumnPlan, Kind};
 
-const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+pub const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 const DEFAULT_WIDE_INT_BOUND: i64 = 1_000_000;
 const DEFAULT_WIDE_UINT_BOUND: u64 = 1_000_000;
 const DEFAULT_FLOAT_BOUND: f64 = 1_000_000.0;
@@ -274,7 +274,7 @@ fn gen_index_column(plan: &ColumnPlan, n: usize, seed: u64) -> Result<UInt32Chun
 
 /// Writes a random alphanumeric string of `len` bytes into `scratch`.
 #[inline(always)]
-fn random_ascii(rng: &mut Xoshiro256PlusPlus, scratch: &mut [u8], len: usize) {
+pub fn random_ascii(rng: &mut Xoshiro256PlusPlus, scratch: &mut [u8], len: usize) {
     let mut rand_val = rng.next_u64();
     let mut bits_left = 64;
     for slot in scratch.iter_mut().take(len) {
@@ -326,6 +326,11 @@ fn gen_string_column(plan: &ColumnPlan, n: usize, seed: u64) -> StringChunked {
 
 /// Fills one column according to its plan.
 pub fn generate_series(plan: &ColumnPlan, n: usize, seed: u64) -> Result<Series, String> {
+    if plan.unique {
+        // Distinctness is a property of the whole column, so a unique column
+        // is filled in one pass rather than in independent chunks.
+        return crate::unique::generate_unique_series(plan, n, seed);
+    }
     Ok(match plan.kind {
         Kind::Int64 => gen_int64_column(plan, n, seed).into_series(),
         Kind::Int32 => gen_int32_column(plan, n, seed).into_series(),
@@ -372,6 +377,7 @@ mod tests {
             None,
             distribution,
             params.as_ref(),
+            false,
         )
         .unwrap()
     }
@@ -490,6 +496,7 @@ mod tests {
             None,
             None,
             None,
+            false,
         )
         .unwrap();
         let s = generate_series(&p, 20_000, 9).unwrap();
@@ -512,6 +519,7 @@ mod tests {
             Some(6),
             None,
             None,
+            false,
         )
         .unwrap();
         let s = generate_series(&p, 2000, 5).unwrap();

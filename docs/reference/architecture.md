@@ -19,10 +19,11 @@ owns only the inner loop that fills arrays with values.
 | `engine` | Turning a spec into the `ColumnPlan` the Rust extension takes, and finishing the result: gathering typed choices, casting temporal columns back |
 | `_ffi` | The only module that imports the Rust extension (lazily), building plans and re-raising its errors as `GenerationError` |
 | `errors` | The `PolspecError` hierarchy |
+| `constraints` | What both sides read: `Domain` (the values a column may hold) and `Pass`/`order` (which rewrite of a generated frame runs first) |
 | `validation` | `inspect` and `validate` over a `TableSpec`: every claim becomes a `_Constraint` (`constraints.py`) that produces a `Finding`; `report.py` holds `Finding` and `ValidationReport` |
 | `tablespec` | `TableSpec` — a spec as an immutable value, with its declaration-time checks and structural operations |
 | `framespec` | `FrameSpec` — the metaclass that builds a `TableSpec` from a class body, and the facade forwarding every verb to it |
-| `generation` | `generate`, `generate_batches` and the file sinks, as functions over a `TableSpec` |
+| `generation` | `generate`, `generate_batches` and the file sinks, as functions over a `TableSpec`; `composite.py` separates a `__unique_together__` group |
 | `catspec` | `CatSpec` — a shared registry of enums and categoricals |
 | `registry` | `Registry` — a declared set of specs: resolving cross-spec keys, ordering parents before children, `generate_all`/`validate_all`, one file and one diagram for the set |
 | `serialization` | Spec files: a field registry (`fields.py`) that YAML, generated Python and the `import datetime` decision all derive from; the dtype codec table (`dtypes.py`); format versions and migrations (`migrations.py`) |
@@ -41,8 +42,8 @@ flowchart LR
     B --> C["_plan_column: one<br/>ColumnPlan per column"]
     C --> D["Rust: generate_dataframe<br/>columns in parallel"]
     D --> E["_finish: gather typed choices,<br/>cast temporal columns back"]
-    E --> F["_apply_rules"]
-    F --> G["_apply_foreign_keys"]
+    E --> F["order the passes<br/>by reads and writes"]
+    F --> G["each pass: rules, foreign keys,<br/>composite-key repair"]
     G --> H[DataFrame]
 ```
 
@@ -52,7 +53,25 @@ columns in parallel, and within a column in 65,536-row chunks whose seeds come
 from the chunk index, so output is identical regardless of thread count.
 
 Rules and foreign keys are applied afterwards as vectorised passes over the
-finished frame, not row by row.
+finished frame, not row by row. Each pass declares the columns it reads and
+the ones it writes, and `constraints.order` runs them so no pass reads a
+column a later one rewrites: a rule keyed on a foreign-keyed column sees the
+parent's values, and a self-referencing key drawing from a foreign-keyed
+column draws from values that are actually there. That ordering is what makes
+generated data satisfy the same claims validation checks it against — which
+is why a spec whose passes cannot be ordered is refused at declaration rather
+than generated and then failed by its own spec.
+
+Seeds are drawn per pass in declaration order, so which order they end up
+running in does not change the values any one of them samples.
+
+A `unique=True` column never reaches a pass: the engine draws it without
+replacement in the first place (`src/unique.rs`), shuffling a materialised
+domain when the domain is barely bigger than the frame and rejecting against a
+set when it is roomy. A `__unique_together__` group is a pass, because
+distinctness across columns can only be judged once they all exist: it
+resamples the rows repeating a combination, and reads every member so it runs
+after the rules and keys that settle them.
 
 ## Validating
 
@@ -101,8 +120,8 @@ are resolved when a column is declared; `src/dist.rs` reads canonical keys and
 exports its table as `distribution_params()`, which a test compares with the
 Python one. Each column's seed is derived from the frame seed and the column
 *name* (`sample.rs`), so inserting a column never reshuffles its neighbours.
-`src/sample.rs` has no Python types and carries the unit tests `cargo test`
-runs; `python/polspec/_polspec.pyi` is the stub, and a test asserts its names
+`src/sample.rs` and `src/unique.rs` have no Python types and carry the unit
+tests `cargo test` runs; `python/polspec/_polspec.pyi` is the stub, and a test asserts its names
 match the module.
 
 ## Tests
@@ -129,6 +148,7 @@ match the module.
 | `test_streaming.py` | Batching and the file sinks |
 | `test_cli.py` | The command line, including running a generated test file under pytest |
 | `test_engine.py` | The Python / Rust boundary: typed plans, exact bounds, typed choices, per-column seeds, the stub |
+| `test_constraints.py` | What both sides share: `Domain`, and the pass ordering that lets rules and keys see each other's work |
 
 The round-trip file carries `xfail(strict=True)` markers for known gaps, so a
 fix turns the marker into a failure rather than passing unnoticed. See

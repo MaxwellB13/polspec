@@ -110,19 +110,22 @@ def test_orders_cartesian_coverage():
 ### It will not hand you a test that fails on the spot
 
 `generate()` does not attempt everything `validate()` checks — see
-[Known limitations](../reference/limitations.md). A spec using `unique=True`,
-`__unique_together__`, `__checks__` or `ColSpec.validators` would otherwise
-generate a test that fails the moment it runs. The generator checks for each
-and disables the corresponding `validate()` flag, with a comment explaining
-why:
+[Known limitations](../reference/limitations.md). A spec using `__checks__` or
+`ColSpec.validators` would otherwise generate a test that fails the moment it
+runs, because both wrap arbitrary expressions nothing can be generated to
+satisfy. The generator checks for each and disables the corresponding
+`validate()` flag, with a comment explaining why:
 
 ```python
-def test_narrow_roundtrip():
-    # unique=True / __unique_together__ is validated but not yet generated
-    # (see docs/reference/limitations.md)
-    df = Narrow.generate(500, seed=42)
-    Narrow.validate(df, validate_unique=False)
+def test_invoices_roundtrip():
+    # __checks__ wraps arbitrary expressions that generation cannot be made
+    # to satisfy
+    df = Invoices.generate(500, seed=42)
+    Invoices.validate(df, validate_checks=False)
 ```
+
+`unique=True` and `__unique_together__` used to be on that list. They are
+generated now, so the generated test validates them like anything else.
 
 A spec with a foreign key referencing *another* spec needs that spec's data
 via `references=`, which the CLI cannot supply on its own — that test is

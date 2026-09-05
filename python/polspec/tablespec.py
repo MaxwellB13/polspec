@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import polars as pl
 
 from polspec.check import Check
+from polspec.constraints import Domain, ordered_passes
 from polspec.errors import SpecError
 from polspec.foreign_key import ForeignKey, _default_fk_name
 from polspec.spec import ColSpec, _column_kind
@@ -156,6 +157,7 @@ class TableSpec:
         self._validate_unique_together()
         self._validate_checks()
         self._validate_foreign_keys()
+        self._validate_pass_order()
 
     # ------------------------------------------------------------------
     # Declaration-time validation
@@ -190,6 +192,18 @@ class TableSpec:
                     raise SpecError(
                         f"Composite unique key {group} references unknown column "
                         f"{col_name!r}"
+                    )
+                # The repair that separates repeated combinations resamples
+                # these columns, which would overwrite whatever a rule put
+                # there; running it the other way round would let the rule
+                # reintroduce the repeats. Neither order works.
+                if self.columns[col_name].rules:
+                    raise SpecError(
+                        f"Column {col_name!r} carries rules and is part of the "
+                        f"composite unique key {list(group)}. A rule assigns "
+                        "values from a fixed set, which is how two rows end up "
+                        "sharing a combination; keep the rules, or the "
+                        "composite key, but not both on this column."
                     )
 
     def _validate_checks(self) -> None:
@@ -246,6 +260,28 @@ class TableSpec:
                         f"dtype-compatible with referenced column {ref_col!r} "
                         f"({target.columns[ref_col].dtype}) on {target_name!r}"
                     )
+                local_domain = Domain.of(self.columns[col])
+                conflict = local_domain.rejects(Domain.of(target.columns[ref_col]))
+                if conflict is not None:
+                    raise SpecError(
+                        f"ForeignKey {fk.name!r} on {self.name!r}: column "
+                        f"{col!r} is declared {local_domain}, but the key fills "
+                        f"it with values from {ref_col!r} on {target_name!r}, "
+                        f"where {conflict}. A foreign key overwrites its column "
+                        "with the parent's values, so widen or drop this "
+                        "column's own bounds/choices, or narrow the parent's."
+                    )
+
+    def _validate_pass_order(self) -> None:
+        """Rejects rules and keys whose passes cannot be run in any order.
+
+        Generation applies each pass to the frame the ones before it
+        produced, so a pass reading a column another rewrites has to run
+        after it. Two that each read what the other writes have no such
+        order, and whichever ran second would leave the first one's rows
+        failing their own validation.
+        """
+        ordered_passes(self)
 
     def resolve_target(self, fk: ForeignKey) -> TableSpec | None:
         """The spec a foreign key points at.

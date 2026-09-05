@@ -136,6 +136,40 @@ class ColSpec:
         self._validate_bounds_fit_dtype()
         self._validate_weights()
         self._validate_choices_against_domain()
+        self._validate_unique_is_generatable()
+
+    def _validate_unique_is_generatable(self) -> None:
+        """Rejects what `unique=True` cannot be combined with.
+
+        A unique column is drawn *without* replacement, so anything that
+        describes how often a value should recur has nothing left to say:
+        weights bias a repeated draw, and a distribution shapes a pile of
+        independent ones. A rule is worse than meaningless -- it overwrites
+        values after the draw, from a fixed set of choices, which is how
+        duplicates would get back in.
+        """
+        if not self.unique:
+            return
+        if self.weights is not None:
+            raise SpecError(
+                "ColSpec cannot be unique=True and carry weights: values are "
+                "drawn without replacement, so a weight has no repeated draw "
+                "to bias. Drop the weights, or the uniqueness."
+            )
+        if self.distribution is not None and self.distribution != "uniform":
+            raise SpecError(
+                f"ColSpec cannot be unique=True and carry "
+                f"distribution={self.distribution!r}: values are drawn without "
+                "replacement from the column's domain, which no distribution "
+                "shapes. Drop the distribution, or the uniqueness."
+            )
+        if self.rules:
+            raise SpecError(
+                "ColSpec cannot be unique=True and carry rules: a rule "
+                "overwrites matched rows with values from a fixed set, which "
+                "would reintroduce the duplicates uniqueness rules out. Drop "
+                "the rules, or the uniqueness."
+            )
 
     def _validate_col_name(self) -> None:
         if self.col_name is not None and not self.col_name:

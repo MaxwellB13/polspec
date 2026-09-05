@@ -10,6 +10,25 @@ seed produces; see
 
 ### Added
 
+- `polspec.constraints`: the definitions generation and validation both read,
+  so they cannot drift. `Domain` is what a column may hold (its `choices`, an
+  `Enum`'s categories, its `bounds`); `Pass` and `order` decide which rewrite
+  of a generated frame runs first, from the columns each one reads and writes.
+- `unique=True` is generated, not just validated. The engine draws the column
+  without replacement (`src/unique.rs`): it shuffles a materialised domain
+  when the domain is barely larger than the frame, and rejects against a set
+  when it is roomy. Every dtype is covered, nulls are exempt (a nullable
+  unique column may repeat nulls and nothing else), and a domain too small to
+  cover the row count is refused by name instead of quietly producing
+  duplicates. `method="cartesian"` holds unique columns out of the coverage
+  product and draws them once over the finished frame.
+- `__unique_together__` is generated. A pass resamples the rows repeating a
+  combination an earlier row already used, so only the repeats move and the
+  rest keep the values their own columns' weights and bounds gave them. Rows
+  with a null member are exempt, matching validation. A group whose columns
+  cannot take enough distinct combinations is refused, naming the group; a
+  foreign-keyed member is never resampled, since that would break its key.
+
 - The Rust boundary is typed. Python builds one `ColumnPlan` per column (a
   `#[pyclass]` validated at construction, with errors naming the column)
   instead of a positional tuple. Bounds cross as an `i64`, `u64` or `f64`,
@@ -100,6 +119,43 @@ seed produces; see
   reproducible.
 
 ### Changed
+
+- **Breaking.** `ColRule.when` is evaluated against the frame as it stands
+  when the rule runs, not against the freely generated values. Rules and
+  foreign keys are applied in dependency order, so a rule keyed on a column
+  that another rule or a foreign key rewrites now reads the rewritten values
+  -- the ones `validate()` checks it against. Chained rules, chained foreign
+  keys, and a rule keyed on a foreign-keyed column all round-trip; the values
+  a given seed produces for such a spec change.
+- **Breaking.** Two columns whose rules each read what the other writes have
+  no order that satisfies both, and are now refused at declaration with a
+  `SpecError` naming them.
+- **Breaking.** A `ForeignKey` whose parent's declared domain does not fit
+  inside its own column's is refused at declaration (or when a `Registry`
+  resolves a key that names its target as a string). A key overwrites its
+  column with the parent's values, so `bounds=(1, 50)` on a column
+  referencing keys in `100..200` could only ever generate data that fails its
+  own validation. A column declaring no `bounds` or `choices` still accepts
+  anything.
+- **Breaking.** `unique=True` can no longer be combined with `weights`, a
+  non-uniform `distribution`, or `rules`. The first two describe how often a
+  value recurs, which a draw without replacement has no room for; a rule
+  assigns from a fixed set, which is how duplicates would get back in. Each
+  is refused at declaration rather than silently ignored.
+- **Breaking.** A column carrying `rules` may not also be part of a
+  `__unique_together__` group, for the same reason: the repair that separates
+  repeated combinations would overwrite what the rule put there.
+- **Breaking.** A `ForeignKey` filling a `unique=True` column now refuses when
+  the parent holds fewer distinct values than there are rows, instead of
+  falling back to sampling with replacement and producing the duplicates the
+  column forbids.
+- `polspec test` no longer emits `validate_unique=False` in generated tests.
+  Uniqueness is generated now, so the generated test asserts it.
+- A foreign key spanning textual dtypes -- a `String` column referencing an
+  `Enum` key, which declaration has always allowed and generation has always
+  handled -- now validates instead of raising `SchemaError` from the
+  anti-join. The parent's keys are cast to the local dtype for the join, so
+  `ValidationReport.rows()` still returns the frame's own rows unchanged.
 
 - **Breaking.** Each column's generation seed is derived from the frame
   seed and the column's *name*, not its position, so inserting a column no

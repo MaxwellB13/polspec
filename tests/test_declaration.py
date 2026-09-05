@@ -11,7 +11,7 @@ import datetime as dt
 
 import polars as pl
 import pytest
-from polspec import Bound, ColRule, ColSpec, FrameSpec, ValidationError
+from polspec import Bound, ColRule, ColSpec, FrameSpec, SpecError, ValidationError
 
 
 def _spec_for(column: ColSpec) -> type[FrameSpec]:
@@ -340,11 +340,29 @@ def test_col_name_used_by_rules_and_unique_together():
                 ),
             ),
         )
-        __unique_together__ = [("Sales Region", "Sale Amount")]
+        ticket = ColSpec(pl.Int64, col_name="Ticket No", bounds=(1, 100_000))
+        __unique_together__ = [("Sales Region", "Ticket No")]
 
     df = Spec.generate(200, seed=3)
     east_amounts = df.filter(pl.col("Sales Region") == "east")["Sale Amount"]
     assert (east_amounts == 99).all()
+    assert df.select(["Sales Region", "Ticket No"]).n_unique() == 200
+
+
+def test_a_rule_cannot_sit_on_a_composite_key_column():
+    """A rule assigns from a fixed set, which is how two rows come to share a
+    combination; the repair that separates them would undo the rule.
+    """
+    with pytest.raises(SpecError, match="carries rules and is part of the"):
+
+        class Spec(FrameSpec):
+            g = ColSpec(pl.Enum(["x", "y"]))
+            v = ColSpec(
+                pl.Int64,
+                bounds=(0, 100),
+                rules=(ColRule(when={"column": "g", "equals": "x"}, choices=[99]),),
+            )
+            __unique_together__ = [("g", "v")]
 
 
 def test_colliding_col_names_are_rejected():
