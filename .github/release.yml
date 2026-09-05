@@ -1,0 +1,35 @@
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+      - chore
+      - dependencies
+    authors:
+      - dependabot[bot]
+      - pre-commit-ci[bot]
+  categories:
+    - title: "🚨 Breaking Changes"
+      labels:
+        - breaking
+        - breaking-change
+    - title: "✨ New Features & Improvements"
+      labels:
+        - feature
+        - enhancement
+    - title: "🐛 Bug Fixes"
+      labels:
+        - bug
+        - fix
+    - title: "⚡ Performance & Rust Engine"
+      labels:
+        - performance
+        - rust
+    - title: "📚 Documentation & Examples"
+      labels:
+        - documentation
+        - docs
+    - title: "🔧 Tooling & CI"
+      labels:
+        - ci
+        - build
+        - refactor
