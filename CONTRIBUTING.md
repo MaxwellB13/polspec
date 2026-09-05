@@ -34,6 +34,10 @@ cargo clippy --release
 uv run python examples/related_specs.py      # worked example, doubles as a smoke test
 ```
 
+On Windows, the `cargo test` binary links against the Python DLL, so the
+interpreter's directory has to be on `PATH` (for a uv-managed interpreter,
+`uv run python -c "import sys; print(sys.base_prefix)"` prints it).
+
 Optionally, install the pre-commit hooks so ruff and `cargo fmt` run on
 every commit:
 

@@ -143,42 +143,41 @@ def test_unknown_attribute_is_still_an_attribute_error():
 
 
 # ---------------------------------------------------------------------------
-# M5 -- choices that are distinct in Python but identical as strings
+# Duplicate choices -- as written, or once cast to the column's dtype
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
     "choices",
     [
-        [1, "1", 2],
+        [1, "1", 2],  # one value once cast to String
         ["a", "a"],
         [1.0, "1.0"],
-        [True, "True"],
     ],
 )
-def test_colliding_choices_are_rejected(choices):
-    with pytest.raises(ValueError, match="both render as"):
+def test_choices_that_collapse_to_one_value_are_rejected(choices):
+    with pytest.raises(ValueError, match="same once cast to String"):
         ColSpec(pl.String, choices=choices)
 
 
-def test_colliding_rule_choices_are_rejected():
-    with pytest.raises(ValueError, match="both render as"):
-        ColRule(when={"column": "g", "equals": "x"}, choices=[1, "1"])
+def test_rule_choices_repeated_as_written_are_rejected():
+    with pytest.raises(ValueError, match="duplicate values"):
+        ColRule(when={"column": "g", "equals": "x"}, choices=[1, 1])
 
 
-def test_distinct_string_forms_are_accepted():
-    spec = ColSpec(pl.String, choices=[1, 2, 3])
-    assert spec.choices == (1, 2, 3)
+def test_choices_distinct_in_their_dtype_are_accepted():
+    # Values cross into the engine as indices into a typed domain, so choices
+    # need only be distinct in the column's own dtype -- not as strings.
+    assert ColSpec(pl.String, choices=[1, 2, 3]).choices == (1, 2, 3)
+    assert ColSpec(pl.String, choices=[True, "True"]).choices == (True, "True")
+    assert ColSpec(pl.Int64, choices=[1, 2]).choices == (1, 2)
 
 
-def test_colliding_choices_would_have_misapplied_weights():
-    """The reason this is an error and not a de-duplication.
-
-    `[1, "1", 2]` used to collapse to two generated values while three weights
-    were still applied positionally -- so the weight written for 2 landed on
-    whichever of the colliding pair survived.
+def test_duplicate_choices_would_have_misapplied_weights():
+    """The reason this is an error and not a de-duplication: weights are
+    positional, so a repeated choice quietly doubles its share.
     """
-    with pytest.raises(ValueError, match="both render as"):
+    with pytest.raises(ValueError, match="same once cast"):
         ColSpec(pl.String, choices=[1, "1", 2], weights=[10.0, 10.0, 1.0])
 
 

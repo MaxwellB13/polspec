@@ -83,20 +83,6 @@ without casting, and Polars raises `SchemaError` rather than a
 
 **Work around it** by declaring both sides with the same dtype.
 
-## Numeric precision
-
-### Integer bounds beyond 2^53
-
-Bounds cross into the Rust engine as `f64`, so `Int64` and `UInt64` bounds
-above 2^53 round. Generation can overshoot a declared maximum by one, and
-`UInt64` bounds near the dtype maximum collapse to a single repeated value.
-
-This is also why the generation clamp for an unbounded distribution is capped
-at 2^53: a limit that rounds outward would enforce nothing.
-
-**Work around it** by keeping explicit bounds within ±2^53
-(±9,007,199,254,740,992).
-
 ## Cartesian generation
 
 ### `n` is a minimum, not a count

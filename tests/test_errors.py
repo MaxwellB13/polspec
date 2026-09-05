@@ -87,14 +87,14 @@ def test_rust_engine_complaints_surface_as_generation_error():
 
     # A valid spec; then reach the engine with a parameter it rejects by
     # bypassing ColSpec's own check, which is what a future bug would do.
-    from polspec._ffi import generate_dataframe
-    from polspec.engine import _to_rust_spec
+    from polspec._ffi import column_plan
 
-    rust_spec = list(_to_rust_spec("a", Spec.spec.columns["a"]))
-    rust_spec[-1] = {"mean": 0.0, "std": -1.0}
     with pytest.raises(GenerationError) as info:
-        generate_dataframe([tuple(rust_spec)], 5, 1)
+        column_plan(
+            "a", "float64", distribution="normal", params={"mean": 0.0, "std": -1.0}
+        )
     assert isinstance(info.value.__cause__, ValueError)
+    assert "'a'" in str(info.value) and "must be positive" in str(info.value)
 
 
 def test_unreadable_file_is_a_serialization_error(tmp_path):
