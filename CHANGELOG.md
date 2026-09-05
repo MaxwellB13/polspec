@@ -10,6 +10,18 @@ seed produces; see
 
 ### Added
 
+- `Registry`: a declared set of specs. `Registry(Customers, Orders, ...)`
+  resolves foreign keys declared against names (`resolve()`, running the
+  checks a class-bound key gets at declaration), orders parents before
+  children (`order()`), generates the whole set with every key satisfied
+  (`generate_all`, with a per-spec seed so adding a table changes no other;
+  `generate_related` for one spec and its ancestors), validates it in one
+  call (`inspect_all`, `validate_all`), merges or checks shared categories
+  (`catspec()`, `categories=`), writes and reads one file for the set
+  (`to_yaml`/`from_yaml`, a `specs:` mapping plus `categories:`), collects
+  specs from modules and directories (`from_module`, `discover`), and draws
+  one entity-relationship diagram (`to_mermaid`). See the new *Multiple
+  specs* guide.
 - `inspect()`: validation results as data. `FrameSpec.inspect(df)` (and
   `polspec.validation.inspect(spec, df)`) returns a `ValidationReport` of
   `Finding` records -- each with a code, a stable key, the columns involved,
@@ -64,6 +76,13 @@ seed produces; see
   cannot be written or read, and `RegistryError`, reserved for the spec
   registry. All are exported from `polspec`; see the new *Errors* reference
   page.
+
+### Fixed
+
+- Foreign-key sampling during generation drew parent keys from an unordered
+  `unique()`, so the same seed could give different child rows between runs.
+  The parent's distinct keys now keep their order and generation is
+  reproducible.
 
 ### Changed
 

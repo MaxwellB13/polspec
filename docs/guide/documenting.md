@@ -67,6 +67,15 @@ one, so the diagram stays live rather than becoming a stale screenshot.
     unique columns renders several primary keys. `UK` would be the correct
     token for the non-primary ones.
 
+## Several specs in one diagram
+
+A single spec's diagram can only name the entity a key points at. A
+[`Registry`](registry.md) draws every spec and every key between them:
+
+```python
+Registry(Customers, Orders, OrderLines).to_mermaid("docs/schema.mmd")
+```
+
 ## Documenting a category registry
 
 `CatSpec` renders the same two ways:

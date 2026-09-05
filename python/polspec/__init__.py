@@ -15,6 +15,7 @@ from polspec.expr import Pred, col
 from polspec.foreign_key import ForeignKey
 from polspec.framespec import FrameSpec
 from polspec.profiler import profile_dataframe
+from polspec.registry import Registry
 from polspec.rules import ColRule
 from polspec.spec import ColSpec
 from polspec.tablespec import TableSpec
@@ -32,6 +33,7 @@ __all__ = [
     "GenerationError",
     "PolspecError",
     "Pred",
+    "Registry",
     "RegistryError",
     "SerializationError",
     "SpecError",

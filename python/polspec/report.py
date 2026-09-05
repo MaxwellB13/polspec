@@ -7,6 +7,7 @@ generation or validation paths.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -189,40 +190,18 @@ def framespec_to_markdown(
     return _write_if_asked("\n".join(lines) + "\n", path)
 
 
-def framespec_to_mermaid(
-    cls: TableSpec | type,
-    path: str | Path | None = None,
-    *,
-    title: str | None = None,
-) -> str:
-    """Generates a Mermaid Entity-Relationship (ER) diagram for this FrameSpec.
+def _mermaid_name(name: str) -> str:
+    return "".join(c if c.isalnum() or c == "_" else "_" for c in name)
 
-    Parameters
-    ----------
-    path : str | Path | None, optional
-        If specified, writes the generated Mermaid diagram to this file path.
-    title : str | None, optional
-        Entity name in the diagram. Defaults to the FrameSpec class name.
 
-    Returns
-    -------
-    str
-        The formatted Mermaid diagram definition.
-    """
-    spec = as_table_spec(cls)
-    entity_name = title or spec.name
-    entity_name = "".join(c if c.isalnum() or c == "_" else "_" for c in entity_name)
-
+def _entity_lines(spec: TableSpec, entity_name: str) -> list[str]:
+    """One `Name { ... }` block: a line per column with its key and notes."""
     fk_columns: dict[str, ForeignKey] = {}
     for fk in spec.foreign_keys:
         for col in fk.columns:
             fk_columns.setdefault(col, fk)
 
-    lines: list[str] = [
-        "erDiagram",
-        f"    {entity_name} {{",
-    ]
-
+    lines = [f"    {entity_name} {{"]
     for col_name, cs in spec.columns.items():
         dtype = cs.dtype
         if isinstance(dtype, pl.Enum):
@@ -270,27 +249,65 @@ def framespec_to_mermaid(
         comment_str = f' "{comment_body}"' if comments else ""
         key_str = f" {key_label}" if key_label else ""
         lines.append(f"        {type_name} {col_name}{key_str}{comment_str}")
-
     lines.append("    }")
+    return lines
 
-    if spec.foreign_keys:
-        for fk in spec.foreign_keys:
-            if fk.references == "self":
-                target_name = entity_name
-            else:
-                target_name = "".join(
-                    c if c.isalnum() or c == "_" else "_" for c in fk.references
-                )
-            fk_label = fk.name.replace('"', "'") if fk.name else "references"
-            lines.append(f'    {target_name} ||--o{{ {entity_name} : "{fk_label}"')
 
-    content = "\n".join(lines) + "\n"
+def _relationship_lines(spec: TableSpec, entity_name: str) -> list[str]:
+    """One `Parent ||--o{ Child : "key"` line per foreign key."""
+    lines: list[str] = []
+    for fk in spec.foreign_keys:
+        target_name = (
+            entity_name if fk.references == "self" else _mermaid_name(fk.references)
+        )
+        fk_label = fk.name.replace('"', "'") if fk.name else "references"
+        lines.append(f'    {target_name} ||--o{{ {entity_name} : "{fk_label}"')
+    return lines
 
-    if path is not None:
-        p = Path(path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
-    return content
+
+def framespec_to_mermaid(
+    cls: TableSpec | type,
+    path: str | Path | None = None,
+    *,
+    title: str | None = None,
+) -> str:
+    """Generates a Mermaid Entity-Relationship (ER) diagram for this FrameSpec.
+
+    Parameters
+    ----------
+    path : str | Path | None, optional
+        If specified, writes the generated Mermaid diagram to this file path.
+    title : str | None, optional
+        Entity name in the diagram. Defaults to the FrameSpec class name.
+
+    Returns
+    -------
+    str
+        The formatted Mermaid diagram definition.
+    """
+    spec = as_table_spec(cls)
+    entity_name = _mermaid_name(title or spec.name)
+    lines = [
+        "erDiagram",
+        *_entity_lines(spec, entity_name),
+        *_relationship_lines(spec, entity_name),
+    ]
+    return _write_if_asked("\n".join(lines) + "\n", path)
+
+
+def registry_to_mermaid(
+    specs: Iterable[TableSpec | type], path: str | Path | None = None
+) -> str:
+    """One ER diagram over several specs: every entity, then every key
+    between them, so the relationships a single spec cannot see are drawn.
+    """
+    tables = [as_table_spec(s) for s in specs]
+    lines = ["erDiagram"]
+    for spec in tables:
+        lines.extend(_entity_lines(spec, _mermaid_name(spec.name)))
+    for spec in tables:
+        lines.extend(_relationship_lines(spec, _mermaid_name(spec.name)))
+    return _write_if_asked("\n".join(lines) + "\n", path)
 
 
 def catspec_to_markdown(

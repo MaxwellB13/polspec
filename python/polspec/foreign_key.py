@@ -163,7 +163,9 @@ def _apply_foreign_keys(
         local_cols = list(fk.columns)
         ref_cols = list(fk.ref_columns)
 
-        parent_keys = parent_df.select(ref_cols).drop_nulls().unique()
+        parent_keys = (
+            parent_df.select(ref_cols).drop_nulls().unique(maintain_order=True)
+        )
         if parent_keys.height == 0:
             raise GenerationError(
                 f"ForeignKey '{fk.name}' cannot generate values: the referenced "

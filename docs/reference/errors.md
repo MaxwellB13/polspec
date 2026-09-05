@@ -20,7 +20,7 @@ except PolspecError as exc:
 | `ValidationError` | Data does not meet its spec. `err.report` is the `ValidationReport`; `err.errors` lists its messages | `ValueError` |
 | `GenerationError` | A spec that declares fine cannot be turned into data as asked: no column for `method="cartesian"` to cover, a coverage set past the size cap, a foreign key with an empty parent. Errors from the Rust engine surface as this | `ValueError` |
 | `SerializationError` | A spec file cannot be written or read: a dtype with no file representation, an unrecognised dtype name, a category reference the registry does not hold | `ValueError` |
-| `RegistryError` | A collection of specs is inconsistent (reserved for the spec registry) | `LookupError` |
+| `RegistryError` | A `Registry` is inconsistent: an unknown or duplicated spec name, a key whose target is not in it, a cycle, two specs disagreeing about a shared category | `LookupError` |
 
 Each subclass keeps the built-in type it replaced, so `except ValueError`
 written against an earlier version still catches it.

@@ -67,64 +67,25 @@ between generated fixtures and fixtures that look like data.
 Both directions are active. Neither has a fixed shape yet, so the specific
 options `generate()` accepts may well change under you.
 
-## Specs do not know about each other yet
+## Specs know about each other through a `Registry`, and only there
 
-A `ForeignKey` can point at another `FrameSpec`, but nothing above the level of
-a single class knows which specs exist in a project. Four separate rough edges
-turn out to be the same missing piece.
+A `ForeignKey` names the spec it points at; nothing above a single spec knows
+which specs exist unless they are put in a
+[`Registry`](../guide/registry.md). That is deliberate — two test modules may
+each define an `Orders` — but it leaves edges:
 
-**Generating a related set is manual.** Parents first, threaded through
-`references=` by hand, in an order you work out yourself:
-
-```python
-customers = Customers.generate(1_000, seed=1)
-orders    = Orders.generate(10_000, seed=2, references={Customers: customers})
-lines     = OrderLines.generate(30_000, seed=3, references={Orders: orders})
-```
-
-That ordering is already implied by the foreign keys those specs declare.
-Walking the graph and returning the whole consistent set from one call is
-probably the single most useful thing on this page.
-
-**Cross-spec foreign keys are written by name and resolved by nothing.**
-`to_yaml()` writes `references: Customers`; a spec loaded from that file
-carries the name and checks nothing about it until a spec called `Customers`
-is supplied by hand. A registry of a project's specs is what would resolve
-it automatically.
-
-**`to_mermaid()` draws one entity.** The relationships *between* specs — the
-reason to draw an ER diagram at all — aren't available to a method that can
-only see the class it was called on.
-
-**Shared categories can silently disagree.** Two specs declaring `STATUS` with
-different variants, or same-named `pl.Categories` with different physical
-dtypes, quietly breaks the join-on-shared-codes property
-[Shared categories](../guide/categories.md) describes. Nothing currently
-notices.
-
-The likely shape is discovery across a directory — the CLI already finds every
-`FrameSpec` subclass defined in a single module — plus a registry the other
-three can be built against. Whether that registry is discovered or declared
-explicitly is undecided, and it is the decision the rest depends on.
-
-## Validation results are shaped for people, not programs
-
-`validate()` collects every violation across every column before raising, which
-is the right behaviour for someone reading a traceback. It is the wrong shape
-for anything else: `ValidationError` carries its findings as a list of
-formatted strings, so a caller that wants to *act* on them — quarantine the
-offending rows, count violations per column, write a report — has to parse
-English back into structure.
-
-Two directions here, neither settled:
-
-- **A result object rather than an exception**, so validation can be asked for
-  its findings instead of raising them, with failing rows available as a frame
-  rather than a handful of samples rendered into a message.
-- **A `validate` verb on the command line.**
-  [The command line](../guide/cli.md) turns data into a spec and a spec into a
-  test, but cannot check data against a spec — the one of the three needing no
-  Python at all, and the one that would let a spec gate a pipeline in CI.
+- **The command line has no registry verbs.** `polspec validate` takes one
+  spec and its parents as `--references NAME=PATH`; generating or validating
+  a whole registry from the shell is not there yet.
+- **Discovery imports code.** `Registry.discover("specs/")` runs every `.py`
+  file it finds. A declared `Registry(...)` in a module of your own is the
+  safer shape, and `discover` is a convenience over it.
+- **Shared categories are checked only when declared.** `resolve()` compares
+  columns against the `CatSpec` a registry was given; without one,
+  `catspec()` merges what the specs declare and refuses a disagreement, but
+  nothing checks unless asked.
+- **A single spec's `to_mermaid()` still draws one entity.** The whole
+  picture is `registry.to_mermaid()`.
 
 ## YAML format and generated values may change
 

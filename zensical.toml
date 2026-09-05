@@ -18,6 +18,7 @@ nav = [
     { "Validating data" = "guide/validating.md" },
     { "Shared categories" = "guide/categories.md" },
     { "YAML specs" = "guide/yaml.md" },
+    { "Multiple specs" = "guide/registry.md" },
     { "Generated documentation" = "guide/documenting.md" },
     { "Command line" = "guide/cli.md" },
     { "Testing pipelines" = "guide/testing.md" },

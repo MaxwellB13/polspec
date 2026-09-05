@@ -250,6 +250,13 @@ def test_generate_foreign_key_samples_from_parent_when_references_supplied():
     GenOrderSpec.validate(orders, references={GenCustomerSpec: customers})
 
 
+def test_generate_foreign_key_is_reproducible_for_a_seed():
+    customers = GenCustomerSpec.generate(50, seed=1)
+    first = GenOrderSpec.generate(500, seed=2, references={GenCustomerSpec: customers})
+    again = GenOrderSpec.generate(500, seed=2, references={GenCustomerSpec: customers})
+    assert first.equals(again)
+
+
 def test_generate_foreign_key_accepts_lazyframe_reference():
     customers = GenCustomerSpec.generate(5, seed=1)
     customer_ids = set(customers["id"].to_list())
