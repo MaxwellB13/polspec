@@ -504,6 +504,19 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     # Validation
     # ------------------------------------------------------------------
 
+    @classmethod
+    def inspect(
+        cls, df: pl.DataFrame | pl.LazyFrame, **options: Any
+    ) -> validation.ValidationReport:
+        """Everything this spec has to say about `df`, as a `ValidationReport`.
+
+        Never raises for a frame that fails: each violation is a `Finding`
+        with a code, a count, samples and, for row-level findings, the
+        offending rows reachable lazily through `report.rows(finding)` or
+        `report.failing_rows()`. Takes the same options as `validate`.
+        """
+        return validation.inspect(cls.spec, df, **options)
+
     @overload
     @classmethod
     def validate(cls, df: pl.DataFrame, **options: Any) -> pl.DataFrame: ...
@@ -518,8 +531,10 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     ) -> pl.DataFrame | pl.LazyFrame:
         """Validates a DataFrame or LazyFrame against this spec.
 
-        Raises `ValidationError` collecting every violation, or returns the
-        (optionally transformed) frame. See `polspec.validation.validate` for
+        Raises `ValidationError` carrying a `ValidationReport` of every
+        violation, or returns the (optionally transformed) frame. Use
+        `inspect` for the report without the exception. See
+        `polspec.validation.validate` for
         every option: `extra_cols`, `missing_cols`, `strict_dtypes`,
         `validate_rules`, `validate_validators`, `validate_unique`,
         `validate_checks`, `validate_foreign_keys`, `references`, `cast`,

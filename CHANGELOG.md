@@ -10,6 +10,21 @@ seed produces; see
 
 ### Added
 
+- `inspect()`: validation results as data. `FrameSpec.inspect(df)` (and
+  `polspec.validation.inspect(spec, df)`) returns a `ValidationReport` of
+  `Finding` records -- each with a code, a stable key, the columns involved,
+  a count, samples and code-specific details -- and never raises for a bad
+  frame. `report.rows(finding)` and `report.failing_rows()` return the
+  offending rows lazily; `by_column()`, `by_code()` and `to_json()` slice
+  and export them. Checks and validators now carry samples too.
+- `ValidationError.report` carries the same `ValidationReport`; `.errors` is
+  still the list of messages.
+- `polspec validate SPEC DATA [--references NAME=PATH] [--json]` on the
+  command line, exiting 1 on findings, so a spec can gate a pipeline in CI.
+- A foreign key whose parent was not supplied is a `foreign_key_unresolved`
+  finding rather than a `ValueError`, matching how `generate()` already
+  treats it; a parent lacking the referenced columns is a `foreign_key`
+  finding.
 - Spec files carry a `version:` (now 2). Files from version 1 are migrated
   on read; a file from a newer polspec is refused with a clear message. A
   key the reader does not know is an error naming the closest known key;
@@ -52,6 +67,9 @@ seed produces; see
 
 ### Changed
 
+- `polspec.validation` is a package (`report.py`, `constraints.py`); foreign
+  key anti-joins are collected together with `pl.collect_all` instead of one
+  `collect` per key.
 - **Breaking.** `ColSpec.distribution` and `distribution_params` are stored
   in canonical form (`"exp"` becomes `"exponential"`, `mu`/`sigma` become
   `mean`/`std`, and so on), so spec files are canonical. Every alias is

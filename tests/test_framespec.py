@@ -56,7 +56,7 @@ def test_modular_subpackage_imports():
         ValidationError as ValidationErrorDirect,
     )
     from polspec.validation import (
-        _validate_dataframe,
+        inspect as inspect_direct,
     )
 
     assert Bound is BoundDirect
@@ -69,7 +69,7 @@ def test_modular_subpackage_imports():
     assert callable(_colspec_from_yaml)
     assert callable(_generate_random)
     assert callable(_generate_cartesian)
-    assert callable(_validate_dataframe)
+    assert callable(inspect_direct)
 
 
 # ---------------------------------------------------------------------------

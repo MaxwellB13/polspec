@@ -164,6 +164,26 @@ This file is only overwritten by running that command again -- edit freely.
 It is a plain file, not managed state — add assertions, rename the functions,
 delete the parts you don't want. Nothing re-reads it.
 
+## `validate` — check data against a schema
+
+```bash
+polspec validate orders.yaml orders.parquet
+polspec validate specs.py orders.parquet --class Orders --references Customers=customers.parquet
+polspec validate orders.yaml orders.csv --json > report.json
+```
+
+Reads a data file (CSV, Parquet, NDJSON or Arrow IPC), runs
+[`inspect()`](validating.md#findings-as-data-inspect) against the spec, and
+prints the report: the same text `validate()` would raise, or the full
+structured report with `--json`. The exit status is 0 when the data passes
+and 1 when it does not, so a spec can gate a pipeline step in CI with no
+Python at all.
+
+`--references NAME=PATH` supplies parent data for a foreign key to another
+spec, by that spec's name; repeat it for several. `--allow-extra` and
+`--allow-missing` relax the structural checks; `--strict-dtypes` tightens the
+dtype check.
+
 ## Exit codes and errors
 
 Every subcommand returns `0` on success and `1` on a reported error, printed

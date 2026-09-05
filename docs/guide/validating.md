@@ -26,7 +26,53 @@ except ValidationError as err:
 
 `ValidationError` is a `PolspecError` (and still a `ValueError`); see
 [Errors](../reference/errors.md). `err.errors` is the list of
-individual messages; `str(err)` is the same list formatted as a report.
+individual messages; `str(err)` is the same list formatted as a report, and
+`err.report` is the `ValidationReport` behind both.
+
+## Findings as data — `inspect()`
+
+An exception is the right shape for someone reading a traceback. For code
+that wants to *act* on what was found — quarantine the offending rows, count
+problems per column, write a report — use `inspect()`, which returns the same
+findings as a `ValidationReport` and never raises for a bad frame:
+
+```python
+report = Orders.inspect(df, references={Customers: customers})
+
+report.passed                 # False
+for finding in report:
+    finding.code              # "bounds", "check", "foreign_key", ...
+    finding.key               # "total__bounds", "check:total_covers_subtotal"
+    finding.columns           # ("total",)
+    finding.count             # rows violating it (None for structural findings)
+    finding.samples           # up to five offending values
+    finding.details           # {"bounds": [0.0, None], "min_found": -3.0, ...}
+    finding.message           # the same text validate() would have raised
+
+report.by_column()["total"]   # every finding involving one column
+report.by_code("foreign_key") # every finding of one kind
+report.to_json()              # everything above, JSON-safe
+```
+
+The offending rows are reachable lazily, so nothing is materialised until you
+ask:
+
+```python
+bad = report.by_code("bounds")[0]
+report.rows(bad).collect()        # just the rows violating that one claim
+report.failing_rows().collect()   # every violating row, with a `__polspec_finding`
+                                  # column naming the claim (a row violating two
+                                  # claims appears twice)
+```
+
+Structural findings (`extra_columns`, `missing_columns`, `dtype`,
+`foreign_key_unresolved`) describe the frame's shape rather than its rows and
+have no rows to return. `inspect()` takes exactly the options `validate()`
+does; `validate()` is `inspect()` followed by `report.raise_if_failed()` and
+the structural transformations below. The full list of codes is in
+[Errors](../reference/errors.md#finding-codes), and `polspec validate` on the
+[command line](cli.md#validate-check-data-against-a-schema) prints the same
+report.
 
 ## Options
 
@@ -117,9 +163,11 @@ A key referencing another spec needs that spec's data:
 Orders.validate(orders, references={Customers: customers})
 ```
 
-Without it, `validate()` raises `ValueError` naming the key and the missing
-spec. Self-referencing keys are checked against the frame itself and need
-nothing.
+Without it, the key is reported as a `foreign_key_unresolved` finding naming
+the spec it needed, so `validate()` raises and `inspect()` lists it alongside
+everything else. `references` may be keyed by the class, its `TableSpec`, or
+the spec's name. Self-referencing keys are checked against the frame itself
+and need nothing.
 
 Each foreign key is an anti-join against the parent, so these run separately
 from the single-pass aggregation above.
