@@ -118,8 +118,6 @@ produce nothing.
   columns are added after validation runs, including for non-nullable columns.
 - **Rules overwrite nulls**, so a nullable column with a rule ends up with
   fewer nulls than `null_probability` suggests.
-- **`generate()` silently ignores a foreign key it has no parent data for**,
-  while `validate()` raises for the same key.
 - **Case-insensitive registry lookup** means a column named `status` binds to a
   registry entry named `STATUS`; entries differing only in case are ambiguous.
 - **`to_mermaid` marks every `unique=True` column `PK`**, so several unique

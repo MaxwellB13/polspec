@@ -18,6 +18,7 @@ from polspec.profiler import profile_dataframe
 from polspec.rules import ColRule
 from polspec.spec import ColSpec
 from polspec.tablespec import TableSpec
+from polspec.validation import Finding, ValidationReport
 
 __all__ = [
     "Bound",
@@ -25,6 +26,7 @@ __all__ = [
     "Check",
     "ColRule",
     "ColSpec",
+    "Finding",
     "ForeignKey",
     "FrameSpec",
     "GenerationError",
@@ -35,6 +37,7 @@ __all__ = [
     "SpecError",
     "TableSpec",
     "ValidationError",
+    "ValidationReport",
     "col",
     "profile_dataframe",
 ]

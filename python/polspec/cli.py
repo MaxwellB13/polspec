@@ -11,6 +11,7 @@ parsing and templating, not new behaviour.
     polspec schema infer orders.parquet -o orders.py
     polspec schema new Orders -o orders.py
     polspec test orders.yaml -o test_orders.py
+    polspec validate orders.yaml orders.parquet --references Customers=customers.parquet
 """
 
 from __future__ import annotations
@@ -201,6 +202,66 @@ def _cmd_schema_new(args: argparse.Namespace) -> int:
     _maybe_format(output)
     print(f"Wrote a starter FrameSpec to {output}")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# validate
+# ---------------------------------------------------------------------------
+
+
+def _parse_reference(text: str) -> tuple[str, Path]:
+    """`Customers=customers.parquet` -> ("Customers", Path("customers.parquet"))."""
+    name, sep, path = text.partition("=")
+    if not sep or not name or not path:
+        raise CliError(
+            f"--references expects NAME=PATH, got {text!r} "
+            "(the spec name a foreign key points at, and a data file for it)"
+        )
+    return name, Path(path)
+
+
+def _cmd_validate(args: argparse.Namespace) -> int:
+    """Checks a data file against a spec, printing findings or JSON.
+
+    Exit status 0 when the data passes, 1 when it does not; a problem with
+    the arguments or files is reported like any other CLI error.
+    """
+    source = Path(args.spec)
+    if not source.exists():
+        raise CliError(f"no such file: {source}")
+    data_path = Path(args.data)
+    if not data_path.exists():
+        raise CliError(f"no such file: {data_path}")
+
+    specs = _loaded_specs(source, args.cls, source)
+    if len(specs) != 1:
+        names = ", ".join(name for name, _, _ in specs)
+        raise CliError(
+            f"{source} defines several specs ({names}); pick one with --class"
+        )
+    _, spec_cls, _ = specs[0]
+
+    references: dict[str, pl.DataFrame] = {}
+    for item in args.references or ():
+        name, path = _parse_reference(item)
+        if not path.exists():
+            raise CliError(f"no such file for reference {name!r}: {path}")
+        references[name] = _read_data_file(path, None)
+
+    df = _read_data_file(data_path, None)
+    report = spec_cls.inspect(
+        df,
+        references=references or None,
+        extra_cols="allow" if args.allow_extra else "raise",
+        missing_cols="allow" if args.allow_missing else "raise",
+        strict_dtypes=args.strict_dtypes,
+    )
+
+    if args.json:
+        print(report.to_json())
+    else:
+        print(str(report))
+    return 0 if report.passed else 1
 
 
 # ---------------------------------------------------------------------------
@@ -470,7 +531,10 @@ def _cmd_test(args: argparse.Namespace) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="polspec",
-        description="Generate a schema from data, or a test from a schema.",
+        description=(
+            "Generate a schema from data, a test from a schema, or check data "
+            "against a schema."
+        ),
     )
     parser.add_argument("--version", action="version", version=f"polspec {_VERSION}")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -546,6 +610,48 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Generate a test for only this class (a .py source may define several)",
     )
     test.set_defaults(func=_cmd_test)
+
+    validate = subparsers.add_parser(
+        "validate", help="Check a data file against a schema"
+    )
+    validate.add_argument("spec", help="A .yaml/.yml spec, or a .py file defining one")
+    validate.add_argument("data", help="Path to a CSV, Parquet, NDJSON or IPC file")
+    validate.add_argument(
+        "--references",
+        action="append",
+        metavar="NAME=PATH",
+        help=(
+            "Parent data for a foreign key to another spec, as the spec's name "
+            "and a data file; repeat for several"
+        ),
+    )
+    validate.add_argument(
+        "--class",
+        dest="cls",
+        metavar="NAME",
+        help="Validate against only this class (a .py source may define several)",
+    )
+    validate.add_argument(
+        "--allow-extra",
+        action="store_true",
+        help="Do not report columns the spec does not declare",
+    )
+    validate.add_argument(
+        "--allow-missing",
+        action="store_true",
+        help="Do not report declared columns the data lacks",
+    )
+    validate.add_argument(
+        "--strict-dtypes",
+        action="store_true",
+        help="Require exact dtypes rather than compatible ones",
+    )
+    validate.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the report as JSON instead of text",
+    )
+    validate.set_defaults(func=_cmd_validate)
 
     return parser
 

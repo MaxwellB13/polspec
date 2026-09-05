@@ -19,7 +19,7 @@ owns only the inner loop that fills arrays with values.
 | `engine` | Turning a spec into the tuple the Rust extension takes, and casting the result back |
 | `_ffi` | The one call into the Rust extension, with its errors re-raised as `GenerationError` |
 | `errors` | The `PolspecError` hierarchy |
-| `validation` | Checking a frame against a spec |
+| `validation` | `inspect` and `validate` over a `TableSpec`: every claim becomes a `_Constraint` (`constraints.py`) that produces a `Finding`; `report.py` holds `Finding` and `ValidationReport` |
 | `tablespec` | `TableSpec` — a spec as an immutable value, with its declaration-time checks and structural operations |
 | `framespec` | `FrameSpec` — the metaclass that builds a `TableSpec` from a class body, and the facade forwarding every verb to it |
 | `generation` | `generate`, `generate_batches` and the file sinks, as functions over a `TableSpec` |
@@ -57,17 +57,18 @@ finished frame, not row by row.
 
 ```mermaid
 flowchart LR
-    A["FrameSpec.validate(df)"] --> B[Structural checks]
+    A["FrameSpec.inspect(df) / validate(df)"] --> B[Structural checks]
     B --> C["Build one _Constraint<br/>per declared claim"]
     C --> D["One Polars aggregation<br/>over the whole frame"]
-    D --> E["Each constraint reports<br/>on its own result"]
-    E --> F{Any errors?}
-    F -->|yes| G[ValidationError with all of them]
-    F -->|no| H["Drop / add / cast / reorder"]
+    D --> E["Each constraint turns its<br/>result into a Finding"]
+    E --> F["ValidationReport<br/>(what inspect returns)"]
+    F -->|validate: findings| G[ValidationError carrying the report]
+    F -->|validate: none| H["Drop / add / cast / reorder"]
 ```
 
 Every claim a spec makes becomes a `_Constraint` that contributes aggregation
-expressions and turns the results back into a message. They are collected
+expressions and turns the results back into a `Finding`: a code, a count,
+samples, code-specific details, and a lazy filter that locates the rows. They are collected
 first and evaluated together, so validating a wide table costs one scan rather
 than one per column. Foreign keys are the exception: each needs its own
 anti-join against a parent frame.

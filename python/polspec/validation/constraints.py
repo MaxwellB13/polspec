@@ -1,26 +1,22 @@
-"""Checking a frame against the claims a spec makes about it.
+"""Every claim a spec makes, as a `_Constraint` that produces a `Finding`.
 
-Every claim is a `_Constraint`: it contributes aggregation expressions, and it
-turns the results back into an error message. All of them are collected first
-and evaluated in a single pass over the frame, so validating fifty columns
-costs one scan rather than fifty.
-
-This replaces a pair of long loops that communicated through hand-built alias
-strings (`f"__val__{name}__oob_cnt"`) built in one and looked up in the other,
-two hundred lines apart. Each constraint now owns its own aliases, and adding
-a new kind of check is a new class rather than an edit in two distant places.
+A constraint contributes aggregation expressions to one pass over the frame,
+then turns the results back into a `Finding`: a count, a few samples, the
+facts that make the message actionable, and a way to locate the offending
+rows later. All constraints are collected first and evaluated together, so
+validating fifty columns costs one scan rather than fifty. Foreign keys are
+the exception: each needs its own anti-join.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from polspec.errors import SpecError, ValidationError
-from polspec.tablespec import TableSpec, resolve_references
+from polspec.validation.report import Finding
 
 if TYPE_CHECKING:
     from polspec.bound import Bound
@@ -28,57 +24,24 @@ if TYPE_CHECKING:
     from polspec.foreign_key import ForeignKey
     from polspec.rules import ColRule
     from polspec.spec import ColSpec
+    from polspec.validation import ValidationOptions
 
-_MAX_SAMPLES = 5
-
-
-@dataclass(frozen=True, slots=True)
-class _Options:
-    """Which checks to run and what to do about structural mismatches.
-
-    Grouped rather than passed as ten separate arguments, so adding a check
-    does not widen every signature between here and `FrameSpec.validate`.
-    """
-
-    extra_cols: Literal["drop", "allow", "raise"] = "raise"
-    missing_cols: Literal["add", "allow", "raise"] = "raise"
-    strict_dtypes: bool = False
-    rules: bool = True
-    validators: bool = True
-    unique: bool = True
-    checks: bool = True
-    foreign_keys: bool = True
-    cast: bool = False
-    streaming: bool = False
-
-    def __post_init__(self) -> None:
-        if self.extra_cols not in ("drop", "allow", "raise"):
-            raise ValueError(
-                f"extra_cols must be one of 'drop', 'allow', 'raise'; got {self.extra_cols!r}"
-            )
-        if self.missing_cols not in ("add", "allow", "raise"):
-            raise ValueError(
-                f"missing_cols must be one of 'add', 'allow', 'raise'; got {self.missing_cols!r}"
-            )
-
-
-# ---------------------------------------------------------------------------
-# Constraints
-# ---------------------------------------------------------------------------
+MAX_SAMPLES = 5
 
 
 @dataclass
 class _Constraint:
     """One checkable claim, measured by counting the rows that violate a mask.
 
-    Subclasses supply the mask and the wording; the aliases tying the two
-    halves together stay private to the instance.
+    Subclasses supply the mask, the wording and the details; the aliases
+    tying the two halves together stay private to the instance.
     """
 
     key: str
     mask: pl.Expr
     sample_expr: pl.Expr | None = None
     unique_samples: bool = True
+    code: str = ""
 
     def _alias(self, suffix: str) -> str:
         return f"__val__{self.key}__{suffix}"
@@ -88,23 +51,40 @@ class _Constraint:
         if self.sample_expr is not None:
             samples = self.sample_expr.filter(self.mask)
             if self.unique_samples:
-                samples = samples.unique()
+                samples = samples.unique(maintain_order=True)
             exprs.append(
-                samples.head(_MAX_SAMPLES).implode().alias(self._alias("samples"))
+                samples.head(MAX_SAMPLES).implode().alias(self._alias("samples"))
             )
         return exprs
 
-    def failure(self, stats: dict[str, list]) -> str | None:
+    def failure(self, stats: dict[str, list]) -> Finding | None:
         count = stats[self._alias("cnt")][0]
         if not count:
             return None
-        return self.message(count, self._samples(stats), stats)
+        samples = self._samples(stats)
+        mask = self.mask
+        return Finding(
+            code=self.code,  # type: ignore[arg-type]
+            key=self.key,
+            message=self.message(count, samples, stats),
+            columns=self.involved(),
+            count=int(count),
+            samples=samples,
+            details=self.details(stats),
+            _locate=lambda lf: lf.filter(mask),
+        )
 
     def _samples(self, stats: dict[str, list]) -> list:
         if self.sample_expr is None:
             return []
         raw = stats[self._alias("samples")][0]
         return list(raw) if raw is not None else []
+
+    def involved(self) -> tuple[str, ...]:
+        return ()
+
+    def details(self, stats: dict[str, list]) -> dict[str, Any]:
+        return {}
 
     def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
         raise NotImplementedError
@@ -114,6 +94,10 @@ class _Constraint:
 class _Nullability(_Constraint):
     column: str = ""
     sample_expr: None = None
+    code: str = "nullability"
+
+    def involved(self) -> tuple[str, ...]:
+        return (self.column,)
 
     def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
         return (
@@ -126,6 +110,13 @@ class _Nullability(_Constraint):
 class _AllowedValues(_Constraint):
     column: str = ""
     allowed: list[Any] = field(default_factory=list)
+    code: str = "choices"
+
+    def involved(self) -> tuple[str, ...]:
+        return (self.column,)
+
+    def details(self, stats: dict[str, list]) -> dict[str, Any]:
+        return {"allowed": list(self.allowed)}
 
     def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
         return (
@@ -139,6 +130,7 @@ class _Bounds(_Constraint):
     column: str = ""
     bounds: Bound | None = None
     unique_samples: bool = False
+    code: str = "bounds"
 
     def aggregations(self) -> list[pl.Expr]:
         # The observed extremes make an out-of-bounds report actionable, so
@@ -148,6 +140,16 @@ class _Bounds(_Constraint):
             pl.col(self.column).min().alias(self._alias("min")),
             pl.col(self.column).max().alias(self._alias("max")),
         ]
+
+    def involved(self) -> tuple[str, ...]:
+        return (self.column,)
+
+    def details(self, stats: dict[str, list]) -> dict[str, Any]:
+        return {
+            "bounds": [self.bounds.min, self.bounds.max] if self.bounds else None,
+            "min_found": stats[self._alias("min")][0],
+            "max_found": stats[self._alias("max")][0],
+        }
 
     def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
         found_min = stats[self._alias("min")][0]
@@ -164,6 +166,15 @@ class _StringLength(_Constraint):
     column: str = ""
     length: Bound | None = None
     unique_samples: bool = False
+    code: str = "string_length"
+
+    def involved(self) -> tuple[str, ...]:
+        return (self.column,)
+
+    def details(self, stats: dict[str, list]) -> dict[str, Any]:
+        return {
+            "string_length": [self.length.min, self.length.max] if self.length else None
+        }
 
     def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
         return (
@@ -177,6 +188,16 @@ class _StringLength(_Constraint):
 class _RuleHolds(_Constraint):
     column: str = ""
     rule: ColRule | None = None
+    code: str = "rule"
+
+    def involved(self) -> tuple[str, ...]:
+        return (self.column,)
+
+    def details(self, stats: dict[str, list]) -> dict[str, Any]:
+        return {
+            "when": repr(self.rule.when),
+            "choices": list(self.rule.choices),
+        }
 
     def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
         return (
@@ -190,7 +211,13 @@ class _RuleHolds(_Constraint):
 class _ColumnValidator(_Constraint):
     column: str = ""
     validator: Check | None = None
-    sample_expr: None = None
+    code: str = "validator"
+
+    def involved(self) -> tuple[str, ...]:
+        return (self.column,)
+
+    def details(self, stats: dict[str, list]) -> dict[str, Any]:
+        return {"validator": self.validator.name, "condition": str(self.validator.expr)}
 
     def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
         described = (
@@ -205,6 +232,10 @@ class _ColumnValidator(_Constraint):
 @dataclass
 class _UniqueValues(_Constraint):
     column: str = ""
+    code: str = "unique"
+
+    def involved(self) -> tuple[str, ...]:
+        return (self.column,)
 
     def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
         return (
@@ -216,6 +247,10 @@ class _UniqueValues(_Constraint):
 @dataclass
 class _CompositeUnique(_Constraint):
     columns: tuple[str, ...] = ()
+    code: str = "unique_together"
+
+    def involved(self) -> tuple[str, ...]:
+        return self.columns
 
     def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
         return (
@@ -227,7 +262,13 @@ class _CompositeUnique(_Constraint):
 @dataclass
 class _FrameCheck(_Constraint):
     check: Check | None = None
-    sample_expr: None = None
+    code: str = "check"
+
+    def involved(self) -> tuple[str, ...]:
+        return tuple(self.check.expr.meta.root_names())
+
+    def details(self, stats: dict[str, list]) -> dict[str, Any]:
+        return {"check": self.check.name, "condition": str(self.check.expr)}
 
     def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
         described = f" ({self.check.description})" if self.check.description else ""
@@ -285,6 +326,11 @@ def _is_textual(dtype: pl.DataType) -> bool:
     )
 
 
+def _struct_of(names: Sequence[str]) -> pl.Expr | None:
+    """A struct of the named columns, for sampling multi-column claims."""
+    return pl.struct([pl.col(n) for n in names]) if names else None
+
+
 # ---------------------------------------------------------------------------
 # Building constraints from a spec
 # ---------------------------------------------------------------------------
@@ -296,14 +342,14 @@ def _column_constraints(
     actual_dtype: pl.DataType,
     *,
     compatible: bool,
-    options: _Options,
+    options: ValidationOptions,
     df_col_names: Sequence[str],
 ) -> list[_Constraint]:
     """The constraints one declared column contributes to the single pass.
 
     Most are skipped when the dtype is already wrong: comparing values against
     bounds or choices of an incompatible type produces noise on top of the
-    dtype error the caller will already see.
+    dtype finding the caller will already see.
     """
     column = pl.col(name)
     present = column.is_not_null()
@@ -369,6 +415,7 @@ def _column_constraints(
             _ColumnValidator(
                 key=f"{name}__validator_{index}",
                 mask=validator._failure_mask(),
+                sample_expr=column,
                 column=name,
                 validator=validator,
             )
@@ -491,10 +538,16 @@ def _frame_constraints(
             )
         )
 
-    constraints.extend(
-        _FrameCheck(key=f"check_{index}", mask=check._failure_mask(), check=check)
-        for index, check in enumerate(checks or ())
-    )
+    for check in checks or ():
+        involved = [c for c in check.expr.meta.root_names() if c in df_col_names]
+        constraints.append(
+            _FrameCheck(
+                key=f"check:{check.name}",
+                mask=check._failure_mask(),
+                sample_expr=_struct_of(involved),
+                check=check,
+            )
+        )
     return constraints
 
 
@@ -503,14 +556,16 @@ def _frame_constraints(
 # ---------------------------------------------------------------------------
 
 
-def _foreign_key_errors(
+def _foreign_key_findings(
     lf: pl.LazyFrame,
     schema_name: str,
     foreign_keys: Sequence[tuple[ForeignKey, pl.LazyFrame | None]],
     df_col_names: Sequence[str],
     collect_kwargs: dict[str, Any],
-) -> list[str]:
-    errors: list[str] = []
+) -> list[Finding]:
+    findings: list[Finding] = []
+    pending: list[tuple[ForeignKey, pl.LazyFrame | None, pl.LazyFrame, Any]] = []
+
     for fk, target_lf in foreign_keys:
         local_cols = list(fk.columns)
         ref_cols = list(fk.ref_columns)
@@ -518,14 +573,25 @@ def _foreign_key_errors(
             continue  # already reported through missing_cols handling
 
         parent_lf = target_lf if target_lf is not None else lf
-        missing_ref = [
-            c for c in ref_cols if c not in parent_lf.collect_schema().names()
-        ]
+        parent_names = parent_lf.collect_schema().names()
+        missing_ref = [c for c in ref_cols if c not in parent_names]
         if missing_ref:
-            raise ValueError(
-                f"ForeignKey '{fk.name}' on {schema_name!r} references columns "
-                f"{missing_ref} not present in the referenced DataFrame"
+            findings.append(
+                Finding(
+                    code="foreign_key",
+                    key=f"fk:{fk.name}",
+                    message=(
+                        f"ForeignKey '{fk.name}' on {schema_name!r} references columns "
+                        f"{missing_ref} not present in the referenced DataFrame"
+                    ),
+                    columns=tuple(local_cols),
+                    details={
+                        "target": fk.references,
+                        "missing_ref_columns": missing_ref,
+                    },
+                )
             )
+            continue
 
         key_expr = (
             pl.col(local_cols[0]) if len(local_cols) == 1 else pl.struct(local_cols)
@@ -535,268 +601,47 @@ def _foreign_key_errors(
             if len(local_cols) == 1
             else pl.all_horizontal([pl.col(c).is_not_null() for c in local_cols])
         )
-        orphans = (
-            lf.select(local_cols)
-            .filter(present)
-            .join(
-                parent_lf.select(ref_cols).unique(),
-                left_on=local_cols,
-                right_on=ref_cols,
-                how="anti",
-            )
-        )
-        stats = orphans.select(
+        parent_keys = parent_lf.select(ref_cols).unique()
+
+        def orphans_of(
+            frame: pl.LazyFrame, _p=present, _k=parent_keys, _l=local_cols, _r=ref_cols
+        ) -> pl.LazyFrame:
+            return frame.filter(_p).join(_k, left_on=_l, right_on=_r, how="anti")
+
+        stats = orphans_of(lf.select(local_cols)).select(
             pl.len().alias("cnt"),
-            key_expr.unique().head(_MAX_SAMPLES).implode().alias("samples"),
-        ).collect(**collect_kwargs)
-
-        count = stats["cnt"][0]
-        if not count:
-            continue
-        raw_samples = stats["samples"][0]
-        target_label = "self" if target_lf is None else fk.references
-        errors.append(
-            f"ForeignKey '{fk.name}' violated ({local_cols} -> "
-            f"{target_label}.{ref_cols}): found {count} row(s) with no "
-            f"matching parent record. Violating samples: "
-            f"{list(raw_samples) if raw_samples is not None else []}"
+            key_expr.unique(maintain_order=True)
+            .head(MAX_SAMPLES)
+            .implode()
+            .alias("samples"),
         )
-    return errors
+        pending.append((fk, target_lf, stats, orphans_of))
 
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
-
-
-def _validate_dataframe(
-    columns: dict[str, ColSpec],
-    schema_name: str,
-    df: pl.DataFrame | pl.LazyFrame,
-    options: _Options,
-    *,
-    checks: Sequence[Check] | None = None,
-    unique_together: Sequence[Sequence[str]] | None = None,
-    foreign_keys: Sequence[tuple[ForeignKey, pl.LazyFrame | None]] | None = None,
-) -> pl.DataFrame | pl.LazyFrame:
-    """Validates a DataFrame or LazyFrame against declared ColSpecs, checks, and unique constraints."""
-    is_lazy = isinstance(df, pl.LazyFrame)
-    lf = df if is_lazy else df.lazy()
-
-    df_schema = lf.collect_schema()
-    df_col_names = df_schema.names()
-
-    extra = [col for col in df_col_names if col not in columns]
-    missing = [col for col in columns if col not in df_col_names]
-
-    errors: list[str] = []
-    if extra and options.extra_cols == "raise":
-        errors.append(f"Extra columns found that are not in schema: {extra}")
-    if missing and options.missing_cols == "raise":
-        errors.append(f"Missing required columns in DataFrame: {missing}")
-
-    constraints: list[_Constraint] = []
-    for name in (c for c in columns if c in df_col_names):
-        spec = columns[name]
-        actual_dtype = df_schema[name]
-        compatible = _is_dtype_compatible(
-            spec.dtype, actual_dtype, strict=options.strict_dtypes
-        )
-        if not compatible:
-            errors.append(
-                f"Column '{name}': expected dtype {spec.dtype}, got {actual_dtype}"
-            )
-        constraints.extend(
-            _column_constraints(
-                name,
-                spec,
-                actual_dtype,
-                compatible=compatible,
-                options=options,
-                df_col_names=df_col_names,
-            )
-        )
-
-    constraints.extend(
-        _frame_constraints(
-            unique_together if options.unique else None,
-            checks if options.checks else None,
-            df_col_names,
-        )
-    )
-
-    collect_kwargs: dict[str, Any] = (
-        {"engine": "streaming"} if options.streaming else {}
-    )
-
-    if constraints:
-        aggregations = [expr for c in constraints for expr in c.aggregations()]
-        stats = (
-            lf.select(aggregations).collect(**collect_kwargs).to_dict(as_series=False)
-        )
-        errors.extend(
-            message
-            for message in (c.failure(stats) for c in constraints)
-            if message is not None
-        )
-
-    if options.foreign_keys and foreign_keys:
-        errors.extend(
-            _foreign_key_errors(
-                lf, schema_name, foreign_keys, df_col_names, collect_kwargs
-            )
-        )
-
-    if errors:
-        raise ValidationError(
-            "\n".join(
-                [
-                    (
-                        f"Validation failed for DataFrame against '{schema_name}' "
-                        f"({len(errors)} error(s) found):"
-                    ),
-                    *(f"  - {err}" for err in errors),
-                ]
-            ),
-            errors=errors,
-        )
-
-    result = _apply_transformations(lf, columns, extra, missing, options)
-    return result if is_lazy else result.collect()
-
-
-def _apply_transformations(
-    lf: pl.LazyFrame,
-    columns: dict[str, ColSpec],
-    extra: list[str],
-    missing: list[str],
-    options: _Options,
-) -> pl.LazyFrame:
-    """Drops, adds, casts and reorders once validation has passed."""
-    if extra and options.extra_cols == "drop":
-        lf = lf.drop(extra)
-
-    if missing and options.missing_cols == "add":
-        lf = lf.with_columns(
-            pl.lit(None, dtype=columns[c].dtype).alias(c) for c in missing
-        )
-
-    if options.cast:
-        schema = lf.collect_schema()
-        cast_exprs = [
-            pl.col(name).cast(spec.dtype)
-            for name, spec in columns.items()
-            if name in schema and schema[name] != spec.dtype
-        ]
-        if cast_exprs:
-            lf = lf.with_columns(cast_exprs)
-
-    # Declared columns first, in declaration order, then anything extra that
-    # survived.
-    present = lf.collect_schema().names()
-    declared = [c for c in columns if c in present]
-    return lf.select(declared + [c for c in present if c not in columns])
-
-
-# ---------------------------------------------------------------------------
-# Public entry point
-# ---------------------------------------------------------------------------
-
-
-@overload
-def validate(spec: TableSpec, df: pl.DataFrame, **options: Any) -> pl.DataFrame: ...
-
-
-@overload
-def validate(spec: TableSpec, df: pl.LazyFrame, **options: Any) -> pl.LazyFrame: ...
-
-
-def validate(
-    spec: TableSpec,
-    df: pl.DataFrame | pl.LazyFrame,
-    *,
-    extra_cols: Literal["drop", "allow", "raise"] = "raise",
-    missing_cols: Literal["add", "allow", "raise"] = "raise",
-    strict_dtypes: bool = False,
-    validate_rules: bool = True,
-    validate_validators: bool = True,
-    validate_unique: bool = True,
-    validate_checks: bool = True,
-    validate_foreign_keys: bool = True,
-    references: Mapping[Any, pl.DataFrame | pl.LazyFrame] | None = None,
-    cast: bool = False,
-    streaming: bool = False,
-) -> pl.DataFrame | pl.LazyFrame:
-    """Validates a DataFrame or LazyFrame against `spec`.
-
-    Parameters
-    ----------
-    df : pl.DataFrame | pl.LazyFrame
-        The frame to validate. A LazyFrame comes back as a LazyFrame.
-    extra_cols : {"drop", "allow", "raise"}
-        Columns present in `df` but not declared: raise a ValidationError
-        naming them, drop them from the returned frame, or keep them.
-    missing_cols : {"add", "allow", "raise"}
-        Declared columns absent from `df`: raise, add them as nulls of the
-        declared dtype, or skip them.
-    strict_dtypes : bool
-        Require identical dtypes, rather than accepting a compatible one
-        (a narrower integer, a String where an Enum was declared).
-    validate_rules, validate_validators, validate_unique, validate_checks,
-    validate_foreign_keys : bool
-        Switch off individual kinds of check.
-    references : mapping
-        Parent frames for foreign keys that reference another spec, keyed by
-        that spec, its FrameSpec class, or its name. Not needed for
-        `references="self"` keys, which are checked against `df` itself.
-    cast : bool
-        Cast validated columns to their declared dtype in the returned frame.
-    streaming : bool
-        Use Polars' streaming engine for the aggregation.
-
-    Returns the validated, optionally transformed frame. Raises
-    `ValidationError` collecting every violation across every column, or
-    `ValueError` for an invalid option or a cross-spec foreign key with no
-    entry in `references`.
-    """
-    if not spec.columns:
-        raise SpecError(f"{spec.name} declares no ColSpec columns")
-
-    resolved: list[tuple[ForeignKey, pl.LazyFrame | None]] = []
-    if validate_foreign_keys:
-        parents = resolve_references(
-            references, lambda f: f.lazy() if isinstance(f, pl.DataFrame) else f
-        )
-        for fk in spec.foreign_keys:
-            if fk.references == "self":
-                resolved.append((fk, None))
+    if pending:
+        results = pl.collect_all([p[2] for p in pending], **collect_kwargs)
+        for (fk, target_lf, _, orphans_of), stats in zip(pending, results, strict=True):
+            count = stats["cnt"][0]
+            if not count:
                 continue
-            parent = parents.get(fk.references)
-            if parent is None:
-                raise ValueError(
-                    f"{spec.name}.validate(): ForeignKey {fk.name!r} references "
-                    f"{fk.references!r}, but no DataFrame for it was supplied via "
-                    "validate(references={...})"
+            raw_samples = stats["samples"][0]
+            samples = list(raw_samples) if raw_samples is not None else []
+            target_label = "self" if target_lf is None else fk.references
+            local_cols = list(fk.columns)
+            ref_cols = list(fk.ref_columns)
+            findings.append(
+                Finding(
+                    code="foreign_key",
+                    key=f"fk:{fk.name}",
+                    message=(
+                        f"ForeignKey '{fk.name}' violated ({local_cols} -> "
+                        f"{target_label}.{ref_cols}): found {count} row(s) with no "
+                        f"matching parent record. Violating samples: {samples}"
+                    ),
+                    columns=tuple(local_cols),
+                    count=int(count),
+                    samples=samples,
+                    details={"target": target_label, "ref_columns": ref_cols},
+                    _locate=orphans_of,
                 )
-            resolved.append((fk, parent))
-
-    return _validate_dataframe(
-        dict(spec.columns),
-        spec.name,
-        df,
-        _Options(
-            extra_cols=extra_cols,
-            missing_cols=missing_cols,
-            strict_dtypes=strict_dtypes,
-            rules=validate_rules,
-            validators=validate_validators,
-            unique=validate_unique,
-            checks=validate_checks,
-            foreign_keys=validate_foreign_keys,
-            cast=cast,
-            streaming=streaming,
-        ),
-        checks=spec.checks,
-        unique_together=spec.unique_together,
-        foreign_keys=resolved,
-    )
+            )
+    return findings

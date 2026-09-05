@@ -17,6 +17,8 @@ working. Plain argument misuse -- a negative row count, an unknown `method=`
 
 from __future__ import annotations
 
+from typing import Any
+
 
 class PolspecError(Exception):
     """Base class for every error polspec raises on its own behalf."""
@@ -35,12 +37,25 @@ class SpecError(PolspecError, ValueError, TypeError):
 class ValidationError(PolspecError, ValueError):
     """Data does not meet its spec.
 
-    Carries every violation found, as `errors`, rather than only the first.
+    Carries the `ValidationReport` of every violation found as `report`;
+    `errors` is the list of their messages, kept for callers written against
+    earlier versions.
     """
 
-    def __init__(self, message: str, errors: list[str] | None = None) -> None:
-        super().__init__(message)
-        self.errors = errors or []
+    def __init__(self, report: Any, errors: list[str] | None = None) -> None:
+        if isinstance(report, str):
+            # A plain message, as raised before reports existed.
+            super().__init__(report)
+            self.report = None
+            self._errors = list(errors or [])
+        else:
+            super().__init__(str(report))
+            self.report = report
+            self._errors = [f.message for f in report.findings]
+
+    @property
+    def errors(self) -> list[str]:
+        return list(self._errors)
 
 
 class GenerationError(PolspecError, ValueError):

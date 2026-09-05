@@ -4,13 +4,14 @@ templating, and -- the part with real risk -- generating a test file that
 actually passes when run.
 """
 
+import json
 import subprocess
 import sys
 import textwrap
 
 import polars as pl
 import pytest
-from polspec import FrameSpec
+from polspec import ColSpec, FrameSpec
 from polspec.cli import main
 
 
@@ -333,6 +334,144 @@ def test_test_command_unknown_class(tmp_path, capsys):
 # ---------------------------------------------------------------------------
 # top level
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# validate
+# ---------------------------------------------------------------------------
+
+
+def _write_orders_specs(tmp_path):
+    source = tmp_path / "specs.py"
+    source.write_text(
+        textwrap.dedent(
+            """
+            import polars as pl
+            from polspec import ColSpec, ForeignKey, FrameSpec
+
+            class Customers(FrameSpec):
+                id = ColSpec(pl.Int64, unique=True)
+
+            class Orders(FrameSpec):
+                order_id = ColSpec(pl.Int64, unique=True)
+                customer_id = ColSpec(pl.Int64)
+                total = ColSpec(pl.Float64, bounds=(0.0, 100.0))
+                __foreign_keys__ = [
+                    ForeignKey("customer_id", references=Customers, ref_columns="id")
+                ]
+            """
+        )
+    )
+    customers = tmp_path / "customers.parquet"
+    pl.DataFrame({"id": [1, 2, 3]}).write_parquet(customers)
+    return source, customers
+
+
+def test_validate_passing_data_exits_zero(tmp_path, capsys):
+    source, customers = _write_orders_specs(tmp_path)
+    data = tmp_path / "orders.parquet"
+    pl.DataFrame(
+        {"order_id": [1, 2], "customer_id": [1, 3], "total": [5.0, 50.0]}
+    ).write_parquet(data)
+    code = run_cli(
+        "validate",
+        source,
+        data,
+        "--class",
+        "Orders",
+        "--references",
+        f"Customers={customers}",
+    )
+    assert code == 0
+    assert "Validation passed" in capsys.readouterr().out
+
+
+def test_validate_failing_data_exits_one_and_prints_the_report(tmp_path, capsys):
+    source, customers = _write_orders_specs(tmp_path)
+    data = tmp_path / "orders.csv"
+    pl.DataFrame(
+        {"order_id": [1, 1], "customer_id": [1, 9], "total": [5.0, 500.0]}
+    ).write_csv(data)
+    code = run_cli(
+        "validate",
+        source,
+        data,
+        "--class",
+        "Orders",
+        "--references",
+        f"Customers={customers}",
+    )
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "Validation failed" in out
+    assert "out of bounds" in out and "duplicate" in out.lower()
+    assert "Customers" in out  # the orphaned customer_id
+
+
+def test_validate_json_output_is_the_report(tmp_path, capsys):
+    source, customers = _write_orders_specs(tmp_path)
+    data = tmp_path / "orders.parquet"
+    pl.DataFrame(
+        {"order_id": [1, 2], "customer_id": [1, 2], "total": [5.0, 500.0]}
+    ).write_parquet(data)
+    code = run_cli(
+        "validate",
+        source,
+        data,
+        "--class",
+        "Orders",
+        "--json",
+        "--references",
+        f"Customers={customers}",
+    )
+    assert code == 1
+    data = json.loads(capsys.readouterr().out)
+    assert data["spec"] == "Orders" and data["passed"] is False
+    assert [f["code"] for f in data["findings"]] == ["bounds"]
+
+
+def test_validate_without_references_reports_the_unresolved_key(tmp_path, capsys):
+    source, _ = _write_orders_specs(tmp_path)
+    data = tmp_path / "orders.parquet"
+    pl.DataFrame({"order_id": [1], "customer_id": [1], "total": [5.0]}).write_parquet(
+        data
+    )
+    assert run_cli("validate", source, data, "--class", "Orders") == 1
+    assert "no DataFrame for it was supplied" in capsys.readouterr().out
+
+
+def test_validate_needs_class_when_the_source_defines_several(tmp_path, capsys):
+    source, _ = _write_orders_specs(tmp_path)
+    data = tmp_path / "orders.parquet"
+    pl.DataFrame({"id": [1]}).write_parquet(data)
+    assert run_cli("validate", source, data) == 1
+    assert "pick one with --class" in capsys.readouterr().err
+
+
+def test_validate_rejects_malformed_references(tmp_path, capsys):
+    source, _ = _write_orders_specs(tmp_path)
+    data = tmp_path / "orders.parquet"
+    pl.DataFrame({"id": [1]}).write_parquet(data)
+    code = run_cli(
+        "validate", source, data, "--class", "Orders", "--references", "nonsense"
+    )
+    assert code == 1
+    assert "NAME=PATH" in capsys.readouterr().err
+
+
+def test_validate_from_yaml_spec(tmp_path, capsys):
+    class Items(FrameSpec):
+        sku = ColSpec(pl.String, string_length=(3, 3))
+
+    spec_path = tmp_path / "items.yaml"
+    Items.to_yaml(spec_path)
+    data = tmp_path / "items.ndjson"
+    pl.DataFrame({"sku": ["abc", "toolong"]}).write_ndjson(data)
+    assert run_cli("validate", spec_path, data) == 1
+    assert "sku" in capsys.readouterr().out
+    good = tmp_path / "good.ndjson"
+    pl.DataFrame({"sku": ["abc"]}).write_ndjson(good)
+    assert run_cli("validate", spec_path, good, "--allow-extra") == 0
 
 
 def test_version_flag(capsys):
