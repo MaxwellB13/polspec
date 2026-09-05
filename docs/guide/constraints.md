@@ -191,6 +191,11 @@ parent to both calls, or disable the check with
 Composite keys are sampled as one joint pick per row, so multi-column keys stay
 internally consistent.
 
+With several related specs, a [`Registry`](registry.md) does the walk:
+`Registry(Customers, Orders, OrderLines).generate_all(1_000, seed=1)` generates
+parents first and threads each into its children, and `validate_all` checks
+the whole set.
+
 ### Self-references
 
 ```python

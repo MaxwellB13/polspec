@@ -14,7 +14,8 @@ Version history
 2. `version:` recorded; tags spelt `tags`; rule conditions and checks in the
    predicate data form; distribution parameters canonical; every foreign key
    written with its target's name; `checks:` and `validators:` present when
-   written with `col()`; unknown keys are an error.
+   written with `col()`; unknown keys are an error. Registry files
+   (`specs:` keyed by name, plus `categories:`) appear.
 """
 
 from __future__ import annotations
@@ -103,9 +104,16 @@ def _catspec_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _registry_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
+    # Registry files did not exist before version 2; one without a version
+    # key is a hand-written current-format file.
+    return dict(data)
+
+
 MIGRATIONS: dict[str, dict[int, Callable[[dict[str, Any]], dict[str, Any]]]] = {
     "spec": {1: _spec_v1_to_v2},
     "catspec": {1: _catspec_v1_to_v2},
+    "registry": {1: _registry_v1_to_v2},
 }
 
 

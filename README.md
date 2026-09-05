@@ -77,6 +77,9 @@ included via `[arrow]`/the `dev` group above.
   or load one from YAML.
 - **Shared categories** — a `CatSpec` registry so several tables agree on an
   `Enum`/`Categorical` domain instead of each restating it.
+- **Related tables** — a `Registry` of specs that resolves foreign keys by
+  name, generates parents before children (`generate_all`), validates the
+  whole set, and draws one ER diagram of it.
 
 ```python
 class Categories(CatSpec):

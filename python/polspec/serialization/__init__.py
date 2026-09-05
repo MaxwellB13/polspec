@@ -47,6 +47,7 @@ from polspec.tablespec import TableSpec
 
 if TYPE_CHECKING:
     from polspec.catspec import CatSpec
+    from polspec.registry import Registry
 
 __all__ = [
     "CHECK_FIELDS",
@@ -61,6 +62,10 @@ __all__ = [
     "catspec_to_yaml",
     "from_dict",
     "from_yaml",
+    "registry_from_dict",
+    "registry_from_yaml",
+    "registry_to_dict",
+    "registry_to_yaml",
     "to_dict",
     "to_python",
     "to_yaml",
@@ -336,6 +341,98 @@ def catspec_from_yaml(source: str | Path, *, strict: bool = True) -> CatSpec:
         raise FileNotFoundError(f"CatSpec file not found: {source}")
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     return catspec_from_dict(raw, strict=strict, source=str(source))
+
+
+# ---------------------------------------------------------------------------
+# Registry files: several specs, and their shared categories, in one file
+# ---------------------------------------------------------------------------
+
+_REGISTRY_KEYS: tuple[str, ...] = ("version", "categories", "specs")
+
+
+def registry_to_dict(registry: Registry) -> dict[str, Any]:
+    """`version`, the declared `categories` if any, and `specs` keyed by name."""
+    out: dict[str, Any] = {"version": FORMAT_VERSION}
+    if registry.categories is not None:
+        out["categories"] = catspec_to_dict(registry.categories)
+    specs: dict[str, Any] = {}
+    for spec in registry.specs:
+        body = tablespec_to_data(spec)
+        body.pop("name", None)
+        specs[spec.name] = body
+    out["specs"] = specs
+    return out
+
+
+def registry_from_dict(
+    data: Mapping[str, Any] | None,
+    *,
+    strict: bool = True,
+    source: str = "registry data",
+    base: Path | None = None,
+) -> Registry:
+    from polspec.registry import Registry
+
+    current = migrate(data, "registry", source)
+    ctx = Ctx(strict=strict)
+    check_unknown_keys(current, _REGISTRY_KEYS, ctx, "")
+
+    declared = current.get("categories")
+    categories: CatSpec | None = None
+    if isinstance(declared, Mapping):
+        categories = catspec_from_dict(declared, strict=strict, source=source)
+    elif isinstance(declared, (str, Path)):
+        if base is None:
+            raise SerializationError(
+                f"{source}: 'categories' names a file ({declared!r}); read the "
+                "registry with from_yaml so the path can be resolved"
+            )
+        path = Path(declared)
+        categories = catspec_from_yaml(path if path.is_absolute() else base / path)
+    elif declared is not None:
+        raise SerializationError(
+            f"{source}: 'categories' must be a mapping or a path, got {declared!r}"
+        )
+
+    specs = current.get("specs")
+    if not isinstance(specs, Mapping) or not specs:
+        raise SerializationError(
+            f"{source}: a registry file needs a non-empty 'specs' mapping, keyed "
+            "by spec name"
+        )
+    registry = Registry(categories=categories)
+    for name, body in specs.items():
+        if not isinstance(body, Mapping):
+            raise SerializationError(
+                f"{source}: specs.{name} must be a mapping, got {type(body).__name__}"
+            )
+        if "name" in body and body["name"] != name:
+            raise SerializationError(
+                f"{source}: specs.{name} carries name {body['name']!r}; the key "
+                "is the name, so drop one or make them agree"
+            )
+        registry.add(
+            tablespec_from_data(
+                {"name": str(name), **body}, Ctx(categories=categories, strict=strict)
+            )
+        )
+    return registry
+
+
+def registry_to_yaml(registry: Registry, source: str | Path) -> None:
+    for spec in registry.specs:
+        _warn_unserializable(spec, source, "yaml")
+    p = Path(source)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
+        yaml.safe_dump(registry_to_dict(registry), sort_keys=False), encoding="utf-8"
+    )
+
+
+def registry_from_yaml(source: str | Path, *, strict: bool = True) -> Registry:
+    path = Path(source)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return registry_from_dict(raw, strict=strict, source=str(source), base=path.parent)
 
 
 # ---------------------------------------------------------------------------

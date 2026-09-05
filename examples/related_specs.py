@@ -13,6 +13,7 @@ from polspec import (
     ColSpec,
     ForeignKey,
     FrameSpec,
+    Registry,
     col,
 )
 
@@ -133,20 +134,35 @@ Products = FrameSpec.from_yaml(EXAMPLE_DIR / "products.yaml")
 
 
 if __name__ == "__main__":
-    customers = Customers.generate(200, seed=1)
-    employees = Employees.generate(50, seed=2)
-    orders = Orders.generate(1_000, seed=3, references={Customers: customers})
-    order_lines = OrderLines.generate(3_000, seed=4, references={Orders: orders})
-    products = Products.generate(150, seed=5)
+    # One registry holds every spec the project declares. resolve() binds the
+    # foreign keys to their targets and checks every Enum/Categorical column
+    # against the shared categories; order() is the parents-first order the
+    # keys imply.
+    registry = Registry(
+        Customers, Employees, Orders, OrderLines, Products, categories=categories
+    ).resolve()
+    print("Generation order:", " -> ".join(registry.order()))
+
+    # Parents are generated first and threaded into their children, so every
+    # foreign key holds by construction. Each spec's seed derives from the
+    # registry seed and its name, so adding a spec changes no other table.
+    frames = registry.generate_all(
+        {
+            Customers: 200,
+            Employees: 50,
+            Orders: 1_000,
+            OrderLines: 3_000,
+            Products: 150,
+        },
+        seed=1,
+    )
+    customers = frames["Customers"]
 
     # validators and __checks__ wrap arbitrary predicates that generation
     # never attempts to satisfy (see docs/guide/constraints.md), so they're
     # skipped here and proven separately below against real, compliant data.
-    Customers.validate(customers, validate_validators=False)
-    Employees.validate(employees)
-    Orders.validate(orders, references={Customers: customers}, validate_checks=False)
-    OrderLines.validate(order_lines, references={Orders: orders})
-    Products.validate(products)
+    registry.validate_all(frames, validate_validators=False, validate_checks=False)
+    print("Relationships drawn:", registry.to_mermaid().count("||--o{"))
 
     print("PII columns on Customers:", Customers.tag("pii"))
 

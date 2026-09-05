@@ -24,9 +24,10 @@ owns only the inner loop that fills arrays with values.
 | `framespec` | `FrameSpec` — the metaclass that builds a `TableSpec` from a class body, and the facade forwarding every verb to it |
 | `generation` | `generate`, `generate_batches` and the file sinks, as functions over a `TableSpec` |
 | `catspec` | `CatSpec` — a shared registry of enums and categoricals |
+| `registry` | `Registry` — a declared set of specs: resolving cross-spec keys, ordering parents before children, `generate_all`/`validate_all`, one file and one diagram for the set |
 | `serialization` | Spec files: a field registry (`fields.py`) that YAML, generated Python and the `import datetime` decision all derive from; the dtype codec table (`dtypes.py`); format versions and migrations (`migrations.py`) |
 | `profiler` | Inferring a spec from an existing DataFrame |
-| `report` | Rendering a spec as Markdown or Mermaid |
+| `report` | Rendering a spec, or a registry of them, as Markdown or Mermaid |
 | `cli` | The `polspec` command: profiling data into a spec, blank specs, and generated tests |
 
 The dependency direction is one-way: `spec` and `tablespec` know nothing about `framespec`,
@@ -104,6 +105,12 @@ tables so the pair can be compared at a glance; they must be changed together.
 | `test_report.py` | Markdown data dictionaries and Mermaid diagrams |
 | `test_foreign_key.py` | `ForeignKey` declaration, persistence and generation |
 | `test_validation.py` | Validation behaviour and error reporting |
+| `test_inspect.py` | `inspect()`: findings as data, lazy failing rows, JSON |
+| `test_tablespec.py` | `TableSpec` as a value: construction, structural operations, the metaclass |
+| `test_expr.py` | The `col()` predicate language and its data form |
+| `test_serialization_format.py` | The field registry, format versions, migrations, unknown keys |
+| `test_registry.py` | `Registry`: resolution, ordering, `generate_all`/`validate_all`, files, discovery |
+| `test_errors.py` | The exception hierarchy |
 | `test_catspec.py` | Shared category registries |
 | `test_streaming.py` | Batching and the file sinks |
 | `test_cli.py` | The command line, including running a generated test file under pytest |

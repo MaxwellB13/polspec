@@ -168,3 +168,15 @@ method name like `schema`, or a name with spaces — load correctly. The YAML
 key is the column's real name; a `col_name` set in a class body is not
 written, because the key already carries it. See
 [Column names that are not identifiers](columns.md#column-names-that-are-not-identifiers).
+
+## Several specs in one file
+
+A [`Registry`](registry.md) writes every spec it holds, and the categories it
+was declared with, to one file keyed by spec name, and reads it back with the
+same version and strictness rules:
+
+```python
+Registry(Customers, Orders, OrderLines, categories=categories).to_yaml("specs.yaml")
+registry = Registry.from_yaml("specs.yaml").resolve()
+```
+

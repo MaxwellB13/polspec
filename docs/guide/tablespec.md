@@ -107,4 +107,10 @@ ForeignKey("customer_id", references="Customers", ref_columns="id") # checked la
 ```
 
 `generate(references={...})` and `validate(references={...})` accept the
-parent frame keyed by the class, the `TableSpec`, or the name.
+parent frame keyed by the class, the `TableSpec`, or the name. A
+[`Registry`](registry.md) holding both specs binds the name and runs the
+checks the class form would have run at declaration:
+
+```python
+Registry(Customers, Orders).resolve()["Orders"].foreign_keys[0].target  # Customers.spec
+```

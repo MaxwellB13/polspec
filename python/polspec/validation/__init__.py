@@ -299,7 +299,15 @@ def validate(
         streaming=streaming,
     )
     report.raise_if_failed()
+    return _transformed(spec, df, report)
 
+
+def _transformed(
+    spec: TableSpec, df: pl.DataFrame | pl.LazyFrame, report: ValidationReport
+) -> pl.DataFrame | pl.LazyFrame:
+    """The frame behind a passing report, with the report's structural
+    options (drop, add, cast, reorder) applied; lazy if `df` was.
+    """
     lf = report.frame
     present = lf.collect_schema().names()
     columns = dict(spec.columns)
