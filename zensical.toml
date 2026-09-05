@@ -8,28 +8,64 @@ edit_uri = "edit/main/docs/"
 
 nav = [
   { "Home" = "index.md" },
-  { "Getting started" = "getting-started.md" },
-  { "Comparison" = "comparison.md" },
-  { "Guide" = [
-    { "Declaring columns" = "guide/columns.md" },
-    { "Specs as values" = "guide/tablespec.md" },
-    { "Constraints" = "guide/constraints.md" },
-    { "Generating data" = "guide/generating.md" },
-    { "Validating data" = "guide/validating.md" },
-    { "Shared categories" = "guide/categories.md" },
-    { "YAML specs" = "guide/yaml.md" },
-    { "Multiple specs" = "guide/registry.md" },
-    { "Generated documentation" = "guide/documenting.md" },
-    { "Command line" = "guide/cli.md" },
-    { "Testing pipelines" = "guide/testing.md" },
+  { "Tutorial" = [
+    { "Getting started" = "tutorial/getting-started.md" },
+    { "Related tables" = "tutorial/related-tables.md" },
+  ] },
+  { "How-to guides" = [
+    { "Declare columns" = "how-to/columns.md" },
+    { "Specs as values" = "how-to/tablespec.md" },
+    { "Constraints" = "how-to/constraints.md" },
+    { "Generate data" = "how-to/generating.md" },
+    { "Validate data" = "how-to/validating.md" },
+    { "Shared categories" = "how-to/categories.md" },
+    { "Specs as files" = "how-to/files.md" },
+    { "Multiple specs" = "how-to/registry.md" },
+    { "Generated documentation" = "how-to/documenting.md" },
+    { "Test pipelines" = "how-to/testing.md" },
+    { "Command line" = "how-to/cli.md" },
   ] },
   { "Reference" = [
-    { "Architecture" = "reference/architecture.md" },
-    { "Errors" = "reference/errors.md" },
-    { "Known limitations" = "reference/limitations.md" },
-    { "Roadmap and stability" = "reference/roadmap.md" },
+    { "API" = [
+      { "Overview" = "reference/api/index.md" },
+      { "Columns" = "reference/api/columns.md" },
+      { "Predicates" = "reference/api/predicates.md" },
+      { "Specs" = "reference/api/specs.md" },
+      { "Registry and categories" = "reference/api/registry.md" },
+      { "Validation results" = "reference/api/validation.md" },
+      { "Profiling" = "reference/api/profiling.md" },
+      { "Exceptions" = "reference/api/errors.md" },
+    ] },
+    { "Errors and findings" = "reference/errors.md" },
   ] },
+  { "Explanation" = [
+    { "Architecture" = "explanation/architecture.md" },
+    { "Generation and validation" = "explanation/two-sides.md" },
+    { "Known limitations" = "explanation/limitations.md" },
+    { "Comparison" = "explanation/comparison.md" },
+    { "Roadmap and stability" = "explanation/roadmap.md" },
+  ] },
+  { "Changelog" = "changelog.md" },
 ]
+
+[project.plugins.mkdocstrings.handlers.python]
+paths = ["python"]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_style = "numpy"
+filters = ["!^_"]
+heading_level = 3
+members_order = "source"
+merge_init_into_class = true
+separate_signature = true
+show_bases = false
+show_root_heading = true
+show_root_full_path = false
+show_signature_annotations = true
+show_source = false
+show_symbol_type_heading = true
+show_symbol_type_toc = true
+signature_crossrefs = true
 
 [project.theme]
 language = "en"
@@ -96,6 +132,8 @@ pymdownx.keys = {}
 pymdownx.magiclink = {}
 pymdownx.mark = {}
 pymdownx.smartsymbols = {}
+pymdownx.snippets.base_path = ["."]
+pymdownx.snippets.check_paths = true
 pymdownx.superfences.custom_fences = [
   { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
 ]

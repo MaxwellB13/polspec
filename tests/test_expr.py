@@ -168,17 +168,18 @@ def test_colrule_when_accepts_a_multi_column_predicate():
 
 
 def test_legacy_dict_conditions_become_predicates():
-    rule = ColRule(when={"column": "a", "between": [1, 5]}, choices=["x"])
+    rule = ColRule(when=col("a").is_between(1, 5), choices=["x"])
     assert rule.when.equals(col("a").is_between(1, 5))
-    assert ColRule(when={"column": "a", "not_in": [1]}, choices=["x"]).when.equals(
+    assert ColRule(when=~col("a").is_in([1]), choices=["x"]).when.equals(
         ~col("a").is_in([1])
     )
-    assert ColRule(when={"column": "a", "is_null": True}, choices=["x"]).when.equals(
+    assert ColRule(when=col("a").is_null(), choices=["x"]).when.equals(
         col("a").is_null()
     )
-    assert ColRule(when={"column": "a", "ge": 2}, choices=["x"]).when.equals(
-        col("a") >= 2
-    )
+    assert ColRule(when=col("a") >= 2, choices=["x"]).when.equals(col("a") >= 2)
+    # The one-column dict is gone; `col()` is the only spelling.
+    with pytest.raises(SpecError, match="must be a predicate built with col"):
+        ColRule(when={"column": "a", "gte": 2}, choices=["x"])
     with pytest.raises(SpecError, match="must reference at least one column"):
         ColRule(when=lit(True) == lit(True), choices=["x"])
     with pytest.raises(SpecError, match="must be a predicate"):
@@ -187,7 +188,7 @@ def test_legacy_dict_conditions_become_predicates():
 
 def test_colrules_compare_structurally():
     a = ColRule(when=col("a") == 1, choices=["x"])
-    b = ColRule(when={"column": "a", "equals": 1}, choices=["x"])
+    b = ColRule(when=col("a") == 1, choices=["x"])
     c = ColRule(when=col("a") == 2, choices=["x"])
     assert a == b
     assert a != c

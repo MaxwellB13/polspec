@@ -159,7 +159,7 @@ if __name__ == "__main__":
     customers = frames["Customers"]
 
     # validators and __checks__ wrap arbitrary predicates that generation
-    # never attempts to satisfy (see docs/guide/constraints.md), so they're
+    # never attempts to satisfy (see docs/how-to/constraints.md), so they're
     # skipped here and proven separately below against real, compliant data.
     registry.validate_all(frames, validate_validators=False, validate_checks=False)
     print("Relationships drawn:", registry.to_mermaid().count("||--o{"))

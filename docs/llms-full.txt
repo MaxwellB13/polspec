@@ -1,0 +1,4187 @@
+# polspec documentation
+
+> Declare a Polars schema once, then generate data from it and validate data against it.
+
+Every page of https://maxwellb13.github.io/polspec/, in the order the documentation presents them.
+
+---
+
+# Home
+Source: https://maxwellb13.github.io/polspec/
+
+# polspec
+
+Declare a Polars schema once. Generate data that matches it, and validate data
+against it — from the same declaration.
+
+```python
+import polars as pl
+from polspec import ColSpec, FrameSpec
+
+class Orders(FrameSpec):
+    order_id = ColSpec(pl.Int64, bounds=(1, None))
+    status   = ColSpec(pl.Enum(["NEW", "PAID", "SHIPPED"]))
+    total    = ColSpec(pl.Float64, bounds=(0.0, None))
+    placed   = ColSpec(pl.Date, nullable=True)
+
+df = Orders.generate(1_000_000, seed=42)   # a million rows in well under a second
+Orders.validate(df)                        # raises ValidationError on any breach
+```
+
+The generator is written in Rust and runs the columns in parallel, so a spec
+that describes a realistic table produces millions of rows in the time it takes
+to describe one.
+
+## Why two directions from one declaration
+
+Most schema tools do one or the other. A validation library tells you when
+production data drifted; a fixture library gives you something to test against.
+Keeping both behind one declaration means the fixtures and the contract cannot
+disagree — and where they might, polspec has a test suite whose whole job is to
+catch it (see [Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/)).
+
+That is the practical payoff: the data in your tests is data your validator
+already accepts, so a test that passes locally is not passing on a shape
+production will reject.
+
+## What you can declare
+
+<div class="grid cards" markdown>
+
+- **Types and shape**
+
+    Every dtype polspec can generate — integers, floats, booleans, strings,
+    binary, all four temporal types, `Enum` and `Categorical` — plus
+    nullability, bounds, string lengths and value domains.
+
+    [Declaring columns](https://maxwellb13.github.io/polspec/how-to/columns/)
+
+- **Rules and invariants**
+
+    Conditional values, single-column validators, multi-column checks,
+    composite uniqueness and foreign keys between specs.
+
+    [Constraints](https://maxwellb13.github.io/polspec/how-to/constraints/)
+
+- **Data on demand**
+
+    Random or coverage-guaranteeing generation, reproducible seeds, batched
+    streaming straight to Parquet, CSV, Arrow IPC or NDJSON.
+
+    [Generating data](https://maxwellb13.github.io/polspec/how-to/generating/)
+
+- **Specs from elsewhere**
+
+    Infer a spec by profiling an existing DataFrame, or load one from YAML so
+    non-Python tooling can read it too.
+
+    [YAML specs](https://maxwellb13.github.io/polspec/how-to/files/)
+
+- **From the command line**
+
+    `polspec schema infer data.parquet -o spec.yaml` profiles a data file into
+    a schema; `polspec test spec.yaml -o test_spec.py` turns a schema into a
+    pytest round-trip test.
+
+    [Command line](https://maxwellb13.github.io/polspec/how-to/cli/)
+
+</div>
+
+## Install
+
+Not published to PyPI yet — install from a checkout. The generator is a
+compiled Rust extension, so this needs a Rust toolchain and
+[maturin](https://www.maturin.rs):
+
+```bash
+git clone https://github.com/MaxwellB13/polspec.git
+cd polspec
+uv sync --group dev        # or: pip install -e ".[arrow]" && pip install maturin
+maturin develop --release
+```
+
+`maturin develop` builds the extension and installs the package into your
+active environment, editable. Writing Parquet or Arrow IPC needs PyArrow,
+included via `[arrow]`/the `dev` group above.
+
+## Where to go next
+
+Start with [Getting started](https://maxwellb13.github.io/polspec/tutorial/getting-started/) for the full loop — declare,
+generate, validate — in about five minutes. If you're weighing polspec
+against a hand-rolled fixture, Faker, or a data-quality framework, see
+[Comparison to other approaches](https://maxwellb13.github.io/polspec/explanation/comparison/) for where each one fits and
+the benchmark numbers behind the speed claim.
+
+## For language models
+
+The documentation is published in the [llms.txt](https://llmstxt.org) format:
+[`/llms.txt`](https://maxwellb13.github.io/polspec/llms.txt) indexes every
+page, and [`/llms-full.txt`](https://maxwellb13.github.io/polspec/llms-full.txt)
+carries the full text of all of them -- including the API reference, expanded
+to signatures and docstrings -- in one file.
+
+---
+
+# Getting started
+Source: https://maxwellb13.github.io/polspec/tutorial/getting-started/
+
+# Getting started
+
+## Declare a spec
+
+A spec is a class. Subclass `FrameSpec` and assign a `ColSpec` per column, in
+the order the columns should appear.
+
+```python
+from datetime import date
+
+import polars as pl
+from polspec import ColSpec, FrameSpec
+
+class Customers(FrameSpec):
+    customer_id = ColSpec(pl.Int64, bounds=(1, 100_000))
+    name        = ColSpec(pl.String, string_length=(4, 20))
+    tier        = ColSpec(pl.Enum(["free", "pro", "enterprise"]))
+    signed_up   = ColSpec(pl.Date, bounds=(date(2020, 1, 1), None))
+    churned     = ColSpec(pl.Boolean, nullable=True, null_probability=0.3)
+```
+
+Nothing runs at declaration time except validation of the declaration itself.
+A contradictory spec fails here, at the line that caused it, rather than
+thousands of rows later:
+
+```python
+ColSpec(pl.Int8, bounds=(0, 1_000))
+# ValueError: ColSpec.bounds max (1000) is outside the range Int8 can represent [-128, 127]
+```
+
+## Generate data
+
+```python
+df = Customers.generate(10_000, seed=42)
+```
+
+`seed` makes the result reproducible across processes and machines. Omit it and
+each call differs.
+
+```python
+Customers.generate(500, seed=7).equals(Customers.generate(500, seed=7))  # True
+```
+
+## Validate data
+
+`validate()` checks a DataFrame or LazyFrame against the same declaration and
+returns it, so it drops into a pipeline:
+
+```python
+clean = Customers.validate(raw_df, cast=True)
+```
+
+Every breach is collected before anything is raised, so one call tells you
+everything that is wrong rather than only the first thing:
+
+```python
+from polspec import ValidationError
+
+try:
+    Customers.validate(broken_df)
+except ValidationError as err:
+    for problem in err.errors:
+        print(problem)
+```
+
+```text
+Column 'customer_id': found 3 value(s) out of bounds [1, 100000] (min found: 100050, max found: 200000). Out of bounds samples: [100050, 150000, 200000]
+Column 'tier': found 2 invalid value(s) not in allowed choices/categories ['free', 'pro', 'enterprise']. Invalid samples: ['trial']
+Column 'name': non-nullable column contains 1 null value(s)
+```
+
+!!! tip "One pass, not one per column"
+
+    Every check across every column is compiled into a single Polars
+    aggregation and evaluated in one scan. Validating a wide table costs about
+    the same as validating a narrow one.
+
+## Handle data that nearly fits
+
+Real input rarely arrives in exactly the declared shape. `validate()` takes
+policies for the two structural mismatches:
+
+```python
+Customers.validate(
+    df,
+    extra_cols="drop",     # "raise" (default) | "drop" | "allow"
+    missing_cols="raise",  # "raise" (default) | "add" | "allow"
+    strict_dtypes=False,   # allow Int32 where Int64 was declared, String for an Enum
+    cast=True,             # cast surviving columns to the declared dtype
+)
+```
+
+By default a String column arriving where an `Enum` was declared is accepted —
+that is how data comes back from CSV and JSON. `strict_dtypes=True` demands the
+exact dtype.
+
+## Infer a spec instead of writing one
+
+Pointed at an existing DataFrame, polspec writes the spec for you:
+
+```python
+Profiled = FrameSpec.from_dataframe(existing_df, weights=True)
+print(Profiled.to_markdown())
+```
+
+It infers nullability and observed null rates, narrows low-cardinality strings
+to `Enum`, and — with `weights=True` — records how often each category actually
+occurred, so regenerated data keeps the observed mix rather than a uniform one.
+
+Treat the result as a first draft to edit, not a finished contract: it
+describes the sample it saw, which may be narrower than the rule you actually
+mean.
+
+## Next
+
+- [Declaring columns](https://maxwellb13.github.io/polspec/how-to/columns/) — everything a `ColSpec` accepts
+- [Constraints](https://maxwellb13.github.io/polspec/how-to/constraints/) — rules, checks, uniqueness, foreign keys
+- [Generating data](https://maxwellb13.github.io/polspec/how-to/generating/) — coverage, batching, writing to files
+
+---
+
+# Related tables
+Source: https://maxwellb13.github.io/polspec/tutorial/related-tables/
+
+# Related tables
+
+[Getting started](https://maxwellb13.github.io/polspec/tutorial/getting-started/) covers one spec on its own. Real
+schemas come in sets, with keys between them, and the interesting question is
+how you generate a *consistent* set: orders whose `customer_id` values are
+customers that exist.
+
+This tutorial builds three related specs and generates all of them in one
+call. The complete version, with more columns and a spec loaded from YAML,
+lives in [`examples/related_specs.py`][example] in the repository and runs in
+CI, so it cannot go stale.
+
+  [example]: https://github.com/MaxwellB13/polspec/blob/main/examples/related_specs.py
+
+## A parent
+
+Nothing new here — a spec like any other. The `unique=True` on `id` matters
+for what follows: it is what makes this a table other tables can point at.
+
+```python
+import datetime as dt
+import polars as pl
+from polspec import ColSpec, ForeignKey, FrameSpec, Registry
+
+class Customers(FrameSpec):
+    id        = ColSpec(pl.Int64, bounds=(1, 10_000_000), unique=True)
+    name      = ColSpec(pl.String, string_length=(3, 40))
+    country   = ColSpec(pl.Enum(["UK", "US", "DE"]))
+    signed_up = ColSpec(pl.Date, bounds=(dt.date(2020, 1, 1), dt.date(2026, 1, 1)))
+```
+
+## A child
+
+`__foreign_keys__` declares that `customer_id` only ever holds values that
+exist in `Customers.id`.
+
+```python
+class Orders(FrameSpec):
+    order_id    = ColSpec(pl.Int64, bounds=(1, 100_000_000), unique=True)
+    customer_id = ColSpec(pl.Int64, bounds=(1, 10_000_000))
+    total       = ColSpec(pl.Float64, bounds=(0.0, 6_000.0))
+
+    __foreign_keys__ = [
+        ForeignKey("customer_id", references=Customers, ref_columns="id"),
+    ]
+```
+
+!!! note "The two `bounds` have to agree"
+
+    `customer_id` is declared `(1, 10_000_000)` — the same range as
+    `Customers.id`. That is not decoration. A key fills its column from the
+    parent, so the parent's domain has to fit inside the child's; declaring
+    `bounds=(1, 50)` here would be a contradiction, and polspec refuses it
+    when you write the class rather than when you run it.
+
+## A composite key
+
+`OrderLines` points at `Orders`, and declares that no order has two lines
+with the same number.
+
+```python
+class OrderLines(FrameSpec):
+    order_id = ColSpec(pl.Int64, bounds=(1, 100_000_000))
+    line_no  = ColSpec(pl.Int32, bounds=(1, 1_000_000))
+    quantity = ColSpec(pl.UInt16, bounds=(1, 500))
+
+    __unique_together__ = [["order_id", "line_no"]]
+    __foreign_keys__ = [
+        ForeignKey("order_id", references=Orders, ref_columns="order_id"),
+    ]
+```
+
+## Generating the set
+
+A `Registry` holds the specs that belong together. `resolve()` binds every key
+to its target and checks the set is coherent; `order()` is the parents-first
+order the keys imply.
+
+```python
+registry = Registry(Customers, Orders, OrderLines).resolve()
+
+print(registry.order())
+# ('Customers', 'Orders', 'OrderLines')
+
+frames = registry.generate_all(1_000, seed=1)
+```
+
+`generate_all` walks that order and threads each parent frame into its
+children, so every key is satisfied by construction:
+
+```python
+orders = frames["Orders"]
+customers = frames["Customers"]
+assert set(orders["customer_id"]) <= set(customers["id"])
+
+registry.validate_all(frames)   # passes
+```
+
+Ask for different row counts per table by passing a mapping:
+
+```python
+frames = registry.generate_all(
+    {"Customers": 1_000, "Orders": 5_000, "OrderLines": 20_000}, seed=1
+)
+```
+
+Each spec's seed is derived from the registry seed and the spec's *name*, so
+adding a fourth table does not reshuffle the three you already had.
+
+## Drawing the result
+
+`to_mermaid()` renders the set as an entity-relationship diagram — one entity
+per spec, one line per key:
+
+```python
+print(registry.to_mermaid())
+```
+
+```mermaid
+erDiagram
+    Customers {
+        Int64 id PK "bounds: [1, 10000000]"
+        String name "len: [3, 40]"
+        Enum country
+        Date signed_up "bounds: [2020-01-01, 2026-01-01]"
+    }
+    Orders {
+        Int64 order_id PK "bounds: [1, 100000000]"
+        Int64 customer_id FK "bounds: [1, 10000000]"
+        Float64 total "bounds: [0.0, 6000.0]"
+    }
+    OrderLines {
+        Int64 order_id UK "bounds: [1, 100000000]"
+        Int32 line_no UK "bounds: [1, 1000000]"
+        UInt16 quantity "bounds: [1, 500]"
+    }
+    Customers ||--o{ Orders : "fk_customer_id__Customers"
+    Orders ||--o{ OrderLines : "fk_order_id__Orders"
+```
+
+## Where to go next
+
+- [Multiple specs](https://maxwellb13.github.io/polspec/how-to/registry/) — the rest of what `Registry` does:
+  discovery from a directory, one file for the whole set, shared categories.
+- [Constraints](https://maxwellb13.github.io/polspec/how-to/constraints/) — foreign keys in detail, including
+  self-references and composite keys.
+- [Specs as files](https://maxwellb13.github.io/polspec/how-to/files/) — moving a spec out of Python entirely,
+  which the full worked example does for one of its tables.
+
+---
+
+# Declare columns
+Source: https://maxwellb13.github.io/polspec/how-to/columns/
+
+# Declaring columns
+
+A `ColSpec` describes one column. Only `dtype` is required.
+
+```python
+ColSpec(
+    dtype,
+    nullable=False,
+    bounds=None,
+    tags=(),
+    unique=False,
+    null_probability=0.1,
+    string_length=None,
+    distribution=None,
+    distribution_params=None,
+    choices=None,
+    weights=None,
+    rules=(),
+    validators=(),
+)
+```
+
+## Types
+
+polspec generates every dtype below. A dtype passed as a class is instantiated
+for you, so `pl.Int64` and `pl.Int64()` mean the same thing.
+
+| Family | Types |
+|:--|:--|
+| Integer | `Int8` `Int16` `Int32` `Int64` `UInt8` `UInt16` `UInt32` `UInt64` |
+| Float | `Float32` `Float64` |
+| Boolean | `Boolean` |
+| Text | `String` |
+| Bytes | `Binary` |
+| Temporal | `Date` `Time` `Datetime` `Duration` |
+| Categorical | `Enum` `Categorical` |
+
+Anything else — `List`, `Struct`, `Array` — can be *validated* but not
+generated; `generate()` raises `TypeError` naming the dtype.
+
+## Nullability
+
+`nullable=False` (the default) means validation rejects any null. When
+`nullable=True`, `null_probability` sets how often generation emits one.
+
+```python
+ColSpec(pl.Int64, nullable=True, null_probability=0.25)   # about a quarter null
+```
+
+`null_probability` is ignored when `nullable=False`, so switching nullability
+off does not silently leave a stale rate behind.
+
+## Bounds
+
+`bounds` is an inclusive `[min, max]` for numeric and temporal columns. Pass a
+tuple, a list, or a `Bound`:
+
+```python
+ColSpec(pl.Int64, bounds=(-100, 100))
+ColSpec(pl.Float64, bounds=[0.0, 1.0])
+ColSpec(pl.Date, bounds=(date(2020, 1, 1), date(2024, 12, 31)))
+```
+
+Temporal bounds accept real `date`, `datetime`, `time` and `timedelta` objects,
+or the physical integer the dtype stores.
+
+### Open-ended bounds
+
+Either endpoint may be `None`, leaving that side unconstrained:
+
+```python
+ColSpec(pl.Int64, bounds=(0, None))    # non-negative
+ColSpec(pl.Int64, bounds=(None, 0))    # non-positive
+```
+
+!!! warning "An open end means different things to generation and validation"
+
+    `validate()` treats it as genuinely unconstrained. `generate()` cannot
+    sample an unbounded range, so it falls back to the same default it would
+    use with no bounds at all.
+
+    ```python
+    class S(FrameSpec):
+        n = ColSpec(pl.Int64, bounds=(0, None))
+
+    S.generate(1000, seed=1)["n"].max()     # ~1_000_000, the Int64 default
+    S.validate(pl.DataFrame({"n": [10**15]}))   # accepted — no upper limit
+    ```
+
+    This mirrors how `bounds=None` already behaves rather than adding a third
+    rule.
+
+For "always positive", note that bounds are *inclusive*: use `(1, None)` for
+integers, and either a small floor like `(1e-9, None)` for floats or an
+unsigned dtype, which cannot represent a negative at all.
+
+Bounds outside what the dtype can hold are rejected when you declare them:
+
+```python
+ColSpec(pl.Float32, bounds=(-1e40, 1e40))
+# ValueError: ColSpec.bounds min (-1e+40) is outside the range Float32 can represent
+```
+
+## Value domains
+
+`choices` restricts a column to a fixed set:
+
+```python
+ColSpec(pl.String, choices=["GBP", "USD", "EUR"])
+```
+
+`weights` biases the draw. Supply them positionally, or as a `{choice: weight}`
+mapping — never both:
+
+```python
+ColSpec(pl.String, choices=["a", "b", "c"], weights=[10.0, 5.0, 1.0])
+ColSpec(pl.String, choices={"a": 10.0, "b": 5.0, "c": 1.0})   # same thing
+```
+
+Weights need a domain to apply to, so they require `choices`, an `Enum` dtype,
+or `Boolean` (where they read `[p_false, p_true]`):
+
+```python
+ColSpec(pl.Enum(["x", "y", "z"]), weights=[1.0, 2.0, 7.0])
+ColSpec(pl.Boolean, weights=[0.9, 0.1])   # 10% true
+```
+
+Choices are held in the column's own dtype, so a `datetime` choice on a
+`Datetime` column or a `bytes` choice on a `Binary` column stays what it is.
+They must be distinct once cast to that dtype -- `1` and `"1"` on a `String`
+column are one value:
+
+```python
+ColSpec(pl.String, choices=[1, "1"])
+# ValueError: ColSpec.choices contains values that are the same once cast to
+# String: ['1']
+```
+
+## String and binary length
+
+`string_length` is an inclusive `[min, max]` on characters (String) or bytes
+(Binary). Unlike `bounds`, both endpoints are required.
+
+```python
+ColSpec(pl.String, string_length=(8, 8))    # fixed width
+ColSpec(pl.Binary, string_length=(16, 64))
+```
+
+## Distributions
+
+Numeric and temporal columns can be drawn from a shape other than uniform:
+
+| Distribution | Parameters (aliases accepted) |
+|:--|:--|
+| `uniform` | — |
+| `normal` | `mean`/`mu`/`loc`, `std`/`sigma`/`scale` |
+| `lognormal` | `mean`/`mu`/`meanlog`, `std`/`sigma`/`sdlog` |
+| `exponential` (`exp`) | `rate`/`lambda`/`lambda_`, or `scale` |
+| `poisson` | `lambda`/`lambda_`/`rate`/`mean` |
+| `gamma` | `shape`/`alpha`/`k`, `scale`/`beta`/`theta` |
+| `beta` | `alpha`/`a`/`shape1`, `beta`/`b`/`shape2` |
+
+```python
+ColSpec(
+    pl.Float64,
+    bounds=(0.0, 500.0),
+    distribution="lognormal",
+    distribution_params={"mean": 2.0, "std": 0.6},
+)
+```
+
+!!! warning "Bounds clamp, they do not resample"
+
+    A draw outside the bounds lands *on* the boundary rather than being drawn
+    again. A `normal` centred at 0 squeezed into `(0, 50)` puts roughly half
+    the column on the floor as one repeated value.
+
+    When you want a positive-skewed shape, reach for a distribution that is
+    already non-negative — `lognormal`, `exponential`, `gamma` — instead of
+    clamping a symmetric one.
+
+## Uniqueness
+
+`unique=True` declares that values must be distinct. `generate()` draws the
+column without replacement, so the data it produces satisfies it.
+
+Nulls are exempt, as they are for foreign keys: a null means "no value", so a
+nullable unique column may repeat nulls and nothing else.
+
+A domain too small to cover the row count is refused, naming the column:
+
+```python
+class Narrow(FrameSpec):
+    id = ColSpec(pl.Int8, unique=True)
+
+Narrow.generate(300, seed=1)
+# GenerationError: Column 'id' is unique, but its domain holds only 256
+# distinct value(s) and 300 are needed. Widen its bounds or choices, or
+# generate fewer rows.
+```
+
+`unique=True` cannot be combined with `weights`, a non-uniform `distribution`,
+or `rules`: the first two describe how often a value recurs, which a draw
+without replacement has no room for, and a rule would reintroduce the
+duplicates. Each is refused at declaration rather than quietly ignored.
+
+## Tags
+
+Tags group columns for later selection. They carry no generation or validation
+meaning.
+
+```python
+class Events(FrameSpec):
+    user_id  = ColSpec(pl.Int64, tags=["pii", "key"])
+    email    = ColSpec(pl.String, tags="pii")
+    duration = ColSpec(pl.Int64, tags="metric")
+
+Events.tag("pii")                      # ['user_id', 'email']
+Events.tag("pii", "key", match="all")  # ['user_id']
+```
+
+## Column names that are not identifiers
+
+A column declared as a class attribute takes the attribute's name, and an
+attribute name has to be a valid Python identifier. Real data is not so
+polite. There are two ways out, for two different situations.
+
+### `col_name`: the data's name has spaces or punctuation
+
+Keep a clean attribute name and tell the `ColSpec` what the column is really
+called:
+
+```python
+class Sales(FrameSpec):
+    unit_price = ColSpec(pl.Float64, col_name="Unit Price", bounds=(0, None))
+    region     = ColSpec(pl.Enum(["UK", "US"]), col_name="Sales Region")
+
+Sales.schema()              # Schema({'Unit Price': Float64, 'Sales Region': Enum(...)})
+Sales.generate(3).columns   # ['Unit Price', 'Sales Region']
+```
+
+`col_name` is the column's name everywhere the spec is used: in the generated
+frame, in `validate()`, in a `ColRule` condition built with `col()`, in
+`__unique_together__`, in `ForeignKey` columns and in `tag()` results. The
+attribute name exists only in the class body. Two attributes that resolve to
+the same `col_name` are rejected at declaration, and overriding an attribute
+on a subclass removes the column it named, whatever `col_name` it carried.
+
+`to_yaml()` and `to_python()` write the real column name as the key, so a
+spec that came from a file never needs `col_name`.
+
+### `__columns__`: the name is an identifier but cannot be an attribute
+
+A leading underscore is skipped by the class-body scan, so a column called
+`_id` needs the explicit mapping. A name that matches one of `FrameSpec`'s
+methods (`schema`, `tag`, …) is fine either way: the method keeps working and
+the column is reachable as `Spec.col("schema")` -- see
+[Specs as values](https://maxwellb13.github.io/polspec/how-to/tablespec/#column-names-and-method-names).
+
+```python
+class Raw(FrameSpec):
+    __columns__ = {
+        "_id": ColSpec(pl.Int64),
+        "schema": ColSpec(pl.String),
+    }
+```
+
+`__columns__` is never looked up as an attribute, so both the column and the
+method survive. The dict key already is the column name, so a `col_name` that
+disagrees with its key is rejected. `from_dataframe`, `from_yaml` and
+`to_python` all declare columns this way, since their names come from data
+rather than from someone's class body.
+
+---
+
+# Specs as values
+Source: https://maxwellb13.github.io/polspec/how-to/tablespec/
+
+# Specs as values
+
+A `FrameSpec` class body is the convenient way to *write* a spec. What it
+builds is a `TableSpec`: an immutable value holding the columns, checks,
+composite keys and foreign keys, reachable as `.spec` on the class.
+
+```python
+class Orders(FrameSpec):
+    order_id = ColSpec(pl.Int64, unique=True)
+    total    = ColSpec(pl.Float64, bounds=(0.0, None))
+
+Orders.spec              # TableSpec(name='Orders', columns={...}, ...)
+Orders.spec.name         # 'Orders'
+list(Orders.spec)        # ['order_id', 'total']
+Orders.spec["total"]     # the ColSpec
+Orders.spec.schema()     # the same pl.Schema as Orders.schema()
+```
+
+Every verb the library offers is a function over a `TableSpec`. The
+classmethods on `FrameSpec` forward to them with `cls.spec`, so these are the
+same call:
+
+```python
+Orders.generate(1_000, seed=1)
+polspec.generation.generate(Orders.spec, 1_000, seed=1)
+```
+
+## Building one directly
+
+A `TableSpec` can be constructed without a class body, which is how
+`from_yaml` and `from_dataframe` work internally:
+
+```python
+from polspec import TableSpec
+
+spec = TableSpec(
+    "Orders",
+    {"order_id": ColSpec(pl.Int64, unique=True), "total": ColSpec(pl.Float64)},
+    unique_together=[["order_id"]],
+)
+```
+
+Everything a class body validates at declaration is validated here too. A
+`TableSpec` that constructs is one that can be used.
+
+To get the class-shaped API back, wrap it:
+
+```python
+Orders = FrameSpec.from_spec(spec)          # a FrameSpec subclass named Orders
+Orders = FrameSpec.from_spec(spec, name="Orders2026")
+```
+
+## Deriving one spec from another
+
+Each operation returns a new `TableSpec`; the original is never changed.
+
+| Operation | Effect |
+|:--|:--|
+| `with_columns({...}, **cols)` | Add columns, or replace existing ones in place |
+| `drop(*names)` | Remove columns, and any composite or foreign key that used them |
+| `select(*names)` | Keep only the named columns, in that order |
+| `rename({old: new})` | Rename columns, rewriting rules, composite keys and foreign keys |
+| `with_checks(*checks)`, `with_foreign_keys(*fks)`, `with_unique_together(*groups)` | Append constraints |
+| `with_name(name)` | Change the name |
+| `with_catspec(registry)` | Re-type columns against a `CatSpec`; see [Shared categories](https://maxwellb13.github.io/polspec/how-to/categories/) |
+
+```python
+staging = Orders.spec.drop("internal_note").rename({"total": "amount"})
+Staging = FrameSpec.from_spec(staging, name="StagingOrders")
+```
+
+Two deliberate limits. `drop` leaves a rule on a surviving column that points
+at a dropped one for validation to reject, since silently dropping a rule
+would change what the surviving column generates. `rename` refuses a column
+carrying `validators`, because a validator is a Polars expression naming the
+column, and rewriting expressions is not something this library does.
+
+## Column names and method names
+
+Because the class body's `ColSpec` attributes are taken out of the namespace
+before the class exists, a column may share a name with a method. The method
+wins on attribute access; the column is reachable by name:
+
+```python
+class Raw(FrameSpec):
+    schema = ColSpec(pl.String)
+    tag    = ColSpec(pl.String)
+
+Raw.schema()            # the method: Schema({'schema': String, 'tag': String})
+Raw.col("schema")       # the column
+Raw.spec["tag"]         # also the column
+```
+
+An ordinary column is still an attribute (`Orders.order_id`), through a
+fallback that runs only when normal lookup fails.
+
+## Foreign keys point at names
+
+`ForeignKey.references` is stored as the target spec's *name*. Declaring
+`references=Customers` binds the target for declaration-time checks and
+stores `"Customers"`; a key can also be declared against a bare name, which
+nothing checks until a spec of that name is supplied:
+
+```python
+ForeignKey("customer_id", references=Customers, ref_columns="id")   # checked now
+ForeignKey("customer_id", references="Customers", ref_columns="id") # checked later
+```
+
+`generate(references={...})` and `validate(references={...})` accept the
+parent frame keyed by the class, the `TableSpec`, or the name. A
+[`Registry`](https://maxwellb13.github.io/polspec/how-to/registry/) holding both specs binds the name and runs the
+checks the class form would have run at declaration:
+
+```python
+Registry(Customers, Orders).resolve()["Orders"].foreign_keys[0].target  # Customers.spec
+```
+
+---
+
+# Constraints
+Source: https://maxwellb13.github.io/polspec/how-to/constraints/
+
+# Constraints
+
+Beyond the shape of a single value, a spec can assert relationships. They fall
+into two groups worth keeping straight:
+
+| | Generated | Validated |
+|:--|:--:|:--:|
+| `ColRule` | yes | yes |
+| `ForeignKey` | yes, when given parent data | yes |
+| `unique=True`, `__unique_together__` | yes | yes |
+| `ColSpec.validators`, `__checks__` | no | yes |
+
+The last row is validation-only by design: both wrap arbitrary Polars
+expressions, and nothing can produce data satisfying an arbitrary predicate.
+Generation makes no attempt, and that boundary is pinned down by tests.
+
+## Writing conditions — `col()`
+
+Rules, validators and checks all take a condition. Write it with `col()`,
+which builds a small predicate tree rather than a Polars expression:
+
+```python
+from polspec import col
+
+col("total") >= col("subtotal")
+col("email").str.contains("@")
+col("status").is_in(["NEW", "PAID"]) & (col("qty") > 0)
+col("shipped").is_null() | (col("shipped") >= col("placed"))
+```
+
+Supported: comparisons (`== != < <= > >=`), arithmetic (`+ - * /`),
+`&`, `|`, `~`, `is_in`, `is_null`, `is_not_null`, `is_between`, and the
+string operations `str.contains` (a literal substring), `str.starts_with`,
+`str.ends_with`, `str.matches` (a regular expression) and `str.len_chars`.
+Scalars, dates and datetimes are fine as operands.
+
+A predicate evaluates exactly as the Polars expression it stands for, and
+unlike one it can be written to a spec file and read back, so rules, checks
+and validators written this way survive `to_yaml` and `to_python`. A raw
+`pl.Expr` is still accepted everywhere a predicate is, for anything the
+predicate language cannot say; it just cannot be persisted.
+
+Comparison operators build predicates, as they do on `pl.Expr`, so a
+predicate has no truth value. Compare two structurally with `Pred.equals`.
+
+## Conditional values — `ColRule`
+
+A rule overwrites a column on the rows where its condition matches.
+
+```python
+from polspec import ColRule, col
+
+class Shipments(FrameSpec):
+    region = ColSpec(pl.Enum(["UK", "US", "EU"]))
+    carrier = ColSpec(
+        pl.Enum(["RoyalMail", "UPS", "DHL"]),
+        rules=[
+            ColRule(when=col("region") == "UK", choices=["RoyalMail"]),
+            ColRule(when=col("region").is_in(["US", "EU"]), choices=["UPS", "DHL"]),
+        ],
+    )
+```
+
+Multiple rules on one column are tried in declaration order, first match wins,
+like a SQL `CASE`. `choices` may be weighted exactly as on a `ColSpec`:
+
+```python
+ColRule(when=col("region") == "US", choices={"UPS": 3.0, "DHL": 1.0})
+```
+
+`when` is a predicate built with [`col()`](#writing-conditions-col), not an
+arbitrary Polars expression, so that every rule can round-trip through a spec
+file. Conditions compose:
+
+```python
+ColRule(
+    when=col("region").is_in(["US", "EU"]) & (col("weight_kg") > 10),
+    choices=["DHL"],
+)
+```
+
+!!! note "Rules see the frame as it stands"
+
+    Every `when` is evaluated against the values the column actually holds
+    when the rule runs, and the passes run in dependency order: a rule keyed
+    on a column that another rule or a foreign key rewrites reads the
+    rewritten values — the same ones `validate()` will check the rule
+    against. So rules chain:
+
+    ```python
+    class Orders(FrameSpec):
+        region  = ColSpec(pl.Enum(["UK", "US"]))
+        carrier = ColSpec(
+            pl.Enum(["RoyalMail", "UPS"]),
+            rules=[ColRule(when=col("region") == "UK", choices=["RoyalMail"])],
+        )
+        tracked = ColSpec(  # keyed on a column that carries rules of its own
+            pl.Enum(["yes", "no"]),
+            rules=[ColRule(when=col("carrier") == "RoyalMail", choices=["yes"])],
+        )
+    ```
+
+    Two columns whose rules each read what the other writes have no such
+    order, and are refused at declaration with `SpecError`.
+
+A rule also overwrites nulls on matching rows, so a nullable column with a rule
+ends up with fewer nulls than `null_probability` suggests.
+
+## Single-column predicates — `validators`
+
+A validator is a Polars expression that each row must satisfy, referencing only
+its own column:
+
+```python
+class Accounts(FrameSpec):
+    email = ColSpec(pl.String, validators=[pl.col("email").str.contains("@")])
+```
+
+Wrap one in a `Check` to name it, describe it, or change null handling:
+
+```python
+from polspec import Check
+
+ColSpec(
+    pl.Float64,
+    validators=[
+        Check(
+            pl.col("score") <= 100,
+            name="score_ceiling",
+            description="Scores are a percentage",
+        )
+    ],
+)
+```
+
+Referencing another column is rejected at declaration time — use `__checks__`
+for that.
+
+## Multi-column invariants — `__checks__`
+
+```python
+class Invoices(FrameSpec):
+    subtotal = ColSpec(pl.Float64, bounds=(0.0, 1000.0))
+    total    = ColSpec(pl.Float64, bounds=(0.0, 2000.0))
+
+    __checks__ = [
+        Check(pl.col("total") >= pl.col("subtotal"), name="total_covers_subtotal"),
+    ]
+```
+
+By default a row whose check evaluates to null passes, matching SQL `CHECK`
+semantics. `Check(..., ignore_nulls=False)` treats null as a failure.
+
+Checks are inherited: a subclass collects its bases' checks as well as its own,
+de-duplicated. Two *different* checks sharing a name is an error, since the name
+is what an error message points at.
+
+## Composite uniqueness — `__unique_together__`
+
+A composite key declares that a *combination* of columns is distinct, even
+where each column on its own repeats.
+
+```python
+class Assignments(FrameSpec):
+    employee_id = ColSpec(pl.Int64, bounds=(1, 500))
+    project_id  = ColSpec(pl.Int64, bounds=(1, 200))
+
+    __unique_together__ = [["employee_id", "project_id"]]
+```
+
+`generate()` satisfies it by resampling the rows that repeat a combination an
+earlier row already used. Only the repeats move, so on a roomy domain almost
+every row keeps the value it was generated with, along with whatever weights
+or bounds shaped it. Rows where any member is null are exempt, matching how
+the key is validated.
+
+A group whose columns cannot take enough distinct combinations between them is
+refused, naming the group:
+
+```python
+class TooTight(FrameSpec):
+    a = ColSpec(pl.Enum(["x", "y"]))
+    b = ColSpec(pl.Enum(["p", "q"]))
+    __unique_together__ = [["a", "b"]]
+
+TooTight.generate(300, seed=1)
+# GenerationError: Composite unique key ['a', 'b'] cannot be satisfied: the
+# columns take 4 distinct combination(s) between them and 300 row(s) need one.
+```
+
+A member column may not also carry `rules`: a rule assigns from a fixed set,
+which is how two rows come to share a combination, and the repair would
+overwrite what the rule put there. Declare one or the other.
+
+A foreign-keyed member is never resampled — that would break the key — so the
+repair works with the other members. If *every* member is foreign-keyed there
+is nothing it can move, and generation says so rather than returning data that
+fails its own validation.
+
+## Referential integrity — `ForeignKey`
+
+```python
+from polspec import ForeignKey
+
+class Customers(FrameSpec):
+    id = ColSpec(pl.Int64, bounds=(1, 10_000))
+
+class Orders(FrameSpec):
+    customer_id = ColSpec(pl.Int64, bounds=(1, 10_000))
+
+    __foreign_keys__ = [
+        ForeignKey("customer_id", references=Customers, ref_columns="id"),
+    ]
+```
+
+Rows where any key column is null are exempt — a null foreign key means "no
+reference", not an invalid one.
+
+### Generating consistent data
+
+Pass the parent frame and the child's key values are sampled from it, so the
+result is referentially consistent by construction:
+
+```python
+customers = Customers.generate(1_000, seed=1)
+orders    = Orders.generate(10_000, seed=2, references={Customers: customers})
+
+Orders.validate(orders, references={Customers: customers})
+```
+
+Without `references`, generation leaves the column freely generated — but
+`validate()` then *raises*, because it has nothing to check against. Supply the
+parent to both calls, or disable the check with
+`validate(..., validate_foreign_keys=False)`.
+
+Composite keys are sampled as one joint pick per row, so multi-column keys stay
+internally consistent.
+
+With several related specs, a [`Registry`](https://maxwellb13.github.io/polspec/how-to/registry/) does the walk:
+`Registry(Customers, Orders, OrderLines).generate_all(1_000, seed=1)` generates
+parents first and threads each into its children, and `validate_all` checks
+the whole set.
+
+### Self-references
+
+```python
+class Employees(FrameSpec):
+    id         = ColSpec(pl.Int64, bounds=(1, 500))
+    manager_id = ColSpec(pl.Int64, bounds=(1, 500), nullable=True)
+
+    __foreign_keys__ = [
+        ForeignKey("manager_id", references="self", ref_columns="id"),
+    ]
+```
+
+`"self"` resolves to whichever spec the key ends up declared on, and needs no
+`references` entry in either call.
+
+!!! warning "The parent's domain has to fit inside the column's own"
+
+    A foreign key overwrites its column with values from the parent, so the
+    parent's `bounds` or `choices` have to be ones the column itself declares
+    it can hold. Declaring `bounds=(1, 50)` on a column referencing keys in
+    `100..200` would produce data that fails its own validation, so it is
+    refused when you declare it:
+
+    ```python
+    class Orders(FrameSpec):
+        customer_id = ColSpec(pl.Int64, bounds=(1, 50))
+        __foreign_keys__ = [
+            ForeignKey("customer_id", references=Customers, ref_columns="id")
+        ]
+    # SpecError: ... column 'customer_id' is declared bounds [1, 50], but the
+    # key fills it with values from 'id' on 'Customers', where bounds
+    # [1, 10000] do not fit inside [1, 50].
+    ```
+
+    A column that declares no `bounds` or `choices` accepts anything, so the
+    check only fires on a genuine contradiction. Widen or drop the child's
+    declaration, or narrow the parent's.
+
+    The check needs both specs, so a key naming its target as a string is
+    checked when a [`Registry`](https://maxwellb13.github.io/polspec/how-to/registry/) resolves it, not before.
+
+---
+
+# Generate data
+Source: https://maxwellb13.github.io/polspec/how-to/generating/
+
+# Generating data
+
+```python
+df = Orders.generate(1_000_000, seed=42)
+```
+
+Columns are generated independently and in parallel by the Rust extension, then
+cast to their declared dtypes in one Polars pass.
+
+## Reproducibility
+
+A `seed` fixes the result across processes, machines and thread counts. Each
+column derives its own seed from its position, and each 65,536-row chunk from
+its index, so the same seed gives the same frame regardless of how many threads
+did the work.
+
+```python
+Orders.generate(500, seed=7).equals(Orders.generate(500, seed=7))   # True
+```
+
+Omit `seed` and generation is seeded from the clock.
+
+## Lazy output
+
+```python
+lf = Orders.generate(1_000, seed=1, lazy=True)   # pl.LazyFrame
+```
+
+## Coverage — `method="cartesian"`
+
+The default `method="random"` draws each column independently, so a rare enum
+value may not appear at all. `method="cartesian"` guarantees it will:
+
+```python
+df = Orders.generate(500, method="cartesian", seed=1)
+```
+
+It builds the cross-product of every finite domain — each `Enum`'s categories,
+both booleans, and the negative / zero / positive / null partitions of every
+bounded numeric column — so every combination is present at least once.
+Columns with no finite domain (String, bare `Categorical`) are filled in
+randomly alongside.
+
+!!! warning "`n` is a minimum here, not a count"
+
+    If the coverage set is smaller than `n` it is padded with random rows. If
+    it is **larger**, all of it is kept and `n` is exceeded. Two ten-category
+    enums produce 100 rows however small `n` was.
+
+    A safety cap refuses to build more than 50 million coverage rows, naming
+    each dimension's cardinality so you can see which one exploded.
+
+## Batching
+
+For volumes that should not be held in memory at once:
+
+```python
+for batch in Orders.generate_batches(10_000_000, batch_size=250_000, seed=1):
+    process(batch)
+```
+
+Each batch is generated independently, so a `unique=True` foreign key column is
+sampled without replacement only *within* a batch.
+
+## Writing straight to a file
+
+Four sinks stream batches to disk without materialising the whole frame:
+
+```python
+Orders.sink_parquet("orders.parquet", 50_000_000, compression="zstd")
+Orders.sink_csv("orders.csv", 1_000_000)
+Orders.sink_ipc("orders.arrow", 1_000_000, compression="zstd")
+Orders.sink_ndjson("orders.ndjson", 1_000_000)
+```
+
+All four take `batch_size`, `method`, `seed` and `references`, create the
+parent directory if needed, and pass extra keyword arguments through to the
+underlying writer. Parquet and IPC need PyArrow — `pip install "polspec[arrow]"`.
+
+With `n=0`, Parquet, IPC and CSV still write a valid schema-bearing file.
+
+## Foreign keys
+
+`references` maps a parent spec to its data, and makes generated keys
+referentially consistent. See [Constraints](https://maxwellb13.github.io/polspec/how-to/constraints/#referential-integrity-foreignkey).
+
+```python
+orders = Orders.generate(10_000, seed=2, references={Customers: customers})
+```
+
+## What generation does not enforce
+
+Generation satisfies dtypes, nullability, bounds, string lengths, value
+domains, weights, distributions, `ColRule`s and — when given parent data —
+foreign keys.
+
+It does **not** attempt `unique=True`, `__unique_together__`,
+`ColSpec.validators` or `__checks__`. The last two are impossible in general
+(they hold arbitrary expressions); the first two are open work. See
+[Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/).
+
+---
+
+# Validate data
+Source: https://maxwellb13.github.io/polspec/how-to/validating/
+
+# Validating data
+
+```python
+clean = Orders.validate(df)
+```
+
+`validate()` accepts a `DataFrame` or a `LazyFrame` and returns the same kind,
+so it drops into a pipeline. On success the returned frame has its declared
+columns first, in declaration order.
+
+## Collecting every problem at once
+
+All checks across all columns are compiled into one Polars aggregation and
+evaluated in a single scan. Every breach is gathered before anything is raised:
+
+```python
+from polspec import ValidationError
+
+try:
+    Orders.validate(df)
+except ValidationError as err:
+    print(len(err.errors), "problems")
+    for problem in err.errors:
+        print(problem)
+```
+
+`ValidationError` is a `PolspecError` (and still a `ValueError`); see
+[Errors](https://maxwellb13.github.io/polspec/reference/errors/). `err.errors` is the list of
+individual messages; `str(err)` is the same list formatted as a report, and
+`err.report` is the `ValidationReport` behind both.
+
+## Findings as data — `inspect()`
+
+An exception is the right shape for someone reading a traceback. For code
+that wants to *act* on what was found — quarantine the offending rows, count
+problems per column, write a report — use `inspect()`, which returns the same
+findings as a `ValidationReport` and never raises for a bad frame:
+
+```python
+report = Orders.inspect(df, references={Customers: customers})
+
+report.passed                 # False
+for finding in report:
+    finding.code              # "bounds", "check", "foreign_key", ...
+    finding.key               # "total__bounds", "check:total_covers_subtotal"
+    finding.columns           # ("total",)
+    finding.count             # rows violating it (None for structural findings)
+    finding.samples           # up to five offending values
+    finding.details           # {"bounds": [0.0, None], "min_found": -3.0, ...}
+    finding.message           # the same text validate() would have raised
+
+report.by_column()["total"]   # every finding involving one column
+report.by_code("foreign_key") # every finding of one kind
+report.to_json()              # everything above, JSON-safe
+```
+
+The offending rows are reachable lazily, so nothing is materialised until you
+ask:
+
+```python
+bad = report.by_code("bounds")[0]
+report.rows(bad).collect()        # just the rows violating that one claim
+report.failing_rows().collect()   # every violating row, with a `__polspec_finding`
+                                  # column naming the claim (a row violating two
+                                  # claims appears twice)
+```
+
+Structural findings (`extra_columns`, `missing_columns`, `dtype`,
+`foreign_key_unresolved`) describe the frame's shape rather than its rows and
+have no rows to return. `inspect()` takes exactly the options `validate()`
+does; `validate()` is `inspect()` followed by `report.raise_if_failed()` and
+the structural transformations below. The full list of codes is in
+[Errors](https://maxwellb13.github.io/polspec/reference/errors/#finding-codes), and `polspec validate` on the
+[command line](https://maxwellb13.github.io/polspec/how-to/cli/#validate-check-data-against-a-schema) prints the same
+report.
+
+## Options
+
+```python
+Orders.validate(
+    df,
+    extra_cols="raise",        # "raise" | "drop" | "allow"
+    missing_cols="raise",      # "raise" | "add" | "allow"
+    strict_dtypes=False,
+    cast=False,
+    streaming=False,
+    references=None,
+    validate_rules=True,
+    validate_validators=True,
+    validate_unique=True,
+    validate_checks=True,
+    validate_foreign_keys=True,
+)
+```
+
+### Structural mismatches
+
+`extra_cols` decides what happens to columns the spec does not declare —
+refuse, drop them from the result, or keep them (appended after the declared
+ones).
+
+`missing_cols` decides what happens to declared columns the frame lacks —
+refuse, add them as all-null, or ignore them.
+
+!!! warning "`missing_cols="add"` can produce a frame that fails re-validation"
+
+    Columns are added *after* validation has run, including for columns
+    declared `nullable=False`. Feed the result straight back into `validate()`
+    and it will object to the nulls it just inserted.
+
+### Dtype strictness
+
+By default polspec accepts what a real pipeline delivers: any integer width for
+a declared integer, an integer or float for a declared float, any temporal for
+a temporal, and `String`/`Categorical` for a declared `Enum`. `strict_dtypes=True`
+requires the exact dtype, treating only `String` and `Utf8` as interchangeable.
+
+### Casting
+
+`cast=True` casts each column to its declared dtype *after* validation passes,
+so a String column that holds only valid enum members comes back as the `Enum`.
+
+### Streaming
+
+`streaming=True` evaluates with the Polars streaming engine, for frames larger
+than memory.
+
+### Turning checks off
+
+The five `validate_*` flags disable whole categories. Useful when generation
+cannot satisfy something yet:
+
+```python
+Orders.validate(Orders.generate(1_000, seed=1), validate_checks=False)
+```
+
+## What gets checked
+
+| Check | From |
+|:--|:--|
+| Column present / not extra | the spec's column set |
+| Dtype compatible | `ColSpec.dtype` |
+| No unexpected nulls | `nullable` |
+| Value in domain | `choices`, `Enum` categories |
+| Value within range | `bounds` |
+| Length within range | `string_length` |
+| Conditional values hold | `rules` |
+| Single-column predicates | `validators` |
+| Values distinct | `unique` |
+| Composite key distinct | `__unique_together__` |
+| Multi-column invariants | `__checks__` |
+| Referential integrity | `__foreign_keys__` |
+
+Bounds, lengths, rules, validators and uniqueness are skipped for a column
+whose dtype is already wrong — comparing values of the wrong type would bury
+the dtype error under noise.
+
+## Foreign keys need their parent
+
+A key referencing another spec needs that spec's data:
+
+```python
+Orders.validate(orders, references={Customers: customers})
+```
+
+Without it, the key is reported as a `foreign_key_unresolved` finding naming
+the spec it needed, so `validate()` raises and `inspect()` lists it alongside
+everything else. `references` may be keyed by the class, its `TableSpec`, or
+the spec's name. Self-referencing keys are checked against the frame itself
+and need nothing.
+
+Each foreign key is an anti-join against the parent, so these run separately
+from the single-pass aggregation above.
+
+---
+
+# Shared categories
+Source: https://maxwellb13.github.io/polspec/how-to/categories/
+
+# Shared categories
+
+A `CatSpec` is a registry of `Enum` and `Categorical` definitions shared across
+specs, so several tables agree on a domain instead of each restating it.
+
+## Declaring one by hand
+
+Subclass `CatSpec`, one line per entry, in the same vocabulary `ColSpec.dtype`
+already accepts:
+
+```python
+import polars as pl
+from polspec import CatSpec, ColSpec, FrameSpec
+
+class Categories(CatSpec):
+    STATUS   = pl.Enum(["NEW", "PAID", "SHIPPED"])
+    CURRENCY = pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt8))
+```
+
+`Categories.STATUS` is a plain class attribute — ordinary Python attribute
+lookup, nothing polspec-specific — so it plugs straight into a `ColSpec`:
+
+```python
+class Orders(FrameSpec):
+    status   = ColSpec(Categories.STATUS)
+    currency = ColSpec(Categories.CURRENCY)
+```
+
+This is deliberately not a dict. `CatSpec(enums={...}, categoricals={...},
+choices={...})` puts one name across up to three parallel mappings that all
+have to stay in step; a class body puts each entry on its own line, in the
+declaration order that also documents it, and inherits the same collision
+handling `FrameSpec` uses for columns — an entry that shadows one of
+`CatSpec`'s own methods (naming an entry `get`, say) warns rather than
+silently breaking, and an unnamed `pl.Categorical()` is rejected outright,
+since a registry entry with no name can't act as a shared key.
+
+!!! note "`.STATUS` means something different on each form"
+
+    On a class-body registry, `.STATUS` is a genuine class attribute, so it
+    returns the dtype exactly as written. On a registry built from
+    `enums=`/`categoricals=` dicts (below), `.STATUS` goes through a lookup
+    method instead and returns the raw category list — `pl.Enum(cats.STATUS)`
+    is how that form turns it into a dtype. `get_enum()`, `get_categorical()`,
+    `[...]`, and the `.enum`/`.categorical` accessors below behave identically
+    either way, since those always go through the registry rather than plain
+    attribute lookup.
+
+## The dict constructor
+
+The form `CatSpec.infer()`, `from_dataframe()` and `from_yaml()` build
+programmatically, since their entry names come from data at runtime rather
+than from a class body someone writes by hand:
+
+```python
+categories = CatSpec(
+    enums={"STATUS": ["NEW", "PAID", "SHIPPED"]},
+    categoricals={"CURRENCY": pl.Categories("CURRENCY", physical=pl.UInt8)},
+)
+```
+
+The two forms compose rather than compete: a class-body subclass's entries
+become the defaults, and an explicit `enums=`/`categoricals=`/`choices=`
+argument at construction time can still add to or override them per key.
+
+```python
+extended = Categories(enums={"REASON": ["FRAUD", "DUPLICATE"]})
+extended.get_enum("STATUS")   # ["NEW", "PAID", "SHIPPED"] -- inherited
+extended.get_enum("REASON")   # ["FRAUD", "DUPLICATE"]     -- added
+```
+
+## Using a registry
+
+Whichever form built it, the registry accessors are the same. Four equivalent
+ways to reach an entry:
+
+```python
+pl.Enum(categories.STATUS)          # attribute, dict-built form only -- see note above
+categories.enum.STATUS              # typed accessor -> pl.Enum
+categories.enum["STATUS"]           # item access
+categories.get_enum("STATUS")       # -> list[str]
+categories.categorical.CURRENCY     # -> pl.Categorical
+```
+
+Lookup falls back to case variants, so a column named `status` finds a registry
+entry named `STATUS`. Convenient, but worth knowing about if you have entries
+differing only in case.
+
+## Why a shared `Categories` matters
+
+A named `pl.Categories()` registry gives two columns the same physical codes,
+so frames can be joined on the code rather than the string. polspec preserves
+that identity through generation and through a YAML round-trip.
+
+Choosing a narrow physical dtype is a real memory saving on wide tables:
+
+| Physical | Distinct categories |
+|:--|:--|
+| `UInt8` | 255 |
+| `UInt16` | 65,535 |
+| `UInt32` (default) | ~4 billion |
+
+polspec respects the ceiling: a `Categorical` on a `UInt8` registry generates
+from a pool sized to the registry rather than overflowing it. Where the
+registry is *named*, that pool is derived from the registry's own identity, so
+two specs sharing it draw from the same domain.
+
+## Building a registry from what you have
+
+```python
+CatSpec.from_dataframe(df)      # existing Enum/Categorical columns
+CatSpec.from_framespec(Orders)  # a spec's declared columns
+```
+
+## Inferring one
+
+`infer` picks a representation per column by cardinality:
+
+```python
+categories = CatSpec.infer(df, max_enum_cardinality=30)
+```
+
+- at most `max_enum_cardinality` distinct values → `Enum`
+- otherwise, up to `max_categorical_cardinality` and either a low unique ratio
+  or under 256 values → `Categorical` with the narrowest physical dtype that fits
+- otherwise, left as `String`
+
+Identifier-shaped names are skipped by default, since they are high-cardinality
+by nature: `*_id`, `*_uuid`, `*_hash`, `*_url`, `*_key`. Override with
+`exclude_patterns`, or force specific columns with `include_columns`.
+
+## Re-typing a spec
+
+`with_catspec` returns a new spec with matching columns re-pointed at the
+registry's types:
+
+```python
+Optimized = Orders.with_catspec(categories)
+Optimized = Orders.with_catspec(CatSpec.infer(df))   # infer, then apply
+```
+
+Re-typing changes the dtype and nothing else a column declared — `unique`,
+`string_length`, `nullable`, tags, rules and validators all carry over. The two
+fields a dtype change can genuinely invalidate are dropped with a warning:
+`weights`, which is positional over a domain that just resized, and `choices`,
+when the new dtype has no category for them.
+
+## Persisting a registry
+
+```python
+categories.to_yaml("categories.yaml")
+categories = CatSpec.from_yaml("categories.yaml")
+```
+
+```yaml
+enums:
+  STATUS: [NEW, PAID, SHIPPED]
+categoricals:
+  CURRENCY:
+    name: CURRENCY
+    physical: UInt8
+    categories: [GBP, USD, EUR]
+```
+
+A spec's YAML can point at a registry file, and `FrameSpec.from_yaml` resolves
+it automatically — see [YAML specs](https://maxwellb13.github.io/polspec/how-to/files/).
+
+Also available: `to_markdown()` for a documentation table, and `to_mermaid()`
+for a class diagram of the registry.
+
+---
+
+# Specs as files
+Source: https://maxwellb13.github.io/polspec/how-to/files/
+
+# YAML specs
+
+A spec can live in a file instead of a class body, so tooling outside Python
+can read it and so it can be reviewed as a document.
+
+```python
+Orders.to_yaml("orders.yaml")
+Loaded = FrameSpec.from_yaml("orders.yaml")
+
+Loaded.generate(1_000, seed=1)
+```
+
+The output is plain, readable YAML — defaults are omitted so the file shows
+only what you actually declared:
+
+```yaml
+version: 2
+name: Orders
+columns:
+  order_id:
+    dtype: Int64
+    bounds: [1, 100000]
+    unique: true
+  status:
+    dtype:
+      Enum: [NEW, PAID, SHIPPED]
+  total:
+    dtype: Float64
+    bounds: [0.0, null]
+  placed:
+    dtype: Date
+    nullable: true
+unique_together:
+  - [order_id, status]
+```
+
+An open-ended bound writes as `null` and reads back unchanged.
+
+`version:` records the file format that wrote the file. A file from an
+earlier version is migrated on the way in; a file from a later polspec is
+refused with a message saying so. A key the reader does not know is an
+error naming the closest known key, since silently reading a misspelt option
+as its default is the worst outcome -- pass `strict=False` to
+`from_yaml` to downgrade that to a warning.
+
+## What survives a round-trip
+
+| | Round-trips |
+|:--|:--:|
+| dtypes, including parametrized `Enum` / `Datetime` / `Duration` / named `Categorical` | yes |
+| `nullable`, `null_probability`, `bounds`, `string_length`, `unique`, `tags` | yes |
+| `choices`, `weights`, `distribution`, `distribution_params` | yes |
+| `rules` (`ColRule`) | yes |
+| `__unique_together__` | yes |
+| `__foreign_keys__`, self-referencing or to another spec (by name) | yes |
+| `__checks__` and `ColSpec.validators` written with `col()` | yes |
+| `__checks__` and `ColSpec.validators` over a raw `pl.Expr` | **no** |
+
+A foreign key to another spec is written as that spec's *name*; nothing
+checks it until a spec of that name is supplied, through `references=` on
+`generate`/`validate` or a registry. What cannot be written is an arbitrary
+`polars.Expr`, which Polars cannot serialize stably. `to_yaml()` warns about
+each, naming exactly what will be lost:
+
+```text
+UserWarning: Orders declares 1 __checks__ ('total_covers_subtotal') that cannot
+be represented in YAML (a Check wraps an arbitrary polars.Expr) and will NOT be
+written to orders.yaml. They will be lost on FrameSpec.from_yaml() unless
+re-declared on a subclass of the loaded spec.
+```
+
+The suggested recovery is to subclass what you loaded:
+
+```python
+Loaded = FrameSpec.from_yaml("orders.yaml")
+
+class Orders(Loaded):
+    __checks__ = [Check(pl.col("total") >= pl.col("subtotal"), name="total_covers_subtotal")]
+```
+
+Columns, rules, unique keys, foreign keys, and any check or validator
+written with `col()` come from the file; only raw-expression parts need
+re-declaring in Python.
+A check in YAML is its predicate in data form:
+
+```yaml
+checks:
+- expr:
+    ge:
+    - col: total
+    - col: subtotal
+  name: total_covers_subtotal
+```
+
+## Sharing categories between files
+
+A spec file can reference a `CatSpec` registry by path, resolved relative to
+the spec file:
+
+```yaml
+name: Orders
+categories: categories.yaml
+columns:
+  status:
+    dtype:
+      Enum: STATUS
+  currency:
+    dtype:
+      Categorical: CURRENCY
+```
+
+`$categories.STATUS` and `categories.STATUS` are accepted as prefixed forms of
+the same reference.
+
+Or pass a registry explicitly, which wins over anything the file names:
+
+```python
+FrameSpec.from_yaml("orders.yaml", categories=CatSpec.from_yaml("categories.yaml"))
+FrameSpec.from_yaml("orders.yaml", categories="categories.yaml")
+```
+
+A spec can also emit the registry its own columns imply:
+
+```python
+Orders.catspec().to_yaml("categories.yaml")
+```
+
+## Python instead of YAML
+
+The same spec can be written as an importable Python module. It is the right
+choice when the spec will be edited by hand from now on, or when it needs the
+parts YAML cannot hold:
+
+```python
+Orders.to_python("orders_spec.py")
+```
+
+```python
+"""Declares the Orders schema."""
+
+import polars as pl
+from polspec import ColSpec, FrameSpec
+
+
+class Orders(FrameSpec):
+    __columns__ = {
+        'order_id': ColSpec(pl.Int64, bounds=(1, 100000), unique=True),
+        'status': ColSpec(pl.Enum(['NEW', 'PAID', 'SHIPPED'])),
+        'total': ColSpec(pl.Float64, bounds=(0.0, None)),
+        'placed': ColSpec(pl.Date, nullable=True),
+    }
+    __unique_together__ = [['order_id', 'status']]
+```
+
+Columns are declared through `__columns__` because a name straight from data
+is not always a valid identifier. What survives is exactly the
+[round-trip table](#what-survives-a-round-trip) above: `__checks__`,
+cross-spec `ForeignKey`s and `ColSpec.validators` warn and are dropped, and
+the file is where you then add them back by hand. `polspec schema infer` uses
+this path when its output ends in `.py`; see
+[Command line](https://maxwellb13.github.io/polspec/how-to/cli/).
+
+## Column names from data
+
+`from_yaml` and `to_python` declare columns through `__columns__`, so names
+that could not be class attributes — a leading underscore, a collision with a
+method name like `schema`, or a name with spaces — load correctly. The YAML
+key is the column's real name; a `col_name` set in a class body is not
+written, because the key already carries it. See
+[Column names that are not identifiers](https://maxwellb13.github.io/polspec/how-to/columns/#column-names-that-are-not-identifiers).
+
+## Several specs in one file
+
+A [`Registry`](https://maxwellb13.github.io/polspec/how-to/registry/) writes every spec it holds, and the categories it
+was declared with, to one file keyed by spec name, and reads it back with the
+same version and strictness rules:
+
+```python
+Registry(Customers, Orders, OrderLines, categories=categories).to_yaml("specs.yaml")
+registry = Registry.from_yaml("specs.yaml").resolve()
+```
+
+---
+
+# Multiple specs
+Source: https://maxwellb13.github.io/polspec/how-to/registry/
+
+# Multiple specs
+
+A `ForeignKey` names the spec it points at, and a single spec knows nothing
+beyond that name. A `Registry` is the declared set of specs that belong
+together: it resolves every cross-spec key, orders parents before children,
+generates or validates the whole set in one call, and draws the relationships
+between them.
+
+```python
+from polspec import Registry
+
+registry = Registry(Customers, Orders, OrderLines)
+
+registry.names            # ('Customers', 'Orders', 'OrderLines')
+registry["Orders"]        # the TableSpec, by name, class or spec
+registry.order()          # parents first: ('Customers', 'Orders', 'OrderLines')
+```
+
+A registry is declared, not global. Two test modules may each define an
+`Orders`, and neither sees the other's. Two *different* specs with one name in
+the same registry is an error.
+
+## Resolving names
+
+A key declared against a class is checked at declaration: the referenced
+columns exist and their dtypes are compatible. A key declared against a bare
+name, or read from a file, is not — nothing knows what `"Orders"` is yet.
+`resolve()` binds every such key to the spec of that name and runs the same
+checks, returning a new registry:
+
+```python
+resolved = registry.resolve()
+resolved["OrderLines"].foreign_keys[0].target   # the Orders TableSpec
+```
+
+It raises `RegistryError` for a key whose target is not in the registry, for
+a reference to a column the target lacks or cannot hold, for a cycle between
+specs, and for a column disagreeing with the shared categories described
+below.
+
+## Generating a related set
+
+`generate_all` walks the foreign-key graph, generates each parent before its
+children, and threads every frame into `references=` for you:
+
+```python
+frames = registry.generate_all(1_000, seed=1)
+frames["Orders"]["customer_id"]   # every value exists in frames["Customers"]["id"]
+```
+
+`n` is one count for every spec or a mapping with each spec's own:
+
+```python
+frames = registry.generate_all(
+    {Customers: 1_000, Orders: 10_000, OrderLines: 30_000}, seed=1
+)
+```
+
+Each spec's seed is derived from `seed` and the spec's name, so adding a
+table to the registry never changes the rows another table produces. A frame
+passed in `references=` is used as-is instead of being generated — real
+customers under synthetic orders — and also stands in for a parent that is
+not in the registry at all.
+
+`generate_related(Orders, n)` is the same walk restricted to one spec and
+everything it depends on.
+
+## Validating a related set
+
+```python
+reports = registry.inspect_all(frames)     # {name: ValidationReport}
+registry.validate_all(frames)              # raises once, listing every spec's findings
+```
+
+Every frame is a possible parent for every other, so no `references=` is
+needed for keys inside the set; pass one for parents that live outside it.
+Both take the options `validate()` does, and `validate_all` returns the frames
+with the same structural transformations applied. A frame for a spec not in
+the registry is a `RegistryError`.
+
+## Shared categories
+
+Declaring the registry with a `CatSpec` says which `Enum` and `Categorical`
+definitions the specs are expected to share; `resolve()` then refuses a column
+whose declaration disagrees with it:
+
+```python
+registry = Registry(Orders, Products, categories=categories)
+registry.resolve()   # RegistryError if Orders.status and categories.STATUS differ
+```
+
+Without one, `catspec()` derives a registry from the specs' own columns and
+refuses two specs that define the same name differently — the disagreement
+[Shared categories](https://maxwellb13.github.io/polspec/how-to/categories/) warns about, now noticed:
+
+```python
+registry.catspec()   # CatSpec merged from every Enum/Categorical column
+```
+
+## One file for the set
+
+A registry writes to a single YAML file: the format version, the declared
+categories, and every spec keyed by name. Foreign keys are written as names
+and bound again by `resolve()` on the way back:
+
+```yaml
+version: 2
+categories:
+  enums:
+    STATUS: [NEW, PAID, SHIPPED]
+specs:
+  Customers:
+    columns:
+      id: {dtype: Int64, unique: true}
+  Orders:
+    columns:
+      customer_id: {dtype: Int64}
+      status: {dtype: {Enum: STATUS}}
+    foreign_keys:
+      - {columns: [customer_id], references: Customers, ref_columns: [id]}
+```
+
+```python
+registry.to_yaml("specs.yaml")
+registry = Registry.from_yaml("specs.yaml").resolve()
+```
+
+`categories:` may also be a path to a `CatSpec` file, relative to the registry
+file. Everything [YAML specs](https://maxwellb13.github.io/polspec/how-to/files/) says about what survives a round-trip
+applies to each spec in the file.
+
+## Finding specs
+
+`Registry.discover()` builds one from files and directories. A `.py` file is
+imported and every `FrameSpec` subclass or `TableSpec` bound in it is taken;
+a `.yaml` file is a spec, or a whole registry when it has a `specs:` key; a
+directory is walked for both, skipping names starting with `_` or `test_`:
+
+```python
+registry = Registry.discover("specs/")
+registry = Registry.from_module(my_project.specs)
+```
+
+Importing a Python file runs it, so point `discover` only at files you would
+import anyway.
+
+## The whole picture
+
+`to_mermaid()` draws every spec and every key between them in one
+entity-relationship diagram — the relationships a single spec's
+[`to_mermaid`](https://maxwellb13.github.io/polspec/how-to/documenting/#entity-relationship-diagram) cannot see:
+
+```python
+registry.to_mermaid("docs/schema.mmd")
+```
+
+```mermaid
+erDiagram
+    Customers {
+        Int64 id PK
+    }
+    Orders {
+        Int64 order_id PK
+        Int64 customer_id FK
+    }
+    OrderLines {
+        Int64 order_id UK
+        Int32 line_no UK
+    }
+    Customers ||--o{ Orders : "fk_customer_id__Customers"
+    Orders ||--o{ OrderLines : "fk_order_id__Orders"
+```
+
+---
+
+# Generated documentation
+Source: https://maxwellb13.github.io/polspec/how-to/documenting/
+
+# Generated documentation
+
+A spec already holds everything a data dictionary needs, so polspec renders one
+rather than asking you to keep a second copy in step.
+
+## Markdown data dictionary
+
+```python
+Orders.to_markdown("docs/orders.md")   # writes and returns
+markdown = Orders.to_markdown()        # just returns
+```
+
+The document has three parts: an overview, a table of every column, and — when
+the spec declares any — a constraints section covering composite keys, checks,
+foreign keys, conditional rules and column validators.
+
+```markdown
+# Orders
+
+## Overview
+- **Schema:** `Orders`
+- **Total Columns:** 4
+- **Composite Unique Keys:** `['order_id', 'status']`
+- **Foreign Keys:** 1 key(s)
+
+## Columns
+
+| Column | Type | Nullable | Bounds | Domain / Choices | String Length | Tags | Rules | Unique |
+|:---|:---|:---|:---|:---|:---|:---|:---|:---|
+| `order_id` | `Int64` | No | [1, 100000] | - | - | - | - | Yes |
+| `status` | `Enum(['NEW', 'PAID', 'SHIPPED'])` | No | - | - | - | - | - | No |
+| `total` | `Float64` | No | >= 0.0 | - | - | - | - | No |
+```
+
+Long category and choice lists are elided rather than blowing out the table,
+and an open-ended bound reads as `>= 0.0` rather than `[0.0, None]`.
+
+Pass `title=` to override the heading, which otherwise uses the class name.
+
+## Entity-relationship diagram
+
+```python
+Orders.to_mermaid("docs/orders.mmd")
+```
+
+```mermaid
+erDiagram
+    Orders {
+        Int64 order_id PK
+        Enum status
+        Float64 total "bounds: >= 0.0"
+        Date placed "nullable"
+    }
+    Customers ||--o{ Orders : "fk_customer_id__Customers"
+```
+
+Columns are annotated with what the spec declares — nullability, bounds or
+choices, tags, string lengths — and keyed as `PK` (a `unique` column), `UK` (a
+member of a composite key) or `FK`.
+
+Mermaid renders in GitHub, GitLab and most documentation sites, including this
+one, so the diagram stays live rather than becoming a stale screenshot.
+
+!!! note
+
+    Every `unique=True` column is currently marked `PK`, so a spec with several
+    unique columns renders several primary keys. `UK` would be the correct
+    token for the non-primary ones.
+
+## Several specs in one diagram
+
+A single spec's diagram can only name the entity a key points at. A
+[`Registry`](https://maxwellb13.github.io/polspec/how-to/registry/) draws every spec and every key between them:
+
+```python
+Registry(Customers, Orders, OrderLines).to_mermaid("docs/schema.mmd")
+```
+
+## Documenting a category registry
+
+`CatSpec` renders the same two ways:
+
+```python
+categories.to_markdown("docs/categories.md")
+categories.to_mermaid("docs/categories.mmd")
+```
+
+The Markdown lists enums with their variants and categoricals with their
+physical dtype, namespace and domain pool. The Mermaid output is a class
+diagram, with each enum as an `<<enumeration>>`.
+
+## Keeping generated docs current
+
+Both renderers are pure functions of the spec, so wiring them into a build or a
+pre-commit hook keeps the documentation honest:
+
+```python
+from pathlib import Path
+
+for spec in (Customers, Orders, Shipments):
+    spec.to_markdown(Path("docs/schemas") / f"{spec.__name__.lower()}.md")
+```
+
+---
+
+# Test pipelines
+Source: https://maxwellb13.github.io/polspec/how-to/testing/
+
+# Testing pipelines with polspec
+
+A spec is a schema and a data source at once, which makes it a natural fit
+for the tests around a data pipeline: declare what a stage of the pipeline
+expects, generate data that matches, and validate what it produces.
+
+## Why this fits hermetic tests
+
+A hermetic test doesn't reach outside itself — no network call, no shared
+fixture file that drifts, no "works on my machine" because someone's local
+`sample_data.csv` is newer than the one in CI. `FrameSpec.generate(n, seed=...)`
+is a pure function of its arguments: the same seed produces the same frame on
+any machine, in any process, with any number of threads. There's no file to
+check into the repo, and no file to go stale.
+
+```python
+class Customers(FrameSpec):
+    customer_id = ColSpec(pl.Int64, bounds=(1, 10_000))
+    tier = ColSpec(pl.Enum(["free", "pro", "enterprise"]))
+    signed_up = ColSpec(pl.Date, bounds=(date(2020, 1, 1), None))
+
+
+def test_pipeline_handles_all_tiers():
+    df = Customers.generate(500, seed=42)
+    assert set(df["tier"].unique()) <= {"free", "pro", "enterprise"}
+```
+
+The spec is the fixture. When the pipeline's input schema changes, the type
+error is in the `ColSpec` declaration, not in a `.parquet` file nobody
+remembers generating.
+
+## Testing a full pipeline
+
+Declare the shape of each stage — including the *output* — and validate the
+real function against it. This catches two different kinds of drift: the
+pipeline producing the wrong shape, and the test's own expectations going
+stale.
+
+```python
+class Orders(FrameSpec):
+    order_id = ColSpec(pl.Int64, bounds=(1, None))
+    customer_id = ColSpec(pl.Int64, bounds=(1, 10_000))
+    amount = ColSpec(pl.Float64, bounds=(0.0, 500.0))
+    __foreign_keys__ = [
+        ForeignKey("customer_id", references=Customers, ref_columns="customer_id")
+    ]
+
+
+class CustomerSpend(FrameSpec):
+    customer_id = ColSpec(pl.Int64, bounds=(1, 10_000))
+    tier = ColSpec(pl.Enum(["free", "pro", "enterprise"]))
+    total_spend = ColSpec(pl.Float64, bounds=(0.0, None))
+    order_count = ColSpec(pl.UInt32)
+
+
+def summarize_spend(customers: pl.DataFrame, orders: pl.DataFrame) -> pl.DataFrame:
+    """The pipeline under test."""
+    return (
+        orders.group_by("customer_id")
+        .agg(
+            total_spend=pl.col("amount").sum(),
+            order_count=pl.len().cast(pl.UInt32),
+        )
+        .join(customers.select("customer_id", "tier"), on="customer_id", how="inner")
+        .select("customer_id", "tier", "total_spend", "order_count")
+    )
+
+
+def test_summarize_spend_matches_declared_output_shape():
+    customers = Customers.generate(200, seed=1)
+    orders = Orders.generate(2_000, seed=2, references={Customers: customers})
+    Orders.validate(orders, references={Customers: customers})
+
+    result = summarize_spend(customers, orders)
+    CustomerSpend.validate(result, extra_cols="allow", missing_cols="allow")
+```
+
+`references={Customers: customers}` makes `orders.customer_id` referentially
+consistent with the generated `customers` frame, so the join in
+`summarize_spend` isn't silently testing against orphaned rows. Validating
+the *input* and the *output* against separate specs means a pipeline bug that
+drops a column, or a schema change nobody updated the test for, both surface
+as a specific, readable `ValidationError` rather than a downstream assertion
+failure three functions later.
+
+For a pipeline with more than two stages — raw events into a bronze table,
+bronze into a cleaned silver table, silver into an aggregated gold table — the
+same pattern repeats at each boundary: a `FrameSpec` per stage, a
+`ForeignKey` where one stage's identity flows into the next, `validate()`
+between every pair of stages the tests actually exercise.
+
+## Large dataframes and files
+
+Generating a realistic volume of data for a load or performance test doesn't
+need a large fixture file checked into version control. `generate_batches`
+streams rows without holding all of them in memory:
+
+```python
+def test_pipeline_handles_a_million_rows_without_holding_them_all():
+    total = 0
+    for batch in Customers.generate_batches(1_000_000, batch_size=100_000, seed=1):
+        total += process(batch).height
+    assert total == 1_000_000
+```
+
+For a pipeline stage that specifically reads from a file — a `scan_parquet`
+step, an ingestion job watching a directory — `sink_*` writes a large file to
+a `tmp_path`, which pytest cleans up automatically:
+
+```python
+def test_pipeline_reads_a_large_parquet_file(tmp_path):
+    path = tmp_path / "customers.parquet"
+    Customers.sink_parquet(path, 2_000_000, batch_size=200_000)
+
+    result = pl.scan_parquet(path).select(pl.len()).collect().item()
+    assert result == 2_000_000
+```
+
+Nothing here is committed to the repository, nothing needs cleaning up by
+hand, and the file is exactly as large as the test needs — a different test
+asking for 50,000,000 rows costs nothing to write.
+
+## Edge-case testing
+
+### Guaranteed coverage with `method="cartesian"`
+
+Random generation might never happen to produce a negative amount paired with
+a particular payment method in 50 rows. `method="cartesian"` guarantees every
+combination of each `Enum`/`Boolean` value with the negative/zero/positive/null
+partitions of every bounded numeric column appears at least once:
+
+```python
+class Payment(FrameSpec):
+    method = ColSpec(pl.Enum(["card", "wire", "cash"]))
+    amount = ColSpec(pl.Int64, bounds=(-1000, 1000), nullable=True)
+
+
+def refund_flag(df: pl.DataFrame) -> pl.DataFrame:
+    """The pipeline under test: refunds are negative amounts."""
+    return df.with_columns(is_refund=pl.col("amount") < 0)
+
+
+def test_refund_flag_handles_every_sign_and_method_combination():
+    edge_cases = Payment.generate(50, method="cartesian", seed=1)
+    result = refund_flag(edge_cases)
+    assert result.filter(pl.col("amount") < 0)["is_refund"].all()
+    assert not result.filter(pl.col("amount") >= 0)["is_refund"].any()
+```
+
+Every method now appears alongside a negative amount, a zero amount, a
+positive amount, and a null — the sign/null boundary a naive `amount < 0`
+check is actually at risk of getting wrong — without hand-writing sixteen
+rows.
+
+### Forcing a specific case with `ColRule`
+
+Cartesian coverage guarantees signs and combinations exist somewhere in the
+frame; it doesn't put a specific value on a specific row. When a test needs an
+exact scenario — "a wire transfer of exactly zero, paired with this other
+column's exact value" — a `ColRule` pins it deterministically instead of
+filtering generated rows and hoping one matches:
+
+```python
+from polspec import ColRule, col
+
+class PaymentWithForcedCase(FrameSpec):
+    method = ColSpec(pl.Enum(["card", "wire", "cash"]))
+    amount = ColSpec(
+        pl.Int64,
+        bounds=(-1000, 1000),
+        rules=[ColRule(when=col("method") == "wire", choices=[0])],
+    )
+
+
+def test_zero_amount_wire_transfer_is_not_a_refund():
+    df = PaymentWithForcedCase.generate(20, seed=1)
+    result = refund_flag(df)
+    assert not result.filter(pl.col("method") == "wire")["is_refund"].any()
+```
+
+Every `wire` row is forced to `amount = 0`, while `card` and `cash` still vary
+normally — useful for a boundary the pipeline treats specially and cartesian
+coverage alone wouldn't reliably isolate.
+
+## Generating the test boilerplate
+
+The [`polspec test`](https://maxwellb13.github.io/polspec/how-to/cli/) command builds the round-trip skeleton for a
+schema automatically:
+
+```bash
+polspec test orders.yaml -o test_orders.py
+```
+
+Point it at a spec written by hand, or one produced by `polspec schema infer`
+against a sample of real production data — a fast way to turn "here's what our
+data actually looks like" into a schema you can generate more of.
+
+## A caveat, not a footnote
+
+polspec is early alpha — see [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/).
+Tests built on it today are exercising real, useful properties (shape,
+referential integrity, boundary coverage), but the exact values a given seed
+produces are not guaranteed to survive a polspec upgrade. Pin a seed for
+*reproducibility within a test run*, not as an assertion baked into a snapshot
+that expects byte-identical output after you bump the version.
+
+---
+
+# Command line
+Source: https://maxwellb13.github.io/polspec/how-to/cli/
+
+# Command line
+
+`polspec` has two things to do with a schema: create one, and turn one into a
+test. Both are thin wrappers over `FrameSpec` methods that already exist —
+`from_dataframe`, `to_yaml`, `generate`, `validate` — so the CLI is argument
+parsing and templating, not new behaviour.
+
+```bash
+polspec schema infer orders.parquet -o orders.yaml
+polspec schema new Orders -o orders.py
+polspec test orders.yaml -o test_orders.py
+```
+
+## `schema infer` — profile data into a spec
+
+```bash
+polspec schema infer SOURCE -o OUTPUT.yaml [options]
+polspec schema infer SOURCE -o OUTPUT.py [options]
+```
+
+`SOURCE` is a `.csv`, `.tsv`, `.parquet`, `.ndjson`/`.jsonl`, `.json`, or Arrow
+IPC (`.arrow`/`.ipc`/`.feather`) file. It is read with the matching Polars
+reader and profiled with `FrameSpec.from_dataframe`, the same function behind
+[Getting started](https://maxwellb13.github.io/polspec/tutorial/getting-started/#infer-a-spec-instead-of-writing-one).
+
+`OUTPUT`'s extension picks the format: `.yaml`/`.yml` writes a YAML spec via
+`FrameSpec.to_yaml`; `.py` writes a `FrameSpec` subclass via
+`FrameSpec.to_python` — a starting-point module you can edit like any other
+source file, rather than a data file `from_yaml` re-parses.
+
+```console
+$ polspec schema infer orders.parquet -o orders.yaml --weights
+Inferred 3 column(s) from 12,483 row(s) of orders.parquet -> orders.yaml
+
+$ polspec schema infer orders.parquet -o orders.py --weights
+Inferred 3 column(s) from 12,483 row(s) of orders.parquet -> orders.py
+```
+
+```python
+"""Declares the Orders schema."""
+
+import polars as pl
+from polspec import ColSpec, FrameSpec
+
+
+class Orders(FrameSpec):
+    __columns__ = {
+        "order_id": ColSpec(pl.Int64, bounds=(1, 12483)),
+        "status": ColSpec(pl.Enum(["NEW", "PAID", "SHIPPED"]), weights=[0.4, 0.3, 0.3]),
+        "total": ColSpec(pl.Float64, bounds=(10.0, 500.0)),
+    }
+```
+
+Columns are declared through `__columns__` rather than as class attributes,
+same as `from_yaml` — see [Column names that are not
+identifiers](https://maxwellb13.github.io/polspec/how-to/columns/#column-names-that-are-not-identifiers). The `.py`
+output is passed through `ruff format` when it's on `PATH`, same as `schema
+new`.
+
+| Option | Effect |
+|:--|:--|
+| `--name NAME` | Class name (default: derived from the file name) |
+| `--weights` | Record each category's observed frequency |
+| `--max-unique-enum N` | Max distinct values for a string column to become an `Enum` (default 50) |
+| `--no-bounds` | Skip computing numeric/temporal bounds and string lengths |
+| `--sample N` | Profile only the first N rows |
+
+Treat the output as a draft. It describes the sample it saw — edit bounds,
+add rules, tighten a domain — before trusting it as a contract.
+
+## `schema new` — start from nothing
+
+```bash
+polspec schema new NAME -o OUTPUT.py
+```
+
+Writes a blank `FrameSpec` with the two imports it will need and a few
+commented `ColSpec` examples, for the case where there's no data yet to
+profile.
+
+## `test` — a round-trip test from a schema
+
+```bash
+polspec test SOURCE -o OUTPUT_test.py [options]
+```
+
+`SOURCE` is a `.yaml`/`.yml` spec (from `schema infer`, or written by
+`FrameSpec.to_yaml`) or a `.py` file defining one or more `FrameSpec`
+subclasses (from `schema new`, filled in). The generated file asserts the
+property this project's own test suite is built around:
+
+```python
+def test_orders_roundtrip():
+    df = Orders.generate(500, seed=42)
+    Orders.validate(df)
+
+
+def test_orders_cartesian_coverage():
+    df = Orders.generate(500, method="cartesian", seed=42)
+    Orders.validate(df)
+```
+
+| Option | Effect |
+|:--|:--|
+| `--rows N` | Rows to generate (default 500) |
+| `--seed N` | Generation seed (default 42) |
+| `--no-cartesian` | Skip the coverage-guaranteeing test |
+| `--class NAME` | Generate a test for only this class, when the source defines several |
+
+### It will not hand you a test that fails on the spot
+
+`generate()` does not attempt everything `validate()` checks — see
+[Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/). A spec using `__checks__` or
+`ColSpec.validators` would otherwise generate a test that fails the moment it
+runs, because both wrap arbitrary expressions nothing can be generated to
+satisfy. The generator checks for each and disables the corresponding
+`validate()` flag, with a comment explaining why:
+
+```python
+def test_invoices_roundtrip():
+    # __checks__ wraps arbitrary expressions that generation cannot be made
+    # to satisfy
+    df = Invoices.generate(500, seed=42)
+    Invoices.validate(df, validate_checks=False)
+```
+
+`unique=True` and `__unique_together__` used to be on that list. They are
+generated now, so the generated test validates them like anything else.
+
+A spec with a foreign key referencing *another* spec needs that spec's data
+via `references=`, which the CLI cannot supply on its own — that test is
+marked `@pytest.mark.skip` with a reason, rather than guessed at:
+
+```python
+@pytest.mark.skip(
+    reason=(
+        "Child has foreign key(s) 'fk_parent_id__Parent' referencing another "
+        "FrameSpec. generate()/validate() need a parent DataFrame via "
+        "references={OtherSpec: parent_df} -- see "
+        "docs/how-to/constraints.md#referential-integrity-foreignkey."
+    )
+)
+def test_child_roundtrip():
+    pass
+```
+
+Similarly, the cartesian test is only emitted when the spec actually has
+something for `method="cartesian"` to build coverage from — an `Enum`,
+`Boolean`, or bounded numeric column. A spec of only unbounded strings gets a
+comment instead of a test that would raise `ValueError` on the first run.
+
+### Regenerating
+
+The generated file names the command that made it:
+
+```python
+"""Generated by `polspec test orders.yaml`.
+
+Regenerate with:
+
+    polspec test orders.yaml -o test_orders.py
+
+This file is only overwritten by running that command again -- edit freely.
+"""
+```
+
+It is a plain file, not managed state — add assertions, rename the functions,
+delete the parts you don't want. Nothing re-reads it.
+
+## `validate` — check data against a schema
+
+```bash
+polspec validate orders.yaml orders.parquet
+polspec validate specs.py orders.parquet --class Orders --references Customers=customers.parquet
+polspec validate orders.yaml orders.csv --json > report.json
+```
+
+Reads a data file (CSV, Parquet, NDJSON or Arrow IPC), runs
+[`inspect()`](https://maxwellb13.github.io/polspec/how-to/validating/#findings-as-data-inspect) against the spec, and
+prints the report: the same text `validate()` would raise, or the full
+structured report with `--json`. The exit status is 0 when the data passes
+and 1 when it does not, so a spec can gate a pipeline step in CI with no
+Python at all.
+
+`--references NAME=PATH` supplies parent data for a foreign key to another
+spec, by that spec's name; repeat it for several. `--allow-extra` and
+`--allow-missing` relax the structural checks; `--strict-dtypes` tightens the
+dtype check.
+
+## Exit codes and errors
+
+Every subcommand returns `0` on success and `1` on a reported error, printed
+as `error: ...` on stderr rather than a traceback — a missing file, an
+unreadable format, an invalid class name.
+
+```console
+$ polspec schema infer nope.csv -o out.yaml
+error: no such file: nope.csv
+```
+
+---
+
+# Overview
+Source: https://maxwellb13.github.io/polspec/reference/api/
+
+# API reference
+
+Every name `polspec` exports, rendered from its own docstrings. A page here
+cannot describe a signature the code does not have.
+
+| Name | Page |
+| --- | --- |
+| [`ColSpec`][polspec.ColSpec] | [Columns](https://maxwellb13.github.io/polspec/reference/api/columns/) |
+| [`Bound`][polspec.Bound] | [Columns](https://maxwellb13.github.io/polspec/reference/api/columns/) |
+| [`ColRule`][polspec.ColRule] | [Columns](https://maxwellb13.github.io/polspec/reference/api/columns/) |
+| [`Check`][polspec.Check] | [Columns](https://maxwellb13.github.io/polspec/reference/api/columns/) |
+| [`col`][polspec.col] | [Predicates](https://maxwellb13.github.io/polspec/reference/api/predicates/) |
+| [`Pred`][polspec.Pred] | [Predicates](https://maxwellb13.github.io/polspec/reference/api/predicates/) |
+| [`TableSpec`][polspec.TableSpec] | [Specs](https://maxwellb13.github.io/polspec/reference/api/specs/) |
+| [`FrameSpec`][polspec.FrameSpec] | [Specs](https://maxwellb13.github.io/polspec/reference/api/specs/) |
+| [`ForeignKey`][polspec.ForeignKey] | [Specs](https://maxwellb13.github.io/polspec/reference/api/specs/) |
+| [`Registry`][polspec.Registry] | [Registry](https://maxwellb13.github.io/polspec/reference/api/registry/) |
+| [`CatSpec`][polspec.CatSpec] | [Registry](https://maxwellb13.github.io/polspec/reference/api/registry/) |
+| [`ValidationReport`][polspec.ValidationReport] | [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/) |
+| [`Finding`][polspec.Finding] | [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/) |
+| [`profile_dataframe`][polspec.profile_dataframe] | [Profiling](https://maxwellb13.github.io/polspec/reference/api/profiling/) |
+| [`PolspecError`][polspec.PolspecError] | [Errors](https://maxwellb13.github.io/polspec/reference/api/errors/) |
+| [`SpecError`][polspec.SpecError] | [Errors](https://maxwellb13.github.io/polspec/reference/api/errors/) |
+| [`GenerationError`][polspec.GenerationError] | [Errors](https://maxwellb13.github.io/polspec/reference/api/errors/) |
+| [`ValidationError`][polspec.ValidationError] | [Errors](https://maxwellb13.github.io/polspec/reference/api/errors/) |
+| [`SerializationError`][polspec.SerializationError] | [Errors](https://maxwellb13.github.io/polspec/reference/api/errors/) |
+| [`RegistryError`][polspec.RegistryError] | [Errors](https://maxwellb13.github.io/polspec/reference/api/errors/) |
+
+Anything not listed here is internal: it can change in a patch release without
+a changelog entry.
+
+---
+
+# Columns
+Source: https://maxwellb13.github.io/polspec/reference/api/columns/
+
+# Columns
+
+What one column declares, and the pieces that make up a declaration.
+
+## ColSpec
+
+### ColSpec(dtype: 'pl.DataType | type[pl.DataType]', col_name: 'str | None' = None, nullable: 'bool' = False, bounds: 'Bound | tuple[Any, Any] | list[Any] | None' = None, tags: 'str | Sequence[str]' = (), unique: 'bool' = False, null_probability: 'float' = 0.1, string_length: 'Bound | tuple[int, int] | list[int] | None' = None, distribution: 'str | None' = None, distribution_params: 'dict[str, float] | None' = None, choices: 'tuple | list | dict | None' = None, weights: 'tuple[float, ...] | list[float] | None' = None, rules: 'tuple[ColRule, ...]' = (), validators: 'Check | pl.Expr | Pred | Sequence[Check | pl.Expr | Pred] | None' = ()) -> None
+
+One column's declaration: its type, and every claim made about its values.
+
+A `ColSpec` is what `generate()` samples from and what `validate()` checks
+against, so each field below is a claim both sides read.
+
+Parameters
+----------
+dtype : pl.DataType | type[pl.DataType]
+    The data type of the column.
+col_name : str | None, optional
+    Overrides the column's name in the generated/validated DataFrame.
+    Declaring columns as class attributes on a `FrameSpec` requires a
+    valid Python identifier, which cannot contain spaces or other special
+    characters -- `col_name` lets the attribute keep a clean Python name
+    (`unit_price`) while the actual column is named whatever the data uses
+    (`"Unit Price"`). Everything else that refers to this column by name --
+    `ColRule`, `unique_together`, tags lookups, `validate()` -- uses
+    `col_name`, not the attribute name.
+nullable : bool, optional
+    Whether the column allows null values.
+bounds : Bound | tuple | list | None, optional
+    The inclusive range of values allowed in the column, as a `Bound` or a
+    2-sequence. Only supported for numeric and temporal data types. Either
+    endpoint may be None to leave that side unconstrained --
+    `bounds=(0, None)` for a non-negative column, `bounds=(None, 0)` for a
+    non-positive one.
+
+    An open end means different things to the two consumers of this field,
+    deliberately. `validate()` treats it as genuinely unconstrained and
+    omits that half of the check. `generate()` cannot sample an unbounded
+    range, so it falls back to the same default it would use with no bounds
+    at all -- `bounds=(0, None)` on Int64 generates 0..1,000,000 while
+    validating any value >= 0. This mirrors how `bounds=None` already
+    behaves rather than adding a third rule.
+tags : str | Sequence[str], optional
+    Tag or tags classifying the column, for later selection.
+unique : bool, optional
+    Whether values in the column must be distinct. Generation draws the
+    column without replacement; nulls are exempt. Cannot be combined with
+    `weights`, a non-uniform `distribution`, or `rules`, none of which
+    survive a draw without replacement.
+null_probability : float, optional
+    Probability of a value being null. Must be between 0 and 1.
+string_length : Bound | tuple[int, int] | list[int] | None, optional
+    The inclusive range of string lengths, where that applies.
+distribution : str | None, optional
+    The name of the probability distribution for the column's values
+    (e.g. `"uniform"`, `"normal"`).
+distribution_params : dict[str, float] | None, optional
+    Parameters specific to the chosen distribution.
+choices : tuple | list | dict | None, optional
+    A finite set of allowed values. A dict maps each choice to its weight.
+weights : tuple[float, ...] | list[float] | None, optional
+    Weights associated with `choices`, biasing selection probabilities.
+rules : tuple[ColRule, ...], optional
+    Rules (`ColRule`) that overwrite the column's values on the rows their
+    condition matches.
+validators : Check | pl.Expr | Pred | Sequence[...] | None, optional
+    A single-column business rule, or several: each either a `pl.Expr`
+    boolean predicate (referencing only this column) or a `Check` (for a
+    custom name, description or null handling). Unlike
+    `FrameSpec.__checks__`, these travel with the column's own declaration.
+
+Examples
+--------
+>>> ColSpec(pl.Int64, bounds=(1, 100), nullable=True, null_probability=0.1)
+>>> ColSpec(pl.String, choices=["NEW", "PAID"], weights=[3.0, 1.0])
+## Bound
+
+### Bound(min: 'T | None', max: 'T | None') -> None
+
+An inclusive [min, max] range, used for numeric bounds, temporal ranges, and string lengths.
+
+Either endpoint may be None, meaning that side is unconstrained -- see
+`ColSpec.bounds`, the only field that accepts an open end.
+## ColRule
+
+### ColRule(when: 'Pred', choices: 'tuple', weights: 'tuple[float, ...] | None' = None) -> None
+
+Restricts a column's generated values on rows where `when` matches.
+
+Applied as a pass over the generated frame: rows where `when` matches get
+a value resampled uniformly (or according to `weights`) from `choices`
+instead of whatever was freely generated for them. Multiple rules on the
+*same* column are checked in declaration order, first match wins (like
+SQL CASE/WHEN).
+
+`when` is evaluated against the frame as it stands when the rule runs,
+and the passes run in dependency order: a rule keyed on a column that
+another rule or a foreign key rewrites sees the rewritten values -- the
+same values validation checks the rule against. Two columns whose rules
+each read what the other writes have no such order and are rejected at
+declaration.
+
+`when` is a predicate built with `polspec.col()`, not an arbitrary polars
+expression, so that every rule can round-trip through a spec file:
+
+    ColRule(when=col("region") == "UK", choices=["RoyalMail"])
+    ColRule(when=col("region").is_in(["US", "EU"]) & (col("qty") > 10), choices=["UPS"])
+## Check
+
+### Check(expr: 'pl.Expr | Pred', name: 'str | None' = None, description: 'str | None' = None, ignore_nulls: 'bool' = True, pred: 'Pred | None' = None) -> None
+
+A declarative multi-column validation constraint evaluated as a Polars boolean expression.
+
+Parameters
+----------
+expr : pl.Expr | Pred
+    The boolean condition each row must satisfy: a Polars expression, or a
+    predicate built with `polspec.col()`. A predicate can be written to a
+    YAML or Python spec file; a raw expression cannot.
+name : str | None, optional
+    A human-readable identifier for the check constraint (e.g. 'total_gte_subtotal').
+    If omitted, defaults to the string representation of the expression.
+description : str | None, optional
+    An optional description detailing the business logic or rationale for this check.
+ignore_nulls : bool, default True
+    Whether rows evaluating to null in the check condition are considered valid
+    (standard SQL CHECK constraint semantics). If False, null results are treated as failures.
+
+Examples
+--------
+>>> check = Check(pl.col("total") >= pl.col("subtotal"), name="total_gte_subtotal")
+
+---
+
+# Predicates
+Source: https://maxwellb13.github.io/polspec/reference/api/predicates/
+
+# Predicates
+
+`col()` builds the conditions a `ColRule` or a `Check` carries. Unlike a raw
+`pl.Expr`, a predicate built this way survives a round trip through a spec
+file -- see [Specs as files](https://maxwellb13.github.io/polspec/how-to/files/).
+
+## col
+
+### col(name: 'str') -> 'Col'
+
+A reference to a column, the starting point of every predicate.
+## Pred
+
+### Pred() -> None
+
+Base class of every predicate node. Build one with `col()`.
+
+- `Pred.equals(self, other: 'object') -> 'bool'` -- Structural equality, since `==` builds a predicate.
+
+- `Pred.is_between(self, lower: 'Any', upper: 'Any') -> 'Between'` -- A predicate true where this value falls within `[lower, upper]`.
+
+- `Pred.is_in(self, values: 'Sequence[Any]') -> 'IsIn'` -- A predicate true where this value is one of `values`.
+
+- `Pred.is_not_null(self) -> 'Not'` -- A predicate true where this value is present.
+
+- `Pred.is_null(self) -> 'IsNull'` -- A predicate true where this value is null.
+
+- `Pred.literals(self) -> 'list[Any]'` -- Every constant this predicate compares against.
+
+- `Pred.rename(self, mapping: 'Mapping[str, str]') -> 'Pred'` -- The same predicate with its columns renamed by `mapping`.
+
+- `Pred.root_names(self) -> 'set[str]'` -- Every column name this predicate reads.
+
+- `Pred.to_data(self) -> 'Any'` -- This predicate as plain data, for writing to a spec file.
+
+- `Pred.to_expr(self) -> 'pl.Expr'` -- This predicate as the Polars expression that evaluates it.
+
+- `Pred.to_source(self) -> 'str'` -- This predicate as the `col(...)` Python that would rebuild it.
+
+---
+
+# Specs
+Source: https://maxwellb13.github.io/polspec/reference/api/specs/
+
+# Specs
+
+A spec is a `TableSpec`: an immutable record of columns and constraints.
+`FrameSpec` is the class syntax that builds one and forwards every verb to it.
+
+## TableSpec
+
+### TableSpec(name: 'str', columns: 'Mapping[str, ColSpec]' = <factory>, checks: 'Sequence[Check]' = (), unique_together: 'Sequence[Sequence[str]]' = (), foreign_keys: 'Sequence[ForeignKey]' = ()) -> None
+
+The columns and constraints of one table, as an immutable value.
+
+Parameters
+----------
+name : str
+    What the table is called: the class name for a `FrameSpec`, the
+    `name:` key for a file. Foreign keys refer to a spec by this name.
+columns : Mapping[str, ColSpec]
+    Column name to declaration, in the order columns should appear.
+checks : Sequence[Check]
+    Multi-column invariants; see `FrameSpec.__checks__`.
+unique_together : Sequence[Sequence[str]]
+    Composite unique keys. A single group may be given as a flat list.
+foreign_keys : Sequence[ForeignKey]
+    Referential-integrity constraints.
+
+Notes
+-----
+Everything a `FrameSpec` class body validates at declaration is validated
+here, so a `TableSpec` that constructs is one that can be used.
+
+- `TableSpec.drop(self, *names: 'str') -> 'TableSpec'` -- Removes columns, and any composite or foreign key that used them.
+
+- `TableSpec.rename(self, mapping: 'Mapping[str, str]') -> 'TableSpec'` -- Renames columns, rewriting every constraint that names them.
+
+- `TableSpec.resolve_target(self, fk: 'ForeignKey') -> 'TableSpec | None'` -- The spec a foreign key points at.
+
+- `TableSpec.schema(self) -> 'pl.Schema'` -- The Polars schema this spec declares: column name to dtype.
+
+- `TableSpec.select(self, *names: 'str') -> 'TableSpec'` -- Keeps only the named columns, in the order given.
+
+- `TableSpec.tag(self, *tags: 'str | Sequence[str]', match: "Literal['any', 'all']" = 'any') -> 'list[str]'` -- Column names carrying any (or all) of the tags, in declaration order.
+
+- `TableSpec.with_catspec(self, catspec: 'CatSpec') -> 'TableSpec'` -- Re-points columns at the registry's Enum and Categorical types.
+
+- `TableSpec.with_checks(self, *checks: 'Check') -> 'TableSpec'` -- A copy of this spec with `checks` added to the ones it has.
+
+- `TableSpec.with_columns(self, mapping: 'Mapping[str, ColSpec] | None' = None, /, **columns: 'ColSpec') -> 'TableSpec'` -- Adds columns, or replaces existing ones of the same name in place.
+
+- `TableSpec.with_foreign_keys(self, *foreign_keys: 'ForeignKey') -> 'TableSpec'` -- A copy of this spec with `foreign_keys` added to the ones it has.
+
+- `TableSpec.with_name(self, name: 'str') -> 'TableSpec'` -- A copy of this spec under a different name.
+
+- `TableSpec.with_unique_together(self, *groups: 'Sequence[str]') -> 'TableSpec'` -- A copy of this spec with `groups` added as composite unique keys.
+## FrameSpec
+
+### FrameSpec()
+
+Base class for declaring a DataFrame/LazyFrame specification.
+
+Subclass it and assign a `ColSpec` per column, in the order columns should
+appear:
+
+    class DataSource(FrameSpec):
+        string_1 = ColSpec(pl.String)
+        enum_1 = ColSpec(pl.Enum(["mammal", "reptile"]), nullable=True)
+        int_1 = ColSpec(pl.Int64, bounds=(-100, 100), nullable=True)
+
+    df = DataSource.generate(1_000_000, seed=42)
+
+The class body builds `DataSource.spec`, a `TableSpec`; every classmethod
+here forwards to a function over it. A column may take any name: one that
+collides with a method (`schema`, `tag`, ...) is reachable as
+`DataSource.col("schema")` while the method keeps working. Names that
+cannot be attributes at all -- a leading underscore, or one straight from
+data -- go through `__columns__`:
+
+    class Raw(FrameSpec):
+        __columns__ = {"_id": ColSpec(pl.Int64), "Unit Price": ColSpec(pl.Float64)}
+
+- `FrameSpec.catspec(cls) -> 'CatSpec'` -- The CatSpec registry this spec's Enum and Categorical columns imply.
+
+- `FrameSpec.checks(cls) -> 'tuple[Check, ...]'` -- The Check constraints defined on this FrameSpec.
+
+- `FrameSpec.col(cls, name: 'str') -> 'ColSpec'` -- The declaration of one column, whatever it is called.
+
+- `FrameSpec.foreign_keys(cls) -> 'tuple[ForeignKey, ...]'` -- The ForeignKey constraints defined on this FrameSpec.
+
+- `FrameSpec.from_dataframe(cls, df: 'pl.DataFrame', *, name: 'str' = 'ProfiledFrameSpec', weights: 'bool' = False, max_unique_enum: 'int' = 50, calculate_bounds: 'bool' = True) -> 'type[FrameSpec]'` -- Infers a spec by profiling an existing DataFrame.
+
+- `FrameSpec.from_spec(cls, spec: 'TableSpec', *, name: 'str | None' = None) -> 'type[FrameSpec]'` -- A `FrameSpec` subclass wrapping an existing `TableSpec`.
+
+- `FrameSpec.from_yaml(cls, source: 'str | Path', *, categories: 'CatSpec | str | Path | None' = None, strict: 'bool' = True) -> 'type[FrameSpec]'` -- Builds a new FrameSpec subclass from a YAML file written by `to_yaml`.
+
+- `FrameSpec.generate(cls, n: 'int', *, method: "Literal['random', 'cartesian']" = 'random', seed: 'int | None' = None, references: 'References' = None, lazy: 'bool' = False) -> 'pl.DataFrame | pl.LazyFrame'` -- Generates a DataFrame (or LazyFrame) matching this spec.
+
+- `FrameSpec.generate_batches(cls, n: 'int', *, batch_size: 'int' = 100000, method: "Literal['random', 'cartesian']" = 'random', seed: 'int | None' = None, references: 'References' = None) -> 'Iterator[pl.DataFrame]'` -- Yields chunks of generated rows without holding all `n` in memory.
+
+- `FrameSpec.inspect(cls, df: 'pl.DataFrame | pl.LazyFrame', **options: 'Any') -> 'validation.ValidationReport'` -- Everything this spec has to say about `df`, as a `ValidationReport`.
+
+- `FrameSpec.schema(cls) -> 'pl.Schema'` -- The Polars schema this spec declares: column name to dtype.
+
+- `FrameSpec.sink_csv(cls, path: 'str | Path', n: 'int', **kwargs: 'Any') -> 'None'` -- Generates `n` rows and streams them to a CSV file in batches.
+
+- `FrameSpec.sink_ipc(cls, path: 'str | Path', n: 'int', **kwargs: 'Any') -> 'None'` -- Generates `n` rows and streams them to an Arrow IPC file in batches.
+
+- `FrameSpec.sink_ndjson(cls, path: 'str | Path', n: 'int', **kwargs: 'Any') -> 'None'` -- Generates `n` rows and streams them to an NDJSON file in batches.
+
+- `FrameSpec.sink_parquet(cls, path: 'str | Path', n: 'int', **kwargs: 'Any') -> 'None'` -- Generates `n` rows and streams them to a Parquet file in batches.
+
+- `FrameSpec.tag(cls, *tags: 'str | Sequence[str]', match: "Literal['any', 'all']" = 'any') -> 'list[str]'` -- Column names carrying any (or all) of the tags, in declaration order.
+
+- `FrameSpec.to_markdown(cls, path: 'str | Path | None' = None, *, title: 'str | None' = None) -> 'str'` -- A Markdown data dictionary for this spec, written to `path` if given.
+
+- `FrameSpec.to_mermaid(cls, path: 'str | Path | None' = None, *, title: 'str | None' = None) -> 'str'` -- A Mermaid entity-relationship diagram for this spec.
+
+- `FrameSpec.to_python(cls, source: 'str | Path') -> 'None'` -- Writes this spec as an importable Python module defining a subclass.
+
+- `FrameSpec.to_yaml(cls, source: 'str | Path') -> 'None'` -- Writes this spec to a human-readable YAML file at `source`.
+
+- `FrameSpec.unique_together(cls) -> 'tuple[tuple[str, ...], ...]'` -- The composite unique column groups defined on this FrameSpec.
+
+- `FrameSpec.validate(cls, df: 'pl.DataFrame | pl.LazyFrame', **options: 'Any') -> 'pl.DataFrame | pl.LazyFrame'` -- Validates a DataFrame or LazyFrame against this spec.
+
+- `FrameSpec.with_catspec(cls, catspec: 'CatSpec', *, name: 'str | None' = None) -> 'type[FrameSpec]'` -- A new FrameSpec subclass with columns re-typed against `catspec`.
+## ForeignKey
+
+### ForeignKey(columns: 'str | Sequence[str]', references: 'type[FrameSpec] | TableSpec | str', ref_columns: 'str | Sequence[str] | None' = None, name: 'str | None' = None, target: 'TableSpec | None' = None) -> None
+
+Declares referential integrity: one or more columns must only contain
+values that exist in another FrameSpec's (or this same FrameSpec's) columns.
+
+Parameters
+----------
+columns : str | Sequence[str]
+    The local column(s) that must reference existing parent values.
+references : type[FrameSpec] | TableSpec | str
+    The spec this key references -- a `FrameSpec` subclass, a
+    `TableSpec`, or a spec's *name* -- or the literal string "self" for a
+    self-referencing key (an `employee.manager_id` pointing back at
+    `employee.id`). "self" always resolves to whichever spec the key ends
+    up declared or inherited on, not the class it was first written in.
+
+    After construction `references` is always a string: the target's
+    name. When a spec object was given, it is kept as `target`, so its
+    columns can be checked at declaration; a bare name has no `target`
+    until a registry resolves it.
+ref_columns : str | Sequence[str] | None, optional
+    The referenced column(s) on the target, in the same order as
+    `columns`. Defaults to `columns` (same names on both sides).
+name : str | None, optional
+    A human-readable identifier. Defaults to a name derived from the
+    columns and target.
+
+Notes
+-----
+Rows where any of `columns` is null are exempt (standard FK semantics --
+a null foreign key means "no reference", not "an invalid one").
+
+Examples
+--------
+>>> class OrderSpec(FrameSpec):
+...     customer_id = ColSpec(pl.Int64)
+...     __foreign_keys__ = [
+...         ForeignKey("customer_id", references=CustomerSpec, ref_columns="id"),
+...     ]
+>>> class EmployeeSpec(FrameSpec):
+...     id = ColSpec(pl.Int64, unique=True)
+...     manager_id = ColSpec(pl.Int64, nullable=True)
+...     __foreign_keys__ = [
+...         ForeignKey("manager_id", references="self", ref_columns="id"),
+...     ]
+
+---
+
+# Registry and categories
+Source: https://maxwellb13.github.io/polspec/reference/api/registry/
+
+# Registry and categories
+
+A declared set of specs, and the shared category domains they draw on.
+
+## Registry
+
+### Registry(*specs: 'TableSpec | type', categories: 'CatSpec | None' = None) -> 'None'
+
+A declared set of specs, with everything that needs more than one.
+
+Parameters
+----------
+*specs : TableSpec | type[FrameSpec]
+    The specs, in any order. Each is stored under its name; two different
+    specs with one name are an error.
+categories : CatSpec | None
+    A shared category registry the specs are expected to agree with.
+    When given, `resolve()` checks every `Enum`/`Categorical` column that
+    binds to one of its entries against it, and the registry file carries
+    it. When omitted, `catspec()` derives one from the specs themselves.
+
+- `Registry.add(self, spec: 'TableSpec | type') -> 'Registry'` -- Adds a spec, returning the registry so calls chain.
+
+- `Registry.ancestors(self, key: 'Any') -> 'tuple[str, ...]'` -- Every spec a spec depends on, directly or through other specs.
+
+- `Registry.catspec(self) -> 'CatSpec'` -- The categories these specs share: the one declared, or one merged from every spec's Enum and Categorical columns.
+
+- `Registry.discover(cls, *paths: 'str | Path', categories: 'CatSpec | None' = None, strict: 'bool' = True) -> 'Registry'` -- Every spec found under the given files and directories.
+
+- `Registry.from_dict(cls, data: 'Mapping[str, Any]', *, strict: 'bool' = True) -> 'Registry'` -- A registry read from the data form `to_dict` writes.
+
+- `Registry.from_module(cls, module: 'ModuleType', *, own_only: 'bool' = False, categories: 'CatSpec | None' = None) -> 'Registry'` -- Every `FrameSpec` subclass and `TableSpec` bound in a module.
+
+- `Registry.from_yaml(cls, source: 'str | Path', *, strict: 'bool' = True) -> 'Registry'` -- A registry read from one YAML file written by `to_yaml`.
+
+- `Registry.generate_all(self, n: 'int | Mapping[Any, int]', *, seed: 'int | None' = None, method: "Literal['random', 'cartesian']" = 'random', references: 'Frames | None' = None) -> 'dict[str, pl.DataFrame]'` -- One frame per spec, parents generated first and threaded into their children, so every foreign key is satisfied by construction.
+
+- `Registry.generate_related(self, key: 'Any', n: 'int | Mapping[Any, int]', *, seed: 'int | None' = None, method: "Literal['random', 'cartesian']" = 'random', references: 'Frames | None' = None) -> 'dict[str, pl.DataFrame]'` -- `generate_all` restricted to one spec and everything it depends on.
+
+- `Registry.inspect_all(self, frames: 'Frames', *, references: 'Frames | None' = None, **options: 'Any') -> 'dict[str, ValidationReport]'` -- A `ValidationReport` per frame, each spec seeing every other frame as a possible parent. Takes the options `validate()` does.
+
+- `Registry.order(self) -> 'tuple[str, ...]'` -- Every spec name, parents before children.
+
+- `Registry.parents(self, key: 'Any') -> 'tuple[str, ...]'` -- Names of the specs one spec's foreign keys point at, self excluded.
+
+- `Registry.resolve(self) -> 'Registry'` -- A registry whose every cross-spec key is bound to its target.
+
+- `Registry.to_dict(self) -> 'dict[str, Any]'` -- This registry as plain data: every spec, plus shared categories.
+
+- `Registry.to_mermaid(self, path: 'str | Path | None' = None) -> 'str'` -- One entity-relationship diagram with every spec and every key.
+
+- `Registry.to_yaml(self, source: 'str | Path') -> 'None'` -- Writes every spec, and the declared categories, to one file.
+
+- `Registry.validate_all(self, frames: 'Frames', *, references: 'Frames | None' = None, **options: 'Any') -> 'dict[str, pl.DataFrame | pl.LazyFrame]'` -- Validates every frame, raising one `ValidationError` that lists every spec's findings, or returning the frames with the structural transformations `validate()` applies.
+## CatSpec
+
+### CatSpec(*, enums: 'Mapping[str, Sequence[str]] | None' = None, categoricals: 'Mapping[str, pl.Categories | dict[str, Any] | str | pl.DataType] | None' = None, choices: 'Mapping[str, Sequence[Any]] | None' = None) -> 'None'
+
+A centralized registry for Enums and Categoricals across pipelines and FrameSpecs.
+
+Stores Enum variant sequences (for `pl.Enum`) and named Categorical definitions
+(for `pl.Categorical` / `pl.Categories`), enabling seamless schema reuse, join
+compatibility, and clean YAML serialization.
+
+The declarative way to write one by hand is to subclass it, one line per
+entry, in the same vocabulary `ColSpec.dtype` already accepts:
+
+    class Categories(CatSpec):
+        STATUS   = pl.Enum(["NEW", "PAID", "SHIPPED"])
+        CURRENCY = pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt8))
+
+    ColSpec(Categories.STATUS)
+    ColSpec(Categories.CURRENCY)
+
+`Categories.STATUS` is a plain class attribute -- ordinary Python
+attribute lookup, nothing polspec-specific -- so it can be handed
+straight to `ColSpec()`. Instantiating the class (`Categories()`) also
+still works, and behaves exactly like the keyword-argument form below,
+for the registry-level operations (`to_yaml`, `get_enum`,
+case-insensitive lookup, ...) that need an instance.
+
+This makes `.STATUS` mean two different things depending on how the
+registry was built, which is worth being deliberate about rather than
+surprised by: on a class-body subclass, plain attribute access returns
+the dtype exactly as written (a `pl.Enum`/`pl.Categorical`), because that
+is a real class attribute and nothing intercepts it. On a registry built
+from `enums=`/`categoricals=` dicts, `.STATUS` goes through `__getattr__`
+instead and returns the raw category list -- `pl.Enum(cats.STATUS)` is
+how that form turns it into a dtype. `get_enum()`, `get_categorical()`,
+`[...]` and the `.enum`/`.categorical` accessors behave identically
+either way, since those always go through the registry, never through
+plain attribute lookup.
+
+The `enums=`/`categoricals=`/`choices=` constructor below remains the
+form `CatSpec.infer()`, `from_dataframe()` and `from_yaml()` build
+programmatically, since their names come from data rather than from a
+class body someone writes by hand -- the two are not in competition.
+
+Examples
+--------
+>>> cats = CatSpec(
+...     enums={"STATUS": ["PENDING", "COMPLETED"]},
+...     categoricals={"CURRENCY": pl.Categories("CURRENCY", physical=pl.UInt8)},
+... )
+>>> pl.Enum(cats.STATUS)
+Enum(categories=['PENDING', 'COMPLETED'])
+>>> pl.Categorical(cats.CURRENCY)
+Categorical(Categories(name="CURRENCY", namespace="", physical=pl.UInt8))
+>>> cats.enum.STATUS
+Enum(categories=['PENDING', 'COMPLETED'])
+>>> cats.categorical.CURRENCY
+Categorical(Categories(name="CURRENCY", namespace="", physical=pl.UInt8))
+
+- `CatSpec.from_dataframe(cls, df: 'pl.DataFrame | pl.LazyFrame') -> 'CatSpec'` -- Constructs a CatSpec from existing Enum and Categorical columns in a DataFrame or LazyFrame.
+
+- `CatSpec.from_dict(cls, data: 'dict[str, Any]', *, strict: 'bool' = True) -> 'CatSpec'` -- Constructs a CatSpec from its data form (any format version).
+
+- `CatSpec.from_framespec(cls, spec: 'TableSpec | type[FrameSpec]') -> 'CatSpec'` -- Constructs a CatSpec from a TableSpec or a FrameSpec subclass.
+
+- `CatSpec.from_yaml(cls, source: 'str | Path', *, strict: 'bool' = True) -> 'CatSpec'` -- Loads a CatSpec from a YAML file.
+
+- `CatSpec.get(self, name: 'str', default: 'Any' = None) -> 'Any'` -- The entry registered under `name`, whatever kind it is.
+
+- `CatSpec.get_categorical(self, name: 'str') -> 'pl.Categories'` -- Returns the pl.Categories definition for a categorical.
+
+- `CatSpec.get_choices(self, name: 'str') -> 'list[Any] | None'` -- Returns domain choices if defined for this enum or categorical.
+
+- `CatSpec.get_enum(self, name: 'str') -> 'list[str]'` -- Returns the list of categories/variants for an enum.
+
+- `CatSpec.infer(cls, target: 'pl.DataFrame | pl.LazyFrame | TableSpec | type[FrameSpec]', *, max_enum_cardinality: 'int' = 30, max_categorical_cardinality: 'int' = 10000, max_categorical_ratio: 'float' = 0.2, include_columns: 'Sequence[str] | None' = None, exclude_patterns: 'Sequence[str] | None' = ('(?:^|.*_)id$', '(?:^|.*_)uuid$', '(?:^|.*_)hash$', '(?:^|.*_)url$', '(?:^|.*_)key$'), default_physical: 'pl.DataType | None' = None) -> 'CatSpec'` -- Infers an optimal CatSpec from a DataFrame, LazyFrame, or FrameSpec.
+
+- `CatSpec.infer_from_dataframe(cls, df: 'pl.DataFrame | pl.LazyFrame', *, max_enum_cardinality: 'int' = 30, max_categorical_cardinality: 'int' = 10000, max_categorical_ratio: 'float' = 0.2, include_columns: 'Sequence[str] | None' = None, exclude_patterns: 'Sequence[str] | None' = ('(?:^|.*_)id$', '(?:^|.*_)uuid$', '(?:^|.*_)hash$', '(?:^|.*_)url$', '(?:^|.*_)key$'), default_physical: 'pl.DataType | None' = None) -> 'CatSpec'` -- Infers an optimal CatSpec from String and Categorical columns in a DataFrame or LazyFrame.
+
+- `CatSpec.infer_from_framespec(cls, spec: 'TableSpec | type[FrameSpec]', *, max_enum_cardinality: 'int' = 30, max_categorical_cardinality: 'int' = 10000, include_columns: 'Sequence[str] | None' = None, exclude_patterns: 'Sequence[str] | None' = ('(?:^|.*_)id$', '(?:^|.*_)uuid$', '(?:^|.*_)hash$', '(?:^|.*_)url$', '(?:^|.*_)key$'), default_physical: 'pl.DataType | None' = None) -> 'CatSpec'` -- Infers an optimal CatSpec from a TableSpec or FrameSpec subclass's declarations.
+
+- `CatSpec.resolve_key(self, name: 'str') -> "tuple[Literal['enum', 'categorical'], str] | None"` -- Which registry entry a column name binds to, if any.
+
+- `CatSpec.to_dict(self) -> 'dict[str, Any]'` -- The data form of this registry, without the file's `version` key.
+
+- `CatSpec.to_markdown(self, path: 'str | Path | None' = None, *, title: 'str | None' = None) -> 'str'` -- Generates a Markdown documentation table of this CatSpec registry.
+
+- `CatSpec.to_mermaid(self, path: 'str | Path | None' = None, *, title: 'str | None' = None) -> 'str'` -- Generates a Mermaid class diagram definition for this CatSpec registry.
+
+- `CatSpec.to_yaml(self, source: 'str | Path | None' = None) -> 'str | None'` -- Writes this registry as YAML to `source`, or returns the text when no path is given.
+
+---
+
+# Validation results
+Source: https://maxwellb13.github.io/polspec/reference/api/validation/
+
+# Validation results
+
+`inspect()` returns a report; `validate()` raises one. Both carry the same
+findings as data -- see [Validating data](https://maxwellb13.github.io/polspec/how-to/validating/).
+
+## ValidationReport
+
+### ValidationReport(spec_name: 'str', findings: 'tuple[Finding, ...]', frame: 'pl.LazyFrame', options: 'ValidationOptions' = None) -> None
+
+Every finding for one frame against one spec.
+
+- `ValidationReport.by_code(self, code: 'FindingCode') -> 'tuple[Finding, ...]'` -- Every finding of one kind, such as `"bounds"` or `"foreign_key"`.
+
+- `ValidationReport.by_column(self) -> 'dict[str, tuple[Finding, ...]]'` -- Findings grouped by column; structural findings under `""`.
+
+- `ValidationReport.failing_rows(self) -> 'pl.LazyFrame'` -- Every row that violates a row-level finding, lazily.
+
+- `ValidationReport.raise_if_failed(self) -> 'None'` -- Raises `ValidationError` carrying this report, if anything was found.
+
+- `ValidationReport.rows(self, finding: 'Finding') -> 'pl.LazyFrame'` -- The rows violating one finding, lazily.
+
+- `ValidationReport.to_dict(self) -> 'dict[str, Any]'` -- This report as JSON-ready data: the spec, the verdict, the findings.
+
+- `ValidationReport.to_json(self, *, indent: 'int | None' = 2) -> 'str'` -- This report as a JSON string. `indent=None` for one line.
+## Finding
+
+### Finding(code: 'FindingCode', key: 'str', message: 'str', columns: 'tuple[str, ...]' = (), count: 'int | None' = None, samples: 'tuple[Any, ...]' = (), details: 'Mapping[str, Any]' = <factory>, _locate: 'Callable[[pl.LazyFrame], pl.LazyFrame] | None' = None) -> None
+
+One violation of one claim the spec makes.
+
+Attributes
+----------
+code : FindingCode
+    Which kind of claim was violated.
+key : str
+    A stable identifier for the claim within its spec, such as
+    `"total__bounds"` or `"check:total_covers_subtotal"`.
+message : str
+    The human-readable description of what was violated.
+columns : tuple[str, ...]
+    The columns involved; empty for structural findings.
+count : int | None
+    How many rows violate the claim; `None` for structural findings.
+samples : tuple
+    Up to five offending values (or structs of values, for multi-column
+    claims).
+details : Mapping
+    Code-specific facts: the expected and actual dtype, the observed
+    extremes, the foreign key's target.
+
+- `Finding.rows(self, frame: 'pl.LazyFrame') -> 'pl.LazyFrame'` -- The rows of `frame` that violate this claim, lazily.
+
+- `Finding.to_dict(self) -> 'dict[str, Any]'` -- This finding as JSON-ready data.
+
+---
+
+# Profiling
+Source: https://maxwellb13.github.io/polspec/reference/api/profiling/
+
+# Profiling
+
+Inferring a spec from data you already have.
+
+## profile_dataframe
+
+### profile_dataframe(df: 'pl.DataFrame', *, weights: 'bool' = False, max_unique_enum: 'int' = 50, calculate_bounds: 'bool' = True) -> 'dict[str, ColSpec]'
+
+Infers ColSpec column definitions by profiling an existing DataFrame.
+
+---
+
+# Exceptions
+Source: https://maxwellb13.github.io/polspec/reference/api/errors/
+
+# Exceptions
+
+Every error polspec raises descends from `PolspecError`, so one `except`
+clause catches the lot. Most also descend from the built-in they replaced, so
+existing `except ValueError` handlers keep working. The
+[Errors and findings](https://maxwellb13.github.io/polspec/reference/errors/) page explains when each is raised.
+
+## PolspecError
+
+### PolspecError
+
+Base class for every error polspec raises on its own behalf.
+## SpecError
+
+### SpecError
+
+A declaration that cannot mean anything.
+
+Raised while a `ColSpec`, `ColRule`, `Check`, `ForeignKey`, `FrameSpec`
+or `CatSpec` is being built: bounds a dtype cannot hold, a rule pointing
+at a column that does not exist, two columns resolving to one name.
+Inherits both `ValueError` and `TypeError` because it replaces both.
+## GenerationError
+
+### GenerationError
+
+A spec that declares fine cannot be turned into data as asked.
+
+A dtype the engine cannot fill, a cartesian coverage set past the size
+cap, a foreign key with an empty parent, a `unique` domain smaller than
+the row count. Errors raised inside the Rust extension surface as this.
+## ValidationError
+
+### ValidationError(report: 'Any', errors: 'list[str] | None' = None) -> 'None'
+
+Data does not meet its spec.
+
+Carries the `ValidationReport` of every violation found as `report`.
+`errors` is the same findings as a plain list of messages, for the common
+case of printing them.
+## SerializationError
+
+### SerializationError
+
+A spec file cannot be written or read.
+
+A dtype with no file representation, a key the reader does not know, a
+file written by a newer format version.
+## RegistryError
+
+### RegistryError
+
+A collection of specs is inconsistent.
+
+An unknown or duplicated spec name, a cycle in the foreign-key graph, two
+specs disagreeing about a shared category.
+
+---
+
+# Errors and findings
+Source: https://maxwellb13.github.io/polspec/reference/errors/
+
+# Errors
+
+Everything polspec raises on its own behalf derives from one base class, so
+a caller can separate "polspec objected" from "something else went wrong"
+with a single clause:
+
+```python
+from polspec import PolspecError
+
+try:
+    Orders.validate(df)
+except PolspecError as exc:
+    log.warning("rejected: %s", exc)
+```
+
+| Exception | Raised when | Also a |
+|:--|:--|:--|
+| `PolspecError` | Base class; never raised directly | `Exception` |
+| `SpecError` | A declaration cannot mean anything: bounds a dtype cannot hold, a rule naming a column that does not exist, two attributes resolving to one column name | `ValueError`, `TypeError` |
+| `ValidationError` | Data does not meet its spec. `err.report` is the `ValidationReport`; `err.errors` lists its messages | `ValueError` |
+| `GenerationError` | A spec that declares fine cannot be turned into data as asked: no column for `method="cartesian"` to cover, a coverage set past the size cap, a foreign key with an empty parent. Errors from the Rust engine surface as this | `ValueError` |
+| `SerializationError` | A spec file cannot be written or read: a dtype with no file representation, an unrecognised dtype name, a category reference the registry does not hold | `ValueError` |
+| `RegistryError` | A `Registry` is inconsistent: an unknown or duplicated spec name, a key whose target is not in it, a cycle, two specs disagreeing about a shared category | `LookupError` |
+
+Each subclass keeps the built-in type it replaced, so `except ValueError`
+written against an earlier version still catches it.
+
+Ordinary argument misuse is not a `PolspecError`. A negative row count, an
+unknown `method=`, a `batch_size` of zero, or the wrong object passed where a
+DataFrame was expected raise the plain `ValueError` or `TypeError` any Python
+API would.
+
+The command line prints a `PolspecError` as a one-line `error: ...` and exits
+with status 1; anything else is a bug and keeps its traceback.
+
+## Finding codes
+
+Every violation `inspect()` reports, and `validate()` raises, is a `Finding`
+with one of these codes. Row-level findings can return the offending rows
+through `report.rows(finding)`; structural ones describe the frame's shape.
+
+| Code | Kind | Raised when |
+|:--|:--|:--|
+| `extra_columns` | structural | the frame has columns the spec does not declare (`extra_cols="raise"`) |
+| `missing_columns` | structural | the frame lacks declared columns (`missing_cols="raise"`) |
+| `dtype` | structural | a column's dtype is not compatible with its declaration |
+| `foreign_key_unresolved` | structural | a key references another spec and `references=` had no entry for it |
+| `nullability` | row-level | a non-nullable column holds nulls |
+| `choices` | row-level | a value is outside `choices` or the `Enum` categories |
+| `bounds` | row-level | a value is outside `bounds`; `details` carry the extremes found |
+| `string_length` | row-level | a string or binary value's length is outside `string_length` |
+| `rule` | row-level | a row matched a `ColRule` but holds a value outside its choices |
+| `validator` | row-level | a `ColSpec.validators` predicate is false |
+| `unique` | row-level | a `unique=True` column holds duplicates |
+| `unique_together` | row-level | a composite key holds duplicate combinations |
+| `check` | row-level | a `__checks__` predicate is false |
+| `foreign_key` | row-level | a key value has no matching parent row (also structural when the parent lacks the referenced columns) |
+
+---
+
+# Architecture
+Source: https://maxwellb13.github.io/polspec/explanation/architecture/
+
+# Architecture
+
+polspec is a small Python package over a Rust extension. The Python side owns
+the vocabulary — what a column can declare and what that means; the Rust side
+owns only the inner loop that fills arrays with values.
+
+## Modules
+
+| Module | Responsibility |
+|:--|:--|
+| `bound` | An inclusive `[min, max]`, either end optionally open |
+| `check` | A named boolean expression, with SQL-style null handling |
+| `constants` | Default generation ranges |
+| `dtypes` | What each dtype can actually hold |
+| `distributions` | The distributions available, and each one's parameter aliases |
+| `spec` | `ColSpec` — one column's declaration, and everything it validates about itself |
+| `rules` | `ColRule` — conditional values, and the pass that applies them |
+| `foreign_key` | `ForeignKey` — declaration, and the pass that makes generated keys consistent |
+| `engine` | Turning a spec into the `ColumnPlan` the Rust extension takes, and finishing the result: gathering typed choices, casting temporal columns back |
+| `_ffi` | The only module that imports the Rust extension (lazily), building plans and re-raising its errors as `GenerationError` |
+| `errors` | The `PolspecError` hierarchy |
+| `constraints` | What both sides read: `Domain` (the values a column may hold) and `Pass`/`order` (which rewrite of a generated frame runs first) |
+| `validation` | `inspect` and `validate` over a `TableSpec`: every claim becomes a `_Constraint` (`constraints.py`) that produces a `Finding`; `report.py` holds `Finding` and `ValidationReport` |
+| `tablespec` | `TableSpec` — a spec as an immutable value, with its declaration-time checks and structural operations |
+| `framespec` | `FrameSpec` — the metaclass that builds a `TableSpec` from a class body, and the facade forwarding every verb to it |
+| `generation` | `generate`, `generate_batches` and the file sinks, as functions over a `TableSpec`; `composite.py` separates a `__unique_together__` group |
+| `catspec` | `CatSpec` — a shared registry of enums and categoricals |
+| `registry` | `Registry` — a declared set of specs: resolving cross-spec keys, ordering parents before children, `generate_all`/`validate_all`, one file and one diagram for the set |
+| `serialization` | Spec files: a field registry (`fields.py`) that YAML, generated Python and the `import datetime` decision all derive from; the dtype codec table (`dtypes.py`); format versions and migrations (`migrations.py`) |
+| `profiler` | Inferring a spec from an existing DataFrame |
+| `report` | Rendering a spec, or a registry of them, as Markdown or Mermaid |
+| `cli` | The `polspec` command: profiling data into a spec, blank specs, and generated tests |
+
+The dependency direction is one-way: `spec` and `tablespec` know nothing about `framespec`,
+and `report` is not reachable from either the generation or validation path.
+
+## Generating
+
+```mermaid
+flowchart LR
+    A["FrameSpec.generate(n, seed)"] --> B["_generate_random<br/>or _generate_cartesian"]
+    B --> C["_plan_column: one<br/>ColumnPlan per column"]
+    C --> D["Rust: generate_dataframe<br/>columns in parallel"]
+    D --> E["_finish: gather typed choices,<br/>cast temporal columns back"]
+    E --> F["order the passes<br/>by reads and writes"]
+    F --> G["each pass: rules, foreign keys,<br/>composite-key repair"]
+    G --> H[DataFrame]
+```
+
+Each column becomes a `ColumnPlan` — kind, nullability, exact bounds, domain
+size and weights, lengths, distribution — crossing into Rust once. Rust fills the
+columns in parallel, and within a column in 65,536-row chunks whose seeds come
+from the chunk index, so output is identical regardless of thread count.
+
+Rules and foreign keys are applied afterwards as vectorised passes over the
+finished frame, not row by row. Each pass declares the columns it reads and
+the ones it writes, and `constraints.order` runs them so no pass reads a
+column a later one rewrites: a rule keyed on a foreign-keyed column sees the
+parent's values, and a self-referencing key drawing from a foreign-keyed
+column draws from values that are actually there. That ordering is what makes
+generated data satisfy the same claims validation checks it against — which
+is why a spec whose passes cannot be ordered is refused at declaration rather
+than generated and then failed by its own spec.
+
+Seeds are drawn per pass in declaration order, so which order they end up
+running in does not change the values any one of them samples.
+
+A `unique=True` column never reaches a pass: the engine draws it without
+replacement in the first place (`src/unique.rs`), shuffling a materialised
+domain when the domain is barely bigger than the frame and rejecting against a
+set when it is roomy. A `__unique_together__` group is a pass, because
+distinctness across columns can only be judged once they all exist: it
+resamples the rows repeating a combination, and reads every member so it runs
+after the rules and keys that settle them.
+
+## Validating
+
+```mermaid
+flowchart LR
+    A["FrameSpec.inspect(df) / validate(df)"] --> B[Structural checks]
+    B --> C["Build one _Constraint<br/>per declared claim"]
+    C --> D["One Polars aggregation<br/>over the whole frame"]
+    D --> E["Each constraint turns its<br/>result into a Finding"]
+    E --> F["ValidationReport<br/>(what inspect returns)"]
+    F -->|validate: findings| G[ValidationError carrying the report]
+    F -->|validate: none| H["Drop / add / cast / reorder"]
+```
+
+Every claim a spec makes becomes a `_Constraint` that contributes aggregation
+expressions and turns the results back into a `Finding`: a code, a count,
+samples, code-specific details, and a lazy filter that locates the rows. They are collected
+first and evaluated together, so validating a wide table costs one scan rather
+than one per column. Foreign keys are the exception: each needs its own
+anti-join against a parent frame.
+
+Adding a new kind of check means adding a class, not editing two distant loops.
+
+## The Python / Rust boundary
+
+Python builds one `ColumnPlan` per column -- a `#[pyclass]` in `src/plan.rs`
+that validates itself at construction, so an unknown kind, a weight vector of
+the wrong length or a distribution parameter out of range is refused with a
+message naming the column before any sampling starts. `polspec/_ffi.py` is the
+only module that imports the extension, lazily: validation, spec files and the
+registry work without a built extension, and only generation asks for one.
+
+Rust knows about *kinds*, not about polspec's vocabulary: `int8` .. `uint64`,
+`float32`/`float64`, `bool`, `string`, and `index`. `Date` crosses as an
+`int32` day count and `Datetime`/`Duration`/`Time` as an `int64` in their own
+unit. Anything with a finite domain -- `choices`, an `Enum`, a
+capacity-limited `Categorical` -- crosses as `index` with the domain's size
+and weights; Rust returns `UInt32` indices and Python gathers the typed values
+back, so a `datetime` or a `bytes` choice never passes through a string.
+
+Bounds cross as a `Limit`: an `i64`, a `u64` or an `f64`, whichever holds the
+Python value exactly, so `Int64` and `UInt64` bounds keep every bit.
+
+Distribution parameter *aliases* live only in `polspec/distributions.py` and
+are resolved when a column is declared; `src/dist.rs` reads canonical keys and
+exports its table as `distribution_params()`, which a test compares with the
+Python one. Each column's seed is derived from the frame seed and the column
+*name* (`sample.rs`), so inserting a column never reshuffles its neighbours.
+`src/sample.rs` and `src/unique.rs` have no Python types and carry the unit
+tests `cargo test` runs; `python/polspec/_polspec.pyi` is the stub, and a test asserts its names
+match the module.
+
+## Tests
+
+| File | Covers |
+|:--|:--|
+| `test_roundtrip.py` | The property tying the two directions together: anything `generate()` produces, `validate()` accepts |
+| `test_declaration.py` | Declaration-time contracts that never reach generated data |
+| `test_generation.py` | Random and cartesian generation, dtype coverage, distributions, weights |
+| `test_rules.py` | `ColRule`: what a rule may declare and which rows it touches |
+| `test_serialization.py` | `to_yaml`/`from_yaml` and `to_python`, and what they warn about and drop |
+| `test_profiler.py` | `from_dataframe` inference |
+| `test_framespec.py` | The class body: inheritance, tags, `__checks__`, `__unique_together__`, validators |
+| `test_report.py` | Markdown data dictionaries and Mermaid diagrams |
+| `test_foreign_key.py` | `ForeignKey` declaration, persistence and generation |
+| `test_validation.py` | Validation behaviour and error reporting |
+| `test_inspect.py` | `inspect()`: findings as data, lazy failing rows, JSON |
+| `test_tablespec.py` | `TableSpec` as a value: construction, structural operations, the metaclass |
+| `test_expr.py` | The `col()` predicate language and its data form |
+| `test_serialization_format.py` | The field registry, format versions, migrations, unknown keys |
+| `test_registry.py` | `Registry`: resolution, ordering, `generate_all`/`validate_all`, files, discovery |
+| `test_errors.py` | The exception hierarchy |
+| `test_catspec.py` | Shared category registries |
+| `test_streaming.py` | Batching and the file sinks |
+| `test_cli.py` | The command line, including running a generated test file under pytest |
+| `test_engine.py` | The Python / Rust boundary: typed plans, exact bounds, typed choices, per-column seeds, the stub |
+| `test_constraints.py` | What both sides share: `Domain`, and the pass ordering that lets rules and keys see each other's work |
+
+The round-trip file carries `xfail(strict=True)` markers for known gaps, so a
+fix turns the marker into a failure rather than passing unnoticed. See
+[Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/).
+
+---
+
+# Generation and validation
+Source: https://maxwellb13.github.io/polspec/explanation/two-sides/
+
+# Generation and validation
+
+polspec does two things with one declaration: it makes data that matches a
+spec, and it checks whether data matches a spec. That sounds like one job read
+in two directions, but the two directions are not symmetric, and most of the
+library's design follows from where they differ.
+
+## Why one declaration is harder than two
+
+A validator only has to *recognise* a violation. A generator has to *avoid*
+one. Recognising is easy for almost any claim you can write down: a Polars
+expression over the frame gives you the answer. Avoiding is only easy for
+claims with a shape a sampler can exploit.
+
+`bounds=(1, 100)` has that shape — draw uniformly from the range and no value
+can be out of bounds. `pl.col("email").str.contains("@")` does not. Both are
+perfectly good validators; only one is a usable generator.
+
+So the honest position is that the two sides cover different amounts of
+ground, and the interesting engineering is in narrowing the gap without
+pretending it isn't there.
+
+## The failure mode: two implementations
+
+The dangerous version of this is implementing each claim twice — once in the
+sampler, once in the checker — and hoping they agree. They drift. A bound is
+inclusive on one side and exclusive on the other; a choice is compared as a
+string here and as a typed value there; a rule is evaluated against the
+freely-generated frame while validation reads the final one.
+
+Every one of those was a real bug in polspec, and each produced the same
+symptom: `Spec.validate(Spec.generate(n))` raising. Data the library made,
+rejected by the library that made it.
+
+That property has a name here — the *round-trip* — and it is asserted
+directly, in `tests/test_roundtrip.py`:
+
+```python
+SpecCls.validate(SpecCls.generate(n, seed=...))   # must not raise
+```
+
+## What is shared, and what is only tested
+
+The structural answer is to give both sides one definition to read. That is
+what `polspec.constraints` holds:
+
+- **`Domain`** — the values a column may hold: its `choices`, an `Enum`'s
+  categories, its `bounds`. Generation samples from it, validation checks
+  against it, and a foreign key asks whether a parent's domain fits inside a
+  child's. One definition, three readers.
+- **`Pass` and `order`** — which rewrite of a generated frame runs first,
+  derived from the columns each pass reads and writes. This is what lets a
+  rule keyed on a foreign-keyed column see the parent's values, which is the
+  same thing validation will check the rule against.
+
+What is not shared is held in step by the round-trip test instead. That is a
+weaker guarantee than a shared definition, and the difference is deliberate:
+sharing costs an abstraction, and it is only worth paying where the two sides
+genuinely say the same thing.
+
+## Where the gap remains
+
+Three claims are validated and not generated, and one of them is permanent:
+
+`__checks__` and `ColSpec.validators` wrap arbitrary Polars expressions.
+Nothing can generate data satisfying an arbitrary predicate — that is a
+statement about predicates, not about polspec — so generation makes no
+attempt, and the boundary is pinned by its own tests rather than papered over.
+
+The way to close *that* gap is not a cleverer generator. It is a richer
+vocabulary for describing values: a `pattern=` or a `format="email"` on
+`ColSpec` says the same thing as the validator, in a shape a sampler can use.
+See the [roadmap](https://maxwellb13.github.io/polspec/explanation/roadmap/).
+
+Everything else on the list has been closed rather than documented away:
+uniqueness by drawing without replacement, rule and foreign-key dependencies
+by ordering the passes. The current list is in
+[Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/), and each entry there is backed by a test
+that fails the moment the entry stops being true.
+
+## What this means when you declare a spec
+
+Two practical consequences.
+
+**A contradiction is refused when you write it, not when you run it.** A
+foreign key whose parent domain cannot fit inside its own column's, two
+columns whose rules each depend on the other, `unique=True` alongside
+`weights` — none of these have a coherent reading, so they raise `SpecError`
+at declaration rather than producing data that fails its own spec.
+
+**A validation-only claim is still worth declaring.** A validator that
+generation cannot satisfy is not wasted: it still guards real data on the way
+in. Generate with `validate_validators=False` when you need synthetic rows,
+and keep the claim for the data that matters.
+
+---
+
+# Known limitations
+Source: https://maxwellb13.github.io/polspec/explanation/limitations/
+
+# Known limitations
+
+polspec generates data and validates it from one declaration. Where both
+sides read the same definition they cannot drift: what values a column may
+hold, and the order the passes that rewrite a generated frame run in, both
+live in `polspec.constraints`. What is left below is what generation does not
+attempt at all, plus a few edges worth knowing about.
+
+Each is pinned by a test in `tests/test_roundtrip.py`. A gap meant to close
+one day carries `xfail(strict=True)`: the suite stays green while it exists,
+and the moment it is fixed pytest turns the XPASS into a failure. A boundary
+that is deliberate is pinned by an ordinary passing test instead. Either way
+this page cannot quietly go stale — changing what polspec does forces the test
+to be updated.
+
+## Generation does not enforce these
+
+### `__checks__` and `ColSpec.validators` are validation-only
+
+This one is by design, not a defect: both wrap arbitrary Polars expressions,
+and nothing can generate data satisfying an arbitrary predicate. Validate
+generated data with `validate_checks=False` / `validate_validators=False`, or
+construct the rows those invariants describe yourself.
+
+## Cartesian generation
+
+### `n` is a minimum, not a count
+
+Under `method="cartesian"`, if the coverage set is larger than `n` all of it is
+kept. `generate_batches` and every `sink_*` inherit this, so asking for 5 rows
+from two ten-category enums yields 100.
+
+### `generate(0, method="cartesian")` is not empty
+
+It emits the whole coverage set, unlike `generate(0)` and the sinks, which all
+produce nothing.
+
+## Smaller sharp edges
+
+- **Unsupported dtypes are accepted at declaration.** `ColSpec(pl.List(...))`
+  constructs and validates; only `generate()` objects.
+- **`missing_cols="add"` can produce a frame that fails re-validation**, since
+  columns are added after validation runs, including for non-nullable columns.
+- **Rules overwrite nulls**, so a nullable column with a rule ends up with
+  fewer nulls than `null_probability` suggests.
+- **Uniqueness holds within a batch, not across one.** `generate_batches` and
+  the `sink_*` functions sample each batch independently, so a `unique=True`
+  column or a `__unique_together__` group is only distinct inside each batch.
+- **A `unique` column ignores `weights` and a non-uniform `distribution`** --
+  both are refused at declaration rather than silently dropped, since neither
+  has anything to say about a draw without replacement.
+- **A foreign key still overwrites its column's distribution.** The parent's
+  domain has to fit inside the column's own — a contradiction is refused at
+  declaration — but within it, values come from the parent, so a declared
+  `distribution` or `weights` on a foreign-keyed column is not what you get.
+- **Case-insensitive registry lookup** means a column named `status` binds to a
+  registry entry named `STATUS`; entries differing only in case are ambiguous.
+- **`to_mermaid` marks every `unique=True` column `PK`**, so several unique
+  columns render as several primary keys.
+
+---
+
+# Comparison
+Source: https://maxwellb13.github.io/polspec/explanation/comparison/
+
+# Comparison to other approaches
+
+polspec sits at the intersection of two things usually solved by separate
+tools: generating test data, and validating that data against a schema. This
+page is about that intersection — what generating *and* validating from one
+declaration buys you that the alternatives don't, where those alternatives
+are still the better tool, and the actual numbers behind the speed claim.
+
+## Benchmarks
+
+`benchmarks/bench_generate.py` generates the same four-column frame — a
+non-nullable string, a nullable enum, a nullable bounded int, a nullable
+bounded float — three ways: polspec's Rust generator, a hand-vectorized NumPy
+implementation, and a pure-Python loop using `random`. All three produce an
+equivalent `pl.DataFrame`, so the comparison is "how fast can each approach
+hand back a usable frame," not raw loop speed in isolation.
+
+| n_rows     | polspec (Rust) |     NumPy |    Python |
+|-----------:|---------------:|----------:|----------:|
+|      1,000 |        0.0003s |   0.0008s |   0.0016s |
+|     10,000 |        0.0006s |   0.0052s |   0.0145s |
+|    100,000 |        0.0027s |   0.0480s |   0.1447s |
+|  1,000,000 |        0.0083s |   0.4867s |   1.4862s |
+|  5,000,000 |        0.0256s |   2.4326s |   skipped |
+| 20,000,000 |        0.0827s |   9.7523s |   skipped |
+
+Measured 2026-09-03 on an Intel 13900K with 64GB DDR5, by
+`benchmarks/bench_generate.py`; yours will differ, and the shape matters more
+than the absolute numbers. Two things worth reading off it:
+
+- **The gap widens with size, not just the ratio.** At 1,000 rows all three
+  are fast enough that the difference doesn't matter to a test suite. At
+  20,000,000, pure Python is impractical (skipped past a 5-second cutoff at
+  a much smaller size) and NumPy's ~2 million rows/second becomes a real wait
+  in a CI loop, while polspec is still under 100ms.
+- **NumPy's implementation is the hard-won version.** Its string column uses
+  a fixed-width byte-array trick because NumPy has no efficient way to
+  vectorize *ragged* per-row lengths — the other two implementations generate
+  strings 5–15 characters long; NumPy's are fixed at 15 and decoded back down.
+  That's not a knock on NumPy — it's the actual cost of writing this by hand:
+  the fast version needs a specific trick per dtype, and someone has to know
+  it.
+
+Reproduce it yourself:
+
+```bash
+uv run --group bench python benchmarks/bench_generate.py
+```
+
+Generation speed is only half the story — [validation](https://maxwellb13.github.io/polspec/how-to/validating/)
+compiles every check across every column into a single Polars aggregation,
+so validating a fifty-column table costs about the same as validating a
+five-column one. That isn't benchmarked here, since there's no equivalent
+"validate this by hand" baseline to compare it against.
+
+## Compared to hand-written fixtures
+
+The common alternative is a Python dict or list literal, copy-pasted between
+test files and edited by hand when the shape needs to change:
+
+```python
+def make_customer_row(customer_id=1, tier="free"):
+    return {"customer_id": customer_id, "tier": tier, "signed_up": "2023-01-01"}
+```
+
+This works, and for a handful of fixed cases it's often the right amount of
+machinery. It stops working as the schema grows: the dtype lives nowhere —
+`tier` being one of three strings is enforced by nobody until something
+downstream breaks — and every edge case (a null, a boundary value, a specific
+combination of two columns) is a row someone remembered to write by hand.
+There's also nothing stopping the fixture and the real schema from drifting
+apart; the dict doesn't know the pipeline added a column last month.
+
+A `ColSpec` declaration is both the definition and the generator: the dtype,
+the bound, and the domain are enforced the same way whether you're generating
+data or checking it, and [`method="cartesian"`](https://maxwellb13.github.io/polspec/how-to/generating/#coverage-methodcartesian)
+covers the boundary/null cases that hand-written fixtures tend to under-cover
+because nobody thought to write them.
+
+## Compared to Faker and similar
+
+[Faker](https://faker.readthedocs.io/) and libraries built on it are the
+right tool for *semantically realistic* values — names that look like names,
+addresses that parse like addresses, emails with plausible domains. polspec
+doesn't try to compete there: its strings are bounded-length ASCII, not
+locale-aware people or places, because it's solving a different problem —
+statistically-shaped data that respects a schema, not human-plausible data
+that respects cultural conventions.
+
+The two combine rather than compete. A Faker-generated pool of realistic
+values becomes a `ColSpec.choices` list; polspec supplies the bounds,
+nullability, cross-column rules, and cross-table referential integrity that
+sit around it:
+
+```python
+import polars as pl
+from faker import Faker
+from polspec import ColSpec, FrameSpec
+
+fake = Faker()
+first_names = list({fake.first_name() for _ in range(500)})  # choices must be distinct
+
+class Customers(FrameSpec):
+    name = ColSpec(pl.String, choices=first_names)
+    signup_bonus = ColSpec(pl.Float64, bounds=(0.0, 50.0))
+```
+
+What Faker doesn't do on its own is hand back a typed `pl.DataFrame`, enforce
+a bound, or keep a foreign key consistent across two generated tables — those
+are the parts of the problem polspec is actually for.
+
+## Compared to NumPy or a bespoke script
+
+The benchmark above *is* this comparison: a hand-written NumPy implementation
+is faster than pure Python and can be made fast enough for most purposes, but
+someone has to write it, and it has to be rewritten — bounds, nullability,
+dtype casts — for every new column and every schema change. There's also
+nothing left over afterward: the script that generated the data has no
+relationship to a validator that checks it, because there was never a shared
+declaration for the two to share.
+
+polspec's Rust generator is faster than a hand-written NumPy version because
+it doesn't pay Python's per-call overhead and fills columns in parallel — but
+the bigger difference for day-to-day use is that the declaration doesn't have
+to be rewritten by hand for each column, and the same one both generates and
+validates.
+
+## Compared to property-based testing (Hypothesis)
+
+[Hypothesis](https://hypothesis.readthedocs.io/) solves a genuinely different
+problem well: given a strategy for producing values, explore the space of
+possible inputs, and when one fails, *shrink* it to the smallest failing
+case. polspec has no shrinking and makes no attempt at exhaustive space
+exploration — `method="cartesian"` is a fixed, deterministic set of
+known-important combinations (every enum value, every numeric sign, null),
+not an open-ended search.
+
+These are complementary rather than competing: a `FrameSpec.generate(n,
+seed=...)` call is a perfectly good data source *inside* a Hypothesis
+strategy or a `@given` test, if what you need is Hypothesis's shrinking on
+top of polspec's schema-shaped, Polars-native output.
+
+## Compared to data-quality frameworks (Great Expectations, pandera, ...)
+
+These frameworks are built around a different center of gravity: validating,
+profiling, and monitoring data that already exists — often production
+tables, with drift detection and reporting as first-class concerns. That's a
+larger and more operational surface than polspec's `validate()`, which is
+schema-shaped correctness checking, not statistical monitoring.
+
+The distinguishing feature runs the other way, too: most validation-first
+tools don't generate matching synthetic data for you. `FrameSpec` is meant to
+be small enough to declare once and use for both jobs in a test suite, not to
+replace a data-quality platform watching a production warehouse.
+
+## What polspec doesn't try to be
+
+Worth being direct about, in the same spirit as the
+[known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/) and
+[roadmap](https://maxwellb13.github.io/polspec/explanation/roadmap/) pages:
+
+- **Not a realistic-fake-data library.** No locales, no plausible names or
+  addresses out of the box — pair it with Faker for that.
+- **Not a data-quality or monitoring platform.** No drift detection, no
+  profiling dashboards, no anomaly scoring.
+- **Not a property-based shrinking engine.** No search, no shrinking —
+  `method="cartesian"` is a fixed set of known-important cases, not an
+  open-ended exploration.
+- **Not feature-complete yet.** Nested dtypes (`List`/`Struct`/`Array`) aren't
+  generatable, and `__checks__`/`ColSpec.validators` are validated but not
+  generated, by design — see [Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/).
+
+## Where it fits
+
+Polars-native pipelines that need fast, schema-shaped synthetic data and
+matching validation from one declaration — especially across several related
+tables via `ForeignKey`, at volumes where a pure-Python or pandas generator
+starts to cost real CI time, in tests that need to stay hermetic. See
+[Testing pipelines](https://maxwellb13.github.io/polspec/how-to/testing/) for that in practice.
+
+---
+
+# Roadmap and stability
+Source: https://maxwellb13.github.io/polspec/explanation/roadmap/
+
+# Roadmap and stability
+
+!!! warning "Early alpha"
+
+    polspec is early. The sections below are the honest version of "what's
+    next" — not a promise of when, just where the rough edges are and which
+    direction they're likely to move. Treat everything here, and everything
+    the library produces, as breakable between versions until it says
+    otherwise.
+
+## Dtype coverage is not complete yet
+
+polspec generates every scalar and temporal Polars dtype — integers, floats,
+booleans, strings, binary, `Date`/`Time`/`Datetime`/`Duration`, `Enum` and
+`Categorical`. Composite and nested dtypes are not there yet:
+
+- `List`
+- `Struct`
+- `Array`
+
+A `ColSpec` for one of these constructs without complaint and can be
+*validated* against — `FrameSpec.validate()` doesn't need to know how to
+generate a dtype to check one. `generate()` is where it stops, with a
+`TypeError` naming the dtype. Expanding into nested types is the most
+requested kind of gap to close next; if you need one of these today, generate
+the column separately and attach it with `with_columns` after `generate()`
+returns.
+
+`Struct` is the interesting one of the three. A struct column is a set of
+named, typed fields, which is what a `FrameSpec` already is — so the question
+is less "how is this generated" than whether it reuses that machinery or gets
+its own, and getting that wrong would be expensive to undo.
+
+## Generation is getting more guardrails, not fewer
+
+Two different kinds of "limit" are in scope here, and they're worth telling
+apart:
+
+**Safety limits that already exist and will grow.** `method="cartesian"`
+refuses to build a coverage set past 50 million rows, naming the dimension
+that caused it, rather than silently trying to allocate one. That's the shape
+future guardrails will take elsewhere in generation — an explicit, named
+refusal before a runaway allocation, not a mysterious hang. Expect more of
+these as generation is asked to handle larger and stranger specs: sanity
+limits on distribution parameters, on cartesian dimensionality, on batch
+sizing.
+
+**Constraints `generate()` doesn't enforce**, which is a different, more
+interesting problem. What is left of it is `__checks__` and
+`ColSpec.validators`, and that one is by design: both wrap arbitrary Polars
+expressions, and nothing can generate data satisfying an arbitrary predicate.
+Everything else on this list has been worked through — rule and foreign-key
+dependencies by ordering the passes rather than asserting the dependencies
+don't exist, and uniqueness by drawing without replacement instead of hoping a
+wide domain would do. What remains is narrowing the gap from the other end:
+letting a column *describe* its values well enough that a validator becomes
+generatable.
+
+**Domains generation cannot currently express.** A `String` column generates
+random characters within its `string_length`, and there is no way to say more
+than that about its shape. This is why a column carrying a validator as
+ordinary as `pl.col("email").str.contains("@")` cannot be generated to satisfy
+its own spec. A pattern or named format on `ColSpec` — a regex, or something
+like `format="email"` — would let generation produce values its own validators
+accept, converting a whole class of the gap above into something that
+round-trips rather than something documented. It is also most of what stands
+between generated fixtures and fixtures that look like data.
+
+Both directions are active. Neither has a fixed shape yet, so the specific
+options `generate()` accepts may well change under you.
+
+## Specs know about each other through a `Registry`, and only there
+
+A `ForeignKey` names the spec it points at; nothing above a single spec knows
+which specs exist unless they are put in a
+[`Registry`](https://maxwellb13.github.io/polspec/how-to/registry/). That is deliberate — two test modules may
+each define an `Orders` — but it leaves edges:
+
+- **The command line has no registry verbs.** `polspec validate` takes one
+  spec and its parents as `--references NAME=PATH`; generating or validating
+  a whole registry from the shell is not there yet.
+- **Discovery imports code.** `Registry.discover("specs/")` runs every `.py`
+  file it finds. A declared `Registry(...)` in a module of your own is the
+  safer shape, and `discover` is a convenience over it.
+- **Shared categories are checked only when declared.** `resolve()` compares
+  columns against the `CatSpec` a registry was given; without one,
+  `catspec()` merges what the specs declare and refuses a disagreement, but
+  nothing checks unless asked.
+- **A single spec's `to_mermaid()` still draws one entity.** The whole
+  picture is `registry.to_mermaid()`.
+
+## YAML format and generated values may change
+
+Two things this project has made no compatibility promise about yet:
+
+- **The YAML spec format.** The keys `to_yaml()` writes and `from_yaml()`
+  reads are what today's `ColSpec`/`FrameSpec`/`CatSpec` happen to need. A
+  new field, a renamed key, or a different nesting for something like
+  distribution parameters could all still happen as the underlying Python API
+  settles.
+- **The exact values `generate()` produces for a given seed.** Determinism
+  *within* a version is a hard guarantee — the same seed on the same version
+  always produces the same frame, and that's load-bearing for the round-trip
+  tests this project is built around. Determinism *across* versions is not
+  guaranteed yet: a bug fix to a distribution, a change to how a chunk's seed
+  is derived, or a fix to one of the [known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/) can
+  all legitimately change what a given seed produces.
+
+The first of those is easier to live with than it sounds, and the first step is
+small: nothing in a spec file currently records which polspec wrote it. A
+version key would let `from_yaml()` say so plainly when a file predates a
+format change, instead of failing on an unrecognized key — or, worse, quietly
+reading a renamed one as its default.
+
+Neither of these is likely to move for the sake of moving — but until this
+page says otherwise, don't build something that depends on today's YAML
+surviving a version bump byte-for-byte, or on a specific seed producing the
+same values after an upgrade.
+
+## Directions, not commitments
+
+Lower confidence than everything above: opportunities noticed rather than gaps
+being actively closed. They are here because the machinery each would need
+already exists, not because any of them is started.
+
+**Synthetic look-alike data.** `from_dataframe()` profiles real data into a
+spec and `generate()` turns a spec back into data, so the trip from a real
+table to a statistically similar fake one is already two calls. Making it one —
+with `tags` marking which columns should be replaced outright rather than
+imitated — would serve the share-realistic-data-without-sharing-real-data case
+directly.
+
+**Drift as a report, not a pass/fail.** "A validation library tells you when
+production data drifted" is the claim on the front page, and today the answer
+is only *that* it drifted. Diffing a spec against data — new enum variants,
+bounds exceeded, cardinality moved — would say how. The same machinery diffs
+two specs against each other, which is what reviewing a schema change in a pull
+request actually needs.
+
+**Test-framework integration.** A pytest fixture or plugin, or a Hypothesis
+strategy built from a spec, are the natural adjacent surfaces for a library
+whose whole pitch is that fixtures and contracts stay in step. Adjacent,
+though — not core.
+
+---
+
+# Changelog
+Source: https://maxwellb13.github.io/polspec/changelog/
+
+# Changelog
+
+All notable changes to polspec are recorded here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Until 1.0, minor
+versions may break the Python API, the YAML format, and the values a given
+seed produces; see
+[Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/).
+
+## [Unreleased]
+
+## [0.2.0] - 2026-09-05
+
+The architecture release. Specs became data, constraints gained one definition
+each, and the generator learned to satisfy claims it used to only check.
+
+This release breaks a lot. Every incompatible change below is marked
+**Breaking** and says what to do instead. Three are worth knowing before you
+upgrade: `Spec._columns` and friends are now `Spec.spec.columns`; the values a
+given seed produces have changed, so any test asserting on generated values
+needs re-baselining; and several declarations that used to be accepted and
+quietly misbehave are now refused at declaration time.
+
+### Added
+
+- `docs/llms.txt` and `docs/llms-full.txt`, published at the documentation
+  site root in the [llms.txt](https://llmstxt.org) format: an index of every
+  page, and the full text of all of them in one file. Generated by
+  `scripts/generate_llms_txt.py` from the nav, the pages, and -- for the API
+  reference, whose source is `:::` directives -- the live docstrings, so a
+  language model reads signatures rather than an empty page. A test fails if
+  either file is stale.
+- `polspec.constraints`: the definitions generation and validation both read,
+  so they cannot drift. `Domain` is what a column may hold (its `choices`, an
+  `Enum`'s categories, its `bounds`); `Pass` and `order` decide which rewrite
+  of a generated frame runs first, from the columns each one reads and writes.
+- `unique=True` is generated, not just validated. The engine draws the column
+  without replacement (`src/unique.rs`): it shuffles a materialised domain
+  when the domain is barely larger than the frame, and rejects against a set
+  when it is roomy. Every dtype is covered, nulls are exempt (a nullable
+  unique column may repeat nulls and nothing else), and a domain too small to
+  cover the row count is refused by name instead of quietly producing
+  duplicates. `method="cartesian"` holds unique columns out of the coverage
+  product and draws them once over the finished frame.
+- `__unique_together__` is generated. A pass resamples the rows repeating a
+  combination an earlier row already used, so only the repeats move and the
+  rest keep the values their own columns' weights and bounds gave them. Rows
+  with a null member are exempt, matching validation. A group whose columns
+  cannot take enough distinct combinations is refused, naming the group; a
+  foreign-keyed member is never resampled, since that would break its key.
+
+- The Rust boundary is typed. Python builds one `ColumnPlan` per column (a
+  `#[pyclass]` validated at construction, with errors naming the column)
+  instead of a positional tuple. Bounds cross as an `i64`, `u64` or `f64`,
+  so `Int64`/`UInt64` bounds beyond 2^53 are exact and the generation clamp
+  for an unbounded distribution reaches the dtype's true limits. Columns
+  with a finite domain (`choices`, `Enum`) receive indices back and the typed
+  values are gathered on the Python side, so a `datetime`, `bytes` or `True`
+  choice never passes through a string; choices need only be distinct in the
+  column's dtype, not as strings. `python/polspec/_polspec.pyi` is a stub for
+  the extension; `src/` is split into `plan.rs`, `dist.rs` and `sample.rs`
+  with unit tests under `cargo test`; a test compares the distribution
+  parameter tables on both sides.
+- `import polspec` works without the Rust extension: validation, spec files,
+  the registry and the report renderers need no build. Only generation
+  imports it, and raises one actionable `ImportError` when it is missing.
+- `Registry`: a declared set of specs. `Registry(Customers, Orders, ...)`
+  resolves foreign keys declared against names (`resolve()`, running the
+  checks a class-bound key gets at declaration), orders parents before
+  children (`order()`), generates the whole set with every key satisfied
+  (`generate_all`, with a per-spec seed so adding a table changes no other;
+  `generate_related` for one spec and its ancestors), validates it in one
+  call (`inspect_all`, `validate_all`), merges or checks shared categories
+  (`catspec()`, `categories=`), writes and reads one file for the set
+  (`to_yaml`/`from_yaml`, a `specs:` mapping plus `categories:`), collects
+  specs from modules and directories (`from_module`, `discover`), and draws
+  one entity-relationship diagram (`to_mermaid`). See the new *Multiple
+  specs* guide.
+- `inspect()`: validation results as data. `FrameSpec.inspect(df)` (and
+  `polspec.validation.inspect(spec, df)`) returns a `ValidationReport` of
+  `Finding` records -- each with a code, a stable key, the columns involved,
+  a count, samples and code-specific details -- and never raises for a bad
+  frame. `report.rows(finding)` and `report.failing_rows()` return the
+  offending rows lazily; `by_column()`, `by_code()` and `to_json()` slice
+  and export them. Checks and validators now carry samples too.
+- `ValidationError.report` carries the same `ValidationReport`; `.errors` is
+  still the list of messages.
+- `polspec validate SPEC DATA [--references NAME=PATH] [--json]` on the
+  command line, exiting 1 on findings, so a spec can gate a pipeline in CI.
+- A foreign key whose parent was not supplied is a `foreign_key_unresolved`
+  finding rather than a `ValueError`, matching how `generate()` already
+  treats it; a parent lacking the referenced columns is a `foreign_key`
+  finding.
+- Spec files carry a `version:` (now 2). Files from version 1 are migrated
+  on read; a file from a newer polspec is refused with a clear message. A
+  key the reader does not know is an error naming the closest known key;
+  `from_yaml(..., strict=False)` downgrades it to a warning.
+- Foreign keys to other specs are written to YAML and Python as the target's
+  name and read back unresolved, instead of being dropped with a warning.
+- `polspec.serialization` is a package driven by one field registry
+  (`fields.py`): YAML in both directions, generated Python, and the
+  `import datetime` decision all derive from it, and a test asserts every
+  dataclass field has an entry. `to_dict`/`from_dict` are public.
+- `CatSpec` files keep choices recorded for plain string columns.
+- `polspec.col()`, a small predicate language for rules, validators and
+  checks: `col("total") >= col("subtotal")`, `col("email").str.contains("@")`,
+  `is_in`, `is_between`, `is_null`, `&`/`|`/`~`, arithmetic, and string
+  operations. A predicate evaluates like the Polars expression it stands
+  for and, unlike one, is written to and read from YAML and generated
+  Python. `__checks__` and `ColSpec.validators` written with `col()` now
+  round-trip through `to_yaml`/`from_yaml` and `to_python`. Raw `pl.Expr`
+  is still accepted and still warns on export.
+- `ColRule.when` accepts a predicate, so a rule may depend on several
+  columns. The one-column dict form is still accepted and converted.
+- `TableSpec`: the spec as an immutable value. A `FrameSpec` class body now
+  builds one, reachable as `Spec.spec`, and every verb (`generate`,
+  `validate`, `to_yaml`, `to_markdown`, ...) is a function over it in
+  `polspec.generation`, `polspec.validation`, `polspec.serialization` and
+  `polspec.report`. `TableSpec` offers `with_columns`, `drop`, `select`,
+  `rename`, `with_checks`, `with_foreign_keys`, `with_unique_together`,
+  `with_name` and `with_catspec`; `FrameSpec.from_spec` wraps one in a class.
+  See the new *Specs as values* guide.
+- `FrameSpec.col(name)` reaches a column whatever it is called.
+- `ForeignKey.references` may be a spec's name, for keys whose target is not
+  importable where the key is declared.
+- An exception hierarchy under `PolspecError`: `SpecError` for declarations
+  that cannot mean anything, `ValidationError` for data that fails its spec,
+  `GenerationError` when a spec cannot be turned into data (including every
+  error raised inside the Rust engine), `SerializationError` for files that
+  cannot be written or read, and `RegistryError`, reserved for the spec
+  registry. All are exported from `polspec`; see the new *Errors* reference
+  page.
+
+### Changed
+
+- **Breaking.** `ColRule.when` no longer accepts the one-column dict
+  (`{"column": "region", "equals": "UK"}`). `col()` is the only spelling:
+  write `col("region") == "UK"`. A spec file written by an earlier version
+  still loads -- its conditions are converted as the file migrates -- but a
+  file declaring the current version must carry the predicate form. The error
+  names the column and says what to write.
+- **Breaking.** The `le` and `ge` condition keys are gone; they were
+  undocumented duplicates of `lte` and `gte`. (`le`/`ge` remain the canonical
+  operator names in a predicate's *data* form, which is unrelated.)
+- **Breaking.** `polspec.serialization` no longer re-exports the names of the
+  pre-package module layout: `_YAML_DTYPES`, `_YAML_NAME_TO_DTYPE`,
+  `_dtype_to_yaml`, `_dtype_from_yaml`, `_dtype_to_python`, `_colspec_to_yaml`,
+  `_colspec_from_yaml` and `_colspec_to_python`. Use the names in
+  `polspec.serialization.fields` and `polspec.serialization.dtypes`.
+- **Breaking.** `ColRule.when` is evaluated against the frame as it stands
+  when the rule runs, not against the freely generated values. Rules and
+  foreign keys are applied in dependency order, so a rule keyed on a column
+  that another rule or a foreign key rewrites now reads the rewritten values
+  -- the ones `validate()` checks it against. Chained rules, chained foreign
+  keys, and a rule keyed on a foreign-keyed column all round-trip; the values
+  a given seed produces for such a spec change.
+- **Breaking.** Two columns whose rules each read what the other writes have
+  no order that satisfies both, and are now refused at declaration with a
+  `SpecError` naming them.
+- **Breaking.** A `ForeignKey` whose parent's declared domain does not fit
+  inside its own column's is refused at declaration (or when a `Registry`
+  resolves a key that names its target as a string). A key overwrites its
+  column with the parent's values, so `bounds=(1, 50)` on a column
+  referencing keys in `100..200` could only ever generate data that fails its
+  own validation. A column declaring no `bounds` or `choices` still accepts
+  anything.
+- **Breaking.** `unique=True` can no longer be combined with `weights`, a
+  non-uniform `distribution`, or `rules`. The first two describe how often a
+  value recurs, which a draw without replacement has no room for; a rule
+  assigns from a fixed set, which is how duplicates would get back in. Each
+  is refused at declaration rather than silently ignored.
+- **Breaking.** A column carrying `rules` may not also be part of a
+  `__unique_together__` group, for the same reason: the repair that separates
+  repeated combinations would overwrite what the rule put there.
+- **Breaking.** A `ForeignKey` filling a `unique=True` column now refuses when
+  the parent holds fewer distinct values than there are rows, instead of
+  falling back to sampling with replacement and producing the duplicates the
+  column forbids.
+- `polspec test` no longer emits `validate_unique=False` in generated tests.
+  Uniqueness is generated now, so the generated test asserts it.
+- A foreign key spanning textual dtypes -- a `String` column referencing an
+  `Enum` key, which declaration has always allowed and generation has always
+  handled -- now validates instead of raising `SchemaError` from the
+  anti-join. The parent's keys are cast to the local dtype for the join, so
+  `ValidationReport.rows()` still returns the frame's own rows unchanged.
+
+- **Breaking.** Each column's generation seed is derived from the frame
+  seed and the column's *name*, not its position, so inserting a column no
+  longer reshuffles the columns after it. The values a given seed produces
+  change from previous versions.
+- `ColRule` application samples only as many values as there are matched
+  rows and scatters them into place, instead of filling the whole column per
+  rule.
+- `polspec.validation` is a package (`report.py`, `constraints.py`); foreign
+  key anti-joins are collected together with `pl.collect_all` instead of one
+  `collect` per key.
+- **Breaking.** `ColSpec.distribution` and `distribution_params` are stored
+  in canonical form (`"exp"` becomes `"exponential"`, `mu`/`sigma` become
+  `mean`/`std`, and so on), so spec files are canonical. Every alias is
+  still accepted when declaring.
+- **Breaking.** An unrecognised physical dtype in a `CatSpec` entry is now a
+  `SerializationError` instead of silently becoming `UInt32`.
+- **Breaking.** `ColRule.when` is a predicate after construction rather
+  than a dict (`rule.when.root_names()` lists the columns it reads); rules
+  in YAML are written in the predicate data form, and the old dict form is
+  still read.
+- **Breaking.** A column may now share a name with a `FrameSpec` method:
+  the metaclass takes `ColSpec` attributes out of the class namespace, so
+  `schema`, `tag` and friends no longer shadow anything and no longer warn.
+  The private `_columns`, `_checks`, `_unique_together` and `_foreign_keys`
+  class attributes are gone; read `Spec.spec.columns` and friends instead.
+- **Breaking.** `ForeignKey.references` is the target's *name* after
+  construction (the bound spec is available as `ForeignKey.target`), and
+  `references={...}` on `generate`/`validate` accepts the class, the
+  `TableSpec` or the name as key.
+- **Breaking.** Removed: the `FrameSchema` alias; `FrameSpec.generate_catspec`,
+  `write_catspec`, `infer_catspec` and `with_inferred_catspec` (use
+  `catspec()`, `catspec().to_yaml()`, `CatSpec.infer(...)` and
+  `with_catspec(CatSpec.infer(...))`); the `max_unique` and `bounds` alias
+  keyword arguments of `from_dataframe` (use `max_unique_enum` and
+  `calculate_bounds`).
+- `to_yaml` and `to_python` share one set of warnings about what a file
+  cannot hold.
+- **Breaking, mildly.** Errors that were bare `ValueError` or `TypeError`
+  are now the subclass above. Each keeps the built-in type it replaced, so
+  `except ValueError` still catches it; only code matching on the exact type
+  (`type(exc) is ValueError`) sees a difference. Plain argument misuse
+  (`n < 0`, an unknown `method=`) is unchanged.
+- The command line prints any `PolspecError` as a one-line `error: ...`
+  instead of a `TypeName: message` line.
+
+### Fixed
+
+- Foreign-key sampling during generation drew parent keys from an unordered
+  `unique()`, so the same seed could give different child rows between runs.
+  The parent's distinct keys now keep their order and generation is
+  reproducible.
+
+## [0.1.5] - 2026-09-03
+
+### Added
+
+- `python/polspec/py.typed`, so type checkers use the package's annotations.
+- `CONTRIBUTING.md`, this changelog, and a `.python-version` file.
+- `examples/related_specs.py`: a worked example of four related specs
+  (foreign keys, shared categories, rules, checks, a YAML-declared spec). It
+  runs in CI as a smoke test.
+- A release-workflow job that refuses a `vX.Y.Z` tag whose version does not
+  match `pyproject.toml`.
+- CI now runs `ruff check` with a wider rule set, `ruff format --check`, `cargo fmt --check`,
+  `cargo clippy -D warnings` and `cargo test`, tests on macOS as well as
+  Linux and Windows, and tests against the newest Polars release inside the
+  declared bound. The docs build runs strictly on pull requests.
+- Release builds now produce wheels for Linux aarch64 and macOS (x86_64 and
+  arm64) alongside Linux and Windows x86_64, plus an sdist, and only publish
+  when the test workflow is green.
+- An optional `.pre-commit-config.yaml` with ruff and cargo fmt hooks.
+- `tests/test_colspec.py` (2,000 lines, unsectioned) is split into
+  `test_generation.py`, `test_rules.py`, `test_serialization.py`,
+  `test_profiler.py`, `test_framespec.py`, `test_report.py` and
+  `test_foreign_key.py`, each with a docstring saying what it covers.
+
+### Changed
+
+- The crate version in `Cargo.toml` is a placeholder; `pyproject.toml` is the
+  only place the version is set, so `uv version --bump` works.
+- The `parquet`, `ipc` and `all` extras (all identical) are replaced by a
+  single `arrow` extra. Install with `polspec[arrow]` for the Parquet and
+  Arrow IPC sinks.
+- `polars` is bounded to `<2`; the Rust extension is coupled to a Polars
+  release line.
+- The abi3 floor is now Python 3.12, matching `requires-python`.
+- `cargo test` links again (`extension-module` is no longer an unconditional
+  crate feature; maturin enables it).
+
+### Fixed
+
+- Repository URL in package metadata pointed at the repository's old name.
+- README claimed the license was unspecified; it is MIT.
+- Documentation: `ColSpec(col_name=...)` is now described in *Declaring
+  columns*, `FrameSpec.to_python()` in *YAML specs*, the getting-started
+  example imports `date`, and the architecture page lists the `cli` module
+  and its tests.
+
+## [0.1.4] - 2026-09-02
+
+### Added
+
+- `polspec schema infer --output spec.py` and `FrameSpec.to_python()`, which
+  write a spec as an editable Python module rather than YAML.
+
+## [0.1.3] - 2026-09-01
+
+### Added
+
+- `ColSpec(col_name=...)`, so a column's name in data may differ from the
+  attribute name used to declare it.
+
+### Changed
+
+- Roadmap expanded with detailed plans for a spec registry, structured
+  validation results, and generation guardrails.
+
+## [0.1.2] - 2026-08-31
+
+Version bump only; no user-facing change.
+
+## [0.1.1] - 2026-08-31
+
+### Added
+
+- Test workflow on GitHub Actions (Linux and Windows, Python 3.12 to 3.14).
+
+### Fixed
+
+- `ColSpec.dtype` accepts a dtype class as well as an instance.
+
+## [0.1.0] - 2026-08-31
+
+First tagged release.
+
+- `ColSpec` and `FrameSpec`: declare a Polars schema with nullability,
+  bounds, string lengths, choices and weights, distributions, tags, and
+  conditional `ColRule`s.
+- `generate()` backed by a parallel Rust extension, `method="cartesian"` for
+  coverage sets, batched generation and Parquet/CSV/IPC/NDJSON sinks.
+- `validate()` collecting every violation in one Polars aggregation, with
+  column validators, multi-column `Check`s, composite uniqueness and
+  `ForeignKey`s.
+- `CatSpec` registries for shared `Enum`/`Categorical` domains.
+- YAML round-trip, `from_dataframe()` profiling, Markdown and Mermaid output.
+- CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
+- Documentation site, comparison guide, and release automation.
+
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/MaxwellB13/polspec/compare/v0.1.5...v0.2.0
+[0.1.5]: https://github.com/MaxwellB13/polspec/compare/v0.1.4...v0.1.5
+[0.1.4]: https://github.com/MaxwellB13/polspec/compare/v0.1.3...v0.1.4
+[0.1.3]: https://github.com/MaxwellB13/polspec/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/MaxwellB13/polspec/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/MaxwellB13/polspec/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/MaxwellB13/polspec/releases/tag/v0.1.0

@@ -73,7 +73,7 @@ options `generate()` accepts may well change under you.
 
 A `ForeignKey` names the spec it points at; nothing above a single spec knows
 which specs exist unless they are put in a
-[`Registry`](../guide/registry.md). That is deliberate — two test modules may
+[`Registry`](../how-to/registry.md). That is deliberate — two test modules may
 each define an `Orders` — but it leaves edges:
 
 - **The command line has no registry verbs.** `polspec validate` takes one

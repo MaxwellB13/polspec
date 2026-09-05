@@ -12,6 +12,7 @@ from polspec import (
     ColRule,
     ColSpec,
     FrameSpec,
+    col,
 )
 
 
@@ -462,7 +463,7 @@ def test_weights_validation_errors():
         match="Cannot specify both a dict for choices and an explicit weights parameter",
     ):
         ColRule(
-            when={"column": "x", "equals": 1},
+            when=col("x") == 1,
             choices={"a": 0.5, "b": 0.5},
             weights=[0.5, 0.5],
         )

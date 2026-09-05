@@ -183,9 +183,15 @@ def _tags_to_source(value: tuple[str, ...]) -> str:
 
 
 def _when_from_data(value: Any, ctx: Ctx, path: str) -> Any:
-    # The legacy one-column dict is accepted by ColRule itself.
     if isinstance(value, dict) and "column" in value:
-        return value
+        # A version 1 condition in a file claiming to be version 2: the
+        # migration converts these, so reaching here means the version key
+        # is wrong rather than the condition.
+        raise SerializationError(
+            f"{path}: {value!r} is a version 1 rule condition, but the file "
+            "declares a later version. Remove the `version:` key to have it "
+            "migrated, or write the condition with col()."
+        )
     return pred_from_data(value)
 
 

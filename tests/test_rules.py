@@ -1,7 +1,8 @@
 """`ColRule`: conditional values applied as a vectorised pass after generation.
 
-Covers what a rule may declare, which rows it touches, the supported `when`
-operators, and that rules behave the same under `method="cartesian"`.
+Covers what a rule may declare, which rows it touches, the `col()`
+predicates `when` accepts, and that rules behave the same under
+`method="cartesian"`.
 """
 
 import polars as pl
@@ -11,6 +12,7 @@ from polspec import (
     ColRule,
     ColSpec,
     FrameSpec,
+    col,
 )
 
 # ---------------------------------------------------------------------------
@@ -23,9 +25,7 @@ class RuledSource(FrameSpec):
     enum_2 = ColSpec(
         dtype=pl.Enum(["X", "Y", "Z"]),
         nullable=False,
-        rules=(
-            ColRule(when={"column": "enum_1", "in": ["A", "B"]}, choices=["X", "Y"]),
-        ),
+        rules=(ColRule(when=col("enum_1").is_in(["A", "B"]), choices=["X", "Y"]),),
     )
 
 
@@ -55,8 +55,8 @@ class MultiRuleSource(FrameSpec):
         dtype=pl.Enum(["X", "Y", "Z"]),
         nullable=False,
         rules=(
-            ColRule(when={"column": "enum_1", "equals": "A"}, choices=["X"]),
-            ColRule(when={"column": "enum_1", "in": ["A", "B"]}, choices=["Y"]),
+            ColRule(when=col("enum_1") == "A", choices=["X"]),
+            ColRule(when=col("enum_1").is_in(["A", "B"]), choices=["Y"]),
         ),
     )
 
@@ -77,7 +77,7 @@ class NumericRuleSource(FrameSpec):
         dtype=pl.Int64,
         bounds=Bound(-100, 100),
         nullable=False,
-        rules=(ColRule(when={"column": "enum_1", "equals": "C"}, choices=[0, 1, 2]),),
+        rules=(ColRule(when=col("enum_1") == "C", choices=[0, 1, 2]),),
     )
 
 
@@ -110,11 +110,7 @@ def test_colrule_rejects_choices_outside_enum_categories():
     with pytest.raises(ValueError, match="not among this column's Enum categories"):
         ColSpec(
             dtype=pl.Enum(["X", "Y", "Z"]),
-            rules=(
-                ColRule(
-                    when={"column": "enum_1", "equals": "A"}, choices=["NOT_A_CATEGORY"]
-                ),
-            ),
+            rules=(ColRule(when=col("enum_1") == "A", choices=["NOT_A_CATEGORY"]),),
         )
 
 
@@ -123,14 +119,19 @@ def test_colrule_rejects_malformed_when():
         ColRule(when="not a dict", choices=["X"])
 
 
-def test_colrule_rejects_ambiguous_when():
-    with pytest.raises(ValueError, match="exactly one of"):
-        ColRule(when={"column": "x", "equals": 1, "in": [1, 2]}, choices=["X"])
+def test_colrule_rejects_the_removed_dict_condition():
+    """The one-column dict was the only other spelling; `col()` is the one
+    that survived, and the refusal says so.
+    """
+    with pytest.raises(ValueError, match="must be a predicate built with col") as info:
+        ColRule(when={"column": "x", "equals": 1}, choices=["X"])
+    assert "col('x') == ..." in str(info.value)
+    assert "still loads" in str(info.value)  # a file written earlier is fine
 
 
 def test_colrule_rejects_empty_choices():
     with pytest.raises(ValueError, match="must not be empty"):
-        ColRule(when={"column": "x", "equals": 1}, choices=[])
+        ColRule(when=col("x") == 1, choices=[])
 
 
 # ---------------------------------------------------------------------------
@@ -146,9 +147,9 @@ def test_expanded_rule_operations():
             dtype=pl.String,
             nullable=False,
             rules=(
-                ColRule(when={"column": "score", "lt": 50}, choices=["Low"]),
-                ColRule(when={"column": "score", "between": [50, 79]}, choices=["Mid"]),
-                ColRule(when={"column": "score", "gte": 80}, choices=["High"]),
+                ColRule(when=col("score") < 50, choices=["Low"]),
+                ColRule(when=col("score").is_between(50, 79), choices=["Mid"]),
+                ColRule(when=col("score") >= 80, choices=["High"]),
             ),
         )
         status = ColSpec(
@@ -156,11 +157,11 @@ def test_expanded_rule_operations():
             nullable=False,
             rules=(
                 ColRule(
-                    when={"column": "optional_val", "is_null": True},
+                    when=col("optional_val").is_null(),
                     choices=["Missing"],
                 ),
                 ColRule(
-                    when={"column": "optional_val", "is_not_null": True},
+                    when=col("optional_val").is_not_null(),
                     choices=["Present"],
                 ),
             ),
@@ -194,9 +195,7 @@ def test_rule_referencing_unknown_column_raises():
         class BadRule(FrameSpec):
             x = ColSpec(
                 dtype=pl.Int32,
-                rules=(
-                    ColRule(when={"column": "non_existent", "equals": 1}, choices=[0]),
-                ),
+                rules=(ColRule(when=col("non_existent") == 1, choices=[0]),),
             )
 
 
@@ -207,11 +206,11 @@ def test_colrule_weighted_choices():
             dtype=pl.String,
             rules=(
                 ColRule(
-                    when={"column": "segment", "equals": "standard"},
+                    when=col("segment") == "standard",
                     choices={"voucher": 0.9, "gift": 0.1},
                 ),
                 ColRule(
-                    when={"column": "segment", "equals": "premium"},
+                    when=col("segment") == "premium",
                     choices=["gift", "vip_pass"],
                     weights=[0.3, 0.7],
                 ),

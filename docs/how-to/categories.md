@@ -163,7 +163,7 @@ categoricals:
 ```
 
 A spec's YAML can point at a registry file, and `FrameSpec.from_yaml` resolves
-it automatically — see [YAML specs](yaml.md).
+it automatically — see [YAML specs](files.md).
 
 Also available: `to_markdown()` for a documentation table, and `to_mermaid()`
 for a class diagram of the registry.

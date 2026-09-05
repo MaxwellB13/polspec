@@ -11,7 +11,7 @@ import datetime as dt
 
 import polars as pl
 import pytest
-from polspec import Bound, ColRule, ColSpec, FrameSpec, SpecError, ValidationError
+from polspec import Bound, ColRule, ColSpec, FrameSpec, SpecError, ValidationError, col
 
 
 def _spec_for(column: ColSpec) -> type[FrameSpec]:
@@ -162,7 +162,7 @@ def test_choices_that_collapse_to_one_value_are_rejected(choices):
 
 def test_rule_choices_repeated_as_written_are_rejected():
     with pytest.raises(ValueError, match="duplicate values"):
-        ColRule(when={"column": "g", "equals": "x"}, choices=[1, 1])
+        ColRule(when=col("g") == "x", choices=[1, 1])
 
 
 def test_choices_distinct_in_their_dtype_are_accepted():
@@ -335,7 +335,7 @@ def test_col_name_used_by_rules_and_unique_together():
             bounds=(0, 100),
             rules=(
                 ColRule(
-                    when={"column": "Sales Region", "equals": "east"},
+                    when=col("Sales Region") == "east",
                     choices=[99],
                 ),
             ),
@@ -360,7 +360,7 @@ def test_a_rule_cannot_sit_on_a_composite_key_column():
             v = ColSpec(
                 pl.Int64,
                 bounds=(0, 100),
-                rules=(ColRule(when={"column": "g", "equals": "x"}, choices=[99]),),
+                rules=(ColRule(when=col("g") == "x", choices=[99]),),
             )
             __unique_together__ = [("g", "v")]
 

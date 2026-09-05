@@ -15,7 +15,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from polspec import ColRule, ColSpec, FrameSpec, GenerationError, _ffi
+from polspec import ColRule, ColSpec, FrameSpec, GenerationError, _ffi, col
 from polspec.distributions import DISTRIBUTIONS
 from polspec.engine import _plan_column
 
@@ -177,9 +177,9 @@ def test_rules_only_sample_what_they_scatter():
         carrier = ColSpec(
             pl.Enum(["RM", "UPS", "DHL"]),
             rules=[
-                ColRule(when={"column": "region", "equals": "UK"}, choices=["RM"]),
+                ColRule(when=col("region") == "UK", choices=["RM"]),
                 ColRule(
-                    when={"column": "region", "equals": "US"},
+                    when=col("region") == "US",
                     choices={"UPS": 1.0, "DHL": 1.0},
                 ),
             ],
@@ -188,7 +188,7 @@ def test_rules_only_sample_what_they_scatter():
             pl.Int64,
             bounds=(0, 10),
             nullable=True,
-            rules=[ColRule(when={"column": "region", "equals": "US"}, choices=[7])],
+            rules=[ColRule(when=col("region") == "US", choices=[7])],
         )
 
     df = Spec.generate(2_000, seed=2)

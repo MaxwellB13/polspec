@@ -539,12 +539,17 @@ class Registry:
         return CatSpec(enums=enums, categoricals=categoricals, choices=choices)
 
     def to_dict(self) -> dict[str, Any]:
+        """This registry as plain data: every spec, plus shared categories."""
         from polspec import serialization
 
         return serialization.registry_to_dict(self)
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any], *, strict: bool = True) -> Registry:
+        """A registry read from the data form `to_dict` writes.
+
+        `strict=False` downgrades an unknown key from an error to a warning.
+        """
         from polspec import serialization
 
         return serialization.registry_from_dict(data, strict=strict)
@@ -557,6 +562,10 @@ class Registry:
 
     @classmethod
     def from_yaml(cls, source: str | Path, *, strict: bool = True) -> Registry:
+        """A registry read from one YAML file written by `to_yaml`.
+
+        `strict=False` downgrades an unknown key from an error to a warning.
+        """
         from polspec import serialization
 
         return serialization.registry_from_yaml(source, strict=strict)

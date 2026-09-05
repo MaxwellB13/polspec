@@ -52,55 +52,73 @@ def _is_categorical_dtype(dtype: pl.DataType) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class ColSpec:
-    """
-    Represents the specification of a column in a dataset, including its data type,
-    nullability, value constraints, and distribution properties.
+    """One column's declaration: its type, and every claim made about its values.
 
-    This class is designed to encapsulate all related metadata and validations
-    required for defining the structure and properties of a dataset column.
+    A `ColSpec` is what `generate()` samples from and what `validate()` checks
+    against, so each field below is a claim both sides read.
 
-    :ivar dtype: The data type of the column.
-    :ivar col_name: Overrides the column's name in the generated/validated
-        DataFrame. Declaring columns as class attributes on a `FrameSpec`
-        requires a valid Python identifier, which cannot contain spaces or
-        other special characters -- `col_name` lets the attribute keep a
-        clean Python name (`unit_price`) while the actual column is named
-        whatever the data uses (`"Unit Price"`). Everything else that refers
-        to this column by name -- `ColRule`, `unique_together`, tags lookups,
-        `validate()` -- uses `col_name`, not the attribute name.
-    :ivar nullable: Whether the column allows null values.
-    :ivar bounds: The inclusive range of values allowed in the column, as a
-        `Bound` or a 2-sequence. Only supported for numeric and temporal data
-        types. Either endpoint may be None to leave that side unconstrained --
+    Parameters
+    ----------
+    dtype : pl.DataType | type[pl.DataType]
+        The data type of the column.
+    col_name : str | None, optional
+        Overrides the column's name in the generated/validated DataFrame.
+        Declaring columns as class attributes on a `FrameSpec` requires a
+        valid Python identifier, which cannot contain spaces or other special
+        characters -- `col_name` lets the attribute keep a clean Python name
+        (`unit_price`) while the actual column is named whatever the data uses
+        (`"Unit Price"`). Everything else that refers to this column by name --
+        `ColRule`, `unique_together`, tags lookups, `validate()` -- uses
+        `col_name`, not the attribute name.
+    nullable : bool, optional
+        Whether the column allows null values.
+    bounds : Bound | tuple | list | None, optional
+        The inclusive range of values allowed in the column, as a `Bound` or a
+        2-sequence. Only supported for numeric and temporal data types. Either
+        endpoint may be None to leave that side unconstrained --
         `bounds=(0, None)` for a non-negative column, `bounds=(None, 0)` for a
         non-positive one.
 
-        Note that an open end means different things to the two consumers of
-        this field, deliberately. `validate()` treats it as genuinely
-        unconstrained and omits that half of the check. `generate()` cannot
-        sample an unbounded range, so it falls back to the same default it
-        would use with no bounds at all -- `bounds=(0, None)` on Int64
-        generates 0..1,000,000 while validating any value >= 0. This mirrors
-        how `bounds=None` already behaves rather than adding a third rule.
-    :ivar tags: Optional tag or sequence of tags to classify the column.
-    :ivar unique: Whether values in the column must be unique (distinct).
-    :ivar null_probability: Probability of a value being null in the column. Must
-        be between 0 and 1.
-    :ivar string_length: The inclusive range of string lengths for the column, if
-        applicable.
-    :ivar distribution: The name of the probability distribution for the column's
-        values (e.g., "uniform", "normal").
-    :ivar distribution_params: Parameters specific to the specified probability
-        distribution.
-    :ivar choices: A predefined set of allowed values for the column.
-    :ivar weights: Weights associated with the `choices`, used to bias
-        selection probabilities.
-    :ivar rules: A sequence of rules (`ColRule`) applied to constrain or validate
-        the column's values.
-    :ivar validators: A single-column business rule, or sequence of them, each
-        either a `pl.Expr` boolean predicate (referencing only this column) or
-        a `Check` (for a custom name/description/null handling). Unlike
+        An open end means different things to the two consumers of this field,
+        deliberately. `validate()` treats it as genuinely unconstrained and
+        omits that half of the check. `generate()` cannot sample an unbounded
+        range, so it falls back to the same default it would use with no bounds
+        at all -- `bounds=(0, None)` on Int64 generates 0..1,000,000 while
+        validating any value >= 0. This mirrors how `bounds=None` already
+        behaves rather than adding a third rule.
+    tags : str | Sequence[str], optional
+        Tag or tags classifying the column, for later selection.
+    unique : bool, optional
+        Whether values in the column must be distinct. Generation draws the
+        column without replacement; nulls are exempt. Cannot be combined with
+        `weights`, a non-uniform `distribution`, or `rules`, none of which
+        survive a draw without replacement.
+    null_probability : float, optional
+        Probability of a value being null. Must be between 0 and 1.
+    string_length : Bound | tuple[int, int] | list[int] | None, optional
+        The inclusive range of string lengths, where that applies.
+    distribution : str | None, optional
+        The name of the probability distribution for the column's values
+        (e.g. `"uniform"`, `"normal"`).
+    distribution_params : dict[str, float] | None, optional
+        Parameters specific to the chosen distribution.
+    choices : tuple | list | dict | None, optional
+        A finite set of allowed values. A dict maps each choice to its weight.
+    weights : tuple[float, ...] | list[float] | None, optional
+        Weights associated with `choices`, biasing selection probabilities.
+    rules : tuple[ColRule, ...], optional
+        Rules (`ColRule`) that overwrite the column's values on the rows their
+        condition matches.
+    validators : Check | pl.Expr | Pred | Sequence[...] | None, optional
+        A single-column business rule, or several: each either a `pl.Expr`
+        boolean predicate (referencing only this column) or a `Check` (for a
+        custom name, description or null handling). Unlike
         `FrameSpec.__checks__`, these travel with the column's own declaration.
+
+    Examples
+    --------
+    >>> ColSpec(pl.Int64, bounds=(1, 100), nullable=True, null_probability=0.1)
+    >>> ColSpec(pl.String, choices=["NEW", "PAID"], weights=[3.0, 1.0])
     """
 
     dtype: pl.DataType | type[pl.DataType]

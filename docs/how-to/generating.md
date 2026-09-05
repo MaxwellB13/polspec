@@ -97,4 +97,4 @@ foreign keys.
 It does **not** attempt `unique=True`, `__unique_together__`,
 `ColSpec.validators` or `__checks__`. The last two are impossible in general
 (they hold arbitrary expressions); the first two are open work. See
-[Known limitations](../reference/limitations.md).
+[Known limitations](../explanation/limitations.md).

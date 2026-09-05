@@ -3,7 +3,7 @@
 polspec is a Python package over a Rust extension. The Python side owns the
 vocabulary (what a column can declare and what it means); the Rust side owns
 the inner loop that fills arrays with values. See
-[Architecture](https://maxwellb13.github.io/polspec/reference/architecture/)
+[Architecture](https://maxwellb13.github.io/polspec/explanation/architecture/)
 for the module map.
 
 ## Set up
@@ -21,6 +21,23 @@ uv run maturin develop --release
 `maturin develop` compiles the extension and installs the package into the
 project's virtual environment as editable. Re-run it whenever `src/` changes;
 Python-only edits are picked up immediately.
+
+## Generated files
+
+Two files under `docs/` are generated and committed, and a test fails if
+either is stale:
+
+```bash
+uv run python scripts/generate_llms_txt.py
+```
+
+`docs/llms.txt` and `docs/llms-full.txt` follow the
+[llms.txt convention](https://llmstxt.org): an index of the documentation and
+its full text, published at the site root so a language model can read the
+library's documentation in one fetch. They are rebuilt from the nav in
+`zensical.toml`, the pages themselves, and -- for the API reference, whose
+source is `:::` directives -- the live docstrings. Regenerate after changing
+any page, the nav, or a public docstring.
 
 ## Check your change
 

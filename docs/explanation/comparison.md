@@ -24,9 +24,9 @@ hand back a usable frame," not raw loop speed in isolation.
 |  5,000,000 |        0.0256s |   2.4326s |   skipped |
 | 20,000,000 |        0.0827s |   9.7523s |   skipped |
 
-Measured 2026-09-03 on an Intel 13900K with 64GB DDR5 (the same run as the README
-table); yours will differ, and the shape matters more than
-the absolute numbers. Two things worth reading off it:
+Measured 2026-09-03 on an Intel 13900K with 64GB DDR5, by
+`benchmarks/bench_generate.py`; yours will differ, and the shape matters more
+than the absolute numbers. Two things worth reading off it:
 
 - **The gap widens with size, not just the ratio.** At 1,000 rows all three
   are fast enough that the difference doesn't matter to a test suite. At
@@ -47,7 +47,7 @@ Reproduce it yourself:
 uv run --group bench python benchmarks/bench_generate.py
 ```
 
-Generation speed is only half the story — [validation](guide/validating.md)
+Generation speed is only half the story — [validation](../how-to/validating.md)
 compiles every check across every column into a single Polars aggregation,
 so validating a fifty-column table costs about the same as validating a
 five-column one. That isn't benchmarked here, since there's no equivalent
@@ -73,7 +73,7 @@ apart; the dict doesn't know the pipeline added a column last month.
 
 A `ColSpec` declaration is both the definition and the generator: the dtype,
 the bound, and the domain are enforced the same way whether you're generating
-data or checking it, and [`method="cartesian"`](guide/generating.md#coverage-methodcartesian)
+data or checking it, and [`method="cartesian"`](../how-to/generating.md#coverage-methodcartesian)
 covers the boundary/null cases that hand-written fixtures tend to under-cover
 because nobody thought to write them.
 
@@ -156,8 +156,8 @@ replace a data-quality platform watching a production warehouse.
 ## What polspec doesn't try to be
 
 Worth being direct about, in the same spirit as the
-[known limitations](reference/limitations.md) and
-[roadmap](reference/roadmap.md) pages:
+[known limitations](limitations.md) and
+[roadmap](roadmap.md) pages:
 
 - **Not a realistic-fake-data library.** No locales, no plausible names or
   addresses out of the box — pair it with Faker for that.
@@ -168,7 +168,7 @@ Worth being direct about, in the same spirit as the
   open-ended exploration.
 - **Not feature-complete yet.** Nested dtypes (`List`/`Struct`/`Array`) aren't
   generatable, and `__checks__`/`ColSpec.validators` are validated but not
-  generated, by design — see [Known limitations](reference/limitations.md).
+  generated, by design — see [Known limitations](limitations.md).
 
 ## Where it fits
 
@@ -176,4 +176,4 @@ Polars-native pipelines that need fast, schema-shaped synthetic data and
 matching validation from one declaration — especially across several related
 tables via `ForeignKey`, at volumes where a pure-Python or pandas generator
 starts to cost real CI time, in tests that need to stay hermetic. See
-[Testing pipelines](guide/testing.md) for that in practice.
+[Testing pipelines](../how-to/testing.md) for that in practice.

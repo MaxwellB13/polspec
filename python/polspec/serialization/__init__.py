@@ -17,14 +17,7 @@ import polars as pl
 import yaml
 
 from polspec.errors import SerializationError, SpecError
-from polspec.serialization.dtypes import (
-    DTYPE_NAMES,
-    NAME_TO_DTYPE,
-    dtype_from_data,
-    dtype_to_data,
-    dtype_to_source,
-    physical_name,
-)
+from polspec.serialization.dtypes import physical_name
 from polspec.serialization.fields import (
     CHECK_FIELDS,
     COLRULE_FIELDS,
@@ -34,8 +27,6 @@ from polspec.serialization.fields import (
     Ctx,
     check_to_source,
     check_unknown_keys,
-    colspec_from_data,
-    colspec_to_data,
     colspec_to_source,
     fk_to_source,
     needs_datetime_import,
@@ -433,20 +424,3 @@ def registry_from_yaml(source: str | Path, *, strict: bool = True) -> Registry:
     path = Path(source)
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     return registry_from_dict(raw, strict=strict, source=str(source), base=path.parent)
-
-
-# ---------------------------------------------------------------------------
-# Names kept for callers of the previous module layout
-# ---------------------------------------------------------------------------
-
-_YAML_DTYPES = DTYPE_NAMES
-_YAML_NAME_TO_DTYPE = NAME_TO_DTYPE
-_dtype_to_yaml = dtype_to_data
-_dtype_from_yaml = dtype_from_data
-_dtype_to_python = dtype_to_source
-_colspec_to_yaml = colspec_to_data
-_colspec_to_python = colspec_to_source
-
-
-def _colspec_from_yaml(data: Mapping[str, Any], categories: CatSpec | None = None):
-    return colspec_from_data(data, Ctx(categories=categories), "column")

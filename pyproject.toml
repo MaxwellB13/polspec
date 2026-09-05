@@ -2,7 +2,7 @@
 name = "polspec"
 # The one place the version is set. Bump with `uv version --bump patch|minor|major`.
 # maturin gives this field precedence over Cargo.toml's, which stays a placeholder.
-version = "0.1.5"
+version = "0.2.0"
 description = "Declare a Polars schema once, then generate data from it and validate data against it."
 readme = "README.md"
 authors = [
@@ -57,6 +57,8 @@ dev = [
     "ruff>=0.16.5",
 ]
 docs = [
+    "mkdocstrings-python>=1.11",
+    "mkdocstrings>=0.26",
     "zensical>=0.0.57",
 ]
 

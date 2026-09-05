@@ -78,7 +78,7 @@ class Finding:
         A stable identifier for the claim within its spec, such as
         `"total__bounds"` or `"check:total_covers_subtotal"`.
     message : str
-        The human-readable description, unchanged from earlier versions.
+        The human-readable description of what was violated.
     columns : tuple[str, ...]
         The columns involved; empty for structural findings.
     count : int | None
@@ -121,6 +121,7 @@ class Finding:
         return self._locate(frame)
 
     def to_dict(self) -> dict[str, Any]:
+        """This finding as JSON-ready data."""
         return {
             "code": self.code,
             "key": self.key,
@@ -171,6 +172,7 @@ class ValidationReport:
         return {k: tuple(v) for k, v in grouped.items()}
 
     def by_code(self, code: FindingCode) -> tuple[Finding, ...]:
+        """Every finding of one kind, such as `"bounds"` or `"foreign_key"`."""
         return tuple(f for f in self.findings if f.code == code)
 
     def rows(self, finding: Finding) -> pl.LazyFrame:
@@ -195,6 +197,7 @@ class ValidationReport:
         return pl.concat(parts, how="vertical_relaxed")
 
     def to_dict(self) -> dict[str, Any]:
+        """This report as JSON-ready data: the spec, the verdict, the findings."""
         return {
             "spec": self.spec_name,
             "passed": self.passed,
@@ -202,6 +205,7 @@ class ValidationReport:
         }
 
     def to_json(self, *, indent: int | None = 2) -> str:
+        """This report as a JSON string. `indent=None` for one line."""
         return json.dumps(self.to_dict(), indent=indent)
 
     def __str__(self) -> str:

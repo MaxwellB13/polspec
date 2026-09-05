@@ -10,57 +10,10 @@ from polspec._ffi import column_plan
 from polspec._ffi import generate_dataframe as _generate_dataframe
 from polspec.dtypes import _typed_values
 from polspec.errors import SpecError
-from polspec.expr import Pred, col
+from polspec.expr import Pred
 
 if TYPE_CHECKING:
     from polspec.spec import ColSpec
-
-# Condition operations ColRule.when accepts.
-_CONDITION_OPS = (
-    "equals",
-    "not_equals",
-    "in",
-    "not_in",
-    "lt",
-    "lte",
-    "le",
-    "gt",
-    "gte",
-    "ge",
-    "between",
-    "is_null",
-    "is_not_null",
-)
-
-
-def _validate_condition(condition: dict) -> None:
-    if not isinstance(condition, dict) or "column" not in condition:
-        raise SpecError(
-            "ColRule.when must be a dict like {'column': 'enum_1', 'in': ['A', 'B']} "
-            f"(supported condition keys: {', '.join(_CONDITION_OPS)})"
-        )
-    ops_present = [op for op in _CONDITION_OPS if op in condition]
-    if len(ops_present) != 1:
-        raise SpecError(
-            f"ColRule.when for column {condition['column']!r} must have exactly one of "
-            f"{_CONDITION_OPS}, got {ops_present}"
-        )
-    if "between" in condition:
-        b = condition["between"]
-        if not (isinstance(b, (list, tuple)) and len(b) == 2 and b[0] <= b[1]):
-            raise SpecError(
-                f"ColRule.when 'between' condition requires a 2-element sequence [min, max] where min <= max, got {b!r}"
-            )
-    if "in" in condition and not isinstance(condition["in"], (list, tuple, set)):
-        raise SpecError(
-            f"ColRule.when 'in' condition requires a collection, got {type(condition['in']).__name__}"
-        )
-    if "not_in" in condition and not isinstance(
-        condition["not_in"], (list, tuple, set)
-    ):
-        raise SpecError(
-            f"ColRule.when 'not_in' condition requires a collection, got {type(condition['not_in']).__name__}"
-        )
 
 
 def _reject_duplicate_choices(
@@ -90,36 +43,6 @@ def _reject_duplicate_choices(
     )
 
 
-def _condition_to_pred(condition: dict) -> Pred:
-    """The predicate a legacy `{"column": ..., <op>: ...}` condition means."""
-    _validate_condition(condition)
-    column = col(condition["column"])
-    if "equals" in condition:
-        return column == condition["equals"]
-    if "not_equals" in condition:
-        return column != condition["not_equals"]
-    if "in" in condition:
-        return column.is_in(list(condition["in"]))
-    if "not_in" in condition:
-        return ~column.is_in(list(condition["not_in"]))
-    if "lt" in condition:
-        return column < condition["lt"]
-    if "lte" in condition or "le" in condition:
-        return column <= condition.get("lte", condition.get("le"))
-    if "gt" in condition:
-        return column > condition["gt"]
-    if "gte" in condition or "ge" in condition:
-        return column >= condition.get("gte", condition.get("ge"))
-    if "between" in condition:
-        lo, hi = condition["between"]
-        return column.is_between(lo, hi)
-    if "is_null" in condition:
-        return column.is_null() if condition["is_null"] else column.is_not_null()
-    if "is_not_null" in condition:
-        return column.is_not_null() if condition["is_not_null"] else column.is_null()
-    raise SpecError(f"Unrecognized condition: {condition}")
-
-
 @dataclass(frozen=True, slots=True, eq=False)
 class ColRule:
     """Restricts a column's generated values on rows where `when` matches.
@@ -142,27 +65,25 @@ class ColRule:
 
         ColRule(when=col("region") == "UK", choices=["RoyalMail"])
         ColRule(when=col("region").is_in(["US", "EU"]) & (col("qty") > 10), choices=["UPS"])
-
-    The original one-column dict form is still accepted and converted:
-
-        {"column": "enum_1", "equals": "A"}       {"column": "enum_1", "in": ["A", "B"]}
-        {"column": "enum_1", "not_equals": "A"}   {"column": "enum_1", "not_in": ["A", "B"]}
-        {"column": "n", "lt" | "le" | "gt" | "ge": 5}   {"column": "n", "between": [1, 5]}
-        {"column": "n", "is_null": True}          {"column": "n", "is_not_null": True}
     """
 
-    when: Pred | dict
+    when: Pred
     choices: tuple
     weights: tuple[float, ...] | None = None
 
     def __post_init__(self) -> None:
-        if isinstance(self.when, dict):
-            object.__setattr__(self, "when", _condition_to_pred(self.when))
-        elif not isinstance(self.when, Pred):
+        if not isinstance(self.when, Pred):
+            hint = ""
+            if isinstance(self.when, dict) and "column" in self.when:
+                hint = (
+                    " The one-column dict was removed: write "
+                    f"col({self.when['column']!r}) == ... instead. A spec file "
+                    "written by an earlier version still loads -- its "
+                    "conditions are converted as the file migrates."
+                )
             raise SpecError(
-                "ColRule.when must be a predicate built with col(), or a dict like "
-                "{'column': 'enum_1', 'in': ['A', 'B']}, got "
-                f"{type(self.when).__name__}"
+                "ColRule.when must be a predicate built with col(), got "
+                f"{type(self.when).__name__}.{hint}"
             )
         if not self.when.root_names():
             raise SpecError(

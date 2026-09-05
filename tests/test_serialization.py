@@ -19,7 +19,7 @@ from polspec import (
     ValidationError,
     col,
 )
-from polspec.serialization import _colspec_to_yaml
+from polspec.serialization.fields import colspec_to_data
 
 # ---------------------------------------------------------------------------
 # YAML round-trip
@@ -36,7 +36,7 @@ class YamlSource(FrameSpec):
         nullable=True,
         rules=(
             ColRule(
-                when={"column": "enum_1", "in": ["mammal", "reptile"]},
+                when=col("enum_1").is_in(["mammal", "reptile"]),
                 choices=[0.0, 1.0],
             ),
         ),
@@ -59,7 +59,7 @@ def test_yaml_roundtrip_preserves_column_order():
         {
             "name": "X",
             "columns": {
-                name: _colspec_to_yaml(spec)
+                name: colspec_to_data(spec)
                 for name, spec in YamlSource.spec.columns.items()
             },
         },
@@ -135,7 +135,7 @@ def test_distributions_and_weights_yaml_roundtrip(tmp_path):
             dtype=pl.String,
             rules=(
                 ColRule(
-                    when={"column": "enum_col", "equals": "X"},
+                    when=col("enum_col") == "X",
                     choices=["A", "B"],
                     weights=[0.8, 0.2],
                 ),
@@ -398,9 +398,9 @@ def test_to_python_renders_categorical_and_datetime_dtypes(tmp_path):
 
 
 def test_dtype_to_python_renders_time_zone():
-    from polspec.serialization import _dtype_to_python
+    from polspec.serialization.dtypes import dtype_to_source
 
-    src = _dtype_to_python(pl.Datetime(time_unit="us", time_zone="UTC"))
+    src = dtype_to_source(pl.Datetime(time_unit="us", time_zone="UTC"))
     assert src == "pl.Datetime(time_unit='us', time_zone='UTC')"
 
 

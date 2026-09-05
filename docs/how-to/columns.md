@@ -240,7 +240,7 @@ Sales.generate(3).columns   # ['Unit Price', 'Sales Region']
 ```
 
 `col_name` is the column's name everywhere the spec is used: in the generated
-frame, in `validate()`, in `ColRule.when={"column": ...}`, in
+frame, in `validate()`, in a `ColRule` condition built with `col()`, in
 `__unique_together__`, in `ForeignKey` columns and in `tag()` results. The
 attribute name exists only in the class body. Two attributes that resolve to
 the same `col_name` are rejected at declaration, and overriding an attribute

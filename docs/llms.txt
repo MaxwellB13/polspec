@@ -1,0 +1,56 @@
+# polspec
+
+> Declare a Polars schema once, then generate data from it and validate data against it.
+
+polspec is a Python library with a Rust extension. A schema is declared
+once -- as a `FrameSpec` class body or a YAML file -- and the same
+declaration both generates data that satisfies it and validates data
+against it. Full text of every page below is also available in one file:
+https://maxwellb13.github.io/polspec/llms-full.txt
+
+## Home
+
+- [Home](https://maxwellb13.github.io/polspec/): Declare a Polars schema once.
+
+## Tutorial
+
+- [Getting started](https://maxwellb13.github.io/polspec/tutorial/getting-started/): A spec is a class.
+- [Related tables](https://maxwellb13.github.io/polspec/tutorial/related-tables/): Getting started covers one spec on its own.
+
+## How-to guides
+
+- [Declare columns](https://maxwellb13.github.io/polspec/how-to/columns/): A `ColSpec` describes one column.
+- [Specs as values](https://maxwellb13.github.io/polspec/how-to/tablespec/): A `FrameSpec` class body is the convenient way to *write* a spec.
+- [Constraints](https://maxwellb13.github.io/polspec/how-to/constraints/): Beyond the shape of a single value, a spec can assert relationships.
+- [Generate data](https://maxwellb13.github.io/polspec/how-to/generating/): Columns are generated independently and in parallel by the Rust extension, then cast to their declared dtypes in one Polars pass.
+- [Validate data](https://maxwellb13.github.io/polspec/how-to/validating/): `validate()` accepts a `DataFrame` or a `LazyFrame` and returns the same kind, so it drops into a pipeline.
+- [Shared categories](https://maxwellb13.github.io/polspec/how-to/categories/): A `CatSpec` is a registry of `Enum` and `Categorical` definitions shared across specs, so several tables agree on a domain instead of each restating it.
+- [Specs as files](https://maxwellb13.github.io/polspec/how-to/files/): A spec can live in a file instead of a class body, so tooling outside Python can read it and so it can be reviewed as a document.
+- [Multiple specs](https://maxwellb13.github.io/polspec/how-to/registry/): A `ForeignKey` names the spec it points at, and a single spec knows nothing beyond that name.
+- [Generated documentation](https://maxwellb13.github.io/polspec/how-to/documenting/): A spec already holds everything a data dictionary needs, so polspec renders one rather than asking you to keep a second copy in step.
+- [Test pipelines](https://maxwellb13.github.io/polspec/how-to/testing/): A spec is a schema and a data source at once, which makes it a natural fit for the tests around a data pipeline: declare what a stage of the pipeline expects, generate data that matches, and validate what it produces.
+- [Command line](https://maxwellb13.github.io/polspec/how-to/cli/): `polspec` has two things to do with a schema: create one, and turn one into a test.
+
+## Reference
+
+- [Overview](https://maxwellb13.github.io/polspec/reference/api/): Every name `polspec` exports, rendered from its own docstrings.
+- [Columns](https://maxwellb13.github.io/polspec/reference/api/columns/): What one column declares, and the pieces that make up a declaration.
+- [Predicates](https://maxwellb13.github.io/polspec/reference/api/predicates/): `col()` builds the conditions a `ColRule` or a `Check` carries.
+- [Specs](https://maxwellb13.github.io/polspec/reference/api/specs/): A spec is a `TableSpec`: an immutable record of columns and constraints.
+- [Registry and categories](https://maxwellb13.github.io/polspec/reference/api/registry/): A declared set of specs, and the shared category domains they draw on.
+- [Validation results](https://maxwellb13.github.io/polspec/reference/api/validation/): `inspect()` returns a report; `validate()` raises one.
+- [Profiling](https://maxwellb13.github.io/polspec/reference/api/profiling/): Inferring a spec from data you already have.
+- [Exceptions](https://maxwellb13.github.io/polspec/reference/api/errors/): Every error polspec raises descends from `PolspecError`, so one `except` clause catches the lot.
+- [Errors and findings](https://maxwellb13.github.io/polspec/reference/errors/): Everything polspec raises on its own behalf derives from one base class, so a caller can separate "polspec objected" from "something else went wrong" with a single clause
+
+## Explanation
+
+- [Architecture](https://maxwellb13.github.io/polspec/explanation/architecture/): polspec is a small Python package over a Rust extension.
+- [Generation and validation](https://maxwellb13.github.io/polspec/explanation/two-sides/): polspec does two things with one declaration: it makes data that matches a spec, and it checks whether data matches a spec.
+- [Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/): polspec generates data and validates it from one declaration.
+- [Comparison](https://maxwellb13.github.io/polspec/explanation/comparison/): polspec sits at the intersection of two things usually solved by separate tools: generating test data, and validating that data against a schema.
+- [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/): polspec is early.
+
+## Optional
+
+- [Changelog](https://maxwellb13.github.io/polspec/changelog/): All notable changes to polspec are recorded here.

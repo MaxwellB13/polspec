@@ -113,6 +113,6 @@ mean.
 
 ## Next
 
-- [Declaring columns](guide/columns.md) — everything a `ColSpec` accepts
-- [Constraints](guide/constraints.md) — rules, checks, uniqueness, foreign keys
-- [Generating data](guide/generating.md) — coverage, batching, writing to files
+- [Declaring columns](../how-to/columns.md) — everything a `ColSpec` accepts
+- [Constraints](../how-to/constraints.md) — rules, checks, uniqueness, foreign keys
+- [Generating data](../how-to/generating.md) — coverage, batching, writing to files

@@ -33,6 +33,7 @@ from polspec import (
     FrameSpec,
     GenerationError,
     SpecError,
+    col,
 )
 
 ROWS = 300
@@ -316,7 +317,7 @@ class SingleRuleSpec(FrameSpec):
     v = ColSpec(
         pl.Int64,
         bounds=(0, 100),
-        rules=[ColRule(when={"column": "g", "equals": "x"}, choices=[7])],
+        rules=[ColRule(when=col("g") == "x", choices=[7])],
     )
 
 
@@ -326,8 +327,8 @@ class MultiRuleSpec(FrameSpec):
         pl.String,
         choices=["a", "b", "c"],
         rules=[
-            ColRule(when={"column": "g", "equals": "x"}, choices=["a"]),
-            ColRule(when={"column": "g", "in": ["y", "z"]}, choices=["b"]),
+            ColRule(when=col("g") == "x", choices=["a"]),
+            ColRule(when=col("g").is_in(["y", "z"]), choices=["b"]),
         ],
     )
 
@@ -336,11 +337,11 @@ class ChainedRuleSpec(FrameSpec):
     a = ColSpec(pl.Enum(["x", "y"]))
     b = ColSpec(
         pl.Enum(["x", "y"]),
-        rules=[ColRule(when={"column": "a", "equals": "x"}, choices=["y"])],
+        rules=[ColRule(when=col("a") == "x", choices=["y"])],
     )
     c = ColSpec(
         pl.Enum(["x", "y"]),
-        rules=[ColRule(when={"column": "b", "equals": "y"}, choices=["x"])],
+        rules=[ColRule(when=col("b") == "y", choices=["x"])],
     )
 
 
@@ -367,11 +368,11 @@ def test_rules_that_each_read_the_other_are_refused():
         class Circular(FrameSpec):
             a = ColSpec(
                 pl.Enum(["x", "y"]),
-                rules=[ColRule(when={"column": "b", "equals": "x"}, choices=["y"])],
+                rules=[ColRule(when=col("b") == "x", choices=["y"])],
             )
             b = ColSpec(
                 pl.Enum(["x", "y"]),
-                rules=[ColRule(when={"column": "a", "equals": "x"}, choices=["y"])],
+                rules=[ColRule(when=col("a") == "x", choices=["y"])],
             )
 
 

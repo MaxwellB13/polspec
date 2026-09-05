@@ -408,6 +408,12 @@ class CatSpec:
                 yield k
 
     def get(self, name: str, default: Any = None) -> Any:
+        """The entry registered under `name`, whatever kind it is.
+
+        A `Categorical` comes back as its dtype, an `Enum` as its list of
+        categories. Lookup is case-insensitive, so `"status"` finds
+        `STATUS`. Returns `default` when nothing is registered.
+        """
         if name in self._categoricals:
             return self._categoricals[name]
         if name in self._enums:

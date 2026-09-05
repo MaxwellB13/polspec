@@ -1,6 +1,6 @@
 import polars as pl
 import pytest
-from polspec import Bound, ColRule, ColSpec, FrameSpec
+from polspec import Bound, ColRule, ColSpec, FrameSpec, col
 
 
 class StreamDataSource(FrameSpec):
@@ -15,7 +15,7 @@ class StreamDataSource(FrameSpec):
         nullable=True,
         rules=(
             ColRule(
-                when={"column": "category", "equals": "alpha"},
+                when=col("category") == "alpha",
                 choices=[99.5],
             ),
         ),

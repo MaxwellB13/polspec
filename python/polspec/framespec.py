@@ -335,6 +335,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
 
     @classmethod
     def schema(cls) -> pl.Schema:
+        """The Polars schema this spec declares: column name to dtype."""
         return cls.spec.schema()
 
     @classmethod
