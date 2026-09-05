@@ -31,5 +31,6 @@ changelog:
     - title: "🔧 Tooling & CI"
       labels:
         - ci
+        - ci/cd
         - build
         - refactor
