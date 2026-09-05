@@ -125,13 +125,15 @@ ColSpec(pl.Enum(["x", "y", "z"]), weights=[1.0, 2.0, 7.0])
 ColSpec(pl.Boolean, weights=[0.9, 0.1])   # 10% true
 ```
 
-Choices must have distinct string forms, because values cross into the
-generator as strings and are mapped back by them:
+Choices are held in the column's own dtype, so a `datetime` choice on a
+`Datetime` column or a `bytes` choice on a `Binary` column stays what it is.
+They must be distinct once cast to that dtype -- `1` and `"1"` on a `String`
+column are one value:
 
 ```python
 ColSpec(pl.String, choices=[1, "1"])
-# ValueError: ColSpec.choices 1 and '1' both render as '1', so they cannot be
-# told apart during generation or validation.
+# ValueError: ColSpec.choices contains values that are the same once cast to
+# String: ['1']
 ```
 
 ## String and binary length

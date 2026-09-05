@@ -6,7 +6,9 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
+from polspec._ffi import column_plan
 from polspec._ffi import generate_dataframe as _generate_dataframe
+from polspec.dtypes import _typed_values
 from polspec.errors import SpecError
 from polspec.expr import Pred, col
 
@@ -61,24 +63,31 @@ def _validate_condition(condition: dict) -> None:
         )
 
 
-def _reject_colliding_choices(choices: tuple, label: str) -> None:
-    """Rejects choices that are distinct in Python but identical as strings.
+def _reject_duplicate_choices(
+    choices: tuple, label: str, dtype: pl.DataType | None = None
+) -> None:
+    """Rejects a choice that appears twice.
 
-    Choices reach the generation engine as `str(choice)` and are mapped back
-    by that string, and validation compares them the same way. Two choices
-    sharing a string form therefore collapse into one -- silently narrowing
-    the domain and sliding every later weight onto the wrong value.
+    With a `dtype`, "twice" means twice *once cast to that dtype*: `1` and
+    `"1"` on a String column are one value. Without one, as written. Weights
+    are positional, so a repeated choice would quietly double its share.
     """
-    seen: dict[str, object] = {}
-    for choice in choices:
-        key = str(choice)
-        if key in seen:
-            raise SpecError(
-                f"{label} {seen[key]!r} and {choice!r} both render as {key!r}, "
-                "so they cannot be told apart during generation or validation. "
-                "Give each choice a distinct string form."
-            )
-        seen[key] = choice
+    if dtype is None:
+        seen: set = set()
+        dupes = [c for c in choices if c in seen or seen.add(c)]
+        if dupes:
+            raise SpecError(f"{label} contains duplicate values {dupes}")
+        return
+    try:
+        typed = _typed_values(choices, dtype)
+    except Exception:  # noqa: BLE001 - the domain check reports what the dtype cannot hold
+        return
+    if typed.n_unique() == len(typed):
+        return
+    dupes = typed.filter(typed.is_duplicated()).unique(maintain_order=True).to_list()
+    raise SpecError(
+        f"{label} contains values that are the same once cast to {dtype}: {dupes}"
+    )
 
 
 def _condition_to_pred(condition: dict) -> Pred:
@@ -171,7 +180,7 @@ class ColRule:
                 )
         if not self.choices:
             raise SpecError("ColRule.choices must not be empty")
-        _reject_colliding_choices(self.choices, "ColRule.choices")
+        _reject_duplicate_choices(self.choices, "ColRule.choices")
         if self.weights is not None:
             if len(self.weights) != len(self.choices):
                 raise SpecError(
@@ -204,32 +213,26 @@ def _sample_choices(
     n: int,
     seed: int,
     weights: tuple[float, ...] | None = None,
+    dtype: pl.DataType | None = None,
 ) -> pl.Series:
-    """n values drawn (with replacement) from `choices` according to `weights`."""
-    if n == 0:
-        return pl.Series([], dtype=pl.String)
-    if len(choices) == 1:
-        return pl.Series([choices[0]] * n)
-
-    cats = [str(i) for i in range(len(choices))]
-    weights_list = [float(w) for w in weights] if weights is not None else None
-    idx_spec = (
-        "__idx",
-        "string",
-        False,
-        0.0,
-        None,
-        None,
-        cats,
-        weights_list,
-        None,
-        None,
-        None,
-        None,
+    """n values drawn (with replacement) from `choices` according to `weights`,
+    typed as `dtype` when one is given.
+    """
+    domain = (
+        _typed_values(choices, dtype) if dtype is not None else pl.Series(list(choices))
     )
-    idx_df = _generate_dataframe([idx_spec], n, seed)
-    idx_series = idx_df["__idx"].cast(pl.UInt32)
-    return pl.Series(list(choices)).gather(idx_series)
+    if n == 0:
+        return domain.clear()
+    if len(choices) == 1:
+        return domain.gather(pl.repeat(0, n, dtype=pl.UInt32, eager=True))
+    plan = column_plan(
+        "__idx",
+        "index",
+        n_categories=len(choices),
+        weights=[float(w) for w in weights] if weights is not None else None,
+    )
+    idx = _generate_dataframe([plan], n, seed)["__idx"]
+    return domain.gather(idx)
 
 
 def _apply_rules(
@@ -237,34 +240,36 @@ def _apply_rules(
 ) -> pl.DataFrame:
     """Overwrites values on rows matched by each column's ColRules.
 
-    A single vectorized pass over the already-generated DataFrame: for a
-    column with rules, rows matching a rule's `when` get a value resampled
-    from that rule's `choices` (first matching rule wins); everything else
-    keeps its freely-generated value. `when` expressions always see the
-    original freely-generated values, never another rule's output, so rules
-    on different columns never need dependency ordering.
+    A vectorised pass over the already-generated DataFrame: for a column
+    with rules, rows matching a rule's `when` get a value resampled from
+    that rule's `choices` (first matching rule wins); everything else keeps
+    its freely-generated value. Only as many values as there are matched
+    rows are sampled, and scattered into place. `when` expressions always
+    see the original freely-generated values, never another rule's output,
+    so rules on different columns never need dependency ordering.
     """
     if df.height == 0:
         return df
     rng = random.Random(seed)
-    exprs = []
+    replaced: list[pl.Series] = []
     for name, spec in columns.items():
         if not spec.rules:
             continue
-        chain = None
+        column = df[name]
+        claimed = pl.repeat(False, df.height, dtype=pl.Boolean, eager=True)
         for rule in spec.rules:
-            condition = rule._expr()
-            if len(rule.choices) == 1:
-                fill_expr = pl.lit(rule.choices[0], dtype=spec.dtype)
-            else:
-                fill_series = _sample_choices(
-                    rule.choices, df.height, rng.randrange(2**63), weights=rule.weights
-                ).cast(spec.dtype)
-                fill_expr = pl.lit(fill_series)
-            if chain is None:
-                chain = pl.when(condition).then(fill_expr)
-            else:
-                chain = chain.when(condition).then(fill_expr)
-        if chain is not None:
-            exprs.append(chain.otherwise(pl.col(name)).alias(name))
-    return df.with_columns(exprs) if exprs else df
+            mask = df.select(rule._expr().fill_null(False)).to_series() & ~claimed
+            rows = mask.arg_true()
+            if rows.len() == 0:
+                continue
+            fill = _sample_choices(
+                rule.choices,
+                rows.len(),
+                rng.randrange(2**63),
+                weights=rule.weights,
+                dtype=spec.dtype,
+            )
+            column = column.scatter(rows, fill)
+            claimed = claimed | mask
+        replaced.append(column.alias(name))
+    return df.with_columns(replaced) if replaced else df

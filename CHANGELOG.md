@@ -10,6 +10,21 @@ seed produces; see
 
 ### Added
 
+- The Rust boundary is typed. Python builds one `ColumnPlan` per column (a
+  `#[pyclass]` validated at construction, with errors naming the column)
+  instead of a positional tuple. Bounds cross as an `i64`, `u64` or `f64`,
+  so `Int64`/`UInt64` bounds beyond 2^53 are exact and the generation clamp
+  for an unbounded distribution reaches the dtype's true limits. Columns
+  with a finite domain (`choices`, `Enum`) receive indices back and the typed
+  values are gathered on the Python side, so a `datetime`, `bytes` or `True`
+  choice never passes through a string; choices need only be distinct in the
+  column's dtype, not as strings. `python/polspec/_polspec.pyi` is a stub for
+  the extension; `src/` is split into `plan.rs`, `dist.rs` and `sample.rs`
+  with unit tests under `cargo test`; a test compares the distribution
+  parameter tables on both sides.
+- `import polspec` works without the Rust extension: validation, spec files,
+  the registry and the report renderers need no build. Only generation
+  imports it, and raises one actionable `ImportError` when it is missing.
 - `Registry`: a declared set of specs. `Registry(Customers, Orders, ...)`
   resolves foreign keys declared against names (`resolve()`, running the
   checks a class-bound key gets at declaration), orders parents before
@@ -86,6 +101,13 @@ seed produces; see
 
 ### Changed
 
+- **Breaking.** Each column's generation seed is derived from the frame
+  seed and the column's *name*, not its position, so inserting a column no
+  longer reshuffles the columns after it. The values a given seed produces
+  change from previous versions.
+- `ColRule` application samples only as many values as there are matched
+  rows and scatters them into place, instead of filling the whole column per
+  rule.
 - `polspec.validation` is a package (`report.py`, `constraints.py`); foreign
   key anti-joins are collected together with `pl.collect_all` instead of one
   `collect` per key.

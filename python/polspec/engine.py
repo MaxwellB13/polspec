@@ -3,9 +3,11 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import random
+from typing import TYPE_CHECKING
 
 import polars as pl
 
+from polspec._ffi import column_plan
 from polspec._ffi import generate_dataframe as _generate_dataframe
 from polspec.bound import Bound
 from polspec.constants import (
@@ -19,10 +21,14 @@ from polspec.constants import (
 from polspec.dtypes import (
     _TIME_UNIT_FACTORS,
     _bound_endpoint_to_physical,
-    _generation_clamp_limits,
+    _dtype_value_limits,
+    _typed_values,
 )
 from polspec.errors import GenerationError
-from polspec.spec import ColSpec, _column_kind, _is_categorical_dtype
+from polspec.spec import ColSpec, _column_kind
+
+if TYPE_CHECKING:
+    from polspec._polspec import ColumnPlan
 
 
 def _stable_seed(*parts: str) -> int:
@@ -67,21 +73,10 @@ def _resolve_bounded_categorical(spec: ColSpec, seed: int) -> ColSpec:
         )
     else:
         pool_seed = seed
-    pool_spec = (
-        "__pool",
-        "string",
-        False,
-        0.0,
-        None,
-        None,
-        None,
-        None,
-        int(length.min),
-        int(length.max),
-        None,
-        None,
+    pool_plan = column_plan(
+        "__pool", "string", str_min_len=int(length.min), str_max_len=int(length.max)
     )
-    pool_df = _generate_dataframe([pool_spec], capacity, pool_seed)
+    pool_df = _generate_dataframe([pool_plan], capacity, pool_seed)
     # maintain_order=True: unique()'s default order isn't stable across calls,
     # which would make the same seed silently pick different pool[i] -> string
     # mappings and break reproducibility.
@@ -112,7 +107,7 @@ def _resolve_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
     # to the dtype's own limit rather than hand the engine an inverted range,
     # which it would silently swap.
     if lo > hi:
-        limits = _generation_clamp_limits(spec.dtype)
+        limits = _dtype_value_limits(spec.dtype)
         if limits is not None:
             if spec.bounds.max is None:
                 hi = limits[1]
@@ -169,108 +164,80 @@ _ENGINE_KINDS: dict[pl.DataType, str] = {
 }
 
 
-def _to_rust_spec(name: str, spec: ColSpec) -> tuple:
-    """Builds the tuple the Rust extension expects for one column.
+def _domain(spec: ColSpec) -> pl.Series | None:
+    """The finite, typed domain a column draws from, if it has one.
 
-    Layout: (name, kind, nullable, null_probability, min, max, categories,
-    weights, str_min_len, str_max_len, distribution, distribution_params).
+    Declared `choices`, or an Enum's categories. The engine samples *indices*
+    into this and the values are gathered back on the Python side, so a
+    choice keeps its type -- a `datetime`, a `bytes`, a `True` -- with no
+    string round-trip.
+    """
+    if spec.choices is not None:
+        return _typed_values(spec.choices, spec.dtype)
+    if isinstance(spec.dtype, pl.Enum):
+        return pl.Series(spec.dtype.categories, dtype=spec.dtype)
+    return None
+
+
+def _plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None]:
+    """The engine's instructions for one column, and the domain to gather
+    from when it samples indices.
     """
     kind = _column_kind(spec.dtype)
-    null_probability = spec.null_probability if spec.nullable else 0.0
+    weights = [float(w) for w in spec.weights] if spec.weights is not None else None
+    options: dict = {
+        "nullable": spec.nullable,
+        "null_probability": spec.null_probability if spec.nullable else 0.0,
+    }
 
-    min_bound: float | None = None
-    max_bound: float | None = None
-    categories: list[str] | None = None
-    weights: list[float] | None = (
-        [float(w) for w in spec.weights] if spec.weights is not None else None
-    )
-    str_min_len: int | None = None
-    str_max_len: int | None = None
-    distribution: str | None = spec.distribution
-    distribution_params: dict[str, float] | None = spec.distribution_params
+    domain = _domain(spec)
+    if domain is not None:
+        plan = column_plan(
+            name, "index", n_categories=len(domain), weights=weights, **options
+        )
+        return plan, domain
 
-    if spec.choices is not None:
-        categories = [str(c) for c in spec.choices]
-        kind = "string"
-    else:
-        kind = _ENGINE_KINDS.get(spec.dtype, kind)
+    if kind in ("int", "float", "temporal"):
+        engine_kind = _ENGINE_KINDS.get(spec.dtype, kind)
         if spec.dtype.is_temporal():
             # Temporal columns cross as their physical integer: Date is an
             # i32 day count, everything else an i64 in its own time unit.
-            kind = "int32" if spec.dtype == pl.Date else "int64"
+            engine_kind = "int32" if spec.dtype == pl.Date else "int64"
+        if (
+            spec.bounds is not None
+            or spec.distribution is None
+            or spec.distribution == "uniform"
+        ):
+            options["min"], options["max"] = _resolve_numeric_bounds(spec)
+        elif spec.dtype.is_temporal():
+            # A non-uniform distribution with no explicit bounds is left to
+            # its own shape rather than squeezed into polspec's default
+            # range -- but a temporal dtype's own domain is not optional:
+            # it reaches the engine as a bare integer kind, and without this
+            # clamp could produce values the dtype cannot represent.
+            options["min"], options["max"] = _dtype_value_limits(spec.dtype)
+        options["distribution"] = spec.distribution
+        if spec.distribution_params:
+            options["params"] = {
+                k: float(v) for k, v in spec.distribution_params.items()
+            }
+        return column_plan(name, engine_kind, **options), None
 
-        if spec.dtype.is_integer() or spec.dtype.is_float() or spec.dtype.is_temporal():
-            if (
-                spec.bounds is not None
-                or spec.distribution is None
-                or spec.distribution.lower() == "uniform"
-            ):
-                lo, hi = _resolve_numeric_bounds(spec)
-                min_bound, max_bound = float(lo), float(hi)
-            elif spec.dtype.is_temporal():
-                # A non-uniform distribution with no explicit bounds is left to
-                # its own shape rather than squeezed into polspec's default
-                # range -- but a temporal dtype's own domain is not optional.
-                # Temporal columns reach the engine as a bare int32/int64 kind,
-                # so without this clamp they are sampled across that whole
-                # integer range and produce values the dtype cannot represent
-                # (an unreadable Date, a negative Time). Integer and float
-                # dtypes need no such clamp: the engine already samples them in
-                # their own native type.
-                limits = _generation_clamp_limits(spec.dtype)
-                if limits is not None:
-                    min_bound, max_bound = float(limits[0]), float(limits[1])
-        elif kind in ("string", "binary"):
-            length = spec.string_length or Bound(*_DEFAULT_STRING_LEN)
-            str_min_len, str_max_len = int(length.min), int(length.max)
-            kind = "string"
-        elif kind in ("enum", "categorical"):
-            if kind == "enum":
-                categories = spec.dtype.categories.to_list()
-            else:
-                length = spec.string_length or Bound(*_DEFAULT_STRING_LEN)
-                str_min_len, str_max_len = int(length.min), int(length.max)
-            kind = "string"
+    if kind == "bool":
+        if spec.distribution_params:
+            options["params"] = {
+                k: float(v) for k, v in spec.distribution_params.items()
+            }
+        return column_plan(name, "bool", weights=weights, **options), None
 
-    return (
-        name,
-        kind,
-        spec.nullable,
-        null_probability,
-        min_bound,
-        max_bound,
-        categories,
-        weights,
-        str_min_len,
-        str_max_len,
-        distribution,
-        distribution_params,
-    )
+    # Free strings: String, Binary, and a Categorical with no pinned domain.
+    length = spec.string_length or Bound(*_DEFAULT_STRING_LEN)
+    options["str_min_len"], options["str_max_len"] = int(length.min), int(length.max)
+    return column_plan(name, "string", **options), None
 
 
-def _cast_expr(name: str, spec: ColSpec) -> pl.Expr:
-    if spec.choices is not None:
-        if spec.dtype in (pl.String, pl.Utf8):
-            return pl.col(name)
-        # The Rust engine samples from str(choice) values as plain strings;
-        # look each one back up to its original typed value instead of
-        # relying on pl.cast(), which can't parse e.g. "True"/a datetime
-        # repr string into Boolean/Datetime/Duration/Binary.
-        mapping = {str(c): c for c in spec.choices}
-        return pl.col(name).replace_strict(
-            mapping, default=None, return_dtype=spec.dtype
-        )
-
-    kind = _column_kind(spec.dtype)
-    if _is_categorical_dtype(spec.dtype):
-        # Cast to spec.dtype itself, not a bare pl.Categorical() -- a caller
-        # may have given a named pl.Categories() registry (e.g. shared across
-        # several FrameSpecs so their Categorical columns can be joined on
-        # physical codes), and that identity must survive generation.
-        return pl.col(name).cast(spec.dtype)
-    if kind == "string" and spec.dtype in (pl.String, pl.Utf8):
-        return pl.col(name)
-    if spec.dtype in (
+_ENGINE_NATIVE: frozenset = frozenset(
+    {
         pl.Int8,
         pl.Int16,
         pl.Int32,
@@ -282,9 +249,22 @@ def _cast_expr(name: str, spec: ColSpec) -> pl.Expr:
         pl.Float32,
         pl.Float64,
         pl.Boolean,
-    ):
-        return pl.col(name)
-    return pl.col(name).cast(spec.dtype)
+        pl.String,
+    }
+)
+
+
+def _finish(raw: pl.Series, spec: ColSpec, domain: pl.Series | None) -> pl.Series:
+    """A raw engine column as the declared dtype: gathered from its domain,
+    cast from its physical form, or as it came.
+    """
+    if domain is not None:
+        return domain.gather(raw).alias(raw.name)
+    if spec.dtype in _ENGINE_NATIVE:
+        return raw
+    # Temporal from its physical integer; Binary from strings; a Categorical
+    # cast to spec.dtype itself so a named pl.Categories() registry survives.
+    return raw.cast(spec.dtype)
 
 
 def _coverage_values(spec: ColSpec, rng: random.Random) -> list | None:
@@ -346,10 +326,16 @@ def _generate_random(
         name: _resolve_bounded_categorical(spec, rng.randrange(2**63))
         for name, spec in columns.items()
     }
-    rust_specs = [_to_rust_spec(name, spec) for name, spec in columns.items()]
-    raw_df = _generate_dataframe(rust_specs, n, seed)
-    cast_exprs = [_cast_expr(name, spec) for name, spec in columns.items()]
-    return raw_df.select(cast_exprs)
+    plans: list[ColumnPlan] = []
+    domains: dict[str, pl.Series | None] = {}
+    for name, spec in columns.items():
+        plan, domain = _plan_column(name, spec)
+        plans.append(plan)
+        domains[name] = domain
+    raw = _generate_dataframe(plans, n, seed)
+    return pl.DataFrame(
+        [_finish(raw[name], spec, domains[name]) for name, spec in columns.items()]
+    )
 
 
 def _generate_cartesian(

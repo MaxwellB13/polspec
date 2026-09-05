@@ -19,7 +19,7 @@ from polspec.distributions import (
 from polspec.dtypes import _bound_endpoint_to_physical, _dtype_value_limits
 from polspec.errors import SpecError
 from polspec.expr import Pred
-from polspec.rules import ColRule, _reject_colliding_choices
+from polspec.rules import ColRule, _reject_duplicate_choices
 
 
 def _column_kind(dtype: pl.DataType) -> str:
@@ -202,7 +202,7 @@ class ColSpec:
         if self.choices is not None:
             if not self.choices:
                 raise SpecError("ColSpec.choices must not be empty")
-            _reject_colliding_choices(self.choices, "ColSpec.choices")
+            _reject_duplicate_choices(self.choices, "ColSpec.choices", self.dtype)
 
     def _normalize_distribution(self) -> None:
         """Canonicalizes the distribution name and floats its parameters."""

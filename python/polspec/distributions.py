@@ -1,11 +1,9 @@
 """The distributions polspec can sample, and the parameter names each accepts.
 
-The Rust engine resolves the same aliases in `DistKind::from_spec`
-(`src/lib.rs`), so these two tables must agree. Keeping the Python side as a
-table rather than a hundred lines of nested branching is what makes the pair
-comparable at a glance -- the previous form hid, for example, that `normal`
-accepts `scale` as a synonym for `std` while `lognormal` accepts `sdlog`
-instead.
+Aliases are resolved here, at declaration, and only here: the Rust engine
+(`src/dist.rs`) reads the canonical names exactly and exports its own table as
+`distribution_params()`, which `tests/test_engine.py` compares with
+`DISTRIBUTIONS` so the two sides cannot drift.
 """
 
 from __future__ import annotations
@@ -39,9 +37,8 @@ class Param:
 
 
 # Canonical distribution name -> its parameters. The Rust engine accepts the
-# canonical names (`DistKind::from_spec` in `src/lib.rs`); Python is the only
-# place aliases are resolved, at declaration, so a spec file is always
-# canonical.
+# canonical names only (`src/dist.rs`); Python is the only place aliases are
+# resolved, at declaration, so a spec file is always canonical.
 DISTRIBUTIONS: dict[str, tuple[Param, ...]] = {
     "uniform": (),
     "normal": (

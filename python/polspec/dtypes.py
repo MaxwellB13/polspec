@@ -62,12 +62,6 @@ _TIMEDELTA_LIMIT_DELTAS = (dt.timedelta.min, dt.timedelta.max)
 # Nanoseconds in a day, minus one: the physical range of pl.Time.
 _TIME_LIMITS = (0, 86_399_999_999_999)
 
-# Largest magnitude a float64 represents without losing integer precision.
-# The spec tuple handed to the Rust engine carries bounds as f64, so a clamp
-# beyond this would not survive the trip intact -- it could round *outward*
-# past the limit it exists to enforce.
-_EXACT_FLOAT_INT = 2**53
-
 
 def _delta_to_unit(delta: dt.timedelta, factor: int) -> int:
     """A timedelta in `factor`-per-second units, exactly and saturating at i64.
@@ -107,22 +101,6 @@ def _dtype_value_limits(dtype: pl.DataType) -> tuple[float, float] | None:
     return None
 
 
-def _generation_clamp_limits(dtype: pl.DataType) -> tuple[float, float] | None:
-    """`_dtype_value_limits` narrowed to what the f64 spec channel carries exactly.
-
-    Used to clamp a distribution that has no explicit bounds. A declared bound
-    is checked against the dtype's true domain instead -- these are narrower on
-    purpose, because a clamp that rounds outward on its way to Rust enforces
-    nothing. Once bounds reach the engine as integers this can collapse back
-    into `_dtype_value_limits`.
-    """
-    limits = _dtype_value_limits(dtype)
-    if limits is None:
-        return None
-    lo, hi = limits
-    return max(lo, -_EXACT_FLOAT_INT), min(hi, _EXACT_FLOAT_INT)
-
-
 def _bound_endpoint_to_physical(value: object, dtype: pl.DataType) -> float | int:
     """Coerces a Bound endpoint to the physical (int) representation `dtype`
     stores internally, so real `date`/`datetime`/`time`/`timedelta` objects
@@ -132,3 +110,11 @@ def _bound_endpoint_to_physical(value: object, dtype: pl.DataType) -> float | in
     if isinstance(value, (int, float)):
         return value
     return pl.Series([value], dtype=dtype).to_physical().item()
+
+
+def _typed_values(values, dtype: pl.DataType) -> pl.Series:
+    """`values` as a Series of `dtype`, so a domain of choices is held in the
+    column's own type -- `[1, 2]` on a `String` column is `["1", "2"]`, a
+    `datetime` on a `Datetime` column stays a datetime.
+    """
+    return pl.Series(list(values), dtype=dtype, strict=False)

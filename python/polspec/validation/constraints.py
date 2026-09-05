@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
+from polspec.dtypes import _typed_values
 from polspec.validation.report import Finding
 
 if TYPE_CHECKING:
@@ -326,6 +327,17 @@ def _is_textual(dtype: pl.DataType) -> bool:
     )
 
 
+def _as_strings(values: Sequence[Any], dtype: pl.DataType) -> list[str]:
+    """`values` as the strings a column of `dtype` holds them as, so a choice
+    of `True` on a String column compares as `"true"` -- the same form
+    generation produces -- rather than as Python's `str(True)`.
+    """
+    try:
+        return _typed_values(values, dtype).cast(pl.String).to_list()
+    except Exception:  # noqa: BLE001 - values the dtype cannot hold fall back to str()
+        return [str(v) for v in values]
+
+
 def _struct_of(names: Sequence[str]) -> pl.Expr | None:
     """A struct of the named columns, for sampling multi-column claims."""
     return pl.struct([pl.col(n) for n in names]) if names else None
@@ -363,7 +375,7 @@ def _column_constraints(
     allowed = _allowed_values(spec)
     if allowed is not None:
         if _is_textual(actual_dtype):
-            in_domain = column.cast(pl.String).is_in([str(c) for c in allowed])
+            in_domain = column.cast(pl.String).is_in(_as_strings(allowed, spec.dtype))
             sample_expr = column.cast(pl.String)
         else:
             in_domain = column.is_in(allowed)
@@ -497,7 +509,9 @@ def _rule_constraints(
         claimed = claimed | rule._expr()
 
         if _is_textual(actual_dtype):
-            in_choices = column.cast(pl.String).is_in([str(c) for c in rule.choices])
+            in_choices = column.cast(pl.String).is_in(
+                _as_strings(rule.choices, spec.dtype)
+            )
             sample_expr = column.cast(pl.String)
         else:
             in_choices = column.is_in(list(rule.choices))

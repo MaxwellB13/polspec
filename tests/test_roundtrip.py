@@ -173,6 +173,19 @@ COLUMN_CASES: dict[str, ColSpec] = {
     "validator_implied_by_bounds": ColSpec(
         pl.Int64, bounds=(1, 10), validators=[pl.col("c") > 0]
     ),
+    # bounds beyond 2**53 cross the boundary as integers, so nothing rounds
+    "int64_bounds_above_2_53": ColSpec(
+        pl.Int64, bounds=(9_007_199_254_740_990, 9_007_199_254_740_999)
+    ),
+    "uint64_bounds_at_the_maximum": ColSpec(
+        pl.UInt64, bounds=(18_446_744_073_709_551_600, 18_446_744_073_709_551_615)
+    ),
+    # typed choices: no string round-trip on the way back from the engine
+    "datetime_choices": ColSpec(
+        pl.Datetime("us"),
+        choices=[dt.datetime(2024, 1, 1, 12), dt.datetime(2025, 6, 30, 8, 30)],
+    ),
+    "binary_choices": ColSpec(pl.Binary, choices=[b"\x00\x01", b"\xff"]),
 }
 
 
@@ -185,13 +198,6 @@ BROKEN_COLUMN_CASES: dict[str, tuple[ColSpec, str]] = {
     "unique_narrow_domain": (
         ColSpec(pl.Int8, unique=True),
         "C5: unique=True is validated but never enforced during generation",
-    ),
-    "int64_bounds_above_2_53": (
-        ColSpec(pl.Int64, bounds=(9_007_199_254_740_990, 9_007_199_254_740_999)),
-        (
-            "C6: bounds are passed to Rust as f64, so integer bounds above "
-            "2**53 round and generation overshoots the declared maximum"
-        ),
     ),
 }
 
@@ -280,11 +286,6 @@ def test_distribution_on_temporal_column_stays_in_dtype_range(dtype, std):
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="C6: UInt64 bounds near the dtype maximum collapse to a single "
-    "value once routed through f64",
-)
 def test_uint64_bounds_near_maximum_keep_precision():
     spec_cls = _spec_for(
         "uint64_huge",

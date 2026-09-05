@@ -16,8 +16,8 @@ owns only the inner loop that fills arrays with values.
 | `spec` | `ColSpec` — one column's declaration, and everything it validates about itself |
 | `rules` | `ColRule` — conditional values, and the pass that applies them |
 | `foreign_key` | `ForeignKey` — declaration, and the pass that makes generated keys consistent |
-| `engine` | Turning a spec into the tuple the Rust extension takes, and casting the result back |
-| `_ffi` | The one call into the Rust extension, with its errors re-raised as `GenerationError` |
+| `engine` | Turning a spec into the `ColumnPlan` the Rust extension takes, and finishing the result: gathering typed choices, casting temporal columns back |
+| `_ffi` | The only module that imports the Rust extension (lazily), building plans and re-raising its errors as `GenerationError` |
 | `errors` | The `PolspecError` hierarchy |
 | `validation` | `inspect` and `validate` over a `TableSpec`: every claim becomes a `_Constraint` (`constraints.py`) that produces a `Finding`; `report.py` holds `Finding` and `ValidationReport` |
 | `tablespec` | `TableSpec` — a spec as an immutable value, with its declaration-time checks and structural operations |
@@ -38,16 +38,16 @@ and `report` is not reachable from either the generation or validation path.
 ```mermaid
 flowchart LR
     A["FrameSpec.generate(n, seed)"] --> B["_generate_random<br/>or _generate_cartesian"]
-    B --> C["_to_rust_spec<br/>per column"]
+    B --> C["_plan_column: one<br/>ColumnPlan per column"]
     C --> D["Rust: generate_dataframe<br/>columns in parallel"]
-    D --> E["_cast_expr<br/>back to declared dtypes"]
+    D --> E["_finish: gather typed choices,<br/>cast temporal columns back"]
     E --> F["_apply_rules"]
     F --> G["_apply_foreign_keys"]
     G --> H[DataFrame]
 ```
 
-Each column becomes a flat tuple — kind, nullability, bounds, categories,
-weights, lengths, distribution — crossing into Rust once. Rust fills the
+Each column becomes a `ColumnPlan` — kind, nullability, exact bounds, domain
+size and weights, lengths, distribution — crossing into Rust once. Rust fills the
 columns in parallel, and within a column in 65,536-row chunks whose seeds come
 from the chunk index, so output is identical regardless of thread count.
 
@@ -78,18 +78,32 @@ Adding a new kind of check means adding a class, not editing two distant loops.
 
 ## The Python / Rust boundary
 
-Rust knows about *kinds* — `int64`, `float32`, `string`, `bool` — not about
-polspec's vocabulary. `Date` crosses as an `int32` day count, `Datetime` as an
-`int64` in its own time unit, `Enum` and `Categorical` as strings.
+Python builds one `ColumnPlan` per column -- a `#[pyclass]` in `src/plan.rs`
+that validates itself at construction, so an unknown kind, a weight vector of
+the wrong length or a distribution parameter out of range is refused with a
+message naming the column before any sampling starts. `polspec/_ffi.py` is the
+only module that imports the extension, lazily: validation, spec files and the
+registry work without a built extension, and only generation asks for one.
 
-That keeps the extension small, at one cost worth knowing: bounds cross as
-`f64`, so integer bounds beyond 2^53 lose precision. It is why the generation
-clamp for an unbounded distribution is capped at 2^53 — a limit that rounds
-outward would enforce nothing.
+Rust knows about *kinds*, not about polspec's vocabulary: `int8` .. `uint64`,
+`float32`/`float64`, `bool`, `string`, and `index`. `Date` crosses as an
+`int32` day count and `Datetime`/`Duration`/`Time` as an `int64` in their own
+unit. Anything with a finite domain -- `choices`, an `Enum`, a
+capacity-limited `Categorical` -- crosses as `index` with the domain's size
+and weights; Rust returns `UInt32` indices and Python gathers the typed values
+back, so a `datetime` or a `bytes` choice never passes through a string.
 
-The distribution parameter aliases exist on both sides of the boundary, in
-`polspec/distributions.py` and `DistKind::from_spec` in `src/lib.rs`. Both are
-tables so the pair can be compared at a glance; they must be changed together.
+Bounds cross as a `Limit`: an `i64`, a `u64` or an `f64`, whichever holds the
+Python value exactly, so `Int64` and `UInt64` bounds keep every bit.
+
+Distribution parameter *aliases* live only in `polspec/distributions.py` and
+are resolved when a column is declared; `src/dist.rs` reads canonical keys and
+exports its table as `distribution_params()`, which a test compares with the
+Python one. Each column's seed is derived from the frame seed and the column
+*name* (`sample.rs`), so inserting a column never reshuffles its neighbours.
+`src/sample.rs` has no Python types and carries the unit tests `cargo test`
+runs; `python/polspec/_polspec.pyi` is the stub, and a test asserts its names
+match the module.
 
 ## Tests
 
@@ -114,6 +128,7 @@ tables so the pair can be compared at a glance; they must be changed together.
 | `test_catspec.py` | Shared category registries |
 | `test_streaming.py` | Batching and the file sinks |
 | `test_cli.py` | The command line, including running a generated test file under pytest |
+| `test_engine.py` | The Python / Rust boundary: typed plans, exact bounds, typed choices, per-column seeds, the stub |
 
 The round-trip file carries `xfail(strict=True)` markers for known gaps, so a
 fix turns the marker into a failure rather than passing unnoticed. See
