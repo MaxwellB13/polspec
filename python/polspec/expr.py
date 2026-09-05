@@ -67,21 +67,30 @@ class Pred:
     """Base class of every predicate node. Build one with `col()`."""
 
     def to_expr(self) -> pl.Expr:
+        """This predicate as the Polars expression that evaluates it."""
         raise NotImplementedError
 
     def to_data(self) -> Any:
+        """This predicate as plain data, for writing to a spec file."""
         raise NotImplementedError
 
     def to_source(self) -> str:
+        """This predicate as the `col(...)` Python that would rebuild it."""
         raise NotImplementedError
 
     def root_names(self) -> set[str]:
+        """Every column name this predicate reads."""
         return set()
 
     def literals(self) -> list[Any]:
+        """Every constant this predicate compares against.
+
+        Used to check a rule's operands against the column's own domain.
+        """
         return []
 
     def rename(self, mapping: Mapping[str, str]) -> Pred:
+        """The same predicate with its columns renamed by `mapping`."""
         return self
 
     def equals(self, other: object) -> bool:
@@ -160,15 +169,19 @@ class Pred:
     # -- methods -------------------------------------------------------------
 
     def is_in(self, values: Sequence[Any]) -> IsIn:
+        """A predicate true where this value is one of `values`."""
         return IsIn(self, tuple(values))
 
     def is_null(self) -> IsNull:
+        """A predicate true where this value is null."""
         return IsNull(self)
 
     def is_not_null(self) -> Not:
+        """A predicate true where this value is present."""
         return Not(IsNull(self))
 
     def is_between(self, lower: Any, upper: Any) -> Between:
+        """A predicate true where this value falls within `[lower, upper]`."""
         return Between(self, _wrap(lower), _wrap(upper))
 
     @property

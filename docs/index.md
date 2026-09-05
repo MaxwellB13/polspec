@@ -27,7 +27,7 @@ Most schema tools do one or the other. A validation library tells you when
 production data drifted; a fixture library gives you something to test against.
 Keeping both behind one declaration means the fixtures and the contract cannot
 disagree — and where they might, polspec has a test suite whose whole job is to
-catch it (see [Known limitations](reference/limitations.md)).
+catch it (see [Known limitations](explanation/limitations.md)).
 
 That is the practical payoff: the data in your tests is data your validator
 already accepts, so a test that passes locally is not passing on a shape
@@ -43,28 +43,28 @@ production will reject.
     binary, all four temporal types, `Enum` and `Categorical` — plus
     nullability, bounds, string lengths and value domains.
 
-    [Declaring columns](guide/columns.md)
+    [Declaring columns](how-to/columns.md)
 
 - **Rules and invariants**
 
     Conditional values, single-column validators, multi-column checks,
     composite uniqueness and foreign keys between specs.
 
-    [Constraints](guide/constraints.md)
+    [Constraints](how-to/constraints.md)
 
 - **Data on demand**
 
     Random or coverage-guaranteeing generation, reproducible seeds, batched
     streaming straight to Parquet, CSV, Arrow IPC or NDJSON.
 
-    [Generating data](guide/generating.md)
+    [Generating data](how-to/generating.md)
 
 - **Specs from elsewhere**
 
     Infer a spec by profiling an existing DataFrame, or load one from YAML so
     non-Python tooling can read it too.
 
-    [YAML specs](guide/yaml.md)
+    [YAML specs](how-to/files.md)
 
 - **From the command line**
 
@@ -72,7 +72,7 @@ production will reject.
     a schema; `polspec test spec.yaml -o test_spec.py` turns a schema into a
     pytest round-trip test.
 
-    [Command line](guide/cli.md)
+    [Command line](how-to/cli.md)
 
 </div>
 
@@ -95,8 +95,16 @@ included via `[arrow]`/the `dev` group above.
 
 ## Where to go next
 
-Start with [Getting started](getting-started.md) for the full loop — declare,
+Start with [Getting started](tutorial/getting-started.md) for the full loop — declare,
 generate, validate — in about five minutes. If you're weighing polspec
 against a hand-rolled fixture, Faker, or a data-quality framework, see
-[Comparison to other approaches](comparison.md) for where each one fits and
+[Comparison to other approaches](explanation/comparison.md) for where each one fits and
 the benchmark numbers behind the speed claim.
+
+## For language models
+
+The documentation is published in the [llms.txt](https://llmstxt.org) format:
+[`/llms.txt`](https://maxwellb13.github.io/polspec/llms.txt) indexes every
+page, and [`/llms-full.txt`](https://maxwellb13.github.io/polspec/llms-full.txt)
+carries the full text of all of them -- including the API reference, expanded
+to signatures and docstrings -- in one file.

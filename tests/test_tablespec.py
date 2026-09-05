@@ -31,7 +31,7 @@ class Orders(FrameSpec):
     region = ColSpec(pl.Enum(["UK", "US"]))
     carrier = ColSpec(
         pl.Enum(["RM", "UPS"]),
-        rules=[ColRule(when={"column": "region", "equals": "UK"}, choices=["RM"])],
+        rules=[ColRule(when=col("region") == "UK", choices=["RM"])],
     )
     total = ColSpec(pl.Float64, bounds=(0.0, None))
     __unique_together__ = [["customer_id", "order_id"]]
@@ -118,7 +118,7 @@ def test_table_spec_validates_like_a_class_body():
             {
                 "a": ColSpec(
                     pl.Int64,
-                    rules=[ColRule(when={"column": "zzz", "equals": 1}, choices=[1])],
+                    rules=[ColRule(when=col("zzz") == 1, choices=[1])],
                 )
             },
         )

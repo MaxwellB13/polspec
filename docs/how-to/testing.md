@@ -161,12 +161,14 @@ column's exact value" — a `ColRule` pins it deterministically instead of
 filtering generated rows and hoping one matches:
 
 ```python
+from polspec import ColRule, col
+
 class PaymentWithForcedCase(FrameSpec):
     method = ColSpec(pl.Enum(["card", "wire", "cash"]))
     amount = ColSpec(
         pl.Int64,
         bounds=(-1000, 1000),
-        rules=[ColRule(when={"column": "method", "equals": "wire"}, choices=[0])],
+        rules=[ColRule(when=col("method") == "wire", choices=[0])],
     )
 
 
@@ -195,7 +197,7 @@ data actually looks like" into a schema you can generate more of.
 
 ## A caveat, not a footnote
 
-polspec is early alpha — see [Roadmap and stability](../reference/roadmap.md).
+polspec is early alpha — see [Roadmap and stability](../explanation/roadmap.md).
 Tests built on it today are exercising real, useful properties (shape,
 referential integrity, boundary coverage), but the exact values a given seed
 produces are not guaranteed to survive a polspec upgrade. Pin a seed for

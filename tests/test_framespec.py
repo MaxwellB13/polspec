@@ -15,7 +15,7 @@ from polspec import (
     FrameSpec,
     ValidationError,
 )
-from polspec.serialization import _colspec_to_yaml
+from polspec.serialization.fields import colspec_to_data
 
 # ---------------------------------------------------------------------------
 # inheritance and the public surface
@@ -50,7 +50,7 @@ def test_modular_subpackage_imports():
     )
     from polspec.profiler import profile_dataframe as profile_dataframe_direct
     from polspec.rules import ColRule as ColRuleDirect
-    from polspec.serialization import _colspec_from_yaml
+    from polspec.serialization.fields import colspec_from_data
     from polspec.spec import ColSpec as ColSpecDirect
     from polspec.validation import (
         ValidationError as ValidationErrorDirect,
@@ -65,8 +65,8 @@ def test_modular_subpackage_imports():
     assert FrameSpec is FrameSpecDirect
     assert ValidationError is ValidationErrorDirect
     assert profile_dataframe is profile_dataframe_direct
-    assert callable(_colspec_to_yaml)
-    assert callable(_colspec_from_yaml)
+    assert callable(colspec_to_data)
+    assert callable(colspec_from_data)
     assert callable(_generate_random)
     assert callable(_generate_cartesian)
     assert callable(inspect_direct)

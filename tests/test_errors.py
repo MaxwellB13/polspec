@@ -19,6 +19,7 @@ from polspec import (
     SerializationError,
     SpecError,
     ValidationError,
+    col,
 )
 from polspec.errors import CliError
 
@@ -56,7 +57,7 @@ def test_bad_declaration_is_a_spec_error():
         class Broken(FrameSpec):
             a = ColSpec(
                 pl.Int64,
-                rules=[ColRule(when={"column": "zzz", "equals": 1}, choices=[1])],
+                rules=[ColRule(when=col("zzz") == 1, choices=[1])],
             )
 
 

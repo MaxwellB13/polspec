@@ -10,6 +10,7 @@ from polspec import (
     ForeignKey,
     FrameSpec,
     ValidationError,
+    col,
 )
 
 
@@ -256,7 +257,7 @@ def test_validation_colrule():
             nullable=False,
             rules=(
                 ColRule(
-                    when={"column": "status", "equals": "inactive"},
+                    when=col("status") == "inactive",
                     choices=[0.0],
                 ),
             ),
@@ -348,10 +349,8 @@ def test_validation_rule_precedence():
         amount = ColSpec(
             dtype=pl.Int64,
             rules=(
-                ColRule(when={"column": "tier", "equals": "gold"}, choices=[100]),
-                ColRule(
-                    when={"column": "tier", "in": ["gold", "silver"]}, choices=[50]
-                ),
+                ColRule(when=col("tier") == "gold", choices=[100]),
+                ColRule(when=col("tier").is_in(["gold", "silver"]), choices=[50]),
             ),
         )
 

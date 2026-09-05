@@ -21,7 +21,7 @@ polspec schema infer SOURCE -o OUTPUT.py [options]
 `SOURCE` is a `.csv`, `.tsv`, `.parquet`, `.ndjson`/`.jsonl`, `.json`, or Arrow
 IPC (`.arrow`/`.ipc`/`.feather`) file. It is read with the matching Polars
 reader and profiled with `FrameSpec.from_dataframe`, the same function behind
-[Getting started](../getting-started.md#infer-a-spec-instead-of-writing-one).
+[Getting started](../tutorial/getting-started.md#infer-a-spec-instead-of-writing-one).
 
 `OUTPUT`'s extension picks the format: `.yaml`/`.yml` writes a YAML spec via
 `FrameSpec.to_yaml`; `.py` writes a `FrameSpec` subclass via
@@ -110,7 +110,7 @@ def test_orders_cartesian_coverage():
 ### It will not hand you a test that fails on the spot
 
 `generate()` does not attempt everything `validate()` checks — see
-[Known limitations](../reference/limitations.md). A spec using `__checks__` or
+[Known limitations](../explanation/limitations.md). A spec using `__checks__` or
 `ColSpec.validators` would otherwise generate a test that fails the moment it
 runs, because both wrap arbitrary expressions nothing can be generated to
 satisfy. The generator checks for each and disables the corresponding
@@ -137,7 +137,7 @@ marked `@pytest.mark.skip` with a reason, rather than guessed at:
         "Child has foreign key(s) 'fk_parent_id__Parent' referencing another "
         "FrameSpec. generate()/validate() need a parent DataFrame via "
         "references={OtherSpec: parent_df} -- see "
-        "docs/guide/constraints.md#referential-integrity-foreignkey."
+        "docs/how-to/constraints.md#referential-integrity-foreignkey."
     )
 )
 def test_child_roundtrip():

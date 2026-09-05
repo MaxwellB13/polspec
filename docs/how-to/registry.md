@@ -126,7 +126,7 @@ registry = Registry.from_yaml("specs.yaml").resolve()
 ```
 
 `categories:` may also be a path to a `CatSpec` file, relative to the registry
-file. Everything [YAML specs](yaml.md) says about what survives a round-trip
+file. Everything [YAML specs](files.md) says about what survives a round-trip
 applies to each spec in the file.
 
 ## Finding specs

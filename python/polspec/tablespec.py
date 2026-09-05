@@ -108,6 +108,8 @@ class TableSpec:
     foreign_keys : Sequence[ForeignKey]
         Referential-integrity constraints.
 
+    Notes
+    -----
     Everything a `FrameSpec` class body validates at declaration is validated
     here, so a `TableSpec` that constructs is one that can be used.
     """
@@ -313,6 +315,7 @@ class TableSpec:
         return len(self.columns)
 
     def schema(self) -> pl.Schema:
+        """The Polars schema this spec declares: column name to dtype."""
         return pl.Schema({name: spec.dtype for name, spec in self.columns.items()})
 
     def tag(
@@ -353,6 +356,7 @@ class TableSpec:
     # ------------------------------------------------------------------
 
     def with_name(self, name: str) -> TableSpec:
+        """A copy of this spec under a different name."""
         return dataclasses.replace(self, name=name)
 
     def with_columns(
@@ -368,14 +372,17 @@ class TableSpec:
         return dataclasses.replace(self, columns=merged)
 
     def with_checks(self, *checks: Check) -> TableSpec:
+        """A copy of this spec with `checks` added to the ones it has."""
         return dataclasses.replace(self, checks=(*self.checks, *checks))
 
     def with_foreign_keys(self, *foreign_keys: ForeignKey) -> TableSpec:
+        """A copy of this spec with `foreign_keys` added to the ones it has."""
         return dataclasses.replace(
             self, foreign_keys=(*self.foreign_keys, *foreign_keys)
         )
 
     def with_unique_together(self, *groups: Sequence[str]) -> TableSpec:
+        """A copy of this spec with `groups` added as composite unique keys."""
         return dataclasses.replace(
             self,
             unique_together=(*self.unique_together, *(tuple(g) for g in groups)),

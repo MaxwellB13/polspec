@@ -45,6 +45,8 @@ class ForeignKey:
         A human-readable identifier. Defaults to a name derived from the
         columns and target.
 
+    Notes
+    -----
     Rows where any of `columns` is null are exempt (standard FK semantics --
     a null foreign key means "no reference", not "an invalid one").
 

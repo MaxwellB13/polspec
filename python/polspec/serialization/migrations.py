@@ -25,13 +25,93 @@ from typing import Any
 
 from polspec.distributions import canonicalize_params, normalize_distribution
 from polspec.errors import SerializationError
+from polspec.expr import Pred, col
 
 FORMAT_VERSION = 2
 
 
-def _spec_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
-    from polspec.rules import _condition_to_pred
+# ---------------------------------------------------------------------------
+# Version 1 vocabulary
+#
+# A v1 file wrote a rule's `when` as a one-column dict. `ColRule` used to
+# accept the same shape directly; it no longer does, so this is the only
+# place that understands it -- reading a file old enough to contain one.
+# ---------------------------------------------------------------------------
 
+_CONDITION_OPS = (
+    "equals",
+    "not_equals",
+    "in",
+    "not_in",
+    "lt",
+    "lte",
+    "gt",
+    "gte",
+    "between",
+    "is_null",
+    "is_not_null",
+)
+
+
+def _validate_condition(condition: dict) -> None:
+    if not isinstance(condition, dict) or "column" not in condition:
+        raise SerializationError(
+            "A version 1 rule condition must be a dict like "
+            "{'column': 'enum_1', 'in': ['A', 'B']} "
+            f"(supported keys: {', '.join(_CONDITION_OPS)})"
+        )
+    ops_present = [op for op in _CONDITION_OPS if op in condition]
+    if len(ops_present) != 1:
+        raise SerializationError(
+            f"A version 1 rule condition on column {condition['column']!r} must "
+            f"have exactly one of {_CONDITION_OPS}, got {ops_present}"
+        )
+    if "between" in condition:
+        b = condition["between"]
+        if not (isinstance(b, (list, tuple)) and len(b) == 2 and b[0] <= b[1]):
+            raise SerializationError(
+                "A version 1 'between' condition requires a 2-element sequence "
+                f"[min, max] where min <= max, got {b!r}"
+            )
+    for op in ("in", "not_in"):
+        if op in condition and not isinstance(condition[op], (list, tuple, set)):
+            raise SerializationError(
+                f"A version 1 {op!r} condition requires a collection, got "
+                f"{type(condition[op]).__name__}"
+            )
+
+
+def _condition_to_pred(condition: dict) -> Pred:
+    """The predicate a version 1 `{"column": ..., <op>: ...}` condition means."""
+    _validate_condition(condition)
+    column = col(condition["column"])
+    if "equals" in condition:
+        return column == condition["equals"]
+    if "not_equals" in condition:
+        return column != condition["not_equals"]
+    if "in" in condition:
+        return column.is_in(list(condition["in"]))
+    if "not_in" in condition:
+        return ~column.is_in(list(condition["not_in"]))
+    if "lt" in condition:
+        return column < condition["lt"]
+    if "lte" in condition:
+        return column <= condition["lte"]
+    if "gt" in condition:
+        return column > condition["gt"]
+    if "gte" in condition:
+        return column >= condition["gte"]
+    if "between" in condition:
+        lo, hi = condition["between"]
+        return column.is_between(lo, hi)
+    if "is_null" in condition:
+        return column.is_null() if condition["is_null"] else column.is_not_null()
+    if "is_not_null" in condition:
+        return column.is_not_null() if condition["is_not_null"] else column.is_null()
+    raise SerializationError(f"Unrecognized version 1 condition: {condition}")
+
+
+def _spec_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
     out = dict(data)
     columns = out.get("columns")
     if isinstance(columns, Mapping):

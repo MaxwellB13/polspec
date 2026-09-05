@@ -48,15 +48,15 @@ predicate has no truth value. Compare two structurally with `Pred.equals`.
 A rule overwrites a column on the rows where its condition matches.
 
 ```python
-from polspec import ColRule
+from polspec import ColRule, col
 
 class Shipments(FrameSpec):
     region = ColSpec(pl.Enum(["UK", "US", "EU"]))
     carrier = ColSpec(
         pl.Enum(["RoyalMail", "UPS", "DHL"]),
         rules=[
-            ColRule(when={"column": "region", "equals": "UK"}, choices=["RoyalMail"]),
-            ColRule(when={"column": "region", "in": ["US", "EU"]}, choices=["UPS", "DHL"]),
+            ColRule(when=col("region") == "UK", choices=["RoyalMail"]),
+            ColRule(when=col("region").is_in(["US", "EU"]), choices=["UPS", "DHL"]),
         ],
     )
 ```
@@ -65,19 +65,18 @@ Multiple rules on one column are tried in declaration order, first match wins,
 like a SQL `CASE`. `choices` may be weighted exactly as on a `ColSpec`:
 
 ```python
-ColRule(when={"column": "region", "equals": "US"}, choices={"UPS": 3.0, "DHL": 1.0})
+ColRule(when=col("region") == "US", choices={"UPS": 3.0, "DHL": 1.0})
 ```
 
-`when` is a small dict rather than an expression so that rules survive a YAML
-round-trip. The supported forms:
+`when` is a predicate built with [`col()`](#writing-conditions-col), not an
+arbitrary Polars expression, so that every rule can round-trip through a spec
+file. Conditions compose:
 
 ```python
-{"column": "c", "equals": "A"}          {"column": "c", "not_equals": "A"}
-{"column": "c", "in": ["A", "B"]}       {"column": "c", "not_in": ["A", "B"]}
-{"column": "c", "lt": 10}               {"column": "c", "lte": 10}
-{"column": "c", "gt": 10}               {"column": "c", "gte": 10}
-{"column": "c", "between": [1, 10]}
-{"column": "c", "is_null": True}        {"column": "c", "is_not_null": True}
+ColRule(
+    when=col("region").is_in(["US", "EU"]) & (col("weight_kg") > 10),
+    choices=["DHL"],
+)
 ```
 
 !!! note "Rules see the frame as it stands"

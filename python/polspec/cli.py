@@ -347,7 +347,7 @@ def _skip_reasons(spec_cls: type[FrameSpec]) -> tuple[dict[str, bool], list[str]
     """validate() flags to disable, and why, so the generated test can pass.
 
     generate() does not attempt __checks__ or ColSpec.validators -- see
-    docs/reference/limitations.md. A round-trip test that did not account for
+    docs/explanation/limitations.md. A round-trip test that did not account for
     this would simply fail on any spec using them, so the flag each
     constraint needs is disabled with a comment explaining why, rather than
     emitting a test the CLI already knows will not pass.
@@ -396,7 +396,7 @@ def _render_test_case(
             f'        "{class_name} has foreign key(s) {names} referencing another "\n'
             f'        "FrameSpec. generate()/validate() need a parent DataFrame via "\n'
             f'        "references={{OtherSpec: parent_df}} -- see "\n'
-            f'        "docs/guide/constraints.md#referential-integrity-foreignkey."\n'
+            f'        "docs/how-to/constraints.md#referential-integrity-foreignkey."\n'
             f"    )\n"
             f")\n"
             f"def test_{fn_name}_roundtrip():\n"

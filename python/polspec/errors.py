@@ -9,10 +9,11 @@ catch the library's own complaints in one clause and let genuine bugs through:
     except PolspecError as exc:
         ...
 
-Each subclass also inherits the built-in type it replaced (`ValueError`,
-`TypeError`, `LookupError`), so code written against earlier versions keeps
-working. Plain argument misuse -- a negative row count, an unknown `method=`
--- stays a bare `ValueError`, as it would in any Python API.
+Each subclass also inherits the built-in its failure is a kind of
+(`ValueError`, `TypeError`, `LookupError`), so an ordinary
+`except ValueError` still catches a bad declaration without knowing polspec's
+hierarchy. Plain argument misuse -- a negative row count, an unknown
+`method=` -- stays a bare `ValueError`, as it would in any Python API.
 """
 
 from __future__ import annotations
@@ -37,9 +38,9 @@ class SpecError(PolspecError, ValueError, TypeError):
 class ValidationError(PolspecError, ValueError):
     """Data does not meet its spec.
 
-    Carries the `ValidationReport` of every violation found as `report`;
-    `errors` is the list of their messages, kept for callers written against
-    earlier versions.
+    Carries the `ValidationReport` of every violation found as `report`.
+    `errors` is the same findings as a plain list of messages, for the common
+    case of printing them.
     """
 
     def __init__(self, report: Any, errors: list[str] | None = None) -> None:
