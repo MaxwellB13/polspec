@@ -142,6 +142,23 @@ def test_resolve_runs_the_declaration_checks_a_bare_name_skipped():
         Registry(Customers, Orders, Missing).resolve()
 
 
+def test_resolve_checks_the_parent_domain_fits_the_local_column():
+    """A key naming its target as a string has no spec to check against until
+    the registry binds one, so the domain check lands here rather than at
+    declaration.
+    """
+
+    class Narrow(FrameSpec):
+        # Orders.order_id is bounded 1..1_000_000, which does not fit here.
+        order_id = ColSpec(pl.Int64, bounds=(1, 500))
+        __foreign_keys__ = [
+            ForeignKey("order_id", references="Orders", ref_columns="order_id")
+        ]
+
+    with pytest.raises(RegistryError, match="do not fit inside"):
+        Registry(Customers, Orders, Narrow).resolve()
+
+
 def test_order_puts_parents_first_and_keeps_declaration_order_otherwise():
     registry = Registry(OrderLines, Employees, Orders, Customers)
     assert registry.order() == ("Employees", "Customers", "Orders", "OrderLines")
@@ -393,7 +410,7 @@ def test_discover_walks_python_and_yaml(tmp_path):
                 id = ColSpec(pl.Int64, unique=True)
 
             class Orders(FrameSpec):
-                order_id = ColSpec(pl.Int64, unique=True)
+                order_id = ColSpec(pl.Int64, bounds=(1, 1_000_000), unique=True)
                 customer_id = ColSpec(pl.Int64)
                 __foreign_keys__ = [
                     ForeignKey("customer_id", references=Customers, ref_columns="id")

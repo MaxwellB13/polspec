@@ -496,7 +496,7 @@ def _rule_constraints(
     """One constraint per ColRule, respecting first-match-wins ordering.
 
     Each rule only governs the rows no earlier rule already claimed, matching
-    how `_apply_rules` assigns them at generation time.
+    how `_apply_column_rules` assigns them at generation time.
     """
     column = pl.col(name)
     constraints: list[_Constraint] = []
@@ -579,6 +579,7 @@ def _foreign_key_findings(
 ) -> list[Finding]:
     findings: list[Finding] = []
     pending: list[tuple[ForeignKey, pl.LazyFrame | None, pl.LazyFrame, Any]] = []
+    local_schema = lf.collect_schema()
 
     for fk, target_lf in foreign_keys:
         local_cols = list(fk.columns)
@@ -587,7 +588,8 @@ def _foreign_key_findings(
             continue  # already reported through missing_cols handling
 
         parent_lf = target_lf if target_lf is not None else lf
-        parent_names = parent_lf.collect_schema().names()
+        parent_schema = parent_lf.collect_schema()
+        parent_names = parent_schema.names()
         missing_ref = [c for c in ref_cols if c not in parent_names]
         if missing_ref:
             findings.append(
@@ -615,7 +617,21 @@ def _foreign_key_findings(
             if len(local_cols) == 1
             else pl.all_horizontal([pl.col(c).is_not_null() for c in local_cols])
         )
-        parent_keys = parent_lf.select(ref_cols).unique()
+        # A key may legitimately span dtypes -- a String column referencing
+        # an Enum primary key, which declaration allows and generation
+        # handles -- and a join across the two would raise instead. Casting
+        # the *parent's* keys to the local dtype settles it without touching
+        # the frame under validation, so `rows()` returns it as it was. A
+        # parent value the local dtype cannot hold becomes null and matches
+        # nothing, which is right: the column could never have held it.
+        parent_keys = parent_lf.select(
+            [
+                pl.col(ref_col).cast(local_schema[local_col], strict=False)
+                if parent_schema[ref_col] != local_schema[local_col]
+                else pl.col(ref_col)
+                for local_col, ref_col in zip(local_cols, ref_cols, strict=True)
+            ]
+        ).unique()
 
         def orphans_of(
             frame: pl.LazyFrame, _p=present, _k=parent_keys, _l=local_cols, _r=ref_cols

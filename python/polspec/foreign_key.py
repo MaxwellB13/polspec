@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import random
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -126,65 +125,63 @@ class ForeignKey:
         return hash((self.name, self.columns, self.ref_columns, self.references))
 
 
-def _apply_foreign_keys(
+def _apply_foreign_key(
     df: pl.DataFrame,
     columns: dict[str, ColSpec],
-    foreign_keys: Sequence[tuple[ForeignKey, pl.DataFrame | None]],
+    fk: ForeignKey,
+    parent_df: pl.DataFrame,
     seed: int | None,
 ) -> pl.DataFrame:
-    """Overwrites non-null ForeignKey column values with values actually
-    sampled from the referenced parent frame's key columns, so generated
-    data satisfies referential integrity by construction.
-
-    Only FKs paired with an actual parent DataFrame are touched -- the
-    second tuple element is None for any FK generation wasn't given data
-    for (e.g. a cross-spec reference the caller didn't pass via
-    `FrameSpec.generate(references=...)`), and that column is left exactly
-    as its own ColSpec freely generated, same as before this existed.
+    """Overwrites `fk`'s non-null local values with values drawn from `parent_df`,
+    so generated data satisfies referential integrity by construction.
 
     Already-null local values are left untouched (they already reflect the
     column's declared null_probability); only non-null values are replaced.
-    Composite keys are sampled as one joint pick per row from the parent, so
-    multi-column keys stay internally consistent with each other. A
-    single-column key whose ColSpec is `unique=True` is sampled without
-    replacement when the parent has enough distinct rows to cover every row
-    of `df` (a clean one-to-one relationship); otherwise -- or for composite
-    keys -- sampling is with replacement, the common many-to-one case.
+    Composite keys are sampled as one joint pick per row, so multi-column
+    keys stay internally consistent with each other. A single-column key
+    whose ColSpec is `unique=True` is sampled without replacement, and a
+    parent with fewer distinct rows than `df` refuses rather than repeating
+    one: the column promises distinct values and every one of them has to
+    come from the parent. Otherwise -- the common many-to-one case, and every
+    composite key -- sampling is with replacement.
+
+    `parent_df` for a self-referencing key is the frame as it stands when
+    this pass runs, so a key reading a column another key rewrote draws from
+    the values that column ended up with.
     """
-    if df.height == 0 or not foreign_keys:
+    if df.height == 0:
         return df
-    rng = random.Random(seed)
-    n = df.height
-    exprs: list[pl.Expr] = []
+    local_cols = list(fk.columns)
+    ref_cols = list(fk.ref_columns)
 
-    for fk, parent_df in foreign_keys:
-        if parent_df is None:
-            continue
-        local_cols = list(fk.columns)
-        ref_cols = list(fk.ref_columns)
-
-        parent_keys = (
-            parent_df.select(ref_cols).drop_nulls().unique(maintain_order=True)
-        )
-        if parent_keys.height == 0:
-            raise GenerationError(
-                f"ForeignKey '{fk.name}' cannot generate values: the referenced "
-                f"parent has no non-null rows for columns {ref_cols}"
-            )
-
-        wants_unique = len(local_cols) == 1 and columns[local_cols[0]].unique
-        with_replacement = not (wants_unique and parent_keys.height >= n)
-        sampled_rows = parent_keys.sample(
-            n=n, with_replacement=with_replacement, seed=rng.randrange(2**63)
+    parent_keys = parent_df.select(ref_cols).drop_nulls().unique(maintain_order=True)
+    if parent_keys.height == 0:
+        raise GenerationError(
+            f"ForeignKey '{fk.name}' cannot generate values: the referenced "
+            f"parent has no non-null rows for columns {ref_cols}"
         )
 
-        for local_col, ref_col in zip(local_cols, ref_cols, strict=True):
-            sampled_col = sampled_rows[ref_col].cast(df.schema[local_col])
-            exprs.append(
-                pl.when(pl.col(local_col).is_not_null())
-                .then(pl.lit(sampled_col))
-                .otherwise(pl.col(local_col))
-                .alias(local_col)
-            )
+    wants_unique = len(local_cols) == 1 and columns[local_cols[0]].unique
+    if wants_unique and parent_keys.height < df.height:
+        raise GenerationError(
+            f"ForeignKey '{fk.name}' fills the unique column "
+            f"'{local_cols[0]}', but the referenced parent offers only "
+            f"{parent_keys.height} distinct value(s) for {df.height} row(s). "
+            "Every value has to come from the parent and no two may repeat, "
+            "so generate more parent rows, or fewer of these."
+        )
+    with_replacement = not wants_unique
+    sampled_rows = parent_keys.sample(
+        n=df.height, with_replacement=with_replacement, seed=seed
+    )
 
-    return df.with_columns(exprs) if exprs else df
+    exprs = []
+    for local_col, ref_col in zip(local_cols, ref_cols, strict=True):
+        sampled_col = sampled_rows[ref_col].cast(df.schema[local_col])
+        exprs.append(
+            pl.when(pl.col(local_col).is_not_null())
+            .then(pl.lit(sampled_col))
+            .otherwise(pl.col(local_col))
+            .alias(local_col)
+        )
+    return df.with_columns(exprs)

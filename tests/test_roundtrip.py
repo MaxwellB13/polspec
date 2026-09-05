@@ -1,9 +1,10 @@
 """The round-trip property: anything ``generate()`` produces, ``validate()`` accepts.
 
-``FrameSpec`` declares each constraint once but implements it twice -- once in
-the generation path (``engine``/``rules``/``foreign_key``) and once in the
-validation path (``validation``). Nothing structurally keeps the two in step,
-so this module asserts the invariant that ties them together::
+``FrameSpec`` declares each constraint once and acts on it twice -- once in the
+generation path (``engine``/``rules``/``foreign_key``/``generation``) and once
+in the validation path (``validation``). What both sides read from
+``constraints`` cannot drift; the rest is held in step only by this module,
+which asserts the invariant that ties them together::
 
     SpecCls.validate(SpecCls.generate(n, seed=...))   # must not raise
 
@@ -30,6 +31,8 @@ from polspec import (
     ColSpec,
     ForeignKey,
     FrameSpec,
+    GenerationError,
+    SpecError,
 )
 
 ROWS = 300
@@ -186,6 +189,16 @@ COLUMN_CASES: dict[str, ColSpec] = {
         choices=[dt.datetime(2024, 1, 1, 12), dt.datetime(2025, 6, 30, 8, 30)],
     ),
     "binary_choices": ColSpec(pl.Binary, choices=[b"\x00\x01", b"\xff"]),
+    # unique columns are drawn without replacement, from a domain with room
+    "unique_int": ColSpec(pl.Int16, unique=True),
+    "unique_bounded": ColSpec(pl.Int64, bounds=(1, 1_000), unique=True),
+    "unique_string": ColSpec(pl.String, unique=True),
+    "unique_choices": ColSpec(
+        pl.String, choices=[f"c{i}" for i in range(400)], unique=True
+    ),
+    "unique_nullable": ColSpec(
+        pl.Int32, bounds=(1, 400), unique=True, nullable=True, null_probability=0.3
+    ),
 }
 
 
@@ -194,23 +207,18 @@ def test_column_roundtrips(case):
     assert_roundtrip(_spec_for(case, COLUMN_CASES[case]))
 
 
-BROKEN_COLUMN_CASES: dict[str, tuple[ColSpec, str]] = {
-    "unique_narrow_domain": (
-        ColSpec(pl.Int8, unique=True),
-        "C5: unique=True is validated but never enforced during generation",
-    ),
-}
+def test_a_unique_column_with_no_room_refuses_by_name():
+    """The one thing generation cannot do is invent a 301st Int8.
 
-
-@pytest.mark.parametrize(
-    "case",
-    [
-        pytest.param(name, marks=pytest.mark.xfail(strict=True, reason=reason))
-        for name, (_, reason) in sorted(BROKEN_COLUMN_CASES.items())
-    ],
-)
-def test_broken_column_roundtrips(case):
-    assert_roundtrip(_spec_for(case, BROKEN_COLUMN_CASES[case][0]))
+    A domain smaller than the frame is a contradiction in the declaration,
+    not a gap in generation, so it is reported rather than quietly producing
+    the duplicates the spec itself rejects.
+    """
+    spec_cls = _spec_for("narrow", ColSpec(pl.Int8, unique=True))
+    with pytest.raises(GenerationError, match="only 256 distinct value"):
+        spec_cls.generate(300, seed=SEED)
+    # 256 rows is the whole domain exactly, and still round-trips.
+    assert_roundtrip(spec_cls, n=256)
 
 
 # ---------------------------------------------------------------------------
@@ -348,15 +356,23 @@ def test_rule_roundtrips_under_cartesian():
     assert_roundtrip(SingleRuleSpec, n=50, method="cartesian")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="C4: _apply_rules evaluates every `when` against the pre-rule frame "
-    "(so rules stay order-independent) but _validate_dataframe evaluates it "
-    "against the final frame, so a rule keyed on a rule-targeted column "
-    "cannot round-trip",
-)
 def test_chained_rules_roundtrip():
     assert_roundtrip(ChainedRuleSpec)
+
+
+def test_rules_that_each_read_the_other_are_refused():
+    """No order runs both against their own inputs, so neither is allowed."""
+    with pytest.raises(SpecError, match="Cannot order the generation passes"):
+
+        class Circular(FrameSpec):
+            a = ColSpec(
+                pl.Enum(["x", "y"]),
+                rules=[ColRule(when={"column": "b", "equals": "x"}, choices=["y"])],
+            )
+            b = ColSpec(
+                pl.Enum(["x", "y"]),
+                rules=[ColRule(when={"column": "a", "equals": "x"}, choices=["y"])],
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -366,17 +382,50 @@ def test_chained_rules_roundtrip():
 
 class UniqueTogetherSpec(FrameSpec):
     a = ColSpec(pl.Enum(["x", "y"]))
+    b = ColSpec(pl.Int64, bounds=(1, 10_000))
+    __unique_together__ = [["a", "b"]]
+
+
+class ThreeWayUniqueSpec(FrameSpec):
+    a = ColSpec(pl.Enum(["x", "y"]))
+    b = ColSpec(pl.Boolean)
+    c = ColSpec(pl.String, choices=[f"s{i}" for i in range(500)])
+    __unique_together__ = [["a", "b", "c"]]
+
+
+class CrowdedUniqueTogetherSpec(FrameSpec):
+    """Two by two: four combinations, however many rows are asked for."""
+
+    a = ColSpec(pl.Enum(["x", "y"]))
     b = ColSpec(pl.Enum(["p", "q"]))
     __unique_together__ = [["a", "b"]]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="C5 (composite): __unique_together__ is validated but generation "
-    "makes no attempt to satisfy it",
-)
 def test_unique_together_roundtrips():
     assert_roundtrip(UniqueTogetherSpec)
+    assert_roundtrip(ThreeWayUniqueSpec)
+
+
+def test_unique_together_only_moves_the_rows_that_repeat():
+    """A roomy domain keeps almost everything it generated."""
+    df = UniqueTogetherSpec.generate(300, seed=SEED)
+    assert df.select(["a", "b"]).n_unique() == 300
+
+
+def test_unique_together_with_no_room_refuses_by_name():
+    with pytest.raises(GenerationError, match="cannot be satisfied"):
+        CrowdedUniqueTogetherSpec.generate(300, seed=SEED)
+    # All four combinations fit in four rows.
+    assert_roundtrip(CrowdedUniqueTogetherSpec, n=4)
+
+
+def test_a_unique_member_already_makes_the_combination_distinct():
+    class Spec(FrameSpec):
+        a = ColSpec(pl.Enum(["x", "y"]))
+        b = ColSpec(pl.Int64, bounds=(1, 100_000), unique=True)
+        __unique_together__ = [["a", "b"]]
+
+    assert_roundtrip(Spec)
 
 
 # ---------------------------------------------------------------------------
@@ -409,13 +458,6 @@ class CompositeChildSpec(FrameSpec):
     ]
 
 
-class WideningChildSpec(FrameSpec):
-    """The FK's parent domain (100..200) does not fit the column's own bounds."""
-
-    fk = ColSpec(pl.Int64, bounds=(1, 50))
-    __foreign_keys__ = [ForeignKey("fk", references=ParentSpec, ref_columns="k")]
-
-
 class ChainedFkSpec(FrameSpec):
     a = ColSpec(pl.Int64, bounds=(100, 200))
     b = ColSpec(pl.Int64, bounds=(100, 200))
@@ -445,34 +487,42 @@ def test_composite_fk_roundtrips():
     assert_roundtrip(CompositeChildSpec, references={CompositeParentSpec: parent})
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="C13: _apply_foreign_keys writes parent values into the local "
-    "column without regard for that column's own bounds/choices, and nothing "
-    "flags the contradictory declaration at class-definition time",
-)
-def test_fk_respects_local_column_bounds():
+def test_fk_whose_parent_does_not_fit_the_column_is_refused():
+    """A key overwrites its column, so the parent's domain has to fit inside
+    the column's own. Data that could not round-trip is refused as it is
+    declared, rather than generated and then failed by its own spec.
+    """
+    with pytest.raises(SpecError, match="do not fit inside"):
+
+        class WideningChild(FrameSpec):
+            fk = ColSpec(pl.Int64, bounds=(1, 50))  # parent keys are 100..200
+            __foreign_keys__ = [
+                ForeignKey("fk", references=ParentSpec, ref_columns="k")
+            ]
+
+    with pytest.raises(SpecError, match="is not one of"):
+
+        class NarrowChoices(FrameSpec):
+            code = ColSpec(pl.String, choices=["a"])
+            __foreign_keys__ = [
+                ForeignKey("code", references=TextualParentSpec, ref_columns="code")
+            ]
+
+
+def test_fk_whose_parent_fits_is_accepted():
+    class FittingChild(FrameSpec):
+        fk = ColSpec(pl.Int64, bounds=(50, 500))
+        __foreign_keys__ = [ForeignKey("fk", references=ParentSpec, ref_columns="k")]
+
     parent = ParentSpec.generate(200, seed=1)
-    assert_roundtrip(WideningChildSpec, references={ParentSpec: parent})
+    assert_roundtrip(FittingChild, references={ParentSpec: parent})
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="C3: every FK expression is built against the original frame and "
-    "applied in one with_columns pass, so a key referencing a column another "
-    "key rewrites samples values that no longer exist",
-)
 def test_chained_fk_roundtrips():
     parent = ParentSpec.generate(200, seed=1)
     assert_roundtrip(ChainedFkSpec, references={ParentSpec: parent})
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="C7: _fk_kind_bucket permits a String key to reference an Enum key, "
-    "but validation anti-joins the columns without casting and Polars raises "
-    "SchemaError",
-)
 def test_textual_fk_across_enum_and_string_roundtrips():
     parent = TextualParentSpec.generate(100, seed=1)
     assert_roundtrip(TextualChildSpec, references={TextualParentSpec: parent})

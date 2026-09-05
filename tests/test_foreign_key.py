@@ -20,7 +20,9 @@ from polspec import (
 
 class CustomerFkSpec(FrameSpec):
     id = ColSpec(pl.Int64, unique=True)
-    code = ColSpec(pl.String, unique=True)
+    # A finite domain, so a child column with one of its own can reference it:
+    # a key fills its column from the parent, which has to fit.
+    code = ColSpec(pl.String, choices=["A", "B"])
 
 
 def test_foreign_key_declaration_variations():

@@ -167,8 +167,8 @@ Worth being direct about, in the same spirit as the
   `method="cartesian"` is a fixed set of known-important cases, not an
   open-ended exploration.
 - **Not feature-complete yet.** Nested dtypes (`List`/`Struct`/`Array`) aren't
-  generatable, and a handful of constraints are validated but not yet
-  generated — see [Known limitations](reference/limitations.md).
+  generatable, and `__checks__`/`ColSpec.validators` are validated but not
+  generated, by design — see [Known limitations](reference/limitations.md).
 
 ## Where it fits
 

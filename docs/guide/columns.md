@@ -181,13 +181,28 @@ ColSpec(
 
 ## Uniqueness
 
-`unique=True` declares that values must be distinct.
+`unique=True` declares that values must be distinct. `generate()` draws the
+column without replacement, so the data it produces satisfies it.
 
-!!! danger "Validated, not yet generated"
+Nulls are exempt, as they are for foreign keys: a null means "no value", so a
+nullable unique column may repeat nulls and nothing else.
 
-    `unique=True` is enforced by `validate()` but **not** by `generate()`. A
-    column whose domain is smaller than `n` will generate duplicates that its
-    own spec then rejects. See [Known limitations](../reference/limitations.md).
+A domain too small to cover the row count is refused, naming the column:
+
+```python
+class Narrow(FrameSpec):
+    id = ColSpec(pl.Int8, unique=True)
+
+Narrow.generate(300, seed=1)
+# GenerationError: Column 'id' is unique, but its domain holds only 256
+# distinct value(s) and 300 are needed. Widen its bounds or choices, or
+# generate fewer rows.
+```
+
+`unique=True` cannot be combined with `weights`, a non-uniform `distribution`,
+or `rules`: the first two describe how often a value recurs, which a draw
+without replacement has no room for, and a rule would reintroduce the
+duplicates. Each is refused at declaration rather than quietly ignored.
 
 ## Tags
 

@@ -178,9 +178,10 @@ def test_generated_test_respects_rows_seed_and_no_cartesian(sample_data, tmp_pat
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_generated_test_disables_unique_validation_it_cannot_satisfy(tmp_path):
-    """C5 in practice: a unique=True column would otherwise fail its own
-    generated test, since generate() does not enforce uniqueness.
+def test_generated_test_validates_the_uniqueness_it_can_now_satisfy(tmp_path):
+    """A unique=True column used to fail its own generated test, so the CLI
+    switched the check off. Generation draws without replacement now, so the
+    generated test asserts it.
     """
     yaml_path = tmp_path / "spec.yaml"
     yaml_path.write_text(
@@ -199,8 +200,9 @@ def test_generated_test_disables_unique_validation_it_cannot_satisfy(tmp_path):
     run_cli("test", yaml_path, "-o", test_path, "--rows", "200")
 
     content = test_path.read_text(encoding="utf-8")
-    assert "validate_unique=False" in content
-    assert "not yet generated" in content or "not yet" in content
+    # A unique column is generated distinct now, so the generated test
+    # validates it like every other constraint rather than switching it off.
+    assert "validate_unique=False" not in content
 
     result = run_pytest_on(test_path)
     assert result.returncode == 0, result.stdout + result.stderr

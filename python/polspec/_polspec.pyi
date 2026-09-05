@@ -16,6 +16,9 @@ class ColumnPlan:
     takes `n_categories` and optional `weights` and yields `UInt32` indices
     into a domain the caller holds; `bool` takes `weights=[p_false, p_true]`;
     `string` takes `str_min_len`/`str_max_len`.
+
+    `unique` draws without replacement instead, from the same domain; a
+    domain too small to cover the row count is refused by name.
     """
 
     def __init__(
@@ -33,6 +36,7 @@ class ColumnPlan:
         str_max_len: int | None = None,
         distribution: str | None = None,
         params: Mapping[str, float] | None = None,
+        unique: bool = False,
     ) -> None: ...
     @property
     def name(self) -> str: ...
@@ -58,6 +62,8 @@ class ColumnPlan:
     def distribution(self) -> str: ...
     @property
     def p_true(self) -> float: ...
+    @property
+    def unique(self) -> bool: ...
 
 def generate_dataframe(
     columns: Sequence[ColumnPlan], n_rows: int, seed: int | None = None

@@ -124,13 +124,18 @@ def _condition_to_pred(condition: dict) -> Pred:
 class ColRule:
     """Restricts a column's generated values on rows where `when` matches.
 
-    Applied as a final vectorized pass after normal generation: rows where
-    `when` matches get a value resampled uniformly (or according to `weights`)
-    from `choices` instead of whatever was freely generated for them. `when`
-    is evaluated against the fully-generated, freely-sampled DataFrame -- never
-    against another rule's output -- so rules on different columns are
-    independent of declaration order. Multiple rules on the *same* column are
-    checked in declaration order, first match wins (like SQL CASE/WHEN).
+    Applied as a pass over the generated frame: rows where `when` matches get
+    a value resampled uniformly (or according to `weights`) from `choices`
+    instead of whatever was freely generated for them. Multiple rules on the
+    *same* column are checked in declaration order, first match wins (like
+    SQL CASE/WHEN).
+
+    `when` is evaluated against the frame as it stands when the rule runs,
+    and the passes run in dependency order: a rule keyed on a column that
+    another rule or a foreign key rewrites sees the rewritten values -- the
+    same values validation checks the rule against. Two columns whose rules
+    each read what the other writes have no such order and are rejected at
+    declaration.
 
     `when` is a predicate built with `polspec.col()`, not an arbitrary polars
     expression, so that every rule can round-trip through a spec file:
@@ -235,41 +240,38 @@ def _sample_choices(
     return domain.gather(idx)
 
 
-def _apply_rules(
-    df: pl.DataFrame, columns: dict[str, ColSpec], seed: int | None
+def _apply_column_rules(
+    df: pl.DataFrame, name: str, spec: ColSpec, seed: int | None
 ) -> pl.DataFrame:
-    """Overwrites values on rows matched by each column's ColRules.
+    """Overwrites `name` on the rows its own ColRules match.
 
-    A vectorised pass over the already-generated DataFrame: for a column
-    with rules, rows matching a rule's `when` get a value resampled from
-    that rule's `choices` (first matching rule wins); everything else keeps
-    its freely-generated value. Only as many values as there are matched
-    rows are sampled, and scattered into place. `when` expressions always
-    see the original freely-generated values, never another rule's output,
-    so rules on different columns never need dependency ordering.
+    A vectorised pass over the frame as it stands: rows matching a rule's
+    `when` get a value resampled from that rule's `choices` (first matching
+    rule wins); everything else keeps the value it already had. Only as many
+    values as there are matched rows are sampled, and scattered into place.
+
+    `when` sees the frame this pass is given, so a rule keyed on a column
+    another pass rewrites reads the rewritten values -- the same values
+    validation will check the rule against. `polspec.constraints.order`
+    decides which pass runs first.
     """
-    if df.height == 0:
+    if df.height == 0 or not spec.rules:
         return df
     rng = random.Random(seed)
-    replaced: list[pl.Series] = []
-    for name, spec in columns.items():
-        if not spec.rules:
+    column = df[name]
+    claimed = pl.repeat(False, df.height, dtype=pl.Boolean, eager=True)
+    for rule in spec.rules:
+        mask = df.select(rule._expr().fill_null(False)).to_series() & ~claimed
+        rows = mask.arg_true()
+        if rows.len() == 0:
             continue
-        column = df[name]
-        claimed = pl.repeat(False, df.height, dtype=pl.Boolean, eager=True)
-        for rule in spec.rules:
-            mask = df.select(rule._expr().fill_null(False)).to_series() & ~claimed
-            rows = mask.arg_true()
-            if rows.len() == 0:
-                continue
-            fill = _sample_choices(
-                rule.choices,
-                rows.len(),
-                rng.randrange(2**63),
-                weights=rule.weights,
-                dtype=spec.dtype,
-            )
-            column = column.scatter(rows, fill)
-            claimed = claimed | mask
-        replaced.append(column.alias(name))
-    return df.with_columns(replaced) if replaced else df
+        fill = _sample_choices(
+            rule.choices,
+            rows.len(),
+            rng.randrange(2**63),
+            weights=rule.weights,
+            dtype=spec.dtype,
+        )
+        column = column.scatter(rows, fill)
+        claimed = claimed | mask
+    return df.with_columns(column.alias(name))

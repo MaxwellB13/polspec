@@ -153,7 +153,7 @@ def test_cartesian_requires_at_least_one_coverage_column():
         a = ColSpec(dtype=pl.String, nullable=False)
 
     with pytest.raises(
-        ValueError, match="at least one Enum, Boolean, or bounded numeric"
+        ValueError, match="at least one non-unique Enum, Boolean, or bounded numeric"
     ):
         StringsOnly.generate(n=10, method="cartesian")
 

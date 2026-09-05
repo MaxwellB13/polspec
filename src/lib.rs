@@ -4,10 +4,12 @@
 //! - `plan.rs` -- `ColumnPlan`, the typed instructions for one column.
 //! - `dist.rs` -- the distributions and their canonical parameters.
 //! - `sample.rs` -- filling a column, in seeded parallel chunks.
+//! - `unique.rs` -- filling a column whose values must all differ.
 
 mod dist;
 mod plan;
 mod sample;
+mod unique;
 
 use polars::prelude::*;
 use pyo3::exceptions::PyValueError;

@@ -2,23 +2,27 @@
 
 `generate` is the whole pipeline: the Rust engine fills every column
 independently, then rules and foreign keys are applied as vectorised passes
-over the finished frame. `generate_batches` and the `sink_*` functions in
+over the finished frame, in the order `polspec.constraints` derives from what
+each pass reads and writes. `generate_batches` and the `sink_*` functions in
 `polspec.generation.sinks` stream the same pipeline in chunks.
 """
 
 from __future__ import annotations
 
 import random
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from typing import Any, Literal, overload
 
 import polars as pl
 
+from polspec.constraints import ordered_passes, rewritable_members
 from polspec.engine import _generate_cartesian, _generate_random
 from polspec.errors import SpecError
-from polspec.foreign_key import ForeignKey, _apply_foreign_keys
+from polspec.foreign_key import _apply_foreign_key
+from polspec.generation.composite import apply_unique_together
 from polspec.generation.sinks import sink_csv, sink_ipc, sink_ndjson, sink_parquet
-from polspec.rules import _apply_rules
+from polspec.rules import _apply_column_rules
+from polspec.spec import ColSpec
 from polspec.tablespec import TableSpec, resolve_references
 
 __all__ = [
@@ -95,17 +99,27 @@ def generate(
     than `n` rows it is padded with random rows; if it has more, all of it is
     kept.
 
-    Any `ColSpec.rules` are applied next, as a vectorised overwrite pass over
-    the fully generated frame, regardless of method.
+    `ColSpec.rules` and any `ForeignKey` the spec declares are then applied as
+    vectorised passes over the generated frame, regardless of method. Each
+    pass sees the frame the passes before it produced, and they run in the
+    order their reads and writes imply -- a rule keyed on a foreign-keyed
+    column reads the parent's values, not the freely generated ones they
+    replaced -- so the result satisfies the same declarations `validate`
+    checks it against.
 
-    Any `ForeignKey` the spec declares is then made referentially consistent
-    where data for its target is available: self-referencing keys always are,
-    sampled from this same frame; a key referencing another spec only is if
-    `references` carries an entry for it, keyed by the spec, its class, or
-    its name -- otherwise that column is left exactly as freely generated.
-    Composite keys are sampled as one joint pick per row; a single-column
-    key whose ColSpec is `unique=True` samples without replacement when the
-    parent has enough distinct rows to cover `n`.
+    A foreign key is only made referentially consistent where data for its
+    target is available: self-referencing keys always are, sampled from this
+    same frame; a key referencing another spec only is if `references`
+    carries an entry for it, keyed by the spec, its class, or its name --
+    otherwise that column is left exactly as freely generated. Composite keys
+    are sampled as one joint pick per row; a single-column key whose ColSpec
+    is `unique=True` samples without replacement when the parent has enough
+    distinct rows to cover `n`.
+
+    A `unique=True` column is drawn without replacement by the engine itself,
+    and a `__unique_together__` group is separated afterwards by resampling
+    the rows that repeat a combination. Either refuses, naming the column or
+    the group, when the domain is too small to cover `n`.
 
     lazy=True returns a `pl.LazyFrame` around the generated DataFrame.
     """
@@ -122,19 +136,65 @@ def generate(
     else:
         raise ValueError(f"Unknown method {method!r}; expected 'random' or 'cartesian'")
 
-    res = _apply_rules(df, columns, rng.randrange(2**63))
+    res = _run_passes(spec, columns, df, references, rng)
+
+    return res.lazy() if lazy else res
+
+
+def _run_passes(
+    spec: TableSpec,
+    columns: dict[str, ColSpec],
+    df: pl.DataFrame,
+    references: References,
+    rng: random.Random,
+) -> pl.DataFrame:
+    """Applies every rule and foreign-key pass, in dependency order.
+
+    Seeds are drawn per pass in *declaration* order, so which order the
+    passes end up running in does not change the values any one of them
+    samples. A cross-spec key the caller gave no data for still draws its
+    seed and is then skipped, so supplying references never reshuffles the
+    columns around it.
+    """
+    runners: dict[str, Callable[[pl.DataFrame], pl.DataFrame]] = {}
+
+    for name, col in columns.items():
+        if not col.rules:
+            continue
+        seed = rng.randrange(2**63)
+        runners[f"rules:{name}"] = lambda frame, name=name, col=col, seed=seed: (
+            _apply_column_rules(frame, name, col, seed)
+        )
 
     if spec.foreign_keys:
         parents = resolve_references(references, _collect)
-        resolved: list[tuple[ForeignKey, pl.DataFrame | None]] = []
         for fk in spec.foreign_keys:
+            seed = rng.randrange(2**63)
             if fk.references == "self":
-                resolved.append((fk, res))
-            else:
-                resolved.append((fk, parents.get(fk.references)))
-        res = _apply_foreign_keys(res, columns, resolved, rng.randrange(2**63))
+                # The parent is this frame as it stands when the pass runs.
+                runners[f"fk:{fk.name}"] = lambda frame, fk=fk, seed=seed: (
+                    _apply_foreign_key(frame, columns, fk, frame, seed)
+                )
+            elif (parent := parents.get(fk.references)) is not None:
+                runners[f"fk:{fk.name}"] = (
+                    lambda frame, fk=fk, parent=parent, seed=seed: _apply_foreign_key(
+                        frame, columns, fk, parent, seed
+                    )
+                )
 
-    return res.lazy() if lazy else res
+    for index, group in enumerate(spec.unique_together):
+        seed = rng.randrange(2**63)
+        key = f"unique_together:{index}"
+        members, writable = tuple(group), rewritable_members(spec, group)
+        runners[key] = lambda frame, m=members, w=writable, seed=seed: (
+            apply_unique_together(frame, columns, m, w, seed)
+        )
+
+    for step in ordered_passes(spec):
+        run = runners.get(step.key)
+        if run is not None:
+            df = run(df)
+    return df
 
 
 def generate_batches(
@@ -148,9 +208,10 @@ def generate_batches(
 ) -> Iterator[pl.DataFrame]:
     """Yields chunks of generated rows without holding all `n` in memory.
 
-    Each batch samples independently, so a `unique=True` foreign-key column
-    is only sampled without replacement *within* a batch, not across the
-    whole `n`.
+    Each batch samples independently, so uniqueness only holds *within* a
+    batch, not across the whole `n`: that applies to a `unique=True` column,
+    a `__unique_together__` group, and a foreign-key column sampled without
+    replacement alike.
     """
     _require_columns(spec)
     _check_counts(n, batch_size)

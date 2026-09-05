@@ -188,6 +188,11 @@ def _plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None
     options: dict = {
         "nullable": spec.nullable,
         "null_probability": spec.null_probability if spec.nullable else 0.0,
+        # The engine draws a unique column without replacement, and refuses --
+        # naming the column -- a domain too small to cover `n`. That check
+        # needs the row count, which only the engine has, so it is not
+        # duplicated here.
+        "unique": spec.unique,
     }
 
     domain = _domain(spec)
@@ -345,12 +350,21 @@ def _generate_cartesian(
     categories crossed with the negative/zero/positive/null partitions of
     every bounded numeric column, padded with ordinary random rows up to
     `n` if the coverage set doesn't already reach it.
+
+    A `unique` column takes no part in the product. Crossing a column with
+    anything repeats it, and concatenating the padding rows would repeat it
+    again, so unique columns are held back and drawn once over the finished
+    frame -- where "once" is what makes them distinct.
     """
     rng = random.Random(seed)
 
     coverage_values: dict[str, list] = {}
     filler_columns: dict[str, ColSpec] = {}
+    unique_columns: dict[str, ColSpec] = {}
     for name, spec in columns.items():
+        if spec.unique:
+            unique_columns[name] = spec
+            continue
         values = _coverage_values(spec, rng)
         if values is None:
             filler_columns[name] = spec
@@ -359,8 +373,8 @@ def _generate_cartesian(
 
     if not coverage_values:
         raise GenerationError(
-            "method='cartesian' needs at least one Enum, Boolean, or bounded "
-            "numeric column to build coverage from"
+            "method='cartesian' needs at least one non-unique Enum, Boolean, "
+            "or bounded numeric column to build coverage from"
         )
 
     coverage_size = 1
@@ -386,10 +400,23 @@ def _generate_cartesian(
         filler_df = _generate_random(filler_columns, coverage_n, rng.randrange(2**63))
         coverage_df = pl.concat([coverage_df, filler_df], how="horizontal_extend")
 
-    coverage_df = coverage_df.select(list(columns.keys()))
+    spread = [name for name in columns if name not in unique_columns]
+    coverage_df = coverage_df.select(spread)
 
-    if coverage_n >= n:
-        return coverage_df
+    if coverage_n < n:
+        topup_df = _generate_random(
+            {name: columns[name] for name in spread},
+            n - coverage_n,
+            rng.randrange(2**63),
+        )
+        coverage_df = pl.concat([coverage_df, topup_df], how="vertical")
 
-    topup_df = _generate_random(columns, n - coverage_n, rng.randrange(2**63))
-    return pl.concat([coverage_df, topup_df], how="vertical")
+    if unique_columns:
+        # One draw over the whole frame, after any padding: a unique column
+        # is only distinct if nothing else ever appends to it.
+        distinct_df = _generate_random(
+            unique_columns, coverage_df.height, rng.randrange(2**63)
+        )
+        coverage_df = pl.concat([coverage_df, distinct_df], how="horizontal_extend")
+
+    return coverage_df.select(list(columns.keys()))

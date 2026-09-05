@@ -346,24 +346,17 @@ def _display_path(path: str) -> str:
 def _skip_reasons(spec_cls: type[FrameSpec]) -> tuple[dict[str, bool], list[str]]:
     """validate() flags to disable, and why, so the generated test can pass.
 
-    generate() does not attempt unique=True, __unique_together__, __checks__
-    or ColSpec.validators -- see docs/reference/limitations.md. A round-trip
-    test that did not account for this would simply fail on any spec using
-    them, so the flag each constraint needs is disabled with a comment
-    explaining why, rather than emitting a test the CLI already knows will
-    not pass.
+    generate() does not attempt __checks__ or ColSpec.validators -- see
+    docs/reference/limitations.md. A round-trip test that did not account for
+    this would simply fail on any spec using them, so the flag each
+    constraint needs is disabled with a comment explaining why, rather than
+    emitting a test the CLI already knows will not pass.
+
+    `unique=True` and `__unique_together__` used to be on that list. They are
+    generated now, so the generated test validates them like anything else.
     """
     flags: dict[str, bool] = {}
     reasons: list[str] = []
-
-    has_unique = any(c.unique for c in spec_cls.spec.columns.values())
-    has_unique_together = bool(spec_cls.spec.unique_together)
-    if has_unique or has_unique_together:
-        flags["validate_unique"] = False
-        reasons.append(
-            "unique=True / __unique_together__ is validated but not yet "
-            "generated (see docs/reference/limitations.md)"
-        )
 
     if spec_cls.spec.checks:
         flags["validate_checks"] = False
