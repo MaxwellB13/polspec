@@ -8,6 +8,23 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-06
+
+The refactor 0.2.0 started, finished. `CatSpec` was the one declarative
+surface left doing everything in one class; it is now a value with a
+metaclass facade, like `TableSpec` and `FrameSpec`. Behind it came the fixes
+that were waiting for a release allowed to break something.
+
+One thing breaks, and it is worth reading before you upgrade: naming a
+`CatSpec` entry now always gives back the dtype, whichever form declared the
+registry. `pl.Enum(cats.STATUS)` becomes `cats.STATUS`, and
+`cats.CURRENCY.physical()` becomes
+`cats.get_categorical("CURRENCY").physical()`. Nothing else in the public API
+changed shape.
+
+The documentation gained a test: every Python example in `docs/` is executed
+by the suite, which found five broken examples that had been shipping.
+
 ### Changed
 
 - **Breaking.** `CatSpec` is a value, and the class body that declares one is
