@@ -37,7 +37,8 @@ problems per column, write a report — use `inspect()`, which returns the same
 findings as a `ValidationReport` and never raises for a bad frame:
 
 ```python
-report = Orders.inspect(df, references={Customers: customers})
+suspect = df.with_columns(pl.col("total") * -1)   # every total now negative
+report = Orders.inspect(suspect)
 
 report.passed                 # False
 for finding in report:
@@ -63,6 +64,16 @@ report.rows(bad).collect()        # just the rows violating that one claim
 report.failing_rows().collect()   # every violating row, with a `__polspec_finding`
                                   # column naming the claim (a row violating two
                                   # claims appears twice)
+```
+
+The column `failing_rows()` adds is named by `polspec.validation.FINDING_COLUMN`
+rather than spelled out, so grouping by it does not hard-code the name:
+
+```python
+from polspec.validation import FINDING_COLUMN
+
+quarantined = report.failing_rows().collect()
+quarantined.group_by(FINDING_COLUMN).len()   # how many rows each claim caught
 ```
 
 Structural findings (`extra_columns`, `missing_columns`, `dtype`,
@@ -91,6 +102,16 @@ Orders.validate(
     validate_checks=True,
     validate_foreign_keys=True,
 )
+```
+
+Every one of these is a field of `polspec.validation.ValidationOptions`, which
+is what a report carries as `report.options` — so a report says what it was
+asked to check, not only what it found:
+
+```python
+report = Orders.inspect(df, validate_checks=False)
+report.options.checks        # False
+report.options.extra_cols    # "raise"
 ```
 
 ### Structural mismatches

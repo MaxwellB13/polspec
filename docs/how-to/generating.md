@@ -54,6 +54,7 @@ randomly alongside.
 
 For volumes that should not be held in memory at once:
 
+<!-- docs: skip -->
 ```python
 for batch in Orders.generate_batches(10_000_000, batch_size=250_000, seed=1):
     process(batch)
@@ -66,6 +67,7 @@ sampled without replacement only *within* a batch.
 
 Four sinks stream batches to disk without materialising the whole frame:
 
+<!-- docs: skip -->
 ```python
 Orders.sink_parquet("orders.parquet", 50_000_000, compression="zstd")
 Orders.sink_csv("orders.csv", 1_000_000)

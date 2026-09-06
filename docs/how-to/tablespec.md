@@ -6,24 +6,34 @@ composite keys and foreign keys, reachable as `.spec` on the class.
 
 ```python
 class Orders(FrameSpec):
-    order_id = ColSpec(pl.Int64, unique=True)
-    total    = ColSpec(pl.Float64, bounds=(0.0, None))
+    order_id      = ColSpec(pl.Int64, unique=True)
+    total         = ColSpec(pl.Float64, bounds=(0.0, None))
+    internal_note = ColSpec(pl.String, nullable=True)
 
 Orders.spec              # TableSpec(name='Orders', columns={...}, ...)
 Orders.spec.name         # 'Orders'
-list(Orders.spec)        # ['order_id', 'total']
+list(Orders.spec)        # ['order_id', 'total', 'internal_note']
 Orders.spec["total"]     # the ColSpec
 Orders.spec.schema()     # the same pl.Schema as Orders.schema()
 ```
 
-Every verb the library offers is a function over a `TableSpec`. The
-classmethods on `FrameSpec` forward to them with `cls.spec`, so these are the
-same call:
+Every verb the library offers is a function over a `TableSpec`; the
+classmethods on `FrameSpec` are one-line forwards that pass `cls.spec`. So a
+`TableSpec` is the thing being operated on either way:
 
 ```python
-Orders.generate(1_000, seed=1)
-polspec.generation.generate(Orders.spec, 1_000, seed=1)
+Orders.generate(1_000, seed=1)                            # the class
+FrameSpec.from_spec(Orders.spec).generate(1_000, seed=1)  # a TableSpec, wrapped
 ```
+
+!!! note "The module-level functions are not public yet"
+
+    `polspec.generation.generate(spec, ...)`,
+    `polspec.validation.inspect(spec, ...)` and their neighbours are what the
+    classmethods call, and they take a `TableSpec` directly. They are not in
+    [the API reference](../reference/api/index.md), which means what it says
+    there: they can change in a patch release. Wrap a `TableSpec` with
+    `FrameSpec.from_spec` and use the classmethods until they are.
 
 ## Building one directly
 
@@ -46,8 +56,8 @@ Everything a class body validates at declaration is validated here too. A
 To get the class-shaped API back, wrap it:
 
 ```python
-Orders = FrameSpec.from_spec(spec)          # a FrameSpec subclass named Orders
-Orders = FrameSpec.from_spec(spec, name="Orders2026")
+Rebuilt = FrameSpec.from_spec(spec)                    # a subclass named Orders
+Renamed = FrameSpec.from_spec(spec, name="Orders2026")
 ```
 
 ## Deriving one spec from another
@@ -112,5 +122,14 @@ parent frame keyed by the class, the `TableSpec`, or the name. A
 checks the class form would have run at declaration:
 
 ```python
-Registry(Customers, Orders).resolve()["Orders"].foreign_keys[0].target  # Customers.spec
+class Shipments(FrameSpec):
+    customer_id = ColSpec(pl.Int64, bounds=(1, 10_000))
+    __foreign_keys__ = [
+        ForeignKey("customer_id", references="Customers", ref_columns="id")
+    ]
+
+Shipments.spec.foreign_keys[0].target                     # None -- nothing to check against
+
+bound = Registry(Customers, Shipments).resolve()
+bound["Shipments"].foreign_keys[0].target                 # Customers.spec
 ```

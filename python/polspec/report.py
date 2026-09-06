@@ -20,6 +20,14 @@ if TYPE_CHECKING:
     from polspec.catspec import CatSpec
     from polspec.foreign_key import ForeignKey
 
+__all__ = [
+    "catspec_to_markdown",
+    "catspec_to_mermaid",
+    "framespec_to_markdown",
+    "framespec_to_mermaid",
+    "registry_to_mermaid",
+]
+
 
 def _write_if_asked(content: str, path: str | Path | None) -> str:
     """Writes rendered output to `path` when one was given, and returns it either way."""
@@ -335,12 +343,12 @@ def catspec_to_markdown(
         f"# {doc_title}",
         "",
         "## Summary",
-        f"- **Enums:** {len(spec._enums)}",
-        f"- **Categoricals:** {len(spec._categoricals)}",
+        f"- **Enums:** {len(spec.enums)}",
+        f"- **Categoricals:** {len(spec.categoricals)}",
         "",
     ]
 
-    if spec._enums:
+    if spec.enums:
         lines.extend(
             [
                 "## Enums (`pl.Enum`)",
@@ -349,12 +357,12 @@ def catspec_to_markdown(
                 "|:---|:---|:---|",
             ]
         )
-        for k, variants in spec._enums.items():
+        for k, variants in spec.enums.items():
             var_str = f"[{', '.join(repr(v) for v in variants[:6])}{', ...' if len(variants) > 6 else ''}]"
             lines.append(f"| `{k}` | {len(variants)} | `{var_str}` |")
         lines.append("")
 
-    if spec._categoricals:
+    if spec.categoricals:
         lines.extend(
             [
                 "## Categoricals (`pl.Categorical`)",
@@ -363,10 +371,10 @@ def catspec_to_markdown(
                 "|:---|:---|:---|:---|:---|",
             ]
         )
-        for k, cat in spec._categoricals.items():
+        for k, cat in spec.categoricals.items():
             phys = DTYPE_NAMES.get(cat.physical(), str(cat.physical()))
             ns = cat.namespace() or "-"
-            choices = spec._choices.get(k)
+            choices = spec.choices.get(k)
             if choices:
                 ch_str = f"[{', '.join(repr(c) for c in choices[:6])}{', ...' if len(choices) > 6 else ''}] ({len(choices)} total)"
             else:
@@ -395,7 +403,7 @@ def catspec_to_mermaid(
     if title:
         lines.insert(0, f"%% {title}")
 
-    for k, variants in spec._enums.items():
+    for k, variants in spec.enums.items():
         clean_k = "".join(c if c.isalnum() or c == "_" else "_" for c in k)
         lines.append(f"    class {clean_k} {{")
         lines.append("        <<enumeration>>")
@@ -406,7 +414,7 @@ def catspec_to_mermaid(
             lines.append(f"        +... ({len(variants) - 10} more)")
         lines.append("    }")
 
-    for k, cat in spec._categoricals.items():
+    for k, cat in spec.categoricals.items():
         clean_k = "".join(c if c.isalnum() or c == "_" else "_" for c in k)
         phys = DTYPE_NAMES.get(cat.physical(), str(cat.physical()))
         lines.append(f"    class {clean_k} {{")
@@ -414,7 +422,7 @@ def catspec_to_mermaid(
         ns = cat.namespace()
         if ns:
             lines.append(f"        +namespace: {ns}")
-        choices = spec._choices.get(k)
+        choices = spec.choices.get(k)
         if choices:
             for c in choices[:5]:
                 clean_c = "".join(c if c.isalnum() or c == "_" else "_" for c in str(c))

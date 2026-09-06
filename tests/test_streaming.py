@@ -1,6 +1,6 @@
 import polars as pl
 import pytest
-from polspec import Bound, ColRule, ColSpec, FrameSpec, col
+from polspec import Bound, ColRule, ColSpec, ForeignKey, FrameSpec, col
 
 
 class StreamDataSource(FrameSpec):
@@ -197,3 +197,47 @@ def test_sink_nested_directory_creation(tmp_path):
     assert nested_path.exists()
     df = pl.read_parquet(nested_path)
     assert df.height == 50
+
+
+def test_a_lazy_parent_is_collected_once_not_once_per_batch(monkeypatch):
+    """Resolving references belongs above the batch loop, not inside it.
+
+    Each batch is its own `generate()` call, and reference resolution used to
+    sit inside that call -- so a `LazyFrame` parent was collected once per
+    batch. On a scan-backed parent that is the whole file re-read, however
+    many batches there are.
+    """
+    from polspec import generation
+
+    class Parent(FrameSpec):
+        id = ColSpec(pl.Int64, bounds=(1, 1_000), unique=True)
+
+    class Child(FrameSpec):
+        id = ColSpec(pl.Int64, bounds=(1, 1_000))
+        __foreign_keys__ = [ForeignKey("id", references=Parent)]
+
+    parent = Parent.generate(200, seed=1)
+    collected = 0
+    real_collect = generation._collect
+
+    def counting_collect(frame):
+        nonlocal collected
+        if isinstance(frame, pl.LazyFrame):
+            collected += 1
+        return real_collect(frame)
+
+    monkeypatch.setattr(generation, "_collect", counting_collect)
+
+    batches = list(
+        Child.generate_batches(
+            500, batch_size=50, seed=2, references={Parent: parent.lazy()}
+        )
+    )
+    assert len(batches) == 10
+    assert collected == 1
+
+    # And the frames are the same whichever form the parent arrived in.
+    eager = list(
+        Child.generate_batches(500, batch_size=50, seed=2, references={Parent: parent})
+    )
+    assert all(a.equals(b) for a, b in zip(batches, eager, strict=True))

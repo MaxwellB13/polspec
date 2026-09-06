@@ -10,7 +10,7 @@ have to run in (`Pass`, `order`) -- so both sides read the same declaration.
 
 from __future__ import annotations
 
-from polspec.constraints.domain import Domain
+from polspec.constraints.domain import Domain, is_textual
 from polspec.constraints.passes import (
     Pass,
     order,
@@ -22,6 +22,7 @@ from polspec.constraints.passes import (
 __all__ = [
     "Domain",
     "Pass",
+    "is_textual",
     "order",
     "ordered_passes",
     "passes_of",

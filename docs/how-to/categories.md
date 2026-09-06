@@ -17,8 +17,7 @@ class Categories(CatSpec):
     CURRENCY = pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt8))
 ```
 
-`Categories.STATUS` is a plain class attribute — ordinary Python attribute
-lookup, nothing polspec-specific — so it plugs straight into a `ColSpec`:
+Naming an entry gives back its dtype, so it plugs straight into a `ColSpec`:
 
 ```python
 class Orders(FrameSpec):
@@ -29,22 +28,26 @@ class Orders(FrameSpec):
 This is deliberately not a dict. `CatSpec(enums={...}, categoricals={...},
 choices={...})` puts one name across up to three parallel mappings that all
 have to stay in step; a class body puts each entry on its own line, in the
-declaration order that also documents it, and inherits the same collision
-handling `FrameSpec` uses for columns — an entry that shadows one of
-`CatSpec`'s own methods (naming an entry `get`, say) warns rather than
-silently breaking, and an unnamed `pl.Categorical()` is rejected outright,
-since a registry entry with no name can't act as a shared key.
+declaration order that also documents it.
 
-!!! note "`.STATUS` means something different on each form"
+The entries are lifted out of the class body before the class exists — the same
+thing `FrameSpec` does with `ColSpec` columns — so an entry may be named
+anything, including a name `CatSpec` already uses:
 
-    On a class-body registry, `.STATUS` is a genuine class attribute, so it
-    returns the dtype exactly as written. On a registry built from
-    `enums=`/`categoricals=` dicts (below), `.STATUS` goes through a lookup
-    method instead and returns the raw category list — `pl.Enum(cats.STATUS)`
-    is how that form turns it into a dtype. `get_enum()`, `get_categorical()`,
-    `[...]`, and the `.enum`/`.categorical` accessors below behave identically
-    either way, since those always go through the registry rather than plain
-    attribute lookup.
+```python
+class TrickyNames(CatSpec):
+    get = pl.Enum(["A", "B"])       # an entry, not a collision
+
+TrickyNames.get                     # still the method
+TrickyNames.spec.get("get")         # pl.Enum(["A", "B"])
+```
+
+An unnamed `pl.Categorical()` is rejected outright, since a registry entry with
+no name can't act as a shared key.
+
+`Categories.spec` is the `CatSpec` value the class body declares. Anywhere a
+registry is expected — `with_catspec`, `Registry(categories=...)` — the class
+and the value are interchangeable.
 
 ## The dict constructor
 
@@ -69,16 +72,41 @@ extended.get_enum("STATUS")   # ["NEW", "PAID", "SHIPPED"] -- inherited
 extended.get_enum("REASON")   # ["FRAUD", "DUPLICATE"]     -- added
 ```
 
+They also compare equal when they say the same thing, so a registry loaded from
+a file can be checked against the one a class body declares:
+
+<!-- docs: skip -->
+```python
+Categories.spec == CatSpec.from_yaml("categories.yaml")
+```
+
 ## Using a registry
 
-Whichever form built it, the registry accessors are the same. Four equivalent
-ways to reach an entry:
+Whichever form built it, the accessors are the same, and naming an entry always
+means the same thing: the dtype.
 
 ```python
-pl.Enum(categories.STATUS)          # attribute, dict-built form only -- see note above
-categories.enum.STATUS              # typed accessor -> pl.Enum
+categories.STATUS                   # -> pl.Enum([...])
+categories.CURRENCY                 # -> pl.Categorical(...)
+categories["STATUS"]                # -> the same dtype
+categories.get("STATUS")            # -> the same dtype, or None
+```
+
+Ask for the pieces underneath when you want them rather than the dtype:
+
+```python
+categories.get_enum("STATUS")           # -> list[str]
+categories.get_categorical("CURRENCY")  # -> pl.Categories
+categories.get_choices("CURRENCY")      # -> the domain pool, or None
+```
+
+And name the kind when you want the lookup to insist on it — these refuse an
+entry of the other kind instead of quietly returning it:
+
+```python
+categories.enum.STATUS              # -> pl.Enum
 categories.enum["STATUS"]           # item access
-categories.get_enum("STATUS")       # -> list[str]
+categories.enum("STATUS")           # callable
 categories.categorical.CURRENCY     # -> pl.Categorical
 ```
 

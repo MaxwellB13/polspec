@@ -151,6 +151,7 @@ Nothing runs at declaration time except validation of the declaration itself.
 A contradictory spec fails here, at the line that caused it, rather than
 thousands of rows later:
 
+<!-- docs: raises -->
 ```python
 ColSpec(pl.Int8, bounds=(0, 1_000))
 # ValueError: ColSpec.bounds max (1000) is outside the range Int8 can represent [-128, 127]
@@ -174,6 +175,7 @@ Customers.generate(500, seed=7).equals(Customers.generate(500, seed=7))  # True
 `validate()` checks a DataFrame or LazyFrame against the same declaration and
 returns it, so it drops into a pipeline:
 
+<!-- docs: skip -->
 ```python
 clean = Customers.validate(raw_df, cast=True)
 ```
@@ -184,6 +186,16 @@ everything that is wrong rather than only the first thing:
 ```python
 from polspec import ValidationError
 
+broken_df = pl.DataFrame(
+    {
+        "customer_id": [100_050, 150_000, 200_000],   # all past the upper bound
+        "name":        ["Adam", None, "Alan"],        # one null in a non-nullable column
+        "tier":        ["trial", "trial", "pro"],     # "trial" is not a tier
+        "signed_up":   [date(2021, 5, 1)] * 3,
+        "churned":     [None, True, False],
+    }
+)
+
 try:
     Customers.validate(broken_df)
 except ValidationError as err:
@@ -193,8 +205,8 @@ except ValidationError as err:
 
 ```text
 Column 'customer_id': found 3 value(s) out of bounds [1, 100000] (min found: 100050, max found: 200000). Out of bounds samples: [100050, 150000, 200000]
-Column 'tier': found 2 invalid value(s) not in allowed choices/categories ['free', 'pro', 'enterprise']. Invalid samples: ['trial']
 Column 'name': non-nullable column contains 1 null value(s)
+Column 'tier': found 2 invalid value(s) not in allowed choices/categories ['free', 'pro', 'enterprise']. Invalid samples: ['trial']
 ```
 
 !!! tip "One pass, not one per column"
@@ -227,6 +239,13 @@ exact dtype.
 Pointed at an existing DataFrame, polspec writes the spec for you:
 
 ```python
+existing_df = pl.DataFrame(
+    {
+        "customer_id": [1, 2, 3, 4],
+        "tier":        ["free", "free", "pro", None],
+    }
+)
+
 Profiled = FrameSpec.from_dataframe(existing_df, weights=True)
 print(Profiled.to_markdown())
 ```
@@ -408,6 +427,7 @@ Source: https://maxwellb13.github.io/polspec/how-to/columns/
 
 A `ColSpec` describes one column. Only `dtype` is required.
 
+<!-- docs: skip -->
 ```python
 ColSpec(
     dtype,
@@ -502,6 +522,7 @@ unsigned dtype, which cannot represent a negative at all.
 
 Bounds outside what the dtype can hold are rejected when you declare them:
 
+<!-- docs: raises -->
 ```python
 ColSpec(pl.Float32, bounds=(-1e40, 1e40))
 # ValueError: ColSpec.bounds min (-1e+40) is outside the range Float32 can represent
@@ -536,6 +557,7 @@ Choices are held in the column's own dtype, so a `datetime` choice on a
 They must be distinct once cast to that dtype -- `1` and `"1"` on a `String`
 column are one value:
 
+<!-- docs: raises -->
 ```python
 ColSpec(pl.String, choices=[1, "1"])
 # ValueError: ColSpec.choices contains values that are the same once cast to
@@ -595,6 +617,7 @@ nullable unique column may repeat nulls and nothing else.
 
 A domain too small to cover the row count is refused, naming the column:
 
+<!-- docs: raises -->
 ```python
 class Narrow(FrameSpec):
     id = ColSpec(pl.Int8, unique=True)
@@ -690,24 +713,34 @@ composite keys and foreign keys, reachable as `.spec` on the class.
 
 ```python
 class Orders(FrameSpec):
-    order_id = ColSpec(pl.Int64, unique=True)
-    total    = ColSpec(pl.Float64, bounds=(0.0, None))
+    order_id      = ColSpec(pl.Int64, unique=True)
+    total         = ColSpec(pl.Float64, bounds=(0.0, None))
+    internal_note = ColSpec(pl.String, nullable=True)
 
 Orders.spec              # TableSpec(name='Orders', columns={...}, ...)
 Orders.spec.name         # 'Orders'
-list(Orders.spec)        # ['order_id', 'total']
+list(Orders.spec)        # ['order_id', 'total', 'internal_note']
 Orders.spec["total"]     # the ColSpec
 Orders.spec.schema()     # the same pl.Schema as Orders.schema()
 ```
 
-Every verb the library offers is a function over a `TableSpec`. The
-classmethods on `FrameSpec` forward to them with `cls.spec`, so these are the
-same call:
+Every verb the library offers is a function over a `TableSpec`; the
+classmethods on `FrameSpec` are one-line forwards that pass `cls.spec`. So a
+`TableSpec` is the thing being operated on either way:
 
 ```python
-Orders.generate(1_000, seed=1)
-polspec.generation.generate(Orders.spec, 1_000, seed=1)
+Orders.generate(1_000, seed=1)                            # the class
+FrameSpec.from_spec(Orders.spec).generate(1_000, seed=1)  # a TableSpec, wrapped
 ```
+
+!!! note "The module-level functions are not public yet"
+
+    `polspec.generation.generate(spec, ...)`,
+    `polspec.validation.inspect(spec, ...)` and their neighbours are what the
+    classmethods call, and they take a `TableSpec` directly. They are not in
+    [the API reference](https://maxwellb13.github.io/polspec/reference/api/), which means what it says
+    there: they can change in a patch release. Wrap a `TableSpec` with
+    `FrameSpec.from_spec` and use the classmethods until they are.
 
 ## Building one directly
 
@@ -730,8 +763,8 @@ Everything a class body validates at declaration is validated here too. A
 To get the class-shaped API back, wrap it:
 
 ```python
-Orders = FrameSpec.from_spec(spec)          # a FrameSpec subclass named Orders
-Orders = FrameSpec.from_spec(spec, name="Orders2026")
+Rebuilt = FrameSpec.from_spec(spec)                    # a subclass named Orders
+Renamed = FrameSpec.from_spec(spec, name="Orders2026")
 ```
 
 ## Deriving one spec from another
@@ -796,7 +829,16 @@ parent frame keyed by the class, the `TableSpec`, or the name. A
 checks the class form would have run at declaration:
 
 ```python
-Registry(Customers, Orders).resolve()["Orders"].foreign_keys[0].target  # Customers.spec
+class Shipments(FrameSpec):
+    customer_id = ColSpec(pl.Int64, bounds=(1, 10_000))
+    __foreign_keys__ = [
+        ForeignKey("customer_id", references="Customers", ref_columns="id")
+    ]
+
+Shipments.spec.foreign_keys[0].target                     # None -- nothing to check against
+
+bound = Registry(Customers, Shipments).resolve()
+bound["Shipments"].foreign_keys[0].target                 # Customers.spec
 ```
 
 ---
@@ -983,6 +1025,7 @@ the key is validated.
 A group whose columns cannot take enough distinct combinations between them is
 refused, naming the group:
 
+<!-- docs: raises -->
 ```python
 class TooTight(FrameSpec):
     a = ColSpec(pl.Enum(["x", "y"]))
@@ -1149,6 +1192,7 @@ randomly alongside.
 
 For volumes that should not be held in memory at once:
 
+<!-- docs: skip -->
 ```python
 for batch in Orders.generate_batches(10_000_000, batch_size=250_000, seed=1):
     process(batch)
@@ -1161,6 +1205,7 @@ sampled without replacement only *within* a batch.
 
 Four sinks stream batches to disk without materialising the whole frame:
 
+<!-- docs: skip -->
 ```python
 Orders.sink_parquet("orders.parquet", 50_000_000, compression="zstd")
 Orders.sink_csv("orders.csv", 1_000_000)
@@ -1238,7 +1283,8 @@ problems per column, write a report — use `inspect()`, which returns the same
 findings as a `ValidationReport` and never raises for a bad frame:
 
 ```python
-report = Orders.inspect(df, references={Customers: customers})
+suspect = df.with_columns(pl.col("total") * -1)   # every total now negative
+report = Orders.inspect(suspect)
 
 report.passed                 # False
 for finding in report:
@@ -1264,6 +1310,16 @@ report.rows(bad).collect()        # just the rows violating that one claim
 report.failing_rows().collect()   # every violating row, with a `__polspec_finding`
                                   # column naming the claim (a row violating two
                                   # claims appears twice)
+```
+
+The column `failing_rows()` adds is named by `polspec.validation.FINDING_COLUMN`
+rather than spelled out, so grouping by it does not hard-code the name:
+
+```python
+from polspec.validation import FINDING_COLUMN
+
+quarantined = report.failing_rows().collect()
+quarantined.group_by(FINDING_COLUMN).len()   # how many rows each claim caught
 ```
 
 Structural findings (`extra_columns`, `missing_columns`, `dtype`,
@@ -1292,6 +1348,16 @@ Orders.validate(
     validate_checks=True,
     validate_foreign_keys=True,
 )
+```
+
+Every one of these is a field of `polspec.validation.ValidationOptions`, which
+is what a report carries as `report.options` — so a report says what it was
+asked to check, not only what it found:
+
+```python
+report = Orders.inspect(df, validate_checks=False)
+report.options.checks        # False
+report.options.extra_cols    # "raise"
 ```
 
 ### Structural mismatches
@@ -1397,8 +1463,7 @@ class Categories(CatSpec):
     CURRENCY = pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt8))
 ```
 
-`Categories.STATUS` is a plain class attribute — ordinary Python attribute
-lookup, nothing polspec-specific — so it plugs straight into a `ColSpec`:
+Naming an entry gives back its dtype, so it plugs straight into a `ColSpec`:
 
 ```python
 class Orders(FrameSpec):
@@ -1409,22 +1474,26 @@ class Orders(FrameSpec):
 This is deliberately not a dict. `CatSpec(enums={...}, categoricals={...},
 choices={...})` puts one name across up to three parallel mappings that all
 have to stay in step; a class body puts each entry on its own line, in the
-declaration order that also documents it, and inherits the same collision
-handling `FrameSpec` uses for columns — an entry that shadows one of
-`CatSpec`'s own methods (naming an entry `get`, say) warns rather than
-silently breaking, and an unnamed `pl.Categorical()` is rejected outright,
-since a registry entry with no name can't act as a shared key.
+declaration order that also documents it.
 
-!!! note "`.STATUS` means something different on each form"
+The entries are lifted out of the class body before the class exists — the same
+thing `FrameSpec` does with `ColSpec` columns — so an entry may be named
+anything, including a name `CatSpec` already uses:
 
-    On a class-body registry, `.STATUS` is a genuine class attribute, so it
-    returns the dtype exactly as written. On a registry built from
-    `enums=`/`categoricals=` dicts (below), `.STATUS` goes through a lookup
-    method instead and returns the raw category list — `pl.Enum(cats.STATUS)`
-    is how that form turns it into a dtype. `get_enum()`, `get_categorical()`,
-    `[...]`, and the `.enum`/`.categorical` accessors below behave identically
-    either way, since those always go through the registry rather than plain
-    attribute lookup.
+```python
+class TrickyNames(CatSpec):
+    get = pl.Enum(["A", "B"])       # an entry, not a collision
+
+TrickyNames.get                     # still the method
+TrickyNames.spec.get("get")         # pl.Enum(["A", "B"])
+```
+
+An unnamed `pl.Categorical()` is rejected outright, since a registry entry with
+no name can't act as a shared key.
+
+`Categories.spec` is the `CatSpec` value the class body declares. Anywhere a
+registry is expected — `with_catspec`, `Registry(categories=...)` — the class
+and the value are interchangeable.
 
 ## The dict constructor
 
@@ -1449,16 +1518,41 @@ extended.get_enum("STATUS")   # ["NEW", "PAID", "SHIPPED"] -- inherited
 extended.get_enum("REASON")   # ["FRAUD", "DUPLICATE"]     -- added
 ```
 
+They also compare equal when they say the same thing, so a registry loaded from
+a file can be checked against the one a class body declares:
+
+<!-- docs: skip -->
+```python
+Categories.spec == CatSpec.from_yaml("categories.yaml")
+```
+
 ## Using a registry
 
-Whichever form built it, the registry accessors are the same. Four equivalent
-ways to reach an entry:
+Whichever form built it, the accessors are the same, and naming an entry always
+means the same thing: the dtype.
 
 ```python
-pl.Enum(categories.STATUS)          # attribute, dict-built form only -- see note above
-categories.enum.STATUS              # typed accessor -> pl.Enum
+categories.STATUS                   # -> pl.Enum([...])
+categories.CURRENCY                 # -> pl.Categorical(...)
+categories["STATUS"]                # -> the same dtype
+categories.get("STATUS")            # -> the same dtype, or None
+```
+
+Ask for the pieces underneath when you want them rather than the dtype:
+
+```python
+categories.get_enum("STATUS")           # -> list[str]
+categories.get_categorical("CURRENCY")  # -> pl.Categories
+categories.get_choices("CURRENCY")      # -> the domain pool, or None
+```
+
+And name the kind when you want the lookup to insist on it — these refuse an
+entry of the other kind instead of quietly returning it:
+
+```python
+categories.enum.STATUS              # -> pl.Enum
 categories.enum["STATUS"]           # item access
-categories.get_enum("STATUS")       # -> list[str]
+categories.enum("STATUS")           # callable
 categories.categorical.CURRENCY     # -> pl.Categorical
 ```
 
@@ -1669,6 +1763,7 @@ the same reference.
 
 Or pass a registry explicitly, which wins over anything the file names:
 
+<!-- docs: skip -->
 ```python
 FrameSpec.from_yaml("orders.yaml", categories=CatSpec.from_yaml("categories.yaml"))
 FrameSpec.from_yaml("orders.yaml", categories="categories.yaml")
@@ -1826,6 +1921,7 @@ Declaring the registry with a `CatSpec` says which `Enum` and `Categorical`
 definitions the specs are expected to share; `resolve()` then refuses a column
 whose declaration disagrees with it:
 
+<!-- docs: skip -->
 ```python
 registry = Registry(Orders, Products, categories=categories)
 registry.resolve()   # RegistryError if Orders.status and categories.STATUS differ
@@ -1878,6 +1974,7 @@ imported and every `FrameSpec` subclass or `TableSpec` bound in it is taken;
 a `.yaml` file is a spec, or a whole registry when it has a `specs:` key; a
 directory is walked for both, skipping names starting with `_` or `test_`:
 
+<!-- docs: skip -->
 ```python
 registry = Registry.discover("specs/")
 registry = Registry.from_module(my_project.specs)
@@ -2014,6 +2111,7 @@ diagram, with each enum as an `<<enumeration>>`.
 Both renderers are pure functions of the spec, so wiring them into a build or a
 pre-commit hook keeps the documentation honest:
 
+<!-- docs: skip -->
 ```python
 from pathlib import Path
 
@@ -2370,6 +2468,7 @@ A spec with a foreign key referencing *another* spec needs that spec's data
 via `references=`, which the CLI cannot supply on its own — that test is
 marked `@pytest.mark.skip` with a reason, rather than guessed at:
 
+<!-- docs: skip -->
 ```python
 @pytest.mark.skip(
     reason=(
@@ -2467,8 +2566,10 @@ cannot describe a signature the code does not have.
 | [`SpecError`][polspec.SpecError] | [Errors](https://maxwellb13.github.io/polspec/reference/api/errors/) |
 | [`GenerationError`][polspec.GenerationError] | [Errors](https://maxwellb13.github.io/polspec/reference/api/errors/) |
 | [`ValidationError`][polspec.ValidationError] | [Errors](https://maxwellb13.github.io/polspec/reference/api/errors/) |
+| [`MultiValidationError`][polspec.MultiValidationError] | [Errors](https://maxwellb13.github.io/polspec/reference/api/errors/) |
 | [`SerializationError`][polspec.SerializationError] | [Errors](https://maxwellb13.github.io/polspec/reference/api/errors/) |
 | [`RegistryError`][polspec.RegistryError] | [Errors](https://maxwellb13.github.io/polspec/reference/api/errors/) |
+| [`CliError`][polspec.CliError] | [Errors](https://maxwellb13.github.io/polspec/reference/api/errors/) |
 
 Anything not listed here is internal: it can change in a patch release without
 a changelog entry.
@@ -2701,7 +2802,7 @@ here, so a `TableSpec` that constructs is one that can be used.
 
 - `TableSpec.tag(self, *tags: 'str | Sequence[str]', match: "Literal['any', 'all']" = 'any') -> 'list[str]'` -- Column names carrying any (or all) of the tags, in declaration order.
 
-- `TableSpec.with_catspec(self, catspec: 'CatSpec') -> 'TableSpec'` -- Re-points columns at the registry's Enum and Categorical types.
+- `TableSpec.with_catspec(self, catspec: 'CatSpec | type[CatSpec]') -> 'TableSpec'` -- Re-points columns at the registry's Enum and Categorical types.
 
 - `TableSpec.with_checks(self, *checks: 'Check') -> 'TableSpec'` -- A copy of this spec with `checks` added to the ones it has.
 
@@ -2750,7 +2851,7 @@ data -- go through `__columns__`:
 
 - `FrameSpec.from_spec(cls, spec: 'TableSpec', *, name: 'str | None' = None) -> 'type[FrameSpec]'` -- A `FrameSpec` subclass wrapping an existing `TableSpec`.
 
-- `FrameSpec.from_yaml(cls, source: 'str | Path', *, categories: 'CatSpec | str | Path | None' = None, strict: 'bool' = True) -> 'type[FrameSpec]'` -- Builds a new FrameSpec subclass from a YAML file written by `to_yaml`.
+- `FrameSpec.from_yaml(cls, source: 'str | Path', *, categories: 'CatSpec | type[CatSpec] | str | Path | None' = None, strict: 'bool' = True) -> 'type[FrameSpec]'` -- Builds a new FrameSpec subclass from a YAML file written by `to_yaml`.
 
 - `FrameSpec.generate(cls, n: 'int', *, method: "Literal['random', 'cartesian']" = 'random', seed: 'int | None' = None, references: 'References' = None, lazy: 'bool' = False) -> 'pl.DataFrame | pl.LazyFrame'` -- Generates a DataFrame (or LazyFrame) matching this spec.
 
@@ -2782,7 +2883,7 @@ data -- go through `__columns__`:
 
 - `FrameSpec.validate(cls, df: 'pl.DataFrame | pl.LazyFrame', **options: 'Any') -> 'pl.DataFrame | pl.LazyFrame'` -- Validates a DataFrame or LazyFrame against this spec.
 
-- `FrameSpec.with_catspec(cls, catspec: 'CatSpec', *, name: 'str | None' = None) -> 'type[FrameSpec]'` -- A new FrameSpec subclass with columns re-typed against `catspec`.
+- `FrameSpec.with_catspec(cls, catspec: 'CatSpec | type[CatSpec]', *, name: 'str | None' = None) -> 'type[FrameSpec]'` -- A new FrameSpec subclass with columns re-typed against `catspec`.
 ## ForeignKey
 
 ### ForeignKey(columns: 'str | Sequence[str]', references: 'type[FrameSpec] | TableSpec | str', ref_columns: 'str | Sequence[str] | None' = None, name: 'str | None' = None, target: 'TableSpec | None' = None) -> None
@@ -2842,7 +2943,7 @@ A declared set of specs, and the shared category domains they draw on.
 
 ## Registry
 
-### Registry(*specs: 'TableSpec | type', categories: 'CatSpec | None' = None) -> 'None'
+### Registry(*specs: 'TableSpec | type', categories: 'CatSpec | type[CatSpec] | None' = None) -> 'None'
 
 A declared set of specs, with everything that needs more than one.
 
@@ -2863,11 +2964,11 @@ categories : CatSpec | None
 
 - `Registry.catspec(self) -> 'CatSpec'` -- The categories these specs share: the one declared, or one merged from every spec's Enum and Categorical columns.
 
-- `Registry.discover(cls, *paths: 'str | Path', categories: 'CatSpec | None' = None, strict: 'bool' = True) -> 'Registry'` -- Every spec found under the given files and directories.
+- `Registry.discover(cls, *paths: 'str | Path', categories: 'CatSpec | type[CatSpec] | None' = None, strict: 'bool' = True) -> 'Registry'` -- Every spec found under the given files and directories.
 
 - `Registry.from_dict(cls, data: 'Mapping[str, Any]', *, strict: 'bool' = True) -> 'Registry'` -- A registry read from the data form `to_dict` writes.
 
-- `Registry.from_module(cls, module: 'ModuleType', *, own_only: 'bool' = False, categories: 'CatSpec | None' = None) -> 'Registry'` -- Every `FrameSpec` subclass and `TableSpec` bound in a module.
+- `Registry.from_module(cls, module: 'ModuleType', *, own_only: 'bool' = False, categories: 'CatSpec | type[CatSpec] | None' = None) -> 'Registry'` -- Every `FrameSpec` subclass and `TableSpec` bound in a module.
 
 - `Registry.from_yaml(cls, source: 'str | Path', *, strict: 'bool' = True) -> 'Registry'` -- A registry read from one YAML file written by `to_yaml`.
 
@@ -2889,97 +2990,74 @@ categories : CatSpec | None
 
 - `Registry.to_yaml(self, source: 'str | Path') -> 'None'` -- Writes every spec, and the declared categories, to one file.
 
-- `Registry.validate_all(self, frames: 'Frames', *, references: 'Frames | None' = None, **options: 'Any') -> 'dict[str, pl.DataFrame | pl.LazyFrame]'` -- Validates every frame, raising one `ValidationError` that lists every spec's findings, or returning the frames with the structural transformations `validate()` applies.
+- `Registry.validate_all(self, frames: 'Frames', *, references: 'Frames | None' = None, **options: 'Any') -> 'dict[str, pl.DataFrame | pl.LazyFrame]'` -- Validates every frame, or returns them with the structural transformations `validate()` applies.
 ## CatSpec
 
 ### CatSpec(*, enums: 'Mapping[str, Sequence[str]] | None' = None, categoricals: 'Mapping[str, pl.Categories | dict[str, Any] | str | pl.DataType] | None' = None, choices: 'Mapping[str, Sequence[Any]] | None' = None) -> 'None'
 
-A centralized registry for Enums and Categoricals across pipelines and FrameSpecs.
+A set of shared `Enum` and `Categorical` domains, as a value.
 
-Stores Enum variant sequences (for `pl.Enum`) and named Categorical definitions
-(for `pl.Categorical` / `pl.Categories`), enabling seamless schema reuse, join
-compatibility, and clean YAML serialization.
+Parameters
+----------
+enums : Mapping[str, Sequence[str]], optional
+    Entry name to its ordered category list.
+categoricals : Mapping[str, pl.Categories | dict | str | pl.DataType], optional
+    Entry name to its shared `pl.Categories`. A physical dtype (`pl.UInt8`)
+    or its name (`"UInt8"`) is shorthand for a registry of that name; a
+    mapping is the file form, and its `categories` key becomes `choices`.
+choices : Mapping[str, Sequence[Any]], optional
+    The pool of values an entry draws from when generating. An `Enum`'s
+    categories already are its pool; this is for `Categorical` entries,
+    whose registry names the domain without listing it.
 
-The declarative way to write one by hand is to subclass it, one line per
-entry, in the same vocabulary `ColSpec.dtype` already accepts:
+Notes
+-----
+Naming an entry -- `cats.STATUS`, `cats["STATUS"]`, `cats.get("STATUS")` --
+gives back the dtype, ready to hand to `ColSpec`. Lookup is
+case-insensitive, so a column named `status` finds `STATUS`, and an `Enum`
+wins over a `Categorical` of the same name.
 
-    class Categories(CatSpec):
-        STATUS   = pl.Enum(["NEW", "PAID", "SHIPPED"])
-        CURRENCY = pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt8))
-
-    ColSpec(Categories.STATUS)
-    ColSpec(Categories.CURRENCY)
-
-`Categories.STATUS` is a plain class attribute -- ordinary Python
-attribute lookup, nothing polspec-specific -- so it can be handed
-straight to `ColSpec()`. Instantiating the class (`Categories()`) also
-still works, and behaves exactly like the keyword-argument form below,
-for the registry-level operations (`to_yaml`, `get_enum`,
-case-insensitive lookup, ...) that need an instance.
-
-This makes `.STATUS` mean two different things depending on how the
-registry was built, which is worth being deliberate about rather than
-surprised by: on a class-body subclass, plain attribute access returns
-the dtype exactly as written (a `pl.Enum`/`pl.Categorical`), because that
-is a real class attribute and nothing intercepts it. On a registry built
-from `enums=`/`categoricals=` dicts, `.STATUS` goes through `__getattr__`
-instead and returns the raw category list -- `pl.Enum(cats.STATUS)` is
-how that form turns it into a dtype. `get_enum()`, `get_categorical()`,
-`[...]` and the `.enum`/`.categorical` accessors behave identically
-either way, since those always go through the registry, never through
-plain attribute lookup.
-
-The `enums=`/`categoricals=`/`choices=` constructor below remains the
-form `CatSpec.infer()`, `from_dataframe()` and `from_yaml()` build
-programmatically, since their names come from data rather than from a
-class body someone writes by hand -- the two are not in competition.
+A subclass of `CatSpec` declares its entries in the class body; see the
+module docstring. Instantiating one takes those entries as defaults, so
+`Categories(enums={"REASON": [...]})` extends rather than replaces.
 
 Examples
 --------
->>> cats = CatSpec(
-...     enums={"STATUS": ["PENDING", "COMPLETED"]},
-...     categoricals={"CURRENCY": pl.Categories("CURRENCY", physical=pl.UInt8)},
-... )
->>> pl.Enum(cats.STATUS)
+>>> cats = CatSpec(enums={"STATUS": ["PENDING", "COMPLETED"]})
+>>> cats.STATUS
 Enum(categories=['PENDING', 'COMPLETED'])
->>> pl.Categorical(cats.CURRENCY)
-Categorical(Categories(name="CURRENCY", namespace="", physical=pl.UInt8))
->>> cats.enum.STATUS
-Enum(categories=['PENDING', 'COMPLETED'])
->>> cats.categorical.CURRENCY
-Categorical(Categories(name="CURRENCY", namespace="", physical=pl.UInt8))
+>>> cats.get_enum("status")
+['PENDING', 'COMPLETED']
 
-- `CatSpec.from_dataframe(cls, df: 'pl.DataFrame | pl.LazyFrame') -> 'CatSpec'` -- Constructs a CatSpec from existing Enum and Categorical columns in a DataFrame or LazyFrame.
+- `CatSpec.dtype_of(self, name: 'str') -> 'pl.DataType | None'` -- The dtype registered under `name`, or None if nothing is.
 
-- `CatSpec.from_dict(cls, data: 'dict[str, Any]', *, strict: 'bool' = True) -> 'CatSpec'` -- Constructs a CatSpec from its data form (any format version).
+- `CatSpec.from_dataframe(cls, df: 'pl.DataFrame | pl.LazyFrame') -> 'CatSpec'` -- The `Enum` and `Categorical` columns a frame already declares.
 
-- `CatSpec.from_framespec(cls, spec: 'TableSpec | type[FrameSpec]') -> 'CatSpec'` -- Constructs a CatSpec from a TableSpec or a FrameSpec subclass.
+- `CatSpec.from_dict(cls, data: 'dict[str, Any]', *, strict: 'bool' = True) -> 'CatSpec'` -- A registry read from the data form `to_dict` writes.
 
-- `CatSpec.from_yaml(cls, source: 'str | Path', *, strict: 'bool' = True) -> 'CatSpec'` -- Loads a CatSpec from a YAML file.
+- `CatSpec.from_framespec(cls, spec: 'TableSpec | type[FrameSpec]') -> 'CatSpec'` -- The `Enum` and `Categorical` columns a spec already declares.
 
-- `CatSpec.get(self, name: 'str', default: 'Any' = None) -> 'Any'` -- The entry registered under `name`, whatever kind it is.
+- `CatSpec.from_yaml(cls, source: 'str | Path', *, strict: 'bool' = True) -> 'CatSpec'` -- A registry read from a YAML file written by `to_yaml`.
 
-- `CatSpec.get_categorical(self, name: 'str') -> 'pl.Categories'` -- Returns the pl.Categories definition for a categorical.
+- `CatSpec.get(self, name: 'str', default: 'Any' = None) -> 'Any'` -- The dtype registered under `name`, or `default` if nothing is.
 
-- `CatSpec.get_choices(self, name: 'str') -> 'list[Any] | None'` -- Returns domain choices if defined for this enum or categorical.
+- `CatSpec.get_categorical(self, name: 'str') -> 'pl.Categories'` -- The shared `pl.Categories` of a `Categorical` entry.
 
-- `CatSpec.get_enum(self, name: 'str') -> 'list[str]'` -- Returns the list of categories/variants for an enum.
+- `CatSpec.get_choices(self, name: 'str') -> 'list[Any] | None'` -- The pool of values an entry draws from, if it has one.
 
-- `CatSpec.infer(cls, target: 'pl.DataFrame | pl.LazyFrame | TableSpec | type[FrameSpec]', *, max_enum_cardinality: 'int' = 30, max_categorical_cardinality: 'int' = 10000, max_categorical_ratio: 'float' = 0.2, include_columns: 'Sequence[str] | None' = None, exclude_patterns: 'Sequence[str] | None' = ('(?:^|.*_)id$', '(?:^|.*_)uuid$', '(?:^|.*_)hash$', '(?:^|.*_)url$', '(?:^|.*_)key$'), default_physical: 'pl.DataType | None' = None) -> 'CatSpec'` -- Infers an optimal CatSpec from a DataFrame, LazyFrame, or FrameSpec.
+- `CatSpec.get_enum(self, name: 'str') -> 'list[str]'` -- The category list of an `Enum` entry.
 
-- `CatSpec.infer_from_dataframe(cls, df: 'pl.DataFrame | pl.LazyFrame', *, max_enum_cardinality: 'int' = 30, max_categorical_cardinality: 'int' = 10000, max_categorical_ratio: 'float' = 0.2, include_columns: 'Sequence[str] | None' = None, exclude_patterns: 'Sequence[str] | None' = ('(?:^|.*_)id$', '(?:^|.*_)uuid$', '(?:^|.*_)hash$', '(?:^|.*_)url$', '(?:^|.*_)key$'), default_physical: 'pl.DataType | None' = None) -> 'CatSpec'` -- Infers an optimal CatSpec from String and Categorical columns in a DataFrame or LazyFrame.
+- `CatSpec.infer(cls, target: 'pl.DataFrame | pl.LazyFrame | TableSpec | type[FrameSpec]', *, max_enum_cardinality: 'int' = 30, max_categorical_cardinality: 'int' = 10000, max_categorical_ratio: 'float' = 0.2, include_columns: 'Sequence[str] | None' = None, exclude_patterns: 'Sequence[str] | None' = ('(?:^|.*_)id$', '(?:^|.*_)uuid$', '(?:^|.*_)hash$', '(?:^|.*_)url$', '(?:^|.*_)key$'), default_physical: 'pl.DataType | None' = None) -> 'CatSpec'` -- A registry of the domains `target` looks like it has.
 
-- `CatSpec.infer_from_framespec(cls, spec: 'TableSpec | type[FrameSpec]', *, max_enum_cardinality: 'int' = 30, max_categorical_cardinality: 'int' = 10000, include_columns: 'Sequence[str] | None' = None, exclude_patterns: 'Sequence[str] | None' = ('(?:^|.*_)id$', '(?:^|.*_)uuid$', '(?:^|.*_)hash$', '(?:^|.*_)url$', '(?:^|.*_)key$'), default_physical: 'pl.DataType | None' = None) -> 'CatSpec'` -- Infers an optimal CatSpec from a TableSpec or FrameSpec subclass's declarations.
+- `CatSpec.resolve_key(self, name: 'str') -> 'tuple[Kind, str] | None'` -- Which entry a name binds to, if any.
 
-- `CatSpec.resolve_key(self, name: 'str') -> "tuple[Literal['enum', 'categorical'], str] | None"` -- Which registry entry a column name binds to, if any.
+- `CatSpec.to_dict(self) -> 'dict[str, Any]'` -- This registry as plain data, without the file's `version` key.
 
-- `CatSpec.to_dict(self) -> 'dict[str, Any]'` -- The data form of this registry, without the file's `version` key.
+- `CatSpec.to_markdown(self, path: 'str | Path | None' = None, *, title: 'str | None' = None) -> 'str'` -- A Markdown table of every entry; written to `path` when given.
 
-- `CatSpec.to_markdown(self, path: 'str | Path | None' = None, *, title: 'str | None' = None) -> 'str'` -- Generates a Markdown documentation table of this CatSpec registry.
+- `CatSpec.to_mermaid(self, path: 'str | Path | None' = None, *, title: 'str | None' = None) -> 'str'` -- A Mermaid class diagram of every entry; written to `path` when given.
 
-- `CatSpec.to_mermaid(self, path: 'str | Path | None' = None, *, title: 'str | None' = None) -> 'str'` -- Generates a Mermaid class diagram definition for this CatSpec registry.
-
-- `CatSpec.to_yaml(self, source: 'str | Path | None' = None) -> 'str | None'` -- Writes this registry as YAML to `source`, or returns the text when no path is given.
+- `CatSpec.to_yaml(self, source: 'str | Path | None' = None) -> 'str | None'` -- Writes this registry as YAML to `source`, or returns the text.
 
 ---
 
@@ -3100,6 +3178,18 @@ Data does not meet its spec.
 Carries the `ValidationReport` of every violation found as `report`.
 `errors` is the same findings as a plain list of messages, for the common
 case of printing them.
+## MultiValidationError
+
+### MultiValidationError(reports: 'Any') -> 'None'
+
+Several frames failed validation together, as one registry call.
+
+`reports` holds the `ValidationReport` of every spec that failed, keyed by
+spec name, so `failing_rows()`, `by_code()` and the rest are reachable for
+each of them. `report` is None: there is no single report here, and
+picking one of several arbitrarily would be worse than saying so. `str()`
+and `errors` read as they always have -- every failing spec's findings,
+one after another.
 ## SerializationError
 
 ### SerializationError
@@ -3116,6 +3206,11 @@ A collection of specs is inconsistent.
 
 An unknown or duplicated spec name, a cycle in the foreign-key graph, two
 specs disagreeing about a shared category.
+## CliError
+
+### CliError
+
+An expected failure on the command line, reported without a traceback.
 
 ---
 
@@ -3211,7 +3306,7 @@ owns only the inner loop that fills arrays with values.
 | `tablespec` | `TableSpec` — a spec as an immutable value, with its declaration-time checks and structural operations |
 | `framespec` | `FrameSpec` — the metaclass that builds a `TableSpec` from a class body, and the facade forwarding every verb to it |
 | `generation` | `generate`, `generate_batches` and the file sinks, as functions over a `TableSpec`; `composite.py` separates a `__unique_together__` group |
-| `catspec` | `CatSpec` — a shared registry of enums and categoricals |
+| `catspec` | `CatSpec` — a shared registry of enums and categoricals, as a value, plus the metaclass that builds one from a class body (the same split as `tablespec`/`framespec`) |
 | `registry` | `Registry` — a declared set of specs: resolving cross-spec keys, ordering parents before children, `generate_all`/`validate_all`, one file and one diagram for the set |
 | `serialization` | Spec files: a field registry (`fields.py`) that YAML, generated Python and the `import datetime` decision all derive from; the dtype codec table (`dtypes.py`); format versions and migrations (`migrations.py`) |
 | `profiler` | Inferring a spec from an existing DataFrame |
@@ -3331,11 +3426,13 @@ match the module.
 | `test_serialization_format.py` | The field registry, format versions, migrations, unknown keys |
 | `test_registry.py` | `Registry`: resolution, ordering, `generate_all`/`validate_all`, files, discovery |
 | `test_errors.py` | The exception hierarchy |
-| `test_catspec.py` | Shared category registries |
+| `test_catspec.py` | Shared category registries: both declaration forms, and that they agree |
 | `test_streaming.py` | Batching and the file sinks |
 | `test_cli.py` | The command line, including running a generated test file under pytest |
 | `test_engine.py` | The Python / Rust boundary: typed plans, exact bounds, typed choices, per-column seeds, the stub |
 | `test_constraints.py` | What both sides share: `Domain`, and the pass ordering that lets rules and keys see each other's work |
+| `test_docs.py` | That the documentation points at things that exist: every exported name, link and nav entry, and the generated `llms.txt` |
+| `test_doc_examples.py` | That the documentation's Python examples run |
 
 The round-trip file carries `xfail(strict=True)` markers for known gaps, so a
 fix turns the marker into a failure rather than passing unnoticed. See
@@ -3383,6 +3480,7 @@ rejected by the library that made it.
 That property has a name here — the *round-trip* — and it is asserted
 directly, in `tests/test_roundtrip.py`:
 
+<!-- docs: skip -->
 ```python
 SpecCls.validate(SpecCls.generate(n, seed=...))   # must not raise
 ```
@@ -3605,6 +3703,7 @@ values becomes a `ColSpec.choices` list; polspec supplies the bounds,
 nullability, cross-column rules, and cross-table referential integrity that
 sit around it:
 
+<!-- docs: skip -->
 ```python
 import polars as pl
 from faker import Faker
@@ -3719,7 +3818,7 @@ booleans, strings, binary, `Date`/`Time`/`Datetime`/`Duration`, `Enum` and
 A `ColSpec` for one of these constructs without complaint and can be
 *validated* against — `FrameSpec.validate()` doesn't need to know how to
 generate a dtype to check one. `generate()` is where it stops, with a
-`TypeError` naming the dtype. Expanding into nested types is the most
+`SpecError` naming the dtype. Expanding into nested types is the most
 requested kind of gap to close next; if you need one of these today, generate
 the column separately and attach it with `with_columns` after `generate()`
 returns.
@@ -3804,11 +3903,17 @@ Two things this project has made no compatibility promise about yet:
   is derived, or a fix to one of the [known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/) can
   all legitimately change what a given seed produces.
 
-The first of those is easier to live with than it sounds, and the first step is
-small: nothing in a spec file currently records which polspec wrote it. A
-version key would let `from_yaml()` say so plainly when a file predates a
-format change, instead of failing on an unrecognized key — or, worse, quietly
-reading a renamed one as its default.
+The first of those is easier to live with than it sounds, because a spec file
+now says which format wrote it. Every file `to_yaml()` writes carries
+`version: 2`; a file with no `version:` key is read as version 1 and migrated
+on load, and one written by a newer polspec than the reader is refused by name
+rather than misread. So a format change is a migration to write, not a class of
+file that silently stops loading — which is what makes the rest of this section
+a smaller promise than it looks.
+
+What is still not promised is that a *given key* survives a minor release. A
+renamed key needs a migration, and migrations are written when the rename
+happens, not before.
 
 Neither of these is likely to move for the sake of moving — but until this
 page says otherwise, don't build something that depends on today's YAML
@@ -3855,8 +3960,82 @@ seed produces; see
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking.** `CatSpec` is a value, and the class body that declares one is
+  read by a metaclass rather than left in the namespace -- the same split
+  `TableSpec` and `FrameSpec` already had. What follows:
+
+  - **Naming an entry always gives back the dtype.** It used to depend on how
+    the registry was built: a class-body entry was a real class attribute and
+    returned the dtype, while a dict-built registry's `.STATUS` returned the
+    raw category list, and only one of the two could be handed to a `ColSpec`.
+    Both now return the dtype, so `ColSpec(cats.STATUS)` and
+    `ColSpec(Categories.STATUS)` mean the same thing. `cats["STATUS"]` and
+    `cats.get("STATUS")` follow the same rule. Replace `pl.Enum(cats.STATUS)`
+    with `cats.STATUS`, and `cats.CURRENCY.physical()` with
+    `cats.get_categorical("CURRENCY").physical()`.
+  - **An entry may share a name with a method.** Entries are removed from the
+    class body before the class exists, so declaring one called `get` no longer
+    warns and no longer costs you `CatSpec.get`. The entry is reached through
+    the registry (`Categories.spec.get("get")`).
+  - **`CatSpec.infer_from_dataframe` and `CatSpec.infer_from_framespec` are
+    removed**; `CatSpec.infer(target, ...)` dispatches on what it is given, as
+    it already did. `from_dataframe` and `from_framespec` are unchanged --
+    those read what is declared rather than inferring what could be.
+  - **`Categories.spec`** is the `CatSpec` a class body declares. Anywhere a
+    registry is expected -- `with_catspec`, `Registry(categories=...)`,
+    `FrameSpec.from_yaml(categories=...)` -- the class and the value are now
+    interchangeable.
+  - **`CatSpec` has value semantics.** Two registries that say the same thing
+    compare equal and hash equal, so one loaded from a file can be checked
+    against one a class body declares.
+  - **`CatSpec.dtype_of(name)`** is the one lookup everything else is built on:
+    the dtype an entry names, or None. `resolve_key` still says which kind of
+    entry a name binds to.
+  - `enums`, `categoricals` and `choices` are read-only mappings rather than
+    fresh dicts. `dict(cats.enums)` if you need a mutable copy.
+
+### Added
+
+- `polspec.MultiValidationError`, raised by `Registry.validate_all` when
+  several frames fail at once. It is a `ValidationError`, so an existing
+  `except` clause still catches it, and it carries every failing spec's
+  `ValidationReport` as `reports`, keyed by spec name -- previously
+  `validate_all` raised with a joined string and the reports were lost, so
+  `failing_rows()`, `by_code()` and `to_json()` were unreachable from the
+  registry path.
+- `polspec.CliError` is exported, so `except polspec.CliError` works. It was
+  the one exception in the hierarchy reachable only from `polspec.errors`.
+- Every Python example in the documentation is executed by
+  `tests/test_doc_examples.py`. A block that cannot run standalone says so in
+  an HTML comment (`<!-- docs: skip -->`), and one that demonstrates an error
+  is checked to still raise (`<!-- docs: raises -->`). This found four broken
+  examples, fixed here: a `drop()` of a column the page never declared, a
+  `TableSpec` example rebinding the name a later block used, and two blocks
+  naming frames (`broken_df`, `existing_df`) that were never built.
+
 ### Fixed
 
+- `ColSpec(tags={...})` is reproducible. A `set` was kept in its own iteration
+  order, which Python salts per process, so `to_yaml` wrote a different `tags:`
+  line on every run and two identically-written specs compared unequal across
+  processes. A set is now sorted; a list or tuple keeps the order it was
+  written in.
+- `Registry.generate_all`, `generate_related` and `inspect_all` bind their
+  cross-spec foreign keys before doing anything, so a key whose dtypes do not
+  match is a `RegistryError` naming both columns rather than a Polars cast
+  error from inside generation. Only `resolve()` used to run that check, and
+  nothing said it had to be called first. A key whose target is supplied
+  through `references=` rather than held by the registry is still accepted, as
+  it was.
+- A `ColSpec` carrying the same validator twice keeps it once, so it produces
+  one finding rather than two identical ones. `TableSpec` already collapsed
+  identical checks and foreign keys.
+- `generate_batches` and the `sink_*` functions resolve `references` once per
+  call rather than once per batch. A `LazyFrame` parent was collected inside
+  every batch, so a scan-backed parent was re-read as many times as there were
+  batches.
 - `inspect()` no longer raises a raw Polars error for a column whose dtype is
   wrong *and* whose spec declares `choices` or an `Enum`. The domain check was
   built before the dtype check could bail out, and comparing values against
@@ -3884,6 +4063,16 @@ seed produces; see
   in by mkdocstrings from the live docstrings, so a docstring that breaks
   `--strict` used to pass its own pull request and fail the next one to touch
   `docs/`.
+- The roadmap's "YAML format may change" section described the missing format
+  version key that 0.2.0 shipped, and said an unsupported dtype raises
+  `TypeError` rather than `SpecError`.
+- `FINDING_COLUMN` and `ValidationOptions` are documented in
+  the validation guide; both are exported and appeared nowhere.
+- `how-to/tablespec.md` taught `polspec.generation.generate(spec, ...)` while
+  the API reference says anything unlisted may change in a patch. The page now
+  says which of the two it is.
+- `CONTRIBUTING.md` gives the runnable form of the Windows `cargo test`
+  workaround, and names the `STATUS_DLL_NOT_FOUND` failure it fixes.
 
 ## [0.2.0] - 2026-09-05
 

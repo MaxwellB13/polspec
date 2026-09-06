@@ -92,6 +92,7 @@ values becomes a `ColSpec.choices` list; polspec supplies the bounds,
 nullability, cross-column rules, and cross-table referential integrity that
 sit around it:
 
+<!-- docs: skip -->
 ```python
 import polars as pl
 from faker import Faker

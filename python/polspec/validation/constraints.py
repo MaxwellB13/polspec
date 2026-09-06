@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
+from polspec.constraints import is_textual as _is_textual
 from polspec.dtypes import _typed_values
 from polspec.validation.report import Finding
 
@@ -318,13 +319,6 @@ def _is_dtype_compatible(
     if expected.is_temporal():
         return actual.is_temporal()
     return actual == expected
-
-
-def _is_textual(dtype: pl.DataType) -> bool:
-    """Whether values of `dtype` are compared to `choices` by their string form."""
-    return dtype in (pl.String, pl.Utf8, pl.Categorical) or isinstance(
-        dtype, (pl.Enum, pl.Categorical)
-    )
 
 
 def _as_strings(values: Sequence[Any], dtype: pl.DataType) -> list[str]:

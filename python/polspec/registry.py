@@ -27,9 +27,9 @@ from typing import TYPE_CHECKING, Any, Literal
 import polars as pl
 
 from polspec import generation, validation
-from polspec.catspec import CatSpec, _declared_categories_from
+from polspec.catspec import CatSpec, _declared_categories_from, as_catspec
 from polspec.engine import _stable_seed
-from polspec.errors import RegistryError, SpecError, ValidationError
+from polspec.errors import MultiValidationError, RegistryError, SpecError
 from polspec.tablespec import TableSpec, as_spec_name, as_table_spec, resolve_references
 
 if TYPE_CHECKING:
@@ -96,10 +96,12 @@ class Registry:
     """
 
     def __init__(
-        self, *specs: TableSpec | type, categories: CatSpec | None = None
+        self,
+        *specs: TableSpec | type,
+        categories: CatSpec | type[CatSpec] | None = None,
     ) -> None:
         self._specs: dict[str, TableSpec] = {}
-        self._categories = categories
+        self._categories = None if categories is None else as_catspec(categories)
         for spec in specs:
             self.add(spec)
 
@@ -170,7 +172,7 @@ class Registry:
         module: ModuleType,
         *,
         own_only: bool = False,
-        categories: CatSpec | None = None,
+        categories: CatSpec | type[CatSpec] | None = None,
     ) -> Registry:
         """Every `FrameSpec` subclass and `TableSpec` bound in a module.
 
@@ -195,7 +197,7 @@ class Registry:
     def discover(
         cls,
         *paths: str | Path,
-        categories: CatSpec | None = None,
+        categories: CatSpec | type[CatSpec] | None = None,
         strict: bool = True,
     ) -> Registry:
         """Every spec found under the given files and directories.
@@ -227,6 +229,50 @@ class Registry:
     # Consistency
     # ------------------------------------------------------------------
 
+    def _bind(self, *, require_known: bool) -> dict[str, TableSpec]:
+        """Every spec with its cross-spec keys pointed at the specs they name.
+
+        Binding is what runs the checks a key declared against a class gets
+        for free: the referenced columns exist, the dtypes are compatible, the
+        parent's domain fits inside the child's. A key declared against a bare
+        name, or read from a file, has had none of them -- so this is where a
+        spec that cannot work says so, instead of failing somewhere inside
+        generation as a Polars cast error.
+
+        `require_known=True` also refuses a key whose target is not in the
+        registry, which is what `resolve()` promises. Generation and
+        validation pass False: they accept a parent supplied through
+        `references=` instead, and a key with no data at all is a warning
+        there, not an error.
+        """
+        bound: dict[str, TableSpec] = {}
+        for name, spec in self._specs.items():
+            keys = []
+            newly_bound = False
+            for fk in spec.foreign_keys:
+                target = (
+                    None if fk.references == "self" else self._specs.get(fk.references)
+                )
+                if target is None:
+                    if require_known and fk.references != "self":
+                        raise RegistryError(
+                            f"ForeignKey {fk.name!r} on {name!r} references "
+                            f"{fk.references!r}, which is not in the registry "
+                            f"({', '.join(self._specs)})"
+                        )
+                    keys.append(fk)
+                    continue
+                newly_bound = newly_bound or fk.target is not target
+                keys.append(dataclasses.replace(fk, target=target))
+            if not newly_bound:
+                bound[name] = spec
+                continue
+            try:
+                bound[name] = dataclasses.replace(spec, foreign_keys=tuple(keys))
+            except SpecError as exc:
+                raise RegistryError(str(exc)) from exc
+        return bound
+
     def resolve(self) -> Registry:
         """A registry whose every cross-spec key is bound to its target.
 
@@ -235,28 +281,13 @@ class Registry:
         -- for keys that were declared against a bare name or read from a
         file. Also refuses a key whose target is not in the registry, a cycle
         between specs, and a column disagreeing with `categories`.
+
+        Not a prerequisite for anything: `generate_all` and `inspect_all` run
+        the same binding themselves. Call it to check a registry, or to hold
+        on to the bound specs.
         """
         resolved = Registry(categories=self._categories)
-        for name, spec in self._specs.items():
-            keys = []
-            for fk in spec.foreign_keys:
-                if fk.references == "self":
-                    keys.append(fk)
-                    continue
-                target = self._specs.get(fk.references)
-                if target is None:
-                    raise RegistryError(
-                        f"ForeignKey {fk.name!r} on {name!r} references "
-                        f"{fk.references!r}, which is not in the registry "
-                        f"({', '.join(self._specs)})"
-                    )
-                keys.append(dataclasses.replace(fk, target=target))
-            try:
-                resolved._specs[name] = dataclasses.replace(
-                    spec, foreign_keys=tuple(keys)
-                )
-            except SpecError as exc:
-                raise RegistryError(str(exc)) from exc
+        resolved._specs.update(self._bind(require_known=True))
         resolved._check_categories()
         resolved.order()
         return resolved
@@ -378,6 +409,7 @@ class Registry:
         references: Frames | None,
     ) -> dict[str, pl.DataFrame]:
         counts = self._counts(n, names)
+        specs = self._bind(require_known=False)
         supplied = resolve_references(references, _collect)
         for name in names:
             for parent in self.parents(name):
@@ -395,7 +427,7 @@ class Registry:
                 continue
             spec_seed = None if seed is None else _stable_seed(str(seed), name)
             frames[name] = generation.generate(
-                self._specs[name],
+                specs[name],
                 counts[name],
                 method=method,
                 seed=spec_seed,
@@ -462,10 +494,11 @@ class Registry:
         as a possible parent. Takes the options `validate()` does.
         """
         named = self._named(frames)
+        specs = self._bind(require_known=False)
         parents = {**resolve_references(references, lambda f: f), **named}
         return {
             name: validation.inspect(
-                self._specs[name], named[name], references=parents, **options
+                specs[name], named[name], references=parents, **options
             )
             for name in self.order()
             if name in named
@@ -474,18 +507,17 @@ class Registry:
     def validate_all(
         self, frames: Frames, *, references: Frames | None = None, **options: Any
     ) -> dict[str, pl.DataFrame | pl.LazyFrame]:
-        """Validates every frame, raising one `ValidationError` that lists
-        every spec's findings, or returning the frames with the structural
+        """Validates every frame, or returns them with the structural
         transformations `validate()` applies.
+
+        Raises `MultiValidationError` -- a `ValidationError`, so one `except`
+        still catches both -- carrying every failing spec's `ValidationReport`
+        as `reports`, keyed by spec name.
         """
         named = self._named(frames)
         reports = self.inspect_all(named, references=references, **options)
-        failed = [report for report in reports.values() if not report.passed]
-        if failed:
-            raise ValidationError(
-                "\n\n".join(str(report) for report in failed),
-                errors=[f.message for report in failed for f in report.findings],
-            )
+        if any(not report.passed for report in reports.values()):
+            raise MultiValidationError(reports)
         return {
             name: validation._transformed(self._specs[name], named[name], report)
             for name, report in reports.items()

@@ -8,8 +8,82 @@ seed produces; see
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking.** `CatSpec` is a value, and the class body that declares one is
+  read by a metaclass rather than left in the namespace -- the same split
+  `TableSpec` and `FrameSpec` already had. What follows:
+
+  - **Naming an entry always gives back the dtype.** It used to depend on how
+    the registry was built: a class-body entry was a real class attribute and
+    returned the dtype, while a dict-built registry's `.STATUS` returned the
+    raw category list, and only one of the two could be handed to a `ColSpec`.
+    Both now return the dtype, so `ColSpec(cats.STATUS)` and
+    `ColSpec(Categories.STATUS)` mean the same thing. `cats["STATUS"]` and
+    `cats.get("STATUS")` follow the same rule. Replace `pl.Enum(cats.STATUS)`
+    with `cats.STATUS`, and `cats.CURRENCY.physical()` with
+    `cats.get_categorical("CURRENCY").physical()`.
+  - **An entry may share a name with a method.** Entries are removed from the
+    class body before the class exists, so declaring one called `get` no longer
+    warns and no longer costs you `CatSpec.get`. The entry is reached through
+    the registry (`Categories.spec.get("get")`).
+  - **`CatSpec.infer_from_dataframe` and `CatSpec.infer_from_framespec` are
+    removed**; `CatSpec.infer(target, ...)` dispatches on what it is given, as
+    it already did. `from_dataframe` and `from_framespec` are unchanged --
+    those read what is declared rather than inferring what could be.
+  - **`Categories.spec`** is the `CatSpec` a class body declares. Anywhere a
+    registry is expected -- `with_catspec`, `Registry(categories=...)`,
+    `FrameSpec.from_yaml(categories=...)` -- the class and the value are now
+    interchangeable.
+  - **`CatSpec` has value semantics.** Two registries that say the same thing
+    compare equal and hash equal, so one loaded from a file can be checked
+    against one a class body declares.
+  - **`CatSpec.dtype_of(name)`** is the one lookup everything else is built on:
+    the dtype an entry names, or None. `resolve_key` still says which kind of
+    entry a name binds to.
+  - `enums`, `categoricals` and `choices` are read-only mappings rather than
+    fresh dicts. `dict(cats.enums)` if you need a mutable copy.
+
+### Added
+
+- `polspec.MultiValidationError`, raised by `Registry.validate_all` when
+  several frames fail at once. It is a `ValidationError`, so an existing
+  `except` clause still catches it, and it carries every failing spec's
+  `ValidationReport` as `reports`, keyed by spec name -- previously
+  `validate_all` raised with a joined string and the reports were lost, so
+  `failing_rows()`, `by_code()` and `to_json()` were unreachable from the
+  registry path.
+- `polspec.CliError` is exported, so `except polspec.CliError` works. It was
+  the one exception in the hierarchy reachable only from `polspec.errors`.
+- Every Python example in the documentation is executed by
+  `tests/test_doc_examples.py`. A block that cannot run standalone says so in
+  an HTML comment (`<!-- docs: skip -->`), and one that demonstrates an error
+  is checked to still raise (`<!-- docs: raises -->`). This found four broken
+  examples, fixed here: a `drop()` of a column the page never declared, a
+  `TableSpec` example rebinding the name a later block used, and two blocks
+  naming frames (`broken_df`, `existing_df`) that were never built.
+
 ### Fixed
 
+- `ColSpec(tags={...})` is reproducible. A `set` was kept in its own iteration
+  order, which Python salts per process, so `to_yaml` wrote a different `tags:`
+  line on every run and two identically-written specs compared unequal across
+  processes. A set is now sorted; a list or tuple keeps the order it was
+  written in.
+- `Registry.generate_all`, `generate_related` and `inspect_all` bind their
+  cross-spec foreign keys before doing anything, so a key whose dtypes do not
+  match is a `RegistryError` naming both columns rather than a Polars cast
+  error from inside generation. Only `resolve()` used to run that check, and
+  nothing said it had to be called first. A key whose target is supplied
+  through `references=` rather than held by the registry is still accepted, as
+  it was.
+- A `ColSpec` carrying the same validator twice keeps it once, so it produces
+  one finding rather than two identical ones. `TableSpec` already collapsed
+  identical checks and foreign keys.
+- `generate_batches` and the `sink_*` functions resolve `references` once per
+  call rather than once per batch. A `LazyFrame` parent was collected inside
+  every batch, so a scan-backed parent was re-read as many times as there were
+  batches.
 - `inspect()` no longer raises a raw Polars error for a column whose dtype is
   wrong *and* whose spec declares `choices` or an `Enum`. The domain check was
   built before the dtype check could bail out, and comparing values against
@@ -37,6 +111,16 @@ seed produces; see
   in by mkdocstrings from the live docstrings, so a docstring that breaks
   `--strict` used to pass its own pull request and fail the next one to touch
   `docs/`.
+- The roadmap's "YAML format may change" section described the missing format
+  version key that 0.2.0 shipped, and said an unsupported dtype raises
+  `TypeError` rather than `SpecError`.
+- `FINDING_COLUMN` and `ValidationOptions` are documented in
+  the validation guide; both are exported and appeared nowhere.
+- `how-to/tablespec.md` taught `polspec.generation.generate(spec, ...)` while
+  the API reference says anything unlisted may change in a patch. The page now
+  says which of the two it is.
+- `CONTRIBUTING.md` gives the runnable form of the Windows `cargo test`
+  workaround, and names the `STATUS_DLL_NOT_FOUND` failure it fixes.
 
 ## [0.2.0] - 2026-09-05
 

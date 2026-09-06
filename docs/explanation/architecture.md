@@ -24,7 +24,7 @@ owns only the inner loop that fills arrays with values.
 | `tablespec` | `TableSpec` — a spec as an immutable value, with its declaration-time checks and structural operations |
 | `framespec` | `FrameSpec` — the metaclass that builds a `TableSpec` from a class body, and the facade forwarding every verb to it |
 | `generation` | `generate`, `generate_batches` and the file sinks, as functions over a `TableSpec`; `composite.py` separates a `__unique_together__` group |
-| `catspec` | `CatSpec` — a shared registry of enums and categoricals |
+| `catspec` | `CatSpec` — a shared registry of enums and categoricals, as a value, plus the metaclass that builds one from a class body (the same split as `tablespec`/`framespec`) |
 | `registry` | `Registry` — a declared set of specs: resolving cross-spec keys, ordering parents before children, `generate_all`/`validate_all`, one file and one diagram for the set |
 | `serialization` | Spec files: a field registry (`fields.py`) that YAML, generated Python and the `import datetime` decision all derive from; the dtype codec table (`dtypes.py`); format versions and migrations (`migrations.py`) |
 | `profiler` | Inferring a spec from an existing DataFrame |
@@ -144,11 +144,13 @@ match the module.
 | `test_serialization_format.py` | The field registry, format versions, migrations, unknown keys |
 | `test_registry.py` | `Registry`: resolution, ordering, `generate_all`/`validate_all`, files, discovery |
 | `test_errors.py` | The exception hierarchy |
-| `test_catspec.py` | Shared category registries |
+| `test_catspec.py` | Shared category registries: both declaration forms, and that they agree |
 | `test_streaming.py` | Batching and the file sinks |
 | `test_cli.py` | The command line, including running a generated test file under pytest |
 | `test_engine.py` | The Python / Rust boundary: typed plans, exact bounds, typed choices, per-column seeds, the stub |
 | `test_constraints.py` | What both sides share: `Domain`, and the pass ordering that lets rules and keys see each other's work |
+| `test_docs.py` | That the documentation points at things that exist: every exported name, link and nav entry, and the generated `llms.txt` |
+| `test_doc_examples.py` | That the documentation's Python examples run |
 
 The round-trip file carries `xfail(strict=True)` markers for known gaps, so a
 fix turns the marker into a failure rather than passing unnoticed. See

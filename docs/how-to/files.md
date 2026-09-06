@@ -114,6 +114,7 @@ the same reference.
 
 Or pass a registry explicitly, which wins over anything the file names:
 
+<!-- docs: skip -->
 ```python
 FrameSpec.from_yaml("orders.yaml", categories=CatSpec.from_yaml("categories.yaml"))
 FrameSpec.from_yaml("orders.yaml", categories="categories.yaml")

@@ -215,14 +215,28 @@ class ColSpec:
             )
 
     def _normalize_tags(self) -> None:
-        """Reduces `tags` to a tuple of distinct, non-empty strings."""
+        """Reduces `tags` to a tuple of distinct, non-empty strings.
+
+        A `list` or `tuple` keeps the order it was written in -- that is the
+        author's choice and it survives into the spec file. A `set` has no
+        order to keep: Python salts string hashing per process, so the same
+        declaration would yield a different tuple on every run, writing a
+        different `tags:` line each time `to_yaml` is called and making two
+        identically-written specs compare unequal across processes. Sorting is
+        the only stable reading of an unordered input.
+        """
         if self.tags is None:
             object.__setattr__(self, "tags", ())
         elif isinstance(self.tags, str):
             object.__setattr__(self, "tags", (self.tags,) if self.tags else ())
         elif isinstance(self.tags, (list, tuple, set, Sequence)):
+            raw = (
+                sorted(self.tags)
+                if isinstance(self.tags, (set, frozenset))
+                else self.tags
+            )
             distinct: dict[str, None] = {}
-            for tag in self.tags:
+            for tag in raw:
                 text = str(tag)
                 if text:
                     distinct.setdefault(text, None)
@@ -423,12 +437,17 @@ class ColSpec:
                     f"got {type(v).__name__}"
                 )
             prior = seen.get(chk.name)
-            if prior is not None and prior != chk:
-                raise SpecError(
-                    f"Duplicate validator name {chk.name!r} on this ColSpec: "
-                    f"{prior.expr!r} vs {chk.expr!r}. Give each validator a "
-                    "distinct name."
-                )
+            if prior is not None:
+                if prior != chk:
+                    raise SpecError(
+                        f"Duplicate validator name {chk.name!r} on this ColSpec: "
+                        f"{prior.expr!r} vs {chk.expr!r}. Give each validator a "
+                        "distinct name."
+                    )
+                # The same validator written twice is one claim, not two. Kept
+                # once so it produces one finding, matching how TableSpec
+                # de-duplicates identical checks and foreign keys.
+                continue
             seen[chk.name] = chk
             normalized.append(chk)
 

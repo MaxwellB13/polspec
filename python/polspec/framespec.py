@@ -284,7 +284,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         cls,
         source: str | Path,
         *,
-        categories: CatSpec | str | Path | None = None,
+        categories: CatSpec | type[CatSpec] | str | Path | None = None,
         strict: bool = True,
     ) -> type[FrameSpec]:
         """Builds a new FrameSpec subclass from a YAML file written by `to_yaml`.
@@ -374,7 +374,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     @classmethod
     def with_catspec(
         cls,
-        catspec: CatSpec,
+        catspec: CatSpec | type[CatSpec],
         *,
         name: str | None = None,
     ) -> type[FrameSpec]:

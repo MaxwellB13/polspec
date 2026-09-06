@@ -59,6 +59,26 @@ class ValidationError(PolspecError, ValueError):
         return list(self._errors)
 
 
+class MultiValidationError(ValidationError):
+    """Several frames failed validation together, as one registry call.
+
+    `reports` holds the `ValidationReport` of every spec that failed, keyed by
+    spec name, so `failing_rows()`, `by_code()` and the rest are reachable for
+    each of them. `report` is None: there is no single report here, and
+    picking one of several arbitrarily would be worse than saying so. `str()`
+    and `errors` read as they always have -- every failing spec's findings,
+    one after another.
+    """
+
+    def __init__(self, reports: Any) -> None:
+        failed = {name: report for name, report in reports.items() if not report.passed}
+        super().__init__(
+            "\n\n".join(str(report) for report in failed.values()),
+            errors=[f.message for report in failed.values() for f in report.findings],
+        )
+        self.reports: dict[str, Any] = failed
+
+
 class GenerationError(PolspecError, ValueError):
     """A spec that declares fine cannot be turned into data as asked.
 

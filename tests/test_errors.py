@@ -9,6 +9,7 @@ import polars as pl
 import pytest
 import yaml
 from polspec import (
+    CliError,
     ColRule,
     ColSpec,
     ForeignKey,
@@ -21,7 +22,6 @@ from polspec import (
     ValidationError,
     col,
 )
-from polspec.errors import CliError
 
 
 def test_every_error_is_a_polspec_error():
@@ -34,6 +34,27 @@ def test_every_error_is_a_polspec_error():
         CliError,
     ):
         assert issubclass(cls, PolspecError)
+
+
+def test_every_error_is_reachable_from_the_package():
+    """One import for the hierarchy, including the one the CLI raises.
+
+    `CliError` used to live only in `polspec.errors`, so `except
+    polspec.CliError` failed while its five siblings worked.
+    """
+    import polspec
+
+    for cls in (
+        PolspecError,
+        SpecError,
+        ValidationError,
+        GenerationError,
+        SerializationError,
+        RegistryError,
+        CliError,
+    ):
+        assert getattr(polspec, cls.__name__) is cls
+        assert cls.__name__ in polspec.__all__
 
 
 def test_subclasses_keep_the_builtin_types_they_replaced():

@@ -52,8 +52,15 @@ uv run python examples/related_specs.py      # worked example, doubles as a smok
 ```
 
 On Windows, the `cargo test` binary links against the Python DLL, so the
-interpreter's directory has to be on `PATH` (for a uv-managed interpreter,
-`uv run python -c "import sys; print(sys.base_prefix)"` prints it).
+interpreter's directory has to be on `PATH` — without it the tests fail to
+start with `STATUS_DLL_NOT_FOUND` (exit code `0xc0000135`) rather than
+anything that names the cause:
+
+```bash
+PATH="$(uv run python -c 'import sys; print(sys.base_prefix)'):$PATH" cargo test
+```
+
+CI runs on Linux, so this only affects local runs.
 
 Optionally, install the pre-commit hooks so ruff and `cargo fmt` run on
 every commit:

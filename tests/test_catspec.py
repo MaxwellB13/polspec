@@ -6,7 +6,15 @@ from pathlib import Path
 import polars as pl
 import pytest
 import yaml
-from polspec import Bound, CatSpec, Check, ColSpec, ForeignKey, FrameSpec
+from polspec import (
+    Bound,
+    CatSpec,
+    Check,
+    ColSpec,
+    ForeignKey,
+    FrameSpec,
+    Registry,
+)
 
 
 def test_catspec_basic_access():
@@ -19,21 +27,31 @@ def test_catspec_basic_access():
         },
     )
 
-    # Attribute lookup
-    assert cats.ORDER_STATUS == ["PENDING", "PROCESSING", "SHIPPED", "DELIVERED"]
-    assert isinstance(cats.CURRENCY, pl.Categories)
-    assert cats.CURRENCY.name() == "CURRENCY"
-    assert cats.CURRENCY.physical() == pl.UInt8
+    # Naming an entry gives back the dtype, whichever kind it is, so it goes
+    # straight into a ColSpec.
+    assert (
+        pl.Enum(["PENDING", "PROCESSING", "SHIPPED", "DELIVERED"]) == cats.ORDER_STATUS
+    )
+    assert isinstance(cats.CURRENCY, pl.Categorical)
+    assert cats.CURRENCY.categories.name() == "CURRENCY"
+    assert ColSpec(cats.CURRENCY).dtype == cats.CURRENCY
 
-    assert cats.COUNTRY.name() == "COUNTRY"
-    assert cats.COUNTRY.physical() == pl.UInt16
-    assert cats.COUNTRY.namespace() == "geo"
-
-    assert cats.SIMPLE.physical() == pl.UInt8
+    # The pieces underneath are reached by asking for them.
+    assert cats.get_enum("ORDER_STATUS") == [
+        "PENDING",
+        "PROCESSING",
+        "SHIPPED",
+        "DELIVERED",
+    ]
+    assert cats.get_categorical("CURRENCY").physical() == pl.UInt8
+    assert cats.get_categorical("COUNTRY").name() == "COUNTRY"
+    assert cats.get_categorical("COUNTRY").physical() == pl.UInt16
+    assert cats.get_categorical("COUNTRY").namespace() == "geo"
+    assert cats.get_categorical("SIMPLE").physical() == pl.UInt8
 
     # Dict subscripting
-    assert cats["ORDER_STATUS"] == ["PENDING", "PROCESSING", "SHIPPED", "DELIVERED"]
-    assert cats["CURRENCY"].name() == "CURRENCY"
+    assert cats["ORDER_STATUS"] == cats.ORDER_STATUS
+    assert cats["CURRENCY"] == cats.CURRENCY
 
     # Container ops
     assert "ORDER_STATUS" in cats
@@ -88,8 +106,8 @@ def test_catspec_framespec_generation_and_joins():
     )
 
     class Items(FrameSpec):
-        status = ColSpec(dtype=pl.Enum(CATEGORIES.STATUS), nullable=False)
-        currency = ColSpec(dtype=pl.Categorical(CATEGORIES.CURRENCY), nullable=False)
+        status = ColSpec(dtype=CATEGORIES.STATUS, nullable=False)
+        currency = ColSpec(dtype=CATEGORIES.CURRENCY, nullable=False)
         fruit = ColSpec(dtype=CATEGORIES.categorical.FRUITS, nullable=True)
 
     class Rates(FrameSpec):
@@ -101,7 +119,7 @@ def test_catspec_framespec_generation_and_joins():
     rates = Rates.generate(n=50, seed=42)
 
     assert items.schema["status"] == pl.Enum(["OPEN", "CLOSED"])
-    assert items.schema["currency"] == pl.Categorical(CATEGORIES.CURRENCY)
+    assert items.schema["currency"] == CATEGORIES.CURRENCY
 
     # Physical join on currency must succeed cleanly
     joined = items.join(rates, on="currency", how="inner")
@@ -128,11 +146,11 @@ def test_catspec_yaml_roundtrip():
         cats.to_yaml(yaml_path)
 
         loaded = CatSpec.from_yaml(yaml_path)
-        assert loaded.STATUS == ["OPEN", "IN_PROGRESS", "CLOSED"]
-        assert loaded.CURRENCY.name() == "CURRENCY"
-        assert loaded.CURRENCY.physical() == pl.UInt8
-        assert loaded.CURRENCY.namespace() == "finance"
-        assert loaded.PRODUCT.physical() == pl.UInt16
+        assert pl.Enum(["OPEN", "IN_PROGRESS", "CLOSED"]) == loaded.STATUS
+        assert loaded.get_categorical("CURRENCY").name() == "CURRENCY"
+        assert loaded.get_categorical("CURRENCY").physical() == pl.UInt8
+        assert loaded.get_categorical("CURRENCY").namespace() == "finance"
+        assert loaded.get_categorical("PRODUCT").physical() == pl.UInt16
         assert loaded.get_choices("CURRENCY") == ["USD", "EUR"]
 
 
@@ -143,9 +161,9 @@ def test_catspec_flat_format():
         "SIMPLE_CAT": "UInt16",
     }
     loaded = CatSpec.from_dict(flat_data)
-    assert loaded.ORDER_STATUS == ["PENDING", "SHIPPED"]
-    assert loaded.CURRENCY.physical() == pl.UInt8
-    assert loaded.SIMPLE_CAT.physical() == pl.UInt16
+    assert pl.Enum(["PENDING", "SHIPPED"]) == loaded.ORDER_STATUS
+    assert loaded.get_categorical("CURRENCY").physical() == pl.UInt8
+    assert loaded.get_categorical("SIMPLE_CAT").physical() == pl.UInt16
 
 
 def test_framespec_from_yaml_with_catspec():
@@ -176,7 +194,7 @@ columns:
         LoadedSpec = FrameSpec.from_yaml(spec_yaml)
         df = LoadedSpec.generate(10, seed=1)
         assert df.schema["tier"] == pl.Enum(["BRONZE", "SILVER", "GOLD"])
-        assert df.schema["currency"] == pl.Categorical(cat_spec.CURRENCY)
+        assert df.schema["currency"] == cat_spec.CURRENCY
 
         # 2. Explicit categories passed as parameter
         LoadedSpec2 = FrameSpec.from_yaml(spec_yaml, categories=cat_spec)
@@ -200,14 +218,14 @@ def test_catspec_from_dataframe_and_framespec():
 
     # from_dataframe
     cats_from_df = CatSpec.from_dataframe(df)
-    assert cats_from_df.status == ["OPEN", "CLOSED"]
-    assert cats_from_df.currency.name() == "CURRENCY"
-    assert cats_from_df.currency.physical() == pl.UInt8
+    assert cats_from_df.status == pl.Enum(["OPEN", "CLOSED"])
+    assert cats_from_df.get_categorical("currency").name() == "CURRENCY"
+    assert cats_from_df.get_categorical("currency").physical() == pl.UInt8
     assert "val" not in cats_from_df
 
     # LazyFrame support
     cats_from_lazy = CatSpec.from_dataframe(df.lazy())
-    assert cats_from_lazy.status == ["OPEN", "CLOSED"]
+    assert cats_from_lazy.status == pl.Enum(["OPEN", "CLOSED"])
 
     # from_framespec & FrameSpec.catspec
     class MySpec(FrameSpec):
@@ -219,9 +237,9 @@ def test_catspec_from_dataframe_and_framespec():
         amount = ColSpec(dtype=pl.Float64)
 
     cats_from_spec = MySpec.catspec()
-    assert cats_from_spec.status == ["PENDING", "COMPLETED"]
-    assert cats_from_spec.currency.name() == "CURRENCY"
-    assert cats_from_spec.currency.physical() == pl.UInt16
+    assert cats_from_spec.status == pl.Enum(["PENDING", "COMPLETED"])
+    assert cats_from_spec.get_categorical("currency").name() == "CURRENCY"
+    assert cats_from_spec.get_categorical("currency").physical() == pl.UInt16
     assert cats_from_spec.get_choices("currency") == ["USD", "EUR"]
 
     # The same registry, from the TableSpec rather than the class
@@ -232,8 +250,8 @@ def test_catspec_from_dataframe_and_framespec():
         out_yaml = Path(tmpdir) / "extracted.yaml"
         MySpec.catspec().to_yaml(out_yaml)
         loaded = CatSpec.from_yaml(out_yaml)
-        assert loaded.status == ["PENDING", "COMPLETED"]
-        assert loaded.currency.physical() == pl.UInt16
+        assert loaded.status == pl.Enum(["PENDING", "COMPLETED"])
+        assert loaded.get_categorical("currency").physical() == pl.UInt16
 
 
 def test_catspec_heuristic_inference():
@@ -257,15 +275,20 @@ def test_catspec_heuristic_inference():
         }
     )
 
-    cats = CatSpec.infer_from_dataframe(df)
+    cats = CatSpec.infer(df)
 
     # status has 4 unique values <= 30 -> Enum
     assert "status" in cats.enums
-    assert set(cats.status) == {"PENDING", "PROCESSING", "COMPLETED", "FAILED"}
+    assert set(cats.get_enum("status")) == {
+        "PENDING",
+        "PROCESSING",
+        "COMPLETED",
+        "FAILED",
+    }
 
     # country has 50 unique values (ratio 50/1000 = 0.05 <= 0.20) -> Categorical (UInt8 because 50 < 256)
     assert "country" in cats.categoricals
-    assert cats.country.physical() == pl.UInt8
+    assert cats.get_categorical("country").physical() == pl.UInt8
 
     # order_id matches exclude_patterns (r".*_id$") -> skipped
     assert "order_id" not in cats
@@ -293,10 +316,10 @@ def test_framespec_infer_catspec_and_transformation():
     # 1. Infer CatSpec from FrameSpec schema
     cats = CatSpec.infer(RawOrders, max_enum_cardinality=10)
     assert "status" in cats.enums
-    assert cats.status == ["NEW", "PAID", "CANCELLED"]
+    assert cats.status == pl.Enum(["NEW", "PAID", "CANCELLED"])
 
     assert "tag" in cats.categoricals
-    assert cats.tag.physical() == pl.UInt8
+    assert cats.get_categorical("tag").physical() == pl.UInt8
     assert len(cats.get_choices("tag")) == 40
 
     # user_id matches exclude_patterns (r".*_id$") -> skipped
@@ -327,16 +350,16 @@ def test_catspec_case_insensitivity_and_resolution():
     assert cats.get_enum("ORDER_STATUS") == ["A", "B"]
     assert cats.get_enum("order_status") == ["A", "B"]
     assert cats.enum("ORDER_STATUS") == pl.Enum(["A", "B"])
-    assert cats.ORDER_STATUS == ["A", "B"]
-    assert cats.order_status == ["A", "B"]
+    assert pl.Enum(["A", "B"]) == cats.ORDER_STATUS
+    assert cats.order_status == pl.Enum(["A", "B"])
     assert "ORDER_STATUS" in cats
     assert "order_status" in cats
 
     assert cats.get_categorical("currency").physical() == pl.UInt8
     assert cats.get_categorical("CURRENCY").physical() == pl.UInt8
     assert cats.categorical("currency").categories.name() == "CURRENCY"
-    assert cats.currency.physical() == pl.UInt8
-    assert cats.CURRENCY.physical() == pl.UInt8
+    assert cats.currency.categories.physical() == pl.UInt8
+    assert cats.CURRENCY.categories.physical() == pl.UInt8
     assert "currency" in cats
     assert "CURRENCY" in cats
 
@@ -501,13 +524,13 @@ def test_catspec_to_yaml_nested_directory_and_utf8(tmp_path):
     assert loaded.get_choices("REGION") == ["Zürich", "München", "Tokyo"]
 
 
-def test_catspec_infer_from_dataframe_existing_categorical_deterministic_sort():
+def test_catspec_infer_keeps_an_existing_categorical_in_a_deterministic_order():
     df = pl.DataFrame(
         {
             "cat_col": pl.Series(["Z", "A", "M", None, "B"]).cast(pl.Categorical),
         }
     )
-    inferred = CatSpec.infer_from_dataframe(df)
+    inferred = CatSpec.infer(df)
     assert inferred.get_choices("cat_col") == ["A", "B", "M", "Z"]
 
 
@@ -577,20 +600,31 @@ def test_class_body_instance_still_supports_full_registry_api():
     assert reloaded.get_enum("STATUS") == ["NEW", "PAID", "SHIPPED"]
 
 
-def test_class_body_attribute_returns_the_dtype_not_the_raw_list():
-    """The documented difference from the dict-constructor form.
+def test_both_forms_agree_on_what_naming_an_entry_means():
+    """Naming an entry gives back the dtype, whichever form declared it.
 
-    A class-body entry is a real class attribute, so plain attribute access
-    returns the dtype exactly as written; a dict-built registry's `.STATUS`
-    goes through __getattr__ and returns the raw category list instead.
+    This used to differ: a class-body entry was a real class attribute and
+    returned the dtype, while a dict-built registry's `.STATUS` went through
+    a lookup and returned the raw category list -- so the same expression
+    meant two things, and only one of them could be handed to a ColSpec.
     """
 
     class Categories(CatSpec):
         STATUS = pl.Enum(["NEW", "PAID"])
+        CURRENCY = pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt8))
 
-    dict_built = CatSpec(enums={"STATUS": ["NEW", "PAID"]})
-    assert isinstance(Categories.STATUS, pl.Enum)
-    assert isinstance(dict_built.STATUS, list)
+    dict_built = CatSpec(
+        enums={"STATUS": ["NEW", "PAID"]},
+        categoricals={"CURRENCY": pl.Categories("CURRENCY", physical=pl.UInt8)},
+    )
+
+    for registry in (Categories, Categories(), dict_built):
+        assert pl.Enum(["NEW", "PAID"]) == registry.STATUS
+        assert isinstance(registry.CURRENCY, pl.Categorical)
+        # Which is to say: usable as a dtype without unwrapping it first.
+        assert ColSpec(registry.STATUS).dtype == pl.Enum(["NEW", "PAID"])
+
+    assert Categories.spec == dict_built
     assert Categories().get_enum("STATUS") == dict_built.get_enum("STATUS")
 
 
@@ -622,16 +656,26 @@ def test_class_body_rejects_an_unnamed_categorical():
             X = pl.Categorical()
 
 
-def test_class_body_shadowing_a_method_warns_but_still_works():
-    with pytest.warns(UserWarning, match=r"shadows CatSpec\.get"):
+def test_an_entry_may_share_a_name_with_a_method():
+    """Entries are lifted out of the class body, so neither shadows the other.
 
-        class Categories(CatSpec):
-            get = pl.Enum(["A", "B"])
+    This used to warn and cost you the method: an entry named `get` replaced
+    `CatSpec.get`. The metaclass now removes entries from the namespace before
+    the class exists, so the method is reached by name and the entry through
+    the registry.
+    """
 
-    # The entry is honoured; only the shadowed method is lost.
-    assert Categories.get == pl.Enum(["A", "B"])
-    with pytest.raises(TypeError):
-        Categories().get("STATUS")
+    class Categories(CatSpec):
+        get = pl.Enum(["A", "B"])
+        to_yaml = pl.Enum(["C", "D"])
+
+    assert callable(Categories.get)
+    assert Categories.spec.get("get") == pl.Enum(["A", "B"])
+    assert Categories()["to_yaml"] == pl.Enum(["C", "D"])
+    assert Categories().get_enum("get") == ["A", "B"]
+
+    # And the shadowed methods still do their jobs.
+    assert "get" in Categories().to_yaml()
 
 
 def test_class_body_ordinary_entries_do_not_warn(recwarn):
@@ -644,5 +688,60 @@ def test_class_body_ordinary_entries_do_not_warn(recwarn):
 def test_plain_catspec_is_unaffected_by_declared_defaults():
     """CatSpec itself declares nothing, so the dict constructor works exactly as before."""
     cats = CatSpec(enums={"STATUS": ["A", "B"]})
-    assert cats.STATUS == ["A", "B"]
+    assert pl.Enum(["A", "B"]) == cats.STATUS
     assert CatSpec._declared_enums == {}
+
+
+def test_the_class_form_is_accepted_wherever_the_value_is():
+    """A class body and the value it declares are interchangeable arguments.
+
+    `as_catspec` is what makes that true, mirroring `as_table_spec` for specs.
+    """
+
+    class Categories(CatSpec):
+        STATUS = pl.Enum(["NEW", "PAID"])
+        CURRENCY = pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt8))
+
+    class Orders(FrameSpec):
+        status = ColSpec(pl.String, choices=["NEW", "PAID"])
+        currency = ColSpec(pl.String, choices=["GBP", "USD"])
+
+    from_class = Orders.with_catspec(Categories)
+    from_value = Orders.with_catspec(Categories())
+    assert from_class.spec == from_value.spec
+    assert from_class.schema()["status"] == pl.Enum(["NEW", "PAID"])
+
+    assert Registry(from_class, categories=Categories).categories == Categories.spec
+
+
+def test_a_registry_is_a_value_whichever_form_built_it():
+    class Categories(CatSpec):
+        STATUS = pl.Enum(["NEW", "PAID"])
+
+    built = CatSpec(enums={"STATUS": ["NEW", "PAID"]})
+    assert Categories.spec == built
+    assert hash(Categories.spec) == hash(built)
+    assert CatSpec(enums={"STATUS": ["NEW"]}) != built
+
+
+def test_a_subclass_may_redeclare_a_base_entry_as_the_other_kind():
+    class Base(CatSpec):
+        REGION = pl.Enum(["UK", "US"])
+
+    class Derived(Base):
+        REGION = pl.Categorical(pl.Categories("REGION", physical=pl.UInt8))
+
+    assert "REGION" in Base.spec.enums
+    assert "REGION" not in Derived.spec.enums
+    assert isinstance(Derived.REGION, pl.Categorical)
+
+
+def test_infer_dispatches_on_what_it_is_given():
+    df = pl.DataFrame({"status": ["A", "B", "A", "B"]})
+
+    class Spec(FrameSpec):
+        status = ColSpec(pl.String, choices=["A", "B"])
+
+    assert CatSpec.infer(df).get_enum("status") == ["A", "B"]
+    assert CatSpec.infer(Spec).get_enum("status") == ["A", "B"]
+    assert CatSpec.infer(Spec.spec).get_enum("status") == ["A", "B"]

@@ -2,6 +2,7 @@
 
 A `ColSpec` describes one column. Only `dtype` is required.
 
+<!-- docs: skip -->
 ```python
 ColSpec(
     dtype,
@@ -96,6 +97,7 @@ unsigned dtype, which cannot represent a negative at all.
 
 Bounds outside what the dtype can hold are rejected when you declare them:
 
+<!-- docs: raises -->
 ```python
 ColSpec(pl.Float32, bounds=(-1e40, 1e40))
 # ValueError: ColSpec.bounds min (-1e+40) is outside the range Float32 can represent
@@ -130,6 +132,7 @@ Choices are held in the column's own dtype, so a `datetime` choice on a
 They must be distinct once cast to that dtype -- `1` and `"1"` on a `String`
 column are one value:
 
+<!-- docs: raises -->
 ```python
 ColSpec(pl.String, choices=[1, "1"])
 # ValueError: ColSpec.choices contains values that are the same once cast to
@@ -189,6 +192,7 @@ nullable unique column may repeat nulls and nothing else.
 
 A domain too small to cover the row count is refused, naming the column:
 
+<!-- docs: raises -->
 ```python
 class Narrow(FrameSpec):
     id = ColSpec(pl.Int8, unique=True)

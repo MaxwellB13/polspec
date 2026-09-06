@@ -42,7 +42,14 @@ def _listed(values: Sequence[Any]) -> str:
     return f"[{', '.join(shown)}]"
 
 
-def _is_textual(dtype: pl.DataType) -> bool:
+def is_textual(dtype: pl.DataType) -> bool:
+    """Whether values of `dtype` are compared to a domain by their string form.
+
+    An `Enum` category and the `String` choice that spells it are one value,
+    so both sides of the spec have to agree on that -- generation gathers from
+    the typed domain, validation compares the column cast to `String`. One
+    definition, for the same reason `Domain` is one definition.
+    """
     return dtype in (pl.String, pl.Utf8, pl.Categorical) or isinstance(
         dtype, (pl.Enum, pl.Categorical)
     )
@@ -105,7 +112,7 @@ class Domain:
         so an `Enum` category and the `String` choice that spells it are one
         value. Everything else compares as written.
         """
-        if not (_is_textual(self.dtype) and _is_textual(dtype)):
+        if not (is_textual(self.dtype) and is_textual(dtype)):
             return list(values)
         try:
             return pl.Series(list(values), dtype=pl.String, strict=False).to_list()

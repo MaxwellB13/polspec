@@ -506,14 +506,19 @@ class TableSpec:
             foreign_keys=tuple(foreign_keys),
         )
 
-    def with_catspec(self, catspec: CatSpec) -> TableSpec:
+    def with_catspec(self, catspec: CatSpec | type[CatSpec]) -> TableSpec:
         """Re-points columns at the registry's Enum and Categorical types.
 
         A column whose name resolves in the registry (exactly, or by case)
         takes the registry's dtype; everything else it declared carries over.
         `choices` a new Enum cannot hold, and `weights` over a domain that
         changed size, are dropped with a warning.
+
+        Takes the registry as a value or as the class body that declares it.
         """
+        from polspec.catspec import as_catspec
+
+        catspec = as_catspec(catspec)
         new_columns: dict[str, ColSpec] = {}
         for col_name, spec in self.columns.items():
             resolved = catspec.resolve_key(col_name)

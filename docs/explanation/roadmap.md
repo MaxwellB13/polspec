@@ -21,7 +21,7 @@ booleans, strings, binary, `Date`/`Time`/`Datetime`/`Duration`, `Enum` and
 A `ColSpec` for one of these constructs without complaint and can be
 *validated* against — `FrameSpec.validate()` doesn't need to know how to
 generate a dtype to check one. `generate()` is where it stops, with a
-`TypeError` naming the dtype. Expanding into nested types is the most
+`SpecError` naming the dtype. Expanding into nested types is the most
 requested kind of gap to close next; if you need one of these today, generate
 the column separately and attach it with `with_columns` after `generate()`
 returns.
@@ -106,11 +106,17 @@ Two things this project has made no compatibility promise about yet:
   is derived, or a fix to one of the [known limitations](limitations.md) can
   all legitimately change what a given seed produces.
 
-The first of those is easier to live with than it sounds, and the first step is
-small: nothing in a spec file currently records which polspec wrote it. A
-version key would let `from_yaml()` say so plainly when a file predates a
-format change, instead of failing on an unrecognized key — or, worse, quietly
-reading a renamed one as its default.
+The first of those is easier to live with than it sounds, because a spec file
+now says which format wrote it. Every file `to_yaml()` writes carries
+`version: 2`; a file with no `version:` key is read as version 1 and migrated
+on load, and one written by a newer polspec than the reader is refused by name
+rather than misread. So a format change is a migration to write, not a class of
+file that silently stops loading — which is what makes the rest of this section
+a smaller promise than it looks.
+
+What is still not promised is that a *given key* survives a minor release. A
+renamed key needs a migration, and migrations are written when the rename
+happens, not before.
 
 Neither of these is likely to move for the sake of moving — but until this
 page says otherwise, don't build something that depends on today's YAML

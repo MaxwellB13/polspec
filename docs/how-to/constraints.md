@@ -177,6 +177,7 @@ the key is validated.
 A group whose columns cannot take enough distinct combinations between them is
 refused, naming the group:
 
+<!-- docs: raises -->
 ```python
 class TooTight(FrameSpec):
     a = ColSpec(pl.Enum(["x", "y"]))

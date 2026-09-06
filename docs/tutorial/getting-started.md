@@ -23,6 +23,7 @@ Nothing runs at declaration time except validation of the declaration itself.
 A contradictory spec fails here, at the line that caused it, rather than
 thousands of rows later:
 
+<!-- docs: raises -->
 ```python
 ColSpec(pl.Int8, bounds=(0, 1_000))
 # ValueError: ColSpec.bounds max (1000) is outside the range Int8 can represent [-128, 127]
@@ -46,6 +47,7 @@ Customers.generate(500, seed=7).equals(Customers.generate(500, seed=7))  # True
 `validate()` checks a DataFrame or LazyFrame against the same declaration and
 returns it, so it drops into a pipeline:
 
+<!-- docs: skip -->
 ```python
 clean = Customers.validate(raw_df, cast=True)
 ```
@@ -56,6 +58,16 @@ everything that is wrong rather than only the first thing:
 ```python
 from polspec import ValidationError
 
+broken_df = pl.DataFrame(
+    {
+        "customer_id": [100_050, 150_000, 200_000],   # all past the upper bound
+        "name":        ["Adam", None, "Alan"],        # one null in a non-nullable column
+        "tier":        ["trial", "trial", "pro"],     # "trial" is not a tier
+        "signed_up":   [date(2021, 5, 1)] * 3,
+        "churned":     [None, True, False],
+    }
+)
+
 try:
     Customers.validate(broken_df)
 except ValidationError as err:
@@ -65,8 +77,8 @@ except ValidationError as err:
 
 ```text
 Column 'customer_id': found 3 value(s) out of bounds [1, 100000] (min found: 100050, max found: 200000). Out of bounds samples: [100050, 150000, 200000]
-Column 'tier': found 2 invalid value(s) not in allowed choices/categories ['free', 'pro', 'enterprise']. Invalid samples: ['trial']
 Column 'name': non-nullable column contains 1 null value(s)
+Column 'tier': found 2 invalid value(s) not in allowed choices/categories ['free', 'pro', 'enterprise']. Invalid samples: ['trial']
 ```
 
 !!! tip "One pass, not one per column"
@@ -99,6 +111,13 @@ exact dtype.
 Pointed at an existing DataFrame, polspec writes the spec for you:
 
 ```python
+existing_df = pl.DataFrame(
+    {
+        "customer_id": [1, 2, 3, 4],
+        "tier":        ["free", "free", "pro", None],
+    }
+)
+
 Profiled = FrameSpec.from_dataframe(existing_df, weights=True)
 print(Profiled.to_markdown())
 ```

@@ -140,14 +140,7 @@ def _strip_registry_prefix(name: str) -> str:
 
 def _from_registry(name: str, categories: CatSpec | None) -> pl.DataType | None:
     """Resolves a name against a CatSpec, as an Enum or a Categorical."""
-    if categories is None or name not in categories:
-        return None
-    resolved = categories[name]
-    if isinstance(resolved, pl.Categories):
-        return pl.Categorical(resolved)
-    if isinstance(resolved, (list, tuple)):
-        return pl.Enum(resolved)
-    return None
+    return None if categories is None else categories.dtype_of(name)
 
 
 def _enum_from_data(payload: Any, categories: CatSpec | None) -> pl.DataType:

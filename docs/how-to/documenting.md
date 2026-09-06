@@ -94,6 +94,7 @@ diagram, with each enum as an `<<enumeration>>`.
 Both renderers are pure functions of the spec, so wiring them into a build or a
 pre-commit hook keeps the documentation honest:
 
+<!-- docs: skip -->
 ```python
 from pathlib import Path
 

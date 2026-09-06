@@ -161,14 +161,16 @@ def to_yaml(spec: TableSpec, source: str | Path) -> None:
 
 
 def _resolve_categories(
-    categories: CatSpec | str | Path | None, data: Mapping[str, Any], base: Path
+    categories: CatSpec | type[CatSpec] | str | Path | None,
+    data: Mapping[str, Any],
+    base: Path,
 ) -> CatSpec | None:
-    from polspec.catspec import CatSpec
+    from polspec.catspec import CatSpec, as_catspec
 
     if categories is not None:
         if isinstance(categories, (str, Path)):
             return CatSpec.from_yaml(categories)
-        return categories
+        return as_catspec(categories)
     declared = data.get("categories")
     if declared is None:
         return None
@@ -187,7 +189,7 @@ def _resolve_categories(
 def from_yaml(
     source: str | Path,
     *,
-    categories: CatSpec | str | Path | None = None,
+    categories: CatSpec | type[CatSpec] | str | Path | None = None,
     strict: bool = True,
 ) -> TableSpec:
     """Reads a `TableSpec` from a YAML file written by `to_yaml`.

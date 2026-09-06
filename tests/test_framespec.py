@@ -5,6 +5,9 @@ Declaration-time behaviour that does not fit `test_declaration.py`'s narrower
 theme of contracts polspec used to break silently.
 """
 
+import subprocess
+import sys
+
 import polars as pl
 import pytest
 from polspec import (
@@ -285,12 +288,20 @@ def test_colspec_validators_rejects_duplicate_names():
         )
 
 
-def test_colspec_validators_allows_reusing_identical_check():
-    # Repeating the exact same Check (same name/expr) is allowed -- it's a
-    # duplicate-name collision only when the *definitions* differ.
+def test_colspec_collapses_a_validator_written_twice():
+    # The same Check repeated is one claim, not two, so it produces one
+    # finding rather than the same message twice. A duplicate *name* over
+    # different definitions is still a collision (see the test above), and
+    # TableSpec already de-duplicates identical checks and foreign keys.
     chk = Check(pl.col("x") > 0, name="positive")
     spec = ColSpec(pl.Int64, validators=[chk, chk])
-    assert spec.validators == (chk, chk)
+    assert spec.validators == (chk,)
+
+    class Numbers(FrameSpec):
+        x = ColSpec(pl.Int64, validators=[chk, chk])
+
+    report = Numbers.inspect(pl.DataFrame({"x": [-1]}))
+    assert [f.key for f in report.by_code("validator")] == ["x__validator_0"]
 
 
 def test_framespec_rejects_validator_referencing_another_column():
@@ -306,3 +317,36 @@ def test_framespec_allows_validator_referencing_only_its_own_column():
         a = ColSpec(pl.Int64, validators=[pl.col("a") > 0])
 
     assert len(GoodSpec.spec.columns["a"].validators) == 1
+
+
+def test_tags_given_as_a_set_are_ordered_the_same_in_every_process():
+    """A set has no order to keep, so polspec has to choose a stable one.
+
+    Python salts string hashing per process, so preserving a set's iteration
+    order meant `to_yaml` wrote a different `tags:` line on every run and two
+    identically-written specs compared unequal across processes -- enough for
+    `Registry.add` to reject them as two different specs sharing a name.
+    """
+    tags = {"alpha", "beta", "gamma", "delta", "epsilon"}
+    assert ColSpec(pl.Int64, tags=tags).tags == (
+        "alpha",
+        "beta",
+        "delta",
+        "epsilon",
+        "gamma",
+    )
+
+    # A sequence is the author's own order and is left exactly as written.
+    assert ColSpec(pl.Int64, tags=["gamma", "alpha"]).tags == ("gamma", "alpha")
+
+    source = (
+        "import polars as pl; from polspec import ColSpec; "
+        "print(ColSpec(pl.Int64, tags={'alpha','beta','gamma','delta','epsilon'}).tags)"
+    )
+    runs = {
+        subprocess.run(
+            [sys.executable, "-c", source], capture_output=True, text=True, check=True
+        ).stdout
+        for _ in range(4)
+    }
+    assert len(runs) == 1, f"tag order differs between processes: {runs}"

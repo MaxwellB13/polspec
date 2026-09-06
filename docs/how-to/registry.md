@@ -84,6 +84,7 @@ Declaring the registry with a `CatSpec` says which `Enum` and `Categorical`
 definitions the specs are expected to share; `resolve()` then refuses a column
 whose declaration disagrees with it:
 
+<!-- docs: skip -->
 ```python
 registry = Registry(Orders, Products, categories=categories)
 registry.resolve()   # RegistryError if Orders.status and categories.STATUS differ
@@ -136,6 +137,7 @@ imported and every `FrameSpec` subclass or `TableSpec` bound in it is taken;
 a `.yaml` file is a spec, or a whole registry when it has a `specs:` key; a
 directory is walked for both, skipping names starting with `_` or `test_`:
 
+<!-- docs: skip -->
 ```python
 registry = Registry.discover("specs/")
 registry = Registry.from_module(my_project.specs)

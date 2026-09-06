@@ -16,6 +16,7 @@ from polspec import (
     ColSpec,
     ForeignKey,
     FrameSpec,
+    MultiValidationError,
     Registry,
     RegistryError,
     TableSpec,
@@ -469,3 +470,87 @@ def test_to_mermaid_draws_every_entity_and_every_key(tmp_path):
     assert (tmp_path / "er.mmd").read_text(encoding="utf-8") == mmd
     # Entities come first, then the relationships between them.
     assert mmd.index("||--o{") > mmd.rindex("    }")
+
+
+def test_generating_binds_cross_spec_keys_before_it_starts():
+    """A registry checks its own keys, whether or not `resolve()` was called.
+
+    The dtype-compatibility check lives in binding, and only `resolve()` used
+    to do it -- so a mismatched key reached generation unchecked and surfaced
+    as a Polars cast error from inside the foreign-key pass.
+    """
+
+    class Parent(FrameSpec):
+        code = ColSpec(pl.String, unique=True, string_length=(3, 3))
+
+    class Child(FrameSpec):
+        code = ColSpec(pl.Int64)
+        __foreign_keys__ = [ForeignKey("code", references="Parent")]
+
+    registry = Registry(Parent, Child)
+    for call in (
+        lambda: registry.generate_all(5, seed=1),
+        lambda: registry.inspect_all({"Parent": Parent.generate(3, seed=1)}),
+        registry.resolve,
+    ):
+        with pytest.raises(RegistryError, match="not dtype-compatible"):
+            call()
+
+
+def test_generating_still_accepts_a_parent_from_outside_the_registry():
+    """Binding must not tighten what `generate_all` accepts.
+
+    `resolve()` refuses a key whose target it does not hold; generation
+    deliberately does not, because the parent may be supplied as data.
+    """
+
+    class Orders(FrameSpec):
+        code = ColSpec(pl.String, string_length=(3, 3))
+        __foreign_keys__ = [ForeignKey("code", references="Elsewhere")]
+
+    parent = pl.DataFrame({"code": ["abc", "def"]})
+    frames = Registry(Orders).generate_all(6, seed=1, references={"Elsewhere": parent})
+    assert set(frames["Orders"]["code"]) <= {"abc", "def"}
+
+    with pytest.raises(RegistryError, match="not in the registry"):
+        Registry(Orders).resolve()
+
+
+def test_validate_all_keeps_every_report():
+    """The findings survive the raise, as data rather than as text."""
+
+    class Alpha(FrameSpec):
+        x = ColSpec(pl.Int64, bounds=(0, 10))
+
+    class Beta(FrameSpec):
+        y = ColSpec(pl.Int64, bounds=(0, 10))
+
+    registry = Registry(Alpha, Beta)
+    frames = {"Alpha": pl.DataFrame({"x": [99]}), "Beta": pl.DataFrame({"y": [-5]})}
+
+    with pytest.raises(MultiValidationError) as exc_info:
+        registry.validate_all(frames)
+
+    error = exc_info.value
+    assert isinstance(error, ValidationError)  # one except clause still catches it
+    assert sorted(error.reports) == ["Alpha", "Beta"]
+    assert error.report is None  # there is no single report to point at
+    assert [f.code for f in error.reports["Alpha"].findings] == ["bounds"]
+    assert error.reports["Alpha"].failing_rows().collect()["x"].to_list() == [99]
+    assert len(error.errors) == 2
+    assert "out of bounds" in str(error)
+
+
+def test_validate_all_reports_only_the_specs_that_failed():
+    class Alpha(FrameSpec):
+        x = ColSpec(pl.Int64, bounds=(0, 10))
+
+    class Beta(FrameSpec):
+        y = ColSpec(pl.Int64, bounds=(0, 10))
+
+    registry = Registry(Alpha, Beta)
+    frames = {"Alpha": pl.DataFrame({"x": [99]}), "Beta": pl.DataFrame({"y": [5]})}
+
+    with pytest.raises(MultiValidationError) as exc_info:
+        registry.validate_all(frames)
+    assert list(exc_info.value.reports) == ["Alpha"]

@@ -4,7 +4,9 @@ from polspec.bound import Bound
 from polspec.catspec import CatSpec
 from polspec.check import Check
 from polspec.errors import (
+    CliError,
     GenerationError,
+    MultiValidationError,
     PolspecError,
     RegistryError,
     SerializationError,
@@ -25,12 +27,14 @@ __all__ = [
     "Bound",
     "CatSpec",
     "Check",
+    "CliError",
     "ColRule",
     "ColSpec",
     "Finding",
     "ForeignKey",
     "FrameSpec",
     "GenerationError",
+    "MultiValidationError",
     "PolspecError",
     "Pred",
     "Registry",

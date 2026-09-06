@@ -220,6 +220,12 @@ def generate_batches(
     if n == 0:
         return
 
+    # A parent frame is the same frame for every batch, so collect it once.
+    # Left as given, a `LazyFrame` reference would be collected inside each
+    # batch's foreign-key pass -- once per batch rather than once per call,
+    # which is the whole parent re-read however many batches there are.
+    references = resolve_references(references, _collect) or None
+
     rng = random.Random(seed)
     rows_remaining = n
 

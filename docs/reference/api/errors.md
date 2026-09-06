@@ -21,6 +21,10 @@ existing `except ValueError` handlers keep working. The
 
 ::: polspec.ValidationError
 
+## MultiValidationError
+
+::: polspec.MultiValidationError
+
 ## SerializationError
 
 ::: polspec.SerializationError
@@ -28,3 +32,7 @@ existing `except ValueError` handlers keep working. The
 ## RegistryError
 
 ::: polspec.RegistryError
+
+## CliError
+
+::: polspec.CliError

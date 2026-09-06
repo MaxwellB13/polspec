@@ -23,8 +23,10 @@ cannot describe a signature the code does not have.
 | [`SpecError`][polspec.SpecError] | [Errors](errors.md) |
 | [`GenerationError`][polspec.GenerationError] | [Errors](errors.md) |
 | [`ValidationError`][polspec.ValidationError] | [Errors](errors.md) |
+| [`MultiValidationError`][polspec.MultiValidationError] | [Errors](errors.md) |
 | [`SerializationError`][polspec.SerializationError] | [Errors](errors.md) |
 | [`RegistryError`][polspec.RegistryError] | [Errors](errors.md) |
+| [`CliError`][polspec.CliError] | [Errors](errors.md) |
 
 Anything not listed here is internal: it can change in a patch release without
 a changelog entry.

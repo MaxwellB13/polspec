@@ -131,6 +131,7 @@ A spec with a foreign key referencing *another* spec needs that spec's data
 via `references=`, which the CLI cannot supply on its own — that test is
 marked `@pytest.mark.skip` with a reason, rather than guessed at:
 
+<!-- docs: skip -->
 ```python
 @pytest.mark.skip(
     reason=(
