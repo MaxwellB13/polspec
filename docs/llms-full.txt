@@ -89,20 +89,21 @@ production will reject.
 
 ## Install
 
-Not published to PyPI yet — install from a checkout. The generator is a
-compiled Rust extension, so this needs a Rust toolchain and
-[maturin](https://www.maturin.rs):
-
 ```bash
-git clone https://github.com/MaxwellB13/polspec.git
-cd polspec
-uv sync --group dev        # or: pip install -e ".[arrow]" && pip install maturin
-maturin develop --release
+uv add polspec           # preferred
+pip install polspec      # alternative
+uv add "polspec[arrow]"  # extra: PyArrow for the Parquet/IPC sinks
 ```
 
-`maturin develop` builds the extension and installs the package into your
-active environment, editable. Writing Parquet or Arrow IPC needs PyArrow,
-included via `[arrow]`/the `dev` group above.
+The generator is a compiled Rust extension, but wheels are published for Linux
+(x86_64, aarch64), macOS (Intel and Apple silicon) and Windows (x86_64), so
+installing needs no Rust toolchain.
+Writing Parquet or Arrow IPC is the one thing that needs more than Polars: the
+`arrow` extra pulls in PyArrow for those two sinks.
+
+Building from a checkout — which does need Rust and
+[maturin](https://www.maturin.rs) — is covered in
+[CONTRIBUTING.md](https://github.com/MaxwellB13/polspec/blob/main/CONTRIBUTING.md).
 
 ## Where to go next
 
@@ -3853,6 +3854,36 @@ seed produces; see
 [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/).
 
 ## [Unreleased]
+
+### Fixed
+
+- `inspect()` no longer raises a raw Polars error for a column whose dtype is
+  wrong *and* whose spec declares `choices` or an `Enum`. The domain check was
+  built before the dtype check could bail out, and comparing values against
+  choices of another type is not something Polars will compile at all, so the
+  frame most likely to arrive -- a column read back from CSV or JSON as the
+  wrong type -- crashed instead of reporting a `dtype` finding.
+- A `ColRule` whose condition is null on a row no longer excuses every later
+  rule on that row. Generation folds a null `when` to `False` before testing it
+  and before accumulating it into the claimed mask; validation did neither, so
+  the null propagated through Kleene logic and left rows that generation *had*
+  rewritten unchecked.
+- `TableSpec` is hashable, so `references={Orders.spec: df}` works. It is one
+  of the three forms `generate()` and `validate()` document, and the only one
+  that could not be put in a dict: the dataclass's generated `__hash__` cannot
+  hash a mapping of columns, nor a `ColSpec` carrying `distribution_params`.
+
+### Documentation
+
+- The install sections of the README and the documentation home said polspec
+  was not published to PyPI, directly below a `pip install polspec` block. Both
+  now describe the published wheels, and point at `CONTRIBUTING.md` for
+  building from a checkout.
+- The documentation workflow runs on changes to `python/**` and
+  `scripts/generate_llms_txt.py`. The API reference is `:::` directives filled
+  in by mkdocstrings from the live docstrings, so a docstring that breaks
+  `--strict` used to pass its own pull request and fail the next one to touch
+  `docs/`.
 
 ## [0.2.0] - 2026-09-05
 

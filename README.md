@@ -43,16 +43,9 @@ pip install polspec      # alternative
 uv add "polspec[arrow]"  # extra: PyArrow for the Parquet/IPC sinks
 ```
 
-Not published to PyPI yet — install from a checkout. The generator is a
-compiled Rust extension, so this needs a Rust toolchain and
-[maturin](https://www.maturin.rs):
-
-```bash
-git clone https://github.com/MaxwellB13/polspec.git
-cd polspec
-uv sync --group dev
-maturin develop --release
-```
+Wheels are published for Linux (x86_64, aarch64), macOS (Intel and Apple
+silicon) and Windows (x86_64), so using polspec needs no Rust toolchain.
+Building from a checkout is covered in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Documentation
 

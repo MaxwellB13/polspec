@@ -4,16 +4,27 @@ on:
   push:
     branches:
       - main
+    # `python/**` is here because the API reference is `:::` directives that
+    # mkdocstrings fills in from the live docstrings: a docstring is
+    # documentation source, and a malformed section or a bad cross-reference
+    # fails --strict exactly as a broken link does. Without it the build
+    # passes on the pull request that breaks it and fails on the next one to
+    # touch docs/. (GitHub Actions does not support YAML anchors, so the two
+    # lists are spelled out; keep them in step.)
     paths:
       - "docs/**"
       - "zensical.toml"
       - "README.md"
+      - "python/**"
+      - "scripts/generate_llms_txt.py"
       - ".github/workflows/docs.yml"
   pull_request:
     paths:
       - "docs/**"
       - "zensical.toml"
       - "README.md"
+      - "python/**"
+      - "scripts/generate_llms_txt.py"
       - ".github/workflows/docs.yml"
 
 permissions:

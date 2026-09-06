@@ -78,20 +78,21 @@ production will reject.
 
 ## Install
 
-Not published to PyPI yet — install from a checkout. The generator is a
-compiled Rust extension, so this needs a Rust toolchain and
-[maturin](https://www.maturin.rs):
-
 ```bash
-git clone https://github.com/MaxwellB13/polspec.git
-cd polspec
-uv sync --group dev        # or: pip install -e ".[arrow]" && pip install maturin
-maturin develop --release
+uv add polspec           # preferred
+pip install polspec      # alternative
+uv add "polspec[arrow]"  # extra: PyArrow for the Parquet/IPC sinks
 ```
 
-`maturin develop` builds the extension and installs the package into your
-active environment, editable. Writing Parquet or Arrow IPC needs PyArrow,
-included via `[arrow]`/the `dev` group above.
+The generator is a compiled Rust extension, but wheels are published for Linux
+(x86_64, aarch64), macOS (Intel and Apple silicon) and Windows (x86_64), so
+installing needs no Rust toolchain.
+Writing Parquet or Arrow IPC is the one thing that needs more than Polars: the
+`arrow` extra pulls in PyArrow for those two sinks.
+
+Building from a checkout — which does need Rust and
+[maturin](https://www.maturin.rs) — is covered in
+[CONTRIBUTING.md](https://github.com/MaxwellB13/polspec/blob/main/CONTRIBUTING.md).
 
 ## Where to go next
 

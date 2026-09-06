@@ -359,9 +359,11 @@ def _column_constraints(
 ) -> list[_Constraint]:
     """The constraints one declared column contributes to the single pass.
 
-    Most are skipped when the dtype is already wrong: comparing values against
-    bounds or choices of an incompatible type produces noise on top of the
-    dtype finding the caller will already see.
+    Only nullability survives an incompatible dtype. Everything else compares
+    values against something typed -- bounds, choices, a rule's operands -- and
+    against the wrong type that is at best noise on top of the dtype finding
+    the caller will already see, and at worst an expression Polars refuses to
+    compile at all.
     """
     column = pl.col(name)
     present = column.is_not_null()
@@ -371,6 +373,13 @@ def _column_constraints(
         constraints.append(
             _Nullability(key=f"{name}__null", mask=column.is_null(), column=name)
         )
+
+    # Nothing below this line can be asked of a column whose dtype is already
+    # wrong. `is_in` against choices of another type does not merely produce a
+    # noisy finding -- Polars refuses to compile it -- so the dtype finding the
+    # caller will already see is the whole answer for this column.
+    if not compatible:
+        return constraints
 
     allowed = _allowed_values(spec)
     if allowed is not None:
@@ -389,9 +398,6 @@ def _column_constraints(
                 allowed=allowed,
             )
         )
-
-    if not compatible:
-        return constraints
 
     if spec.bounds is not None and not spec.bounds.is_open_both:
         constraints.append(
@@ -496,7 +502,12 @@ def _rule_constraints(
     """One constraint per ColRule, respecting first-match-wins ordering.
 
     Each rule only governs the rows no earlier rule already claimed, matching
-    how `_apply_column_rules` assigns them at generation time.
+    how `_apply_column_rules` assigns them at generation time -- including how
+    it reads a null condition. A `when` that evaluates to null on a row does
+    not match there, so generation folds it to False before both testing it and
+    accumulating it into `claimed`. Doing anything else here lets a null
+    propagate through `~claimed` and silently excuse every later rule on that
+    row, which is a row generation did rewrite and validation would not check.
     """
     column = pl.col(name)
     constraints: list[_Constraint] = []
@@ -505,8 +516,9 @@ def _rule_constraints(
     for index, rule in enumerate(spec.rules):
         if not rule.when.root_names() <= set(df_col_names):
             continue  # reported through missing_cols instead
-        applies = rule._expr() & ~claimed
-        claimed = claimed | rule._expr()
+        matches = rule._expr().fill_null(False)
+        applies = matches & ~claimed
+        claimed = claimed | matches
 
         if _is_textual(actual_dtype):
             in_choices = column.cast(pl.String).is_in(

@@ -8,6 +8,36 @@ seed produces; see
 
 ## [Unreleased]
 
+### Fixed
+
+- `inspect()` no longer raises a raw Polars error for a column whose dtype is
+  wrong *and* whose spec declares `choices` or an `Enum`. The domain check was
+  built before the dtype check could bail out, and comparing values against
+  choices of another type is not something Polars will compile at all, so the
+  frame most likely to arrive -- a column read back from CSV or JSON as the
+  wrong type -- crashed instead of reporting a `dtype` finding.
+- A `ColRule` whose condition is null on a row no longer excuses every later
+  rule on that row. Generation folds a null `when` to `False` before testing it
+  and before accumulating it into the claimed mask; validation did neither, so
+  the null propagated through Kleene logic and left rows that generation *had*
+  rewritten unchecked.
+- `TableSpec` is hashable, so `references={Orders.spec: df}` works. It is one
+  of the three forms `generate()` and `validate()` document, and the only one
+  that could not be put in a dict: the dataclass's generated `__hash__` cannot
+  hash a mapping of columns, nor a `ColSpec` carrying `distribution_params`.
+
+### Documentation
+
+- The install sections of the README and the documentation home said polspec
+  was not published to PyPI, directly below a `pip install polspec` block. Both
+  now describe the published wheels, and point at `CONTRIBUTING.md` for
+  building from a checkout.
+- The documentation workflow runs on changes to `python/**` and
+  `scripts/generate_llms_txt.py`. The API reference is `:::` directives filled
+  in by mkdocstrings from the live docstrings, so a docstring that breaks
+  `--strict` used to pass its own pull request and fail the next one to touch
+  `docs/`.
+
 ## [0.2.0] - 2026-09-05
 
 The architecture release. Specs became data, constraints gained one definition

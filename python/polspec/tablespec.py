@@ -314,6 +314,21 @@ class TableSpec:
     def __len__(self) -> int:
         return len(self.columns)
 
+    def __hash__(self) -> int:
+        """A hash over the spec's shape, so a spec can be a dict key.
+
+        `references={Orders.spec: df}` is one of the three forms `generate`
+        and `validate` document, and the dataclass's generated `__hash__`
+        cannot serve it: `columns` is a mapping, and a `ColSpec` carrying
+        `distribution_params` holds a dict of its own.
+
+        So this hashes the parts that are cheap and certainly hashable -- the
+        name, the column names in order, the composite keys -- and leaves the
+        column declarations to `__eq__`, which still compares them in full.
+        Two equal specs agree on all three, which is all a hash must promise.
+        """
+        return hash((self.name, tuple(self.columns), self.unique_together))
+
     def schema(self) -> pl.Schema:
         """The Polars schema this spec declares: column name to dtype."""
         return pl.Schema({name: spec.dtype for name, spec in self.columns.items()})

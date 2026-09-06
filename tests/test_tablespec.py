@@ -301,3 +301,35 @@ def test_declarations_under_bare_names_do_not_shadow_accessors():
 
     assert [c.name for c in Spec.checks()] == ["pos"]
     assert Spec.unique_together() == (("a",),)
+
+
+def test_a_spec_is_hashable_so_it_can_key_a_references_mapping():
+    # `generate`/`validate` document three forms for a `references=` key: the
+    # spec, its FrameSpec class, or its name. The spec form needs a hash the
+    # generated dataclass one cannot supply -- `columns` is a mapping, and a
+    # ColSpec carrying `distribution_params` holds a dict of its own.
+    parents = Customers.generate(50, seed=1)
+    by_class = Orders.generate(10, seed=2, references={Customers: parents})
+    by_spec = Orders.generate(10, seed=2, references={Customers.spec: parents})
+    by_name = Orders.generate(10, seed=2, references={"Customers": parents})
+
+    assert by_spec.equals(by_class)
+    assert by_spec.equals(by_name)
+
+
+def test_equal_specs_hash_equal_even_with_an_unhashable_field():
+    priced = TableSpec(
+        "Priced",
+        {
+            "amount": ColSpec(
+                pl.Float64,
+                distribution="normal",
+                distribution_params={"mean": 0.0, "std": 1.0},
+            )
+        },
+    )
+    copy = priced.with_columns({})
+
+    assert priced == copy
+    assert hash(priced) == hash(copy)
+    assert {priced: "one", copy: "two"} == {priced: "two"}

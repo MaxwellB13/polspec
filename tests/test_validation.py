@@ -182,6 +182,28 @@ def test_validation_dtype_mismatch():
     assert "Column 'id': expected dtype Int64, got String" in str(exc_info.value)
 
 
+def test_a_wrong_dtype_on_a_column_with_choices_is_reported_not_raised():
+    """A column with a closed domain must not turn a dtype error into a crash.
+
+    Comparing values against `choices` of another type is not a noisy finding
+    -- Polars refuses to compile the `is_in` at all -- so the domain check has
+    to sit behind the dtype check, not in front of it. `inspect()` promises
+    never to raise for a bad frame, and this is the frame most likely to
+    arrive: a column read back from CSV or JSON as the wrong type.
+    """
+
+    class Statuses(FrameSpec):
+        status = ColSpec(pl.String, choices=["NEW", "PAID"])
+
+    report = Statuses.inspect(pl.DataFrame({"status": [1, 2]}))
+
+    assert [f.code for f in report.findings] == ["dtype"]
+    assert "expected dtype String, got Int64" in report.findings[0].message
+
+    with pytest.raises(ValidationError, match="expected dtype String"):
+        Statuses.validate(pl.DataFrame({"status": [1, 2]}))
+
+
 def test_validation_strict_dtypes_and_cast():
     df = pl.DataFrame(
         {
@@ -364,6 +386,51 @@ def test_validation_rule_precedence():
     )
     validated = TierSpec.validate(df)
     assert validated.height == 2
+
+
+def test_a_null_condition_does_not_excuse_the_rules_after_it():
+    """Validation must read a null `when` the way generation writes one.
+
+    Generation folds a null condition to False before testing it *and* before
+    accumulating it into the claimed mask, so a row the first rule does not
+    match is still offered to the second. If validation lets the null through
+    instead, Kleene logic turns `~claimed` null on that row and every later
+    rule is silently excused there -- on a row generation did rewrite.
+    """
+
+    class Shipments(FrameSpec):
+        tier = ColSpec(pl.String, nullable=True, choices=["gold"])
+        express = ColSpec(pl.Boolean)
+        carrier = ColSpec(
+            pl.String,
+            choices=["RM", "UPS", "DHL"],
+            rules=(
+                ColRule(when=col("tier") == "gold", choices=["RM"]),
+                ColRule(when=col("express"), choices=["UPS"]),
+            ),
+        )
+
+    # Row 0's `tier` is null, so rule 1's condition is null there; rule 2 still
+    # applies, and "DHL" violates it exactly as it does on row 1.
+    df = pl.DataFrame(
+        {
+            "tier": [None, "gold"],
+            "express": [True, True],
+            "carrier": ["DHL", "DHL"],
+        },
+        schema={"tier": pl.String, "express": pl.Boolean, "carrier": pl.String},
+    )
+    report = Shipments.inspect(df)
+
+    violations = report.by_code("rule")
+    assert [f.count for f in violations] == [1, 1]
+    assert report.rows(violations[1]).collect().height == 1
+
+    # And the same spec's own generated data agrees with the same check, which
+    # is the property the two implementations exist to keep.
+    generated = Shipments.generate(2_000, seed=7)
+    assert generated["tier"].null_count() > 0
+    assert Shipments.inspect(generated).passed
 
 
 def test_validation_column_ordering():
