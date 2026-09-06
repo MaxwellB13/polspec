@@ -37,7 +37,8 @@ its full text, published at the site root so a language model can read the
 library's documentation in one fetch. They are rebuilt from the nav in
 `zensical.toml`, the pages themselves, and -- for the API reference, whose
 source is `:::` directives -- the live docstrings. Regenerate after changing
-any page, the nav, or a public docstring.
+any page, the nav, or a public docstring -- and after editing `CHANGELOG.md`,
+which `docs/changelog.md` pulls in whole.
 
 ## Check your change
 
