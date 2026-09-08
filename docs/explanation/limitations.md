@@ -47,29 +47,20 @@ not the same as safe — a cycle is exactly what makes a recursive CTE or a
 hierarchy walk fail to terminate, and `validate()` will not report one, because
 nothing in a spec can currently say "acyclic".
 
-Where you need a genuine hierarchy, draw each row's parent from a row that
-precedes it. A parent that always comes earlier cannot close a loop:
+Where you need a genuine hierarchy, declare one. `Hierarchy` is the same two
+columns with the shape written down — one parent per reference, a bounded
+depth, no cycles — and generation satisfies it rather than leaving it to the
+draw:
 
 ```python
-import random
-
-df = Node.generate(1_000, seed=7)
-rng = random.Random(7)
-refs = df["Reference"].to_list()
-df = df.with_columns(
-    pl.Series(
-        "Parent",
-        [
-            None if i == 0 or rng.random() < 0.2 else refs[rng.randrange(i)]
-            for i in range(df.height)
-        ],
-        dtype=pl.String,
-    )
-)
+class Node(FrameSpec):
+    Reference = ColSpec(pl.String)
+    Parent    = ColSpec(pl.String)
+    __hierarchy__ = Hierarchy(child="Reference", parent="Parent", max_depth=5)
 ```
 
-The result is a forest, and it still validates against the same unmodified
-spec.
+See [Hierarchies and link tables](../how-to/hierarchies.md), including how to
+ask for the cycles back when they are what you are testing against.
 
 ## Cartesian generation
 
@@ -92,6 +83,12 @@ produce nothing.
   columns are added after validation runs, including for non-nullable columns.
 - **Rules overwrite nulls**, so a nullable column with a rule ends up with
   fewer nulls than `null_probability` suggests.
+- **A `Hierarchy` cannot be batched or streamed.** `generate_batches` and
+  every `sink_*` refuse a spec that declares one, because each batch is
+  generated independently and a forest is a property of the whole frame.
+- **A `Hierarchy` owns both its columns.** A `null_probability`,
+  `distribution` or `weights` declared on either is not what you get: the
+  references have to come from one pool for the two columns to join at all.
 - **Uniqueness holds within a batch, not across one.** `generate_batches` and
   the `sink_*` functions sample each batch independently, so a `unique=True`
   column or a `__unique_together__` group is only distinct inside each batch.

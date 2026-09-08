@@ -80,7 +80,7 @@ def test_files_record_the_format_version(tmp_path):
     Sample.to_yaml(path)
     data = yaml.safe_load(path.read_text())
     assert next(iter(data)) == "version"
-    assert data["version"] == FORMAT_VERSION == 2
+    assert data["version"] == FORMAT_VERSION == 3
     assert to_dict(Sample.spec)["version"] == FORMAT_VERSION
 
     cat_path = tmp_path / "cats.yaml"

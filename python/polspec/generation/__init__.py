@@ -21,6 +21,7 @@ from polspec.errors import SpecError
 from polspec.foreign_key import _apply_foreign_key
 from polspec.generation.composite import apply_unique_together
 from polspec.generation.sinks import sink_csv, sink_ipc, sink_ndjson, sink_parquet
+from polspec.hierarchy import _apply_hierarchy
 from polspec.rules import _apply_column_rules
 from polspec.spec import ColSpec
 from polspec.tablespec import TableSpec, resolve_references
@@ -43,6 +44,36 @@ def _require_columns(spec: TableSpec) -> None:
         raise SpecError(f"{spec.name} declares no ColSpec columns")
 
 
+def _check_faults(spec: TableSpec, cycles: int, self_references: int) -> None:
+    """Faults are hierarchy-shaped, so a spec without one cannot take them."""
+    if cycles < 0 or self_references < 0:
+        raise ValueError("cycles and self_references must be >= 0")
+    if (cycles or self_references) and spec.hierarchy is None:
+        raise SpecError(
+            f"{spec.name} declares no __hierarchy__, so there are no links to "
+            "damage. cycles= and self_references= describe a parent/child edge "
+            "list; declare a Hierarchy, or drop the arguments."
+        )
+
+
+def _requires_whole_frame(spec: TableSpec, verb: str) -> None:
+    """Refuses the streaming verbs for a spec whose shape spans the frame.
+
+    A hierarchy is a property of every row at once -- each reference has one
+    parent somewhere else in the same frame. Batches are sampled
+    independently, so a batched hierarchy would be a pile of unrelated
+    fragments rather than a shallow tree, which is a worse answer than saying
+    no.
+    """
+    if spec.hierarchy is not None:
+        raise SpecError(
+            f"{spec.name} declares a __hierarchy__, which {verb} cannot produce: "
+            "every reference points at another row of the same frame, and each "
+            "batch is generated on its own. Use generate() for a hierarchy, and "
+            "write the frame out yourself."
+        )
+
+
 def _check_counts(n: int, batch_size: int | None = None) -> None:
     if n < 0:
         raise ValueError("n must be >= 0")
@@ -62,6 +93,8 @@ def generate(
     method: Method = "random",
     seed: int | None = None,
     references: References = None,
+    cycles: int = 0,
+    self_references: int = 0,
     lazy: Literal[False] = False,
 ) -> pl.DataFrame: ...
 
@@ -74,6 +107,8 @@ def generate(
     method: Method = "random",
     seed: int | None = None,
     references: References = None,
+    cycles: int = 0,
+    self_references: int = 0,
     lazy: Literal[True],
 ) -> pl.LazyFrame: ...
 
@@ -85,6 +120,8 @@ def generate(
     method: Method = "random",
     seed: int | None = None,
     references: References = None,
+    cycles: int = 0,
+    self_references: int = 0,
     lazy: bool = False,
 ) -> pl.DataFrame | pl.LazyFrame:
     """Generates a DataFrame (or LazyFrame) matching `spec`.
@@ -121,10 +158,18 @@ def generate(
     the rows that repeat a combination. Either refuses, naming the column or
     the group, when the domain is too small to cover `n`.
 
+    A spec declaring a `Hierarchy` has its two link columns rewritten as a
+    forest of the declared depth. `cycles` and `self_references` then damage it
+    on purpose -- closing that many chains into loops, and pointing that many
+    rows at themselves -- which is how a graph walk gets something to fail
+    against. Both default to zero, and `validate()` reports whatever they
+    injected.
+
     lazy=True returns a `pl.LazyFrame` around the generated DataFrame.
     """
     _require_columns(spec)
     _check_counts(n)
+    _check_faults(spec, cycles, self_references)
 
     rng = random.Random(seed)
     gen_seed = rng.randrange(2**63)
@@ -136,7 +181,15 @@ def generate(
     else:
         raise ValueError(f"Unknown method {method!r}; expected 'random' or 'cartesian'")
 
-    res = _run_passes(spec, columns, df, references, rng)
+    res = _run_passes(
+        spec,
+        columns,
+        df,
+        references,
+        rng,
+        cycles=cycles,
+        self_references=self_references,
+    )
 
     return res.lazy() if lazy else res
 
@@ -147,6 +200,9 @@ def _run_passes(
     df: pl.DataFrame,
     references: References,
     rng: random.Random,
+    *,
+    cycles: int = 0,
+    self_references: int = 0,
 ) -> pl.DataFrame:
     """Applies every rule and foreign-key pass, in dependency order.
 
@@ -164,6 +220,17 @@ def _run_passes(
         seed = rng.randrange(2**63)
         runners[f"rules:{name}"] = lambda frame, name=name, col=col, seed=seed: (
             _apply_column_rules(frame, name, col, seed)
+        )
+
+    if spec.hierarchy is not None:
+        seed = rng.randrange(2**63)
+        runners["hierarchy"] = lambda frame, seed=seed: _apply_hierarchy(
+            frame,
+            columns,
+            spec.hierarchy,
+            seed,
+            cycles=cycles,
+            self_references=self_references,
         )
 
     if spec.foreign_keys:
@@ -214,6 +281,7 @@ def generate_batches(
     replacement alike.
     """
     _require_columns(spec)
+    _requires_whole_frame(spec, "generate_batches")
     _check_counts(n, batch_size)
     if method not in ("random", "cartesian"):
         raise ValueError(f"Unknown method {method!r}; expected 'random' or 'cartesian'")

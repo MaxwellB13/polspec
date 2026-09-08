@@ -56,6 +56,7 @@ from polspec import (
     Finding,
     ForeignKey,
     FrameSpec,
+    Hierarchy,
     MultiValidationError,
     Registry,
     TableSpec,

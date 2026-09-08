@@ -24,6 +24,7 @@ from polspec.generation import (
     sink_ndjson,
     sink_parquet,
 )
+from polspec.hierarchy import Hierarchy
 from polspec.profiler import profile_dataframe
 from polspec.registry import Registry
 from polspec.rules import ColRule
@@ -42,6 +43,7 @@ __all__ = [
     "ForeignKey",
     "FrameSpec",
     "GenerationError",
+    "Hierarchy",
     "MultiValidationError",
     "PolspecError",
     "Pred",

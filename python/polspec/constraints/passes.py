@@ -80,6 +80,17 @@ def passes_of(spec: TableSpec) -> list[Pass]:
                 reads=frozenset(reads),
             )
         )
+    if spec.hierarchy is not None:
+        # It writes both columns from one pool of references and reads
+        # nothing: whatever the engine put there independently cannot be a
+        # hierarchy, so there is nothing to preserve.
+        passes.append(
+            Pass(
+                key="hierarchy",
+                label="the hierarchy",
+                writes=frozenset(spec.hierarchy.columns),
+            )
+        )
     for index, group in enumerate(spec.unique_together):
         members = tuple(group)
         if any(spec.columns[m].unique for m in members):

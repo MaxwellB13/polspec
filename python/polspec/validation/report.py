@@ -40,6 +40,9 @@ FindingCode = Literal[
     "check",
     "foreign_key",
     "foreign_key_unresolved",
+    "hierarchy_multi_parent",
+    "hierarchy_cycle",
+    "hierarchy_depth",
 ]
 
 FINDING_COLUMN = "__polspec_finding"

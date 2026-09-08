@@ -28,6 +28,41 @@ absolute numbers as the claim.
 
 ### Added
 
+- **`Hierarchy`**, declaring that two columns of a spec are a parent/child
+  edge list drawn on one pool of references: a child pointing at its parent,
+  and that parent pointing at its own parent, are the same row shape.
+
+  ```python
+  class Links(FrameSpec):
+      PARENT_REF = ColSpec(pl.String)
+      CHILD_REF = ColSpec(pl.String)
+      __hierarchy__ = Hierarchy(
+          child="CHILD_REF", parent="PARENT_REF", max_depth=5
+      )
+  ```
+
+  `generate()` produces a real forest: one parent per reference, so every row
+  resolves to a single ultimate parent, and no chain longer than `max_depth`
+  with at least one reaching it exactly -- so a test of a graph walk exercises
+  the boundary rather than whatever the draw happened to give. `branching`
+  shapes the tree, or `roots` pins the number of ultimate parents.
+
+  `generate(n, cycles=10, self_references=5)` then breaks it on purpose, which
+  is the other half of testing a graph walk: a resolver written without a
+  visited set does not fail on a loop, it runs forever. The spec still says the
+  data should be acyclic, so `validate()` reports what was injected --
+  `hierarchy_cycle`, `hierarchy_depth` and `hierarchy_multi_parent` are new
+  finding codes -- and a test can assert that its own resolver and polspec
+  agree about what is broken.
+
+  Both checks are bounded, so validating deliberately cyclic data terminates:
+  depth costs `max_depth` steps and cycle detection walks by pointer doubling,
+  covering a million-row chain in about twenty. A validator that walked until
+  it reached a root would hang on the fixtures this feature exists to make.
+
+  `generate_batches` and the `sink_*` functions refuse a spec carrying one: a
+  forest spans the whole frame, and batches are generated independently. See
+  [Hierarchies and link tables](https://maxwellb13.github.io/polspec/how-to/hierarchies/).
 - `generate`, `generate_batches`, `inspect`, `validate`, `sink_parquet`,
   `sink_ipc`, `sink_csv` and `sink_ndjson` are exported from `polspec` itself.
   Each takes a `TableSpec` as its first argument and each is what the matching
@@ -81,14 +116,16 @@ absolute numbers as the claim.
 
 ### Documentation
 
+- The spec file format is version 3, which adds the `hierarchy:` key. A
+  version 2 file loads unchanged.
 - A self-referencing `ForeignKey` guarantees that every parent value exists,
   and nothing more -- in particular not that the result is a tree. Parents are
   sampled from the whole frame, so some rows end up in a cycle or pointing at
   themselves, which is what makes a recursive query fail to terminate, and
   `validate()` does not report it because no part of a spec can say "acyclic".
   [Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/)
-  now says so, with a recipe for a genuine hierarchy, and the roadmap carries
-  what closing the gap would need. Two tests pin the behaviour.
+  now says so, and points at `Hierarchy` for the case that wants a real tree.
+  Two tests pin the behaviour, so the two stay told apart.
 
 ### Fixed
 

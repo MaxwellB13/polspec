@@ -24,6 +24,7 @@ from polspec.check import Check
 from polspec.constraints import Domain, ordered_passes
 from polspec.errors import SpecError
 from polspec.foreign_key import ForeignKey, _default_fk_name
+from polspec.hierarchy import Hierarchy
 from polspec.spec import ColSpec, _column_kind
 
 if TYPE_CHECKING:
@@ -107,6 +108,8 @@ class TableSpec:
         Composite unique keys. A single group may be given as a flat list.
     foreign_keys : Sequence[ForeignKey]
         Referential-integrity constraints.
+    hierarchy : Hierarchy | None
+        Declares two columns as a parent/child edge list; see `Hierarchy`.
 
     Notes
     -----
@@ -119,6 +122,7 @@ class TableSpec:
     checks: Sequence[Check] = ()
     unique_together: Sequence[Sequence[str]] = ()
     foreign_keys: Sequence[ForeignKey] = ()
+    hierarchy: Hierarchy | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name:
@@ -159,6 +163,7 @@ class TableSpec:
         self._validate_unique_together()
         self._validate_checks()
         self._validate_foreign_keys()
+        self._validate_hierarchy()
         self._validate_pass_order()
 
     # ------------------------------------------------------------------
@@ -273,6 +278,60 @@ class TableSpec:
                         "with the parent's values, so widen or drop this "
                         "column's own bounds/choices, or narrow the parent's."
                     )
+
+    def _validate_hierarchy(self) -> None:
+        """Rejects a hierarchy that cannot be built over these columns.
+
+        The pass overwrites both columns outright, so anything else that also
+        writes one of them has no order that leaves both satisfied -- the same
+        reason a composite key refuses to share a column with a rule.
+        """
+        h = self.hierarchy
+        if h is None:
+            return
+        if not isinstance(h, Hierarchy):
+            raise SpecError(
+                f"TableSpec.hierarchy must be a Hierarchy, got {type(h).__name__}"
+            )
+        for label, name in (("child", h.child), ("parent", h.parent)):
+            if name not in self.columns:
+                raise SpecError(
+                    f"Hierarchy.{label} references unknown column {name!r} on "
+                    f"{self.name}"
+                )
+        child_kind = _fk_kind_bucket(_column_kind(self.columns[h.child].dtype))
+        parent_kind = _fk_kind_bucket(_column_kind(self.columns[h.parent].dtype))
+        if child_kind != parent_kind:
+            raise SpecError(
+                f"Hierarchy on {self.name!r}: {h.child!r} "
+                f"({self.columns[h.child].dtype}) and {h.parent!r} "
+                f"({self.columns[h.parent].dtype}) hold the same references and "
+                "must be dtype-compatible."
+            )
+        for name in h.columns:
+            if self.columns[name].rules:
+                raise SpecError(
+                    f"Column {name!r} carries rules and is part of the hierarchy "
+                    f"on {self.name}. The hierarchy pass rewrites both its "
+                    "columns from one pool of references, so a rule assigning "
+                    "values from a fixed set would break the links it just "
+                    "made. Keep the rules, or the hierarchy, but not both."
+                )
+        keyed = {c for fk in self.foreign_keys for c in fk.columns}
+        clash = sorted(keyed.intersection(h.columns))
+        if clash:
+            raise SpecError(
+                f"Column(s) {clash} are foreign-keyed and part of the hierarchy "
+                f"on {self.name}. Both fill the column, and whichever ran second "
+                "would undo the other. Drop one of the two."
+            )
+        if self.columns[h.parent].unique:
+            raise SpecError(
+                f"Hierarchy.parent {h.parent!r} on {self.name} is declared "
+                "unique=True, but a reference with more than one child appears "
+                "in the parent column once per child. Declare unique=True on "
+                f"the child column ({h.child!r}) instead, where it is true."
+            )
 
     def _validate_pass_order(self) -> None:
         """Rejects rules and keys whose passes cannot be run in any order.
@@ -396,6 +455,10 @@ class TableSpec:
             self, foreign_keys=(*self.foreign_keys, *foreign_keys)
         )
 
+    def with_hierarchy(self, hierarchy: Hierarchy | None) -> TableSpec:
+        """A copy of this spec declaring (or, with None, dropping) a hierarchy."""
+        return dataclasses.replace(self, hierarchy=hierarchy)
+
     def with_unique_together(self, *groups: Sequence[str]) -> TableSpec:
         """A copy of this spec with `groups` added as composite unique keys."""
         return dataclasses.replace(
@@ -424,6 +487,11 @@ class TableSpec:
             ),
             "foreign_keys": tuple(
                 fk for fk in self.foreign_keys if not dropped & set(fk.columns)
+            ),
+            "hierarchy": (
+                None
+                if self.hierarchy is not None and dropped & set(self.hierarchy.columns)
+                else self.hierarchy
             ),
         }
 
@@ -497,6 +565,13 @@ class TableSpec:
                     name=fk.name if keep_name else None,
                 )
             )
+        hierarchy = self.hierarchy
+        if hierarchy is not None:
+            hierarchy = dataclasses.replace(
+                hierarchy,
+                child=new_name(hierarchy.child),
+                parent=new_name(hierarchy.parent),
+            )
         return dataclasses.replace(
             self,
             columns=columns,
@@ -504,6 +579,7 @@ class TableSpec:
                 tuple(new_name(c) for c in g) for g in self.unique_together
             ),
             foreign_keys=tuple(foreign_keys),
+            hierarchy=hierarchy,
         )
 
     def with_catspec(self, catspec: CatSpec | type[CatSpec]) -> TableSpec:

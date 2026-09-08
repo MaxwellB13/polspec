@@ -25,6 +25,8 @@ from polspec.validation.constraints import (
     _Constraint,
     _foreign_key_findings,
     _frame_constraints,
+    _hierarchy_constraints,
+    _hierarchy_findings,
     _is_dtype_compatible,
 )
 from polspec.validation.report import (
@@ -64,6 +66,7 @@ class ValidationOptions:
     unique: bool = True
     checks: bool = True
     foreign_keys: bool = True
+    hierarchy: bool = True
     cast: bool = False
     streaming: bool = False
 
@@ -88,6 +91,7 @@ def _options_from(**options: Any) -> ValidationOptions:
         "validate_unique": "unique",
         "validate_checks": "checks",
         "validate_foreign_keys": "foreign_keys",
+        "validate_hierarchy": "hierarchy",
     }
     return ValidationOptions(**{renamed.get(k, k): v for k, v in options.items()})
 
@@ -199,6 +203,8 @@ def inspect(
                 df_col_names=df_col_names,
             )
         )
+    if opts.hierarchy and spec.hierarchy is not None:
+        constraints.extend(_hierarchy_constraints(spec.hierarchy, df_col_names))
     constraints.extend(
         _frame_constraints(
             spec.unique_together if opts.unique else None,
@@ -225,6 +231,13 @@ def inspect(
             _foreign_key_findings(lf, spec.name, resolved, df_col_names, collect_kwargs)
         )
 
+    if opts.hierarchy and spec.hierarchy is not None:
+        findings.extend(
+            _hierarchy_findings(
+                lf, spec.name, spec.hierarchy, df_col_names, collect_kwargs
+            )
+        )
+
     return ValidationReport(spec.name, tuple(findings), lf, opts)
 
 
@@ -248,6 +261,7 @@ def validate(
     validate_unique: bool = True,
     validate_checks: bool = True,
     validate_foreign_keys: bool = True,
+    validate_hierarchy: bool = True,
     references: References = None,
     cast: bool = False,
     streaming: bool = False,
@@ -268,7 +282,7 @@ def validate(
         Require identical dtypes, rather than accepting a compatible one
         (a narrower integer, a String where an Enum was declared).
     validate_rules, validate_validators, validate_unique, validate_checks,
-    validate_foreign_keys : bool
+    validate_foreign_keys, validate_hierarchy : bool
         Switch off individual kinds of check.
     references : mapping
         Parent frames for foreign keys that reference another spec, keyed by
@@ -295,6 +309,7 @@ def validate(
         validate_unique=validate_unique,
         validate_checks=validate_checks,
         validate_foreign_keys=validate_foreign_keys,
+        validate_hierarchy=validate_hierarchy,
         cast=cast,
         streaming=streaming,
     )

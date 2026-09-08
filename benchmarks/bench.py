@@ -60,7 +60,7 @@ from pathlib import Path
 from typing import Any
 
 import polars as pl
-from polspec import Bound, ColRule, ColSpec, ForeignKey, FrameSpec, col
+from polspec import Bound, ColRule, ColSpec, ForeignKey, FrameSpec, Hierarchy, col
 
 ROOT = Path(__file__).resolve().parent.parent
 BASELINE = Path(__file__).resolve().parent / "baseline.json"
@@ -186,6 +186,14 @@ class SelfKeyed(FrameSpec):
     __foreign_keys__ = [ForeignKey("manager_id", references="self", ref_columns="id")]
 
 
+class Linked(FrameSpec):
+    """A link table: one pool of references wired into a forest of depth 5."""
+
+    PARENT_REF = ColSpec(pl.String)
+    CHILD_REF = ColSpec(pl.String)
+    __hierarchy__ = Hierarchy(child="CHILD_REF", parent="PARENT_REF", max_depth=5)
+
+
 class Composite(FrameSpec):
     """A composite key, whose repair resamples the rows that repeat."""
 
@@ -261,6 +269,19 @@ def generate_python(n: int) -> pl.DataFrame:
     return df.with_columns(pl.col("enum_1").cast(pl.Enum(CATEGORIES)))
 
 
+def _validate_cyclic_hierarchy(n: int) -> None:
+    """Validating a frame built to contain cycles.
+
+    Its own case because the walk is the part with a cliff in it: advancing a
+    lazy frame along itself nests its plan, and an implementation that slipped
+    back into doing so took half a minute over fifty thousand rows rather than
+    the twenty milliseconds it takes now.
+    """
+    from polspec import inspect as inspect_frame
+
+    inspect_frame(Linked.spec, Linked.generate(n, seed=SEED, cycles=10))
+
+
 def _sink_parquet(n: int) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         DataSource.sink_parquet(Path(tmp) / "out.parquet", n, batch_size=100_000)
@@ -334,6 +355,13 @@ CASES: tuple[Case, ...] = (
     Case("rules", "regression", (1_000_000,), _polspec(Ruled)),
     Case("foreign_key_self", "regression", (1_000_000,), _polspec(SelfKeyed)),
     Case("unique_together", "regression", (1_000_000,), _polspec(Composite)),
+    Case("hierarchy", "regression", (100_000, 1_000_000), _polspec(Linked)),
+    Case(
+        "hierarchy_validate_cyclic",
+        "regression",
+        (100_000,),
+        _validate_cyclic_hierarchy,
+    ),
     # Streaming to disk, which no other case exercises.
     Case("sink_parquet", "regression", (1_000_000,), _sink_parquet),
 )

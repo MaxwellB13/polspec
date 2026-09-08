@@ -2021,6 +2021,146 @@ erDiagram
 
 ---
 
+# Hierarchies
+Source: https://maxwellb13.github.io/polspec/how-to/hierarchies/
+
+# Hierarchies and link tables
+
+A link table is an edge list: one column holds a reference, the other holds
+the reference it points at, and both draw on the same set of values. A child
+pointing at its parent, and that parent pointing at its own parent, are the
+same row shape — which is why one table holds both.
+
+`Hierarchy` declares that shape, so `generate()` produces a real tree and
+`validate()` can say when data is not one.
+
+## Declaring one
+
+```python
+class Links(FrameSpec):
+    PARENT_REF = ColSpec(pl.String)
+    CHILD_REF = ColSpec(pl.String)
+    __hierarchy__ = Hierarchy(
+        child="CHILD_REF",
+        parent="PARENT_REF",
+        max_depth=5,
+    )
+
+df = Links.generate(1_000_000, seed=7)
+```
+
+`child` is the column doing the pointing and `parent` the column being
+pointed at. A row is an edge, so `n` is the number of rows. Ultimate parents
+have nothing to point at and so have no row of their own.
+
+What that gives you:
+
+- **One parent per reference.** Every value in `CHILD_REF` appears exactly
+  once, so walking upward from any row reaches exactly one ultimate parent.
+- **A known depth.** No chain is longer than `max_depth` hops, and at least one
+  chain is exactly that long — so a test of "resolve to the ultimate parent"
+  always exercises the boundary rather than whatever the draw happened to give.
+- **No cycles**, unless you ask for them.
+
+`branching` controls the shape — the mean number of children a reference has,
+and so how many ultimate parents `n` rows imply. `roots` is the same dial from
+the other end: give an exact number of ultimate parents instead, and the
+branching follows. They are mutually exclusive, and the default is
+`branching=3.0`.
+
+```python
+Hierarchy(child="CHILD_REF", parent="PARENT_REF", max_depth=5, roots=40)
+```
+
+## Generating data that is deliberately broken
+
+Code that walks a hierarchy has to cope with data that is not one. A loop in
+the parent chain is the case that matters; because a resolver written without
+a visited set does not fail on it — it runs forever.
+
+```python
+Links.generate(1_000_000, seed=7, cycles=10)
+Links.generate(1_000_000, seed=7, self_references=5)
+```
+
+`cycles=n` closes that many chains into loops, each a few hops long and none
+overlapping another. `self_references=n` points that many rows straight at
+themselves, which is the degenerate loop your resolver most likely tests for
+and the one a `child == parent` guard already catches.
+
+Neither is declared on the spec, because the spec still says the data *should*
+be an acyclic forest. That is what makes them useful: `validate()` reports what
+was injected, so a test can assert its own resolver and polspec agree.
+
+```python
+broken = Links.generate(10_000, seed=7, cycles=3)
+report = Links.inspect(broken)
+
+report.passed                                     # False
+[f.code for f in report.findings]                 # ['hierarchy_cycle']
+report.rows(report.findings[0]).collect().height  # the rows that never terminate
+```
+
+## What validation checks
+
+Three findings, on top of everything a column declares for itself:
+
+| code | meaning |
+|:--|:--|
+| `hierarchy_multi_parent` | a reference appears as a child in more than one row, so it has no single ultimate parent |
+| `hierarchy_cycle` | a row's chain of parents never reaches an ultimate parent |
+| `hierarchy_depth` | a chain is longer than the declared `max_depth`, without being a loop |
+
+A row inside a loop is reported as a cycle rather than as a depth violation:
+it is both, and the loop is the useful half. `hierarchy_cycle` counts every
+row that never terminates, which includes rows hanging *below* a loop — they
+do not reach an ultimate parent either.
+
+Both checks are bounded. Depth costs `max_depth` steps; cycle detection walks
+by pointer doubling, so it covers a chain of a million rows in about twenty.
+Validating cyclic data terminates — which matters, because the whole point of
+generating it was to have something that breaks a naive walk.
+
+## Resolving the ultimate parent
+
+The reason to generate this data is to test code that collapses it. The same
+bounded walk works in Polars:
+
+```python
+links = Links.generate(50_000, seed=7)
+resolved = links.select(
+    node=pl.col("CHILD_REF"), root=pl.col("PARENT_REF")
+)
+lookup = links.select(
+    pl.col("CHILD_REF").alias("root"), pl.col("PARENT_REF").alias("next")
+)
+for _ in range(5):  # max_depth
+    resolved = (
+        resolved.join(lookup, on="root", how="left")
+        .with_columns(root=pl.coalesce("next", "root"))
+        .drop("next")
+    )
+```
+
+After `max_depth` rounds every `root` is an ultimate parent, because the spec
+promised no chain is longer than that. Run the same loop over a frame from
+`cycles=10` and it silently returns a value that is not a root — which is
+exactly the bug worth having a fixture for.
+
+## What it will not do
+
+- **`generate_batches` and the `sink_*` functions refuse a spec with a
+  hierarchy.** Each batch is generated independently, so a batched hierarchy
+  would be a pile of unrelated fragments. Use `generate()` and write the frame
+  out yourself.
+- **The pass owns both columns.** A `null_probability`, `distribution` or
+  `weights` on either is not what you get: the references have to come from one
+  pool for the two columns to join at all.
+- **One parent, not many.** A reference with two parents is a finding, not a
+  supported shape.
+
+---
+
 # Generated documentation
 Source: https://maxwellb13.github.io/polspec/how-to/documenting/
 
@@ -2566,6 +2706,7 @@ cannot describe a signature the code does not have.
 | [`TableSpec`][polspec.TableSpec] | [Specs](https://maxwellb13.github.io/polspec/reference/api/specs/) |
 | [`FrameSpec`][polspec.FrameSpec] | [Specs](https://maxwellb13.github.io/polspec/reference/api/specs/) |
 | [`ForeignKey`][polspec.ForeignKey] | [Specs](https://maxwellb13.github.io/polspec/reference/api/specs/) |
+| [`Hierarchy`][polspec.Hierarchy] | [Specs](https://maxwellb13.github.io/polspec/reference/api/specs/) |
 | [`Registry`][polspec.Registry] | [Registry](https://maxwellb13.github.io/polspec/reference/api/registry/) |
 | [`CatSpec`][polspec.CatSpec] | [Registry](https://maxwellb13.github.io/polspec/reference/api/registry/) |
 | [`generate`][polspec.generate] | [Generation](https://maxwellb13.github.io/polspec/reference/api/generation/) |
@@ -2784,7 +2925,7 @@ A spec is a `TableSpec`: an immutable record of columns and constraints.
 
 ## TableSpec
 
-### TableSpec(name: 'str', columns: 'Mapping[str, ColSpec]' = <factory>, checks: 'Sequence[Check]' = (), unique_together: 'Sequence[Sequence[str]]' = (), foreign_keys: 'Sequence[ForeignKey]' = ()) -> None
+### TableSpec(name: 'str', columns: 'Mapping[str, ColSpec]' = <factory>, checks: 'Sequence[Check]' = (), unique_together: 'Sequence[Sequence[str]]' = (), foreign_keys: 'Sequence[ForeignKey]' = (), hierarchy: 'Hierarchy | None' = None) -> None
 
 The columns and constraints of one table, as an immutable value.
 
@@ -2801,6 +2942,8 @@ unique_together : Sequence[Sequence[str]]
     Composite unique keys. A single group may be given as a flat list.
 foreign_keys : Sequence[ForeignKey]
     Referential-integrity constraints.
+hierarchy : Hierarchy | None
+    Declares two columns as a parent/child edge list; see `Hierarchy`.
 
 Notes
 -----
@@ -2826,6 +2969,8 @@ here, so a `TableSpec` that constructs is one that can be used.
 - `TableSpec.with_columns(self, mapping: 'Mapping[str, ColSpec] | None' = None, /, **columns: 'ColSpec') -> 'TableSpec'` -- Adds columns, or replaces existing ones of the same name in place.
 
 - `TableSpec.with_foreign_keys(self, *foreign_keys: 'ForeignKey') -> 'TableSpec'` -- A copy of this spec with `foreign_keys` added to the ones it has.
+
+- `TableSpec.with_hierarchy(self, hierarchy: 'Hierarchy | None') -> 'TableSpec'` -- A copy of this spec declaring (or, with None, dropping) a hierarchy.
 
 - `TableSpec.with_name(self, name: 'str') -> 'TableSpec'` -- A copy of this spec under a different name.
 
@@ -2870,7 +3015,7 @@ data -- go through `__columns__`:
 
 - `FrameSpec.from_yaml(cls, source: 'str | Path', *, categories: 'CatSpec | type[CatSpec] | str | Path | None' = None, strict: 'bool' = True) -> 'type[FrameSpec]'` -- Builds a new FrameSpec subclass from a YAML file written by `to_yaml`.
 
-- `FrameSpec.generate(cls, n: 'int', *, method: "Literal['random', 'cartesian']" = 'random', seed: 'int | None' = None, references: 'References' = None, lazy: 'bool' = False) -> 'pl.DataFrame | pl.LazyFrame'` -- Generates a DataFrame (or LazyFrame) matching this spec.
+- `FrameSpec.generate(cls, n: 'int', *, method: "Literal['random', 'cartesian']" = 'random', seed: 'int | None' = None, references: 'References' = None, cycles: 'int' = 0, self_references: 'int' = 0, lazy: 'bool' = False) -> 'pl.DataFrame | pl.LazyFrame'` -- Generates a DataFrame (or LazyFrame) matching this spec.
 
 - `FrameSpec.generate_batches(cls, n: 'int', *, batch_size: 'int' = 100000, method: "Literal['random', 'cartesian']" = 'random', seed: 'int | None' = None, references: 'References' = None) -> 'Iterator[pl.DataFrame]'` -- Yields chunks of generated rows without holding all `n` in memory.
 
@@ -2948,6 +3093,46 @@ Examples
 ...     __foreign_keys__ = [
 ...         ForeignKey("manager_id", references="self", ref_columns="id"),
 ...     ]
+## Hierarchy
+
+### Hierarchy(child: 'str', parent: 'str', max_depth: 'int' = 1, branching: 'float | None' = None, roots: 'int | None' = None) -> None
+
+Declares that two columns of a spec form a parent/child edge list.
+
+Parameters
+----------
+child : str
+    The column holding the lower reference -- the one doing the pointing.
+    Each value appears in exactly one row, which is what gives every
+    reference a single ultimate parent.
+parent : str
+    The column holding the reference being pointed at.
+max_depth : int
+    Hops from an ultimate parent to the furthest child. Generation
+    guarantees at least one chain of exactly this length and none longer,
+    so a walk that stops early and one that runs away are both caught.
+branching : float | None
+    Mean children per reference, which is what decides how many ultimate
+    parents `n` rows imply. Mutually exclusive with `roots`; one of the two
+    must be given, and `branching=3.0` is the default when neither is.
+roots : int | None
+    An exact number of ultimate parents, as an alternative to `branching`.
+
+Notes
+-----
+A row is an edge, so `generate(n)` produces `n` rows. Ultimate parents have
+no row of their own -- nothing to point at -- so `n` edges over `R` roots
+need `n + R` distinct references, drawn from the child column's own
+declaration.
+
+Examples
+--------
+>>> class Links(FrameSpec):
+...     PARENT_REF = ColSpec(pl.String)
+...     CHILD_REF = ColSpec(pl.String)
+...     __hierarchy__ = Hierarchy(
+...         child="CHILD_REF", parent="PARENT_REF", max_depth=5
+...     )
 
 ---
 
@@ -3090,7 +3275,7 @@ has a `FrameSpec` classmethod that forwards to it with `cls.spec` -- see
 
 ## generate
 
-### generate(spec: 'TableSpec', n: 'int', *, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, lazy: 'bool' = False) -> 'pl.DataFrame | pl.LazyFrame'
+### generate(spec: 'TableSpec', n: 'int', *, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, cycles: 'int' = 0, self_references: 'int' = 0, lazy: 'bool' = False) -> 'pl.DataFrame | pl.LazyFrame'
 
 Generates a DataFrame (or LazyFrame) matching `spec`.
 
@@ -3125,6 +3310,13 @@ A `unique=True` column is drawn without replacement by the engine itself,
 and a `__unique_together__` group is separated afterwards by resampling
 the rows that repeat a combination. Either refuses, naming the column or
 the group, when the domain is too small to cover `n`.
+
+A spec declaring a `Hierarchy` has its two link columns rewritten as a
+forest of the declared depth. `cycles` and `self_references` then damage it
+on purpose -- closing that many chains into loops, and pointing that many
+rows at themselves -- which is how a graph walk gets something to fail
+against. Both default to zero, and `validate()` reports whatever they
+injected.
 
 lazy=True returns a `pl.LazyFrame` around the generated DataFrame.
 ## generate_batches
@@ -3187,7 +3379,7 @@ the report, with `report.rows(finding)` and `report.failing_rows()`
 giving the offending rows back lazily. See `validate` for the options.
 ## validate
 
-### validate(spec: 'TableSpec', df: 'pl.DataFrame | pl.LazyFrame', *, extra_cols: "Literal['drop', 'allow', 'raise']" = 'raise', missing_cols: "Literal['add', 'allow', 'raise']" = 'raise', strict_dtypes: 'bool' = False, validate_rules: 'bool' = True, validate_validators: 'bool' = True, validate_unique: 'bool' = True, validate_checks: 'bool' = True, validate_foreign_keys: 'bool' = True, references: 'References' = None, cast: 'bool' = False, streaming: 'bool' = False) -> 'pl.DataFrame | pl.LazyFrame'
+### validate(spec: 'TableSpec', df: 'pl.DataFrame | pl.LazyFrame', *, extra_cols: "Literal['drop', 'allow', 'raise']" = 'raise', missing_cols: "Literal['add', 'allow', 'raise']" = 'raise', strict_dtypes: 'bool' = False, validate_rules: 'bool' = True, validate_validators: 'bool' = True, validate_unique: 'bool' = True, validate_checks: 'bool' = True, validate_foreign_keys: 'bool' = True, validate_hierarchy: 'bool' = True, references: 'References' = None, cast: 'bool' = False, streaming: 'bool' = False) -> 'pl.DataFrame | pl.LazyFrame'
 
 Validates a DataFrame or LazyFrame against `spec`.
 
@@ -3205,7 +3397,7 @@ strict_dtypes : bool
     Require identical dtypes, rather than accepting a compatible one
     (a narrower integer, a String where an Enum was declared).
 validate_rules, validate_validators, validate_unique, validate_checks,
-validate_foreign_keys : bool
+validate_foreign_keys, validate_hierarchy : bool
     Switch off individual kinds of check.
 references : mapping
     Parent frames for foreign keys that reference another spec, keyed by
@@ -3757,29 +3949,20 @@ not the same as safe — a cycle is exactly what makes a recursive CTE or a
 hierarchy walk fail to terminate, and `validate()` will not report one, because
 nothing in a spec can currently say "acyclic".
 
-Where you need a genuine hierarchy, draw each row's parent from a row that
-precedes it. A parent that always comes earlier cannot close a loop:
+Where you need a genuine hierarchy, declare one. `Hierarchy` is the same two
+columns with the shape written down — one parent per reference, a bounded
+depth, no cycles — and generation satisfies it rather than leaving it to the
+draw:
 
 ```python
-import random
-
-df = Node.generate(1_000, seed=7)
-rng = random.Random(7)
-refs = df["Reference"].to_list()
-df = df.with_columns(
-    pl.Series(
-        "Parent",
-        [
-            None if i == 0 or rng.random() < 0.2 else refs[rng.randrange(i)]
-            for i in range(df.height)
-        ],
-        dtype=pl.String,
-    )
-)
+class Node(FrameSpec):
+    Reference = ColSpec(pl.String)
+    Parent    = ColSpec(pl.String)
+    __hierarchy__ = Hierarchy(child="Reference", parent="Parent", max_depth=5)
 ```
 
-The result is a forest, and it still validates against the same unmodified
-spec.
+See [Hierarchies and link tables](https://maxwellb13.github.io/polspec/how-to/hierarchies/), including how to
+ask for the cycles back when they are what you are testing against.
 
 ## Cartesian generation
 
@@ -3802,6 +3985,12 @@ produce nothing.
   columns are added after validation runs, including for non-nullable columns.
 - **Rules overwrite nulls**, so a nullable column with a rule ends up with
   fewer nulls than `null_probability` suggests.
+- **A `Hierarchy` cannot be batched or streamed.** `generate_batches` and
+  every `sink_*` refuse a spec that declares one, because each batch is
+  generated independently and a forest is a property of the whole frame.
+- **A `Hierarchy` owns both its columns.** A `null_probability`,
+  `distribution` or `weights` declared on either is not what you get: the
+  references have to come from one pool for the two columns to join at all.
 - **Uniqueness holds within a batch, not across one.** `generate_batches` and
   the `sink_*` functions sample each batch independently, so a `unique=True`
   column or a `__unique_together__` group is only distinct inside each batch.
@@ -4171,17 +4360,6 @@ bounds exceeded, cardinality moved — would say how. The same machinery diffs
 two specs against each other, which is what reviewing a schema change in a pull
 request actually needs.
 
-**Hierarchies from a self-referencing key.** A
-`ForeignKey(..., references="self")` fills its column with values that exist,
-which is what it promises and all it promises — parents are sampled from the
-whole frame, so the result is a random functional graph and some rows sit in a
-cycle (see [known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/)). A parent/child table is the
-commonest reason to reach for a self-referencing key and almost never wants
-that, and the fix is small: draw each row's parent from a row that precedes
-it. What is less obvious is the declaration — whether acyclicity is a flag on
-the key, a separate constraint kind, and what `validate()` should then say
-about data that has a cycle in it.
-
 **Test-framework integration.** A pytest fixture or plugin, or a Hypothesis
 strategy built from a spec, are the natural adjacent surfaces for a library
 whose whole pitch is that fixtures and contracts stay in step. Adjacent,
@@ -4222,6 +4400,41 @@ absolute numbers as the claim.
 
 ### Added
 
+- **`Hierarchy`**, declaring that two columns of a spec are a parent/child
+  edge list drawn on one pool of references: a child pointing at its parent,
+  and that parent pointing at its own parent, are the same row shape.
+
+  ```python
+  class Links(FrameSpec):
+      PARENT_REF = ColSpec(pl.String)
+      CHILD_REF = ColSpec(pl.String)
+      __hierarchy__ = Hierarchy(
+          child="CHILD_REF", parent="PARENT_REF", max_depth=5
+      )
+  ```
+
+  `generate()` produces a real forest: one parent per reference, so every row
+  resolves to a single ultimate parent, and no chain longer than `max_depth`
+  with at least one reaching it exactly -- so a test of a graph walk exercises
+  the boundary rather than whatever the draw happened to give. `branching`
+  shapes the tree, or `roots` pins the number of ultimate parents.
+
+  `generate(n, cycles=10, self_references=5)` then breaks it on purpose, which
+  is the other half of testing a graph walk: a resolver written without a
+  visited set does not fail on a loop, it runs forever. The spec still says the
+  data should be acyclic, so `validate()` reports what was injected --
+  `hierarchy_cycle`, `hierarchy_depth` and `hierarchy_multi_parent` are new
+  finding codes -- and a test can assert that its own resolver and polspec
+  agree about what is broken.
+
+  Both checks are bounded, so validating deliberately cyclic data terminates:
+  depth costs `max_depth` steps and cycle detection walks by pointer doubling,
+  covering a million-row chain in about twenty. A validator that walked until
+  it reached a root would hang on the fixtures this feature exists to make.
+
+  `generate_batches` and the `sink_*` functions refuse a spec carrying one: a
+  forest spans the whole frame, and batches are generated independently. See
+  [Hierarchies and link tables](https://maxwellb13.github.io/polspec/how-to/hierarchies/).
 - `generate`, `generate_batches`, `inspect`, `validate`, `sink_parquet`,
   `sink_ipc`, `sink_csv` and `sink_ndjson` are exported from `polspec` itself.
   Each takes a `TableSpec` as its first argument and each is what the matching
@@ -4275,14 +4488,16 @@ absolute numbers as the claim.
 
 ### Documentation
 
+- The spec file format is version 3, which adds the `hierarchy:` key. A
+  version 2 file loads unchanged.
 - A self-referencing `ForeignKey` guarantees that every parent value exists,
   and nothing more -- in particular not that the result is a tree. Parents are
   sampled from the whole frame, so some rows end up in a cycle or pointing at
   themselves, which is what makes a recursive query fail to terminate, and
   `validate()` does not report it because no part of a spec can say "acyclic".
   [Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/)
-  now says so, with a recipe for a genuine hierarchy, and the roadmap carries
-  what closing the gap would need. Two tests pin the behaviour.
+  now says so, and points at `Hierarchy` for the case that wants a real tree.
+  Two tests pin the behaviour, so the two stay told apart.
 
 ### Fixed
 

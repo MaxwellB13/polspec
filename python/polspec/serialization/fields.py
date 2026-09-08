@@ -23,6 +23,7 @@ from polspec.constants import _DEFAULT_NULL_PROBABILITY
 from polspec.errors import SerializationError
 from polspec.expr import from_data as pred_from_data
 from polspec.foreign_key import ForeignKey, _default_fk_name
+from polspec.hierarchy import Hierarchy
 from polspec.rules import ColRule
 from polspec.serialization.dtypes import dtype_from_data, dtype_to_data, dtype_to_source
 from polspec.spec import ColSpec
@@ -397,6 +398,32 @@ def fk_to_source(fk: ForeignKey) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Hierarchy
+# ---------------------------------------------------------------------------
+
+
+HIERARCHY_FIELDS: tuple[Field, ...] = (
+    Field("child", omit_if=_never),
+    Field("parent", omit_if=_never),
+    Field("max_depth", omit_if=_never),
+    Field("branching", omit_if=_if_none),
+    Field("roots", omit_if=_if_none),
+)
+
+
+def hierarchy_from_data(value: Any, ctx: Ctx, path: str) -> Hierarchy:
+    if not isinstance(value, Mapping) or "child" not in value:
+        raise SerializationError(
+            f"{path}: a hierarchy needs a 'child' key, got {value!r}"
+        )
+    return decode(Hierarchy, value, HIERARCHY_FIELDS, ctx, path)
+
+
+def hierarchy_to_source(hierarchy: Hierarchy) -> str:
+    return to_source(hierarchy, HIERARCHY_FIELDS, "Hierarchy")
+
+
+# ---------------------------------------------------------------------------
 # TableSpec
 # ---------------------------------------------------------------------------
 
@@ -439,6 +466,13 @@ TABLESPEC_FIELDS: tuple[Field, ...] = (
             check_from_data(c, ctx, f"{path}[{i}]") for i, c in enumerate(v)
         ],
         since=2,
+    ),
+    Field(
+        "hierarchy",
+        omit_if=_if_none,
+        to_data=lambda h: encode(h, HIERARCHY_FIELDS),
+        from_data=lambda v, ctx, path: hierarchy_from_data(v, ctx, path),
+        since=3,
     ),
 )
 
