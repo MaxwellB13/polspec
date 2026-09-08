@@ -2,7 +2,7 @@
 name = "polspec"
 # The one place the version is set. Bump with `uv version --bump patch|minor|major`.
 # maturin gives this field precedence over Cargo.toml's, which stays a placeholder.
-version = "0.3.0"
+version = "0.4.0"
 description = "Declare a Polars schema once, then generate data from it and validate data against it."
 readme = "README.md"
 authors = [
@@ -101,7 +101,9 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["RUF012", "DTZ001", "S101", "S102", "S603"]
 "examples/*" = ["RUF012", "DTZ001"]
-"benchmarks/*" = ["S101"]
+# FrameSpec declarations (`__columns__`, `__foreign_keys__`) are class-level
+# mappings by design, as in tests/ and examples/.
+"benchmarks/*" = ["S101", "RUF012"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

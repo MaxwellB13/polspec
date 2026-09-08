@@ -22,18 +22,27 @@ classmethods on `FrameSpec` are one-line forwards that pass `cls.spec`. So a
 `TableSpec` is the thing being operated on either way:
 
 ```python
-Orders.generate(1_000, seed=1)                            # the class
-FrameSpec.from_spec(Orders.spec).generate(1_000, seed=1)  # a TableSpec, wrapped
+import polspec
+
+Orders.generate(1_000, seed=1)          # the class
+polspec.generate(Orders.spec, 1_000, seed=1)  # the function, over the value
 ```
 
-!!! note "The module-level functions are not public yet"
+Both reach the same code. The functions are exported from `polspec` itself:
 
-    `polspec.generation.generate(spec, ...)`,
-    `polspec.validation.inspect(spec, ...)` and their neighbours are what the
-    classmethods call, and they take a `TableSpec` directly. They are not in
-    [the API reference](../reference/api/index.md), which means what it says
-    there: they can change in a patch release. Wrap a `TableSpec` with
-    `FrameSpec.from_spec` and use the classmethods until they are.
+```python
+from polspec import generate, generate_batches, inspect, validate
+from polspec import sink_csv, sink_ipc, sink_ndjson, sink_parquet
+
+df = generate(Orders.spec, 1_000, seed=1)
+report = inspect(Orders.spec, df)
+validate(Orders.spec, df)
+```
+
+Each takes a `TableSpec` as its first argument, and each has a `FrameSpec`
+classmethod that forwards to it with `cls.spec`. Use whichever suits the code:
+the classmethods read better when a class body declared the spec, the
+functions when the spec is a value that was built, loaded or derived.
 
 ## Building one directly
 

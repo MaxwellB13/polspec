@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 
 use rand::Rng;
-use rand::distributions::Distribution as _;
+use rand::distr::Distribution as _;
 use rand_distr::{Beta, Exp, Gamma, LogNormal, Normal, Poisson};
 
 /// One parameter of a distribution: canonical name, default, positivity.
@@ -181,7 +181,7 @@ impl Distribution {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand_xoshiro::rand_core::SeedableRng;
+    use rand::SeedableRng;
 
     fn params(pairs: &[(&str, f64)]) -> HashMap<String, f64> {
         pairs.iter().map(|(k, v)| (k.to_string(), *v)).collect()

@@ -52,6 +52,20 @@ size and weights, lengths, distribution — crossing into Rust once. Rust fills 
 columns in parallel, and within a column in 65,536-row chunks whose seeds come
 from the chunk index, so output is identical regardless of thread count.
 
+For a fixed-width column a chunk is a unit of work, not a unit of storage. The
+values buffer and the validity bitmap are each allocated once at the column's
+full length, and a chunk fills its own disjoint slice of both — which is why
+the chunk size is a multiple of 8, so the bitmap divides on a byte boundary and
+no two threads touch the same byte. The column reaches Polars as a single
+chunk, so nothing downstream — the gather behind a `choices` domain, the cast
+behind a temporal dtype, a `sink_*` write — pays for a column split into
+hundreds of pieces.
+
+String columns are the exception: a row's width is not known until it is drawn,
+and Polars backs them with view arrays, which merge by copying sixteen bytes of
+view per row. That costs more than the split it would remove, so a long string
+column stays chunked.
+
 Rules and foreign keys are applied afterwards as vectorised passes over the
 finished frame, not row by row. Each pass declares the columns it reads and
 the ones it writes, and `constraints.order` runs them so no pass reads a

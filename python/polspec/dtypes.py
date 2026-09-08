@@ -19,9 +19,11 @@ _TIME_UNIT_FACTORS = {"ms": 1_000, "us": 1_000_000, "ns": 1_000_000_000}
 
 _I64_MIN, _I64_MAX = -(2**63), 2**63 - 1
 
-# The full representable range of each fixed-width integer dtype. Note this is
-# *not* _INT_DTYPE_BOUNDS, which is the narrower set polspec generates within
-# by default; these are the limits a user-supplied bound may not exceed.
+# The full representable range of each fixed-width integer dtype: the limits a
+# user-supplied bound may not exceed. `engine._default_numeric_bounds` reads
+# the same table for the range those dtypes generate within when a ColSpec
+# declares no bounds of its own -- the 64-bit types being the exception, where
+# the full range is not a useful default.
 _INT_DTYPE_LIMITS: dict[pl.DataType, tuple[int, int]] = {
     pl.Int8: (-128, 127),
     pl.Int16: (-32_768, 32_767),

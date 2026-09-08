@@ -21,10 +21,27 @@ Method = Literal["random", "cartesian"]
 References = Mapping[Any, pl.DataFrame | pl.LazyFrame] | None
 
 
-def _batches(spec: TableSpec, n: int, **kwargs: Any) -> Iterator[pl.DataFrame]:
+def _stream(
+    spec: TableSpec,
+    n: int,
+    *,
+    batch_size: int,
+    method: Method,
+    seed: int | None,
+    references: References,
+) -> Iterator[pl.DataFrame]:
+    """The batch stream every sink writes.
+
+    Named and typed rather than forwarding `**kwargs`: these four options are
+    the whole of what a sink passes through to generation, and spelling them
+    out is what makes a typo in one of them a failure here rather than a
+    `TypeError` from inside the generator, several frames away.
+    """
     from polspec.generation import generate_batches
 
-    return generate_batches(spec, n, **kwargs)
+    return generate_batches(
+        spec, n, batch_size=batch_size, method=method, seed=seed, references=references
+    )
 
 
 def _empty(spec: TableSpec, references: References) -> pl.DataFrame:
@@ -102,7 +119,7 @@ def sink_parquet(
 
     path = _prepare(spec, path, n, batch_size)
     _sink_arrow(
-        _batches(
+        _stream(
             spec,
             n,
             batch_size=batch_size,
@@ -143,7 +160,7 @@ def sink_ipc(
     path = _prepare(spec, path, n, batch_size)
     with open(path, "wb") as f:
         _sink_arrow(
-            _batches(
+            _stream(
                 spec,
                 n,
                 batch_size=batch_size,
@@ -184,7 +201,7 @@ def sink_csv(
             if include_header:
                 _empty(spec, references).write_csv(f, include_header=True, **kwargs)
             return
-        for batch_df in _batches(
+        for batch_df in _stream(
             spec,
             n,
             batch_size=batch_size,
@@ -213,7 +230,7 @@ def sink_ndjson(
     """
     path = _prepare(spec, path, n, batch_size)
     with open(path, "wb") as f:
-        for batch_df in _batches(
+        for batch_df in _stream(
             spec,
             n,
             batch_size=batch_size,

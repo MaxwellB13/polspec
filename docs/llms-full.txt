@@ -729,18 +729,27 @@ classmethods on `FrameSpec` are one-line forwards that pass `cls.spec`. So a
 `TableSpec` is the thing being operated on either way:
 
 ```python
-Orders.generate(1_000, seed=1)                            # the class
-FrameSpec.from_spec(Orders.spec).generate(1_000, seed=1)  # a TableSpec, wrapped
+import polspec
+
+Orders.generate(1_000, seed=1)          # the class
+polspec.generate(Orders.spec, 1_000, seed=1)  # the function, over the value
 ```
 
-!!! note "The module-level functions are not public yet"
+Both reach the same code. The functions are exported from `polspec` itself:
 
-    `polspec.generation.generate(spec, ...)`,
-    `polspec.validation.inspect(spec, ...)` and their neighbours are what the
-    classmethods call, and they take a `TableSpec` directly. They are not in
-    [the API reference](https://maxwellb13.github.io/polspec/reference/api/), which means what it says
-    there: they can change in a patch release. Wrap a `TableSpec` with
-    `FrameSpec.from_spec` and use the classmethods until they are.
+```python
+from polspec import generate, generate_batches, inspect, validate
+from polspec import sink_csv, sink_ipc, sink_ndjson, sink_parquet
+
+df = generate(Orders.spec, 1_000, seed=1)
+report = inspect(Orders.spec, df)
+validate(Orders.spec, df)
+```
+
+Each takes a `TableSpec` as its first argument, and each has a `FrameSpec`
+classmethod that forwards to it with `cls.spec`. Use whichever suits the code:
+the classmethods read better when a class body declared the spec, the
+functions when the spec is a value that was built, loaded or derived.
 
 ## Building one directly
 
@@ -2559,6 +2568,14 @@ cannot describe a signature the code does not have.
 | [`ForeignKey`][polspec.ForeignKey] | [Specs](https://maxwellb13.github.io/polspec/reference/api/specs/) |
 | [`Registry`][polspec.Registry] | [Registry](https://maxwellb13.github.io/polspec/reference/api/registry/) |
 | [`CatSpec`][polspec.CatSpec] | [Registry](https://maxwellb13.github.io/polspec/reference/api/registry/) |
+| [`generate`][polspec.generate] | [Generation](https://maxwellb13.github.io/polspec/reference/api/generation/) |
+| [`generate_batches`][polspec.generate_batches] | [Generation](https://maxwellb13.github.io/polspec/reference/api/generation/) |
+| [`sink_parquet`][polspec.sink_parquet] | [Generation](https://maxwellb13.github.io/polspec/reference/api/generation/) |
+| [`sink_ipc`][polspec.sink_ipc] | [Generation](https://maxwellb13.github.io/polspec/reference/api/generation/) |
+| [`sink_csv`][polspec.sink_csv] | [Generation](https://maxwellb13.github.io/polspec/reference/api/generation/) |
+| [`sink_ndjson`][polspec.sink_ndjson] | [Generation](https://maxwellb13.github.io/polspec/reference/api/generation/) |
+| [`inspect`][polspec.inspect] | [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/) |
+| [`validate`][polspec.validate] | [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/) |
 | [`ValidationReport`][polspec.ValidationReport] | [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/) |
 | [`Finding`][polspec.Finding] | [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/) |
 | [`profile_dataframe`][polspec.profile_dataframe] | [Profiling](https://maxwellb13.github.io/polspec/reference/api/profiling/) |
@@ -3061,14 +3078,147 @@ Enum(categories=['PENDING', 'COMPLETED'])
 
 ---
 
-# Validation results
+# Generation
+Source: https://maxwellb13.github.io/polspec/reference/api/generation/
+
+# Generation
+
+Every function here takes a `TableSpec` as its first argument, and every one
+has a `FrameSpec` classmethod that forwards to it with `cls.spec` -- see
+[Generating data](https://maxwellb13.github.io/polspec/how-to/generating/) for what the options mean and
+[Specs as values](https://maxwellb13.github.io/polspec/how-to/tablespec/) for when to reach for which.
+
+## generate
+
+### generate(spec: 'TableSpec', n: 'int', *, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, lazy: 'bool' = False) -> 'pl.DataFrame | pl.LazyFrame'
+
+Generates a DataFrame (or LazyFrame) matching `spec`.
+
+method="random" (default): `n` rows, each column drawn independently.
+
+method="cartesian": guarantees a minimum level of coverage. Builds the
+cartesian product of every Enum/Boolean column's full set of values,
+crossed with the negative/zero/positive/null partitions of every bounded
+numeric column, so every enum combination appears alongside every numeric
+sign/null case. `n` is then a *minimum*: if that coverage set has fewer
+than `n` rows it is padded with random rows; if it has more, all of it is
+kept.
+
+`ColSpec.rules` and any `ForeignKey` the spec declares are then applied as
+vectorised passes over the generated frame, regardless of method. Each
+pass sees the frame the passes before it produced, and they run in the
+order their reads and writes imply -- a rule keyed on a foreign-keyed
+column reads the parent's values, not the freely generated ones they
+replaced -- so the result satisfies the same declarations `validate`
+checks it against.
+
+A foreign key is only made referentially consistent where data for its
+target is available: self-referencing keys always are, sampled from this
+same frame; a key referencing another spec only is if `references`
+carries an entry for it, keyed by the spec, its class, or its name --
+otherwise that column is left exactly as freely generated. Composite keys
+are sampled as one joint pick per row; a single-column key whose ColSpec
+is `unique=True` samples without replacement when the parent has enough
+distinct rows to cover `n`.
+
+A `unique=True` column is drawn without replacement by the engine itself,
+and a `__unique_together__` group is separated afterwards by resampling
+the rows that repeat a combination. Either refuses, naming the column or
+the group, when the domain is too small to cover `n`.
+
+lazy=True returns a `pl.LazyFrame` around the generated DataFrame.
+## generate_batches
+
+### generate_batches(spec: 'TableSpec', n: 'int', *, batch_size: 'int' = 100000, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None) -> 'Iterator[pl.DataFrame]'
+
+Yields chunks of generated rows without holding all `n` in memory.
+
+Each batch samples independently, so uniqueness only holds *within* a
+batch, not across the whole `n`: that applies to a `unique=True` column,
+a `__unique_together__` group, and a foreign-key column sampled without
+replacement alike.
+## sink_parquet
+
+### sink_parquet(spec: 'TableSpec', path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, compression: 'str' = 'zstd', method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'
+
+Generates `n` rows and streams them to a Parquet file in batches.
+
+Extra keyword arguments go to `pyarrow.parquet.ParquetWriter`.
+## sink_ipc
+
+### sink_ipc(spec: 'TableSpec', path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, compression: 'str | None' = 'zstd', method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'
+
+Generates `n` rows and streams them to an Arrow IPC / Feather file in batches.
+
+Extra keyword arguments go to `pyarrow.ipc.new_file`.
+## sink_csv
+
+### sink_csv(spec: 'TableSpec', path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, include_header: 'bool' = True, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'
+
+Generates `n` rows and streams them to a CSV file in batches.
+
+Extra keyword arguments go to `pl.DataFrame.write_csv`.
+## sink_ndjson
+
+### sink_ndjson(spec: 'TableSpec', path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'
+
+Generates `n` rows and streams them to a newline-delimited JSON file in batches.
+
+Extra keyword arguments go to `pl.DataFrame.write_ndjson`.
+
+---
+
+# Validation
 Source: https://maxwellb13.github.io/polspec/reference/api/validation/
 
-# Validation results
+# Validation
 
 `inspect()` returns a report; `validate()` raises one. Both carry the same
 findings as data -- see [Validating data](https://maxwellb13.github.io/polspec/how-to/validating/).
 
+## inspect
+
+### inspect(spec: 'TableSpec', df: 'pl.DataFrame | pl.LazyFrame', *, references: 'References' = None, **options: 'Any') -> 'ValidationReport'
+
+Everything `spec` has to say about `df`, as a `ValidationReport`.
+
+Never raises for a frame that fails: every violation is a `Finding` on
+the report, with `report.rows(finding)` and `report.failing_rows()`
+giving the offending rows back lazily. See `validate` for the options.
+## validate
+
+### validate(spec: 'TableSpec', df: 'pl.DataFrame | pl.LazyFrame', *, extra_cols: "Literal['drop', 'allow', 'raise']" = 'raise', missing_cols: "Literal['add', 'allow', 'raise']" = 'raise', strict_dtypes: 'bool' = False, validate_rules: 'bool' = True, validate_validators: 'bool' = True, validate_unique: 'bool' = True, validate_checks: 'bool' = True, validate_foreign_keys: 'bool' = True, references: 'References' = None, cast: 'bool' = False, streaming: 'bool' = False) -> 'pl.DataFrame | pl.LazyFrame'
+
+Validates a DataFrame or LazyFrame against `spec`.
+
+Parameters
+----------
+df : pl.DataFrame | pl.LazyFrame
+    The frame to validate. A LazyFrame comes back as a LazyFrame.
+extra_cols : {"drop", "allow", "raise"}
+    Columns present in `df` but not declared: raise a ValidationError
+    naming them, drop them from the returned frame, or keep them.
+missing_cols : {"add", "allow", "raise"}
+    Declared columns absent from `df`: raise, add them as nulls of the
+    declared dtype, or skip them.
+strict_dtypes : bool
+    Require identical dtypes, rather than accepting a compatible one
+    (a narrower integer, a String where an Enum was declared).
+validate_rules, validate_validators, validate_unique, validate_checks,
+validate_foreign_keys : bool
+    Switch off individual kinds of check.
+references : mapping
+    Parent frames for foreign keys that reference another spec, keyed by
+    that spec, its FrameSpec class, or its name. A key with no entry is
+    reported as a `foreign_key_unresolved` finding.
+cast : bool
+    Cast validated columns to their declared dtype in the returned frame.
+streaming : bool
+    Use Polars' streaming engine for the aggregation.
+
+Returns the validated, optionally transformed frame. Raises
+`ValidationError` carrying a `ValidationReport` of every violation, or
+`ValueError` for an invalid option.
 ## ValidationReport
 
 ### ValidationReport(spec_name: 'str', findings: 'tuple[Finding, ...]', frame: 'pl.LazyFrame', options: 'ValidationOptions' = None) -> None
@@ -3334,6 +3484,20 @@ size and weights, lengths, distribution — crossing into Rust once. Rust fills 
 columns in parallel, and within a column in 65,536-row chunks whose seeds come
 from the chunk index, so output is identical regardless of thread count.
 
+For a fixed-width column a chunk is a unit of work, not a unit of storage. The
+values buffer and the validity bitmap are each allocated once at the column's
+full length, and a chunk fills its own disjoint slice of both — which is why
+the chunk size is a multiple of 8, so the bitmap divides on a byte boundary and
+no two threads touch the same byte. The column reaches Polars as a single
+chunk, so nothing downstream — the gather behind a `choices` domain, the cast
+behind a temporal dtype, a `sink_*` write — pays for a column split into
+hundreds of pieces.
+
+String columns are the exception: a row's width is not known until it is drawn,
+and Polars backs them with view arrays, which merge by copying sixteen bytes of
+view per row. That costs more than the split it would remove, so a long string
+column stays chunked.
+
 Rules and foreign keys are applied afterwards as vectorised passes over the
 finished frame, not row by row. Each pass declares the columns it reads and
 the ones it writes, and `constraints.order` runs them so no pass reads a
@@ -3568,6 +3732,55 @@ and nothing can generate data satisfying an arbitrary predicate. Validate
 generated data with `validate_checks=False` / `validate_validators=False`, or
 construct the rows those invariants describe yourself.
 
+### A self-referencing foreign key is referential, not acyclic
+
+A `ForeignKey(..., references="self")` guarantees exactly what it says: every
+non-null value in the child column is a value that exists in the referenced
+column of the same frame. It does **not** guarantee the result is a tree.
+
+Parents are sampled from the frame as it stands, which builds a random
+functional graph — so a row can be its own parent, and two rows can be each
+other's. This is not rare:
+
+```python
+class Node(FrameSpec):
+    Reference = ColSpec(pl.String, unique=True)
+    Parent    = ColSpec(pl.String, nullable=True, null_probability=0.2)
+    __foreign_keys__ = [
+        ForeignKey("Parent", references="self", ref_columns="Reference")
+    ]
+```
+
+At 20 rows that typically leaves a handful of rows inside a cycle and one or
+two pointing at themselves; at 20,000 it is a fraction of a percent. Rare is
+not the same as safe — a cycle is exactly what makes a recursive CTE or a
+hierarchy walk fail to terminate, and `validate()` will not report one, because
+nothing in a spec can currently say "acyclic".
+
+Where you need a genuine hierarchy, draw each row's parent from a row that
+precedes it. A parent that always comes earlier cannot close a loop:
+
+```python
+import random
+
+df = Node.generate(1_000, seed=7)
+rng = random.Random(7)
+refs = df["Reference"].to_list()
+df = df.with_columns(
+    pl.Series(
+        "Parent",
+        [
+            None if i == 0 or rng.random() < 0.2 else refs[rng.randrange(i)]
+            for i in range(df.height)
+        ],
+        dtype=pl.String,
+    )
+)
+```
+
+The result is a forest, and it still validates against the same unmodified
+spec.
+
 ## Cartesian generation
 
 ### `n` is a minimum, not a count
@@ -3619,7 +3832,7 @@ are still the better tool, and the actual numbers behind the speed claim.
 
 ## Benchmarks
 
-`benchmarks/bench_generate.py` generates the same four-column frame — a
+`benchmarks/bench.py compare` generates the same four-column frame — a
 non-nullable string, a nullable enum, a nullable bounded int, a nullable
 bounded float — three ways: polspec's Rust generator, a hand-vectorized NumPy
 implementation, and a pure-Python loop using `random`. All three produce an
@@ -3628,22 +3841,22 @@ hand back a usable frame," not raw loop speed in isolation.
 
 | n_rows     | polspec (Rust) |     NumPy |    Python |
 |-----------:|---------------:|----------:|----------:|
-|      1,000 |        0.0003s |   0.0008s |   0.0016s |
-|     10,000 |        0.0006s |   0.0052s |   0.0145s |
-|    100,000 |        0.0027s |   0.0480s |   0.1447s |
-|  1,000,000 |        0.0083s |   0.4867s |   1.4862s |
-|  5,000,000 |        0.0256s |   2.4326s |   skipped |
-| 20,000,000 |        0.0827s |   9.7523s |   skipped |
+|      1,000 |        0.0001s |   0.0006s |   0.0014s |
+|     10,000 |        0.0003s |   0.0049s |   skipped |
+|    100,000 |        0.0020s |   0.0472s |   0.1454s |
+|  1,000,000 |        0.0069s |   0.4797s |   1.4837s |
+|  5,000,000 |        0.0286s |   2.4156s |   skipped |
+| 20,000,000 |        0.1127s |   9.7757s |   skipped |
 
-Measured 2026-09-03 on an Intel 13900K with 64GB DDR5, by
-`benchmarks/bench_generate.py`; yours will differ, and the shape matters more
-than the absolute numbers. Two things worth reading off it:
+Measured 2026-09-08 on an Intel 13900K with 64GB DDR5; yours will differ, and
+the shape matters more than the absolute numbers. Three things worth reading
+off it:
 
 - **The gap widens with size, not just the ratio.** At 1,000 rows all three
   are fast enough that the difference doesn't matter to a test suite. At
   20,000,000, pure Python is impractical (skipped past a 5-second cutoff at
   a much smaller size) and NumPy's ~2 million rows/second becomes a real wait
-  in a CI loop, while polspec is still under 100ms.
+  in a CI loop, while polspec is still around a tenth of a second.
 - **NumPy's implementation is the hard-won version.** Its string column uses
   a fixed-width byte-array trick because NumPy has no efficient way to
   vectorize *ragged* per-row lengths — the other two implementations generate
@@ -3652,10 +3865,28 @@ than the absolute numbers. Two things worth reading off it:
   the fast version needs a specific trick per dtype, and someone has to know
   it.
 
+- **A benchmark is a measurement of a machine, not only of code.** Every
+  number here is the fastest of several runs, each in a process of its own so
+  that one case cannot leave the allocator warm for the next, and the run
+  records the CPU, the thread count, the Polars version and the cargo profile
+  beside the timings. That last one matters more than it sounds: building the
+  extension as a single codegen unit moves the `unique` path by a factor of two
+  on its own.
+
 Reproduce it yourself:
 
 ```bash
-uv run --group bench python benchmarks/bench_generate.py
+uv run --group bench python benchmarks/bench.py compare
+```
+
+The same harness guards against regressions. `record` writes a baseline for
+the machine you are on, and `check` re-measures every case — each column kind,
+both branches of the unique draw, the cartesian and rule and foreign-key
+passes, the sinks — and exits non-zero if one has regressed:
+
+```bash
+uv run --group bench python benchmarks/bench.py record   # before a change
+uv run --group bench python benchmarks/bench.py check    # after it
 ```
 
 Generation speed is only half the story — [validation](https://maxwellb13.github.io/polspec/how-to/validating/)
@@ -3843,7 +4074,7 @@ limits on distribution parameters, on cartesian dimensionality, on batch
 sizing.
 
 **Constraints `generate()` doesn't enforce**, which is a different, more
-interesting problem. What is left of it is `__checks__` and
+interesting problem. Most of what is left is `__checks__` and
 `ColSpec.validators`, and that one is by design: both wrap arbitrary Polars
 expressions, and nothing can generate data satisfying an arbitrary predicate.
 Everything else on this list has been worked through — rule and foreign-key
@@ -3940,6 +4171,17 @@ bounds exceeded, cardinality moved — would say how. The same machinery diffs
 two specs against each other, which is what reviewing a schema change in a pull
 request actually needs.
 
+**Hierarchies from a self-referencing key.** A
+`ForeignKey(..., references="self")` fills its column with values that exist,
+which is what it promises and all it promises — parents are sampled from the
+whole frame, so the result is a random functional graph and some rows sit in a
+cycle (see [known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/)). A parent/child table is the
+commonest reason to reach for a self-referencing key and almost never wants
+that, and the fix is small: draw each row's parent from a row that precedes
+it. What is less obvious is the declaration — whether acyclicity is a flag on
+the key, a separate constraint kind, and what `validate()` should then say
+about data that has a cycle in it.
+
 **Test-framework integration.** A pytest fixture or plugin, or a Hypothesis
 strategy built from a spec, are the natural adjacent surfaces for a library
 whose whole pitch is that fixtures and contracts stay in step. Adjacent,
@@ -3959,6 +4201,132 @@ seed produces; see
 [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/).
 
 ## [Unreleased]
+
+The internals release. 0.2.0 and 0.3.0 settled the vocabulary; this one goes
+underneath it, to the Rust generator and the places where the same table was
+being maintained in two or three languages.
+
+Nothing about how a spec is written changes. One thing does break, and it is
+the same thing the roadmap has always reserved: **the values a given seed
+produces are different**. Any test asserting on specific generated values
+needs re-baselining; a test asserting on their *properties* -- bounds,
+distinctness, null share, distribution shape -- does not. polspec's own suite
+needed no changes, which is the shape of test this library is built to support.
+
+Generation got faster, by between a tenth and a third depending on the column.
+Measured A/B against v0.3.0 on one machine, same build profile, twenty million
+rows: the four-column frame in `benchmarks/bench.py` 1.30x, a
+`unique=True` Int64 column 1.21x, a bounded nullable Int64 column 1.17x, an
+Enum column 1.25x, a String column unchanged. Treat the ratios rather than the
+absolute numbers as the claim.
+
+### Added
+
+- `generate`, `generate_batches`, `inspect`, `validate`, `sink_parquet`,
+  `sink_ipc`, `sink_csv` and `sink_ndjson` are exported from `polspec` itself.
+  Each takes a `TableSpec` as its first argument and each is what the matching
+  `FrameSpec` classmethod already called -- but they lived in
+  `polspec.generation` / `polspec.validation`, which the API reference calls
+  internal and free to change in a patch release. So the `TableSpec`-first
+  half of the library had no stable import path; now it does, and both halves
+  appear in [the API reference](https://maxwellb13.github.io/polspec/reference/api/).
+
+### Changed
+
+- **Breaking: the values a given seed produces have changed.** polspec now
+  builds on `rand` 0.10 (from 0.8), whose samplers draw differently. Same seed,
+  same version, same frame -- as before; across this version boundary, not.
+- A generated numeric, boolean, temporal or categorical column arrives as
+  **one chunk** rather than one per 65,536 rows. The values buffer and the
+  validity bitmap are each allocated once at full length and filled in parallel
+  through disjoint slices, instead of being built per chunk and appended
+  together. Nothing downstream now pays for a column split into hundreds of
+  pieces -- the gather behind a `choices` domain, the cast behind a temporal
+  dtype, every `sink_*` write.
+
+  String columns are the exception and stay chunked, because Polars backs them
+  with view arrays: merging those copies no string bytes, but it does copy
+  sixteen bytes of view per row, which costs more than the split it removes.
+  They still gain the other half of the change -- the chunks are collected in
+  one go rather than appended one at a time, and an append rescanned both sides
+  for their first and last non-null value to maintain a sorted flag that random
+  strings will not have set anyway.
+- Drawing a `unique=True` column no longer materialises its domain. A domain
+  only a little wider than the row count used to be built in full and partially
+  shuffled, which allocates in proportion to the domain rather than to the
+  output: ten million distinct values from a range of eighty million reserved
+  1.4 GB before writing anything. That branch is now Floyd's algorithm, which
+  holds only the values it has chosen -- the same case now peaks at 491 MB.
+  Roomier domains keep drawing and rejecting, which is faster there and was
+  never the memory problem.
+- Every character of the generated-string alphabet is now exactly equally
+  likely. Six random bits give 64 values for a 62-character alphabet, and the
+  two spare ones fell back on `% 62` over a fresh 32-bit draw, which is biased
+  by about one part in 70 million -- far too little to see, but free to remove:
+  the fallback now rejects properly instead.
+- `rand` 0.8 was compiled alongside the `rand` 0.10 that Polars already links,
+  so the extension carried two copies of `rand`, `rand_core` and their chacha
+  backends. There is now one of each.
+- The release profile builds the crate as a single codegen unit. Measured on
+  one machine against otherwise identical v0.3.0 code, that alone is worth
+  2.1x on the `unique=True` path, for about twenty seconds of build time. Fat
+  LTO on top of it was tried and dropped: a further 5% for eight more minutes
+  per build.
+
+### Documentation
+
+- A self-referencing `ForeignKey` guarantees that every parent value exists,
+  and nothing more -- in particular not that the result is a tree. Parents are
+  sampled from the whole frame, so some rows end up in a cycle or pointing at
+  themselves, which is what makes a recursive query fail to terminate, and
+  `validate()` does not report it because no part of a spec can say "acyclic".
+  [Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/)
+  now says so, with a recipe for a genuine hierarchy, and the roadmap carries
+  what closing the gap would need. Two tests pin the behaviour.
+
+### Fixed
+
+- `Registry.validate_all` applies each report's structural transformations
+  using the same bound spec the report was produced against, rather than the
+  unbound copy.
+
+### Internal
+
+- `ColumnPlan::build` takes a `PlanArgs` struct instead of thirteen positional
+  arguments, so a call site names what it sets and leaves the rest to
+  `Default`. Four `#[allow(clippy::too_many_arguments)]` and a great many
+  `None`s went with it.
+- `Kind`'s three parallel lists -- the names, the parse, the reverse lookup --
+  are generated from one declaration, so a new column kind cannot be added to
+  two of them and forgotten in the third.
+- The fixed-width integer ranges were written three times: once as polspec's
+  default generation range, once as the limits a declared bound may not exceed,
+  and once as the Rust samplers' defaults. The first is now read from the
+  second.
+- The four `sink_*` functions share a typed batch-stream helper rather than
+  forwarding `**kwargs`.
+- `benchmarks/bench_generate.py` is replaced by `benchmarks/bench.py`, which
+  measures the same comparison and adds a regression mode. The old harness
+  timed one run per case, in a process shared with the implementations it was
+  comparing against, and recorded nothing about the machine -- so its numbers
+  varied by around 25% between runs and could not be compared across days. It
+  also measured exactly one column shape, which is how a change that made the
+  `unique` path half as fast came within an afternoon of being released as a
+  speed-up. The new one takes the fastest of several runs, gives every
+  measurement its own process, repeats a short case until its floor settles,
+  records the CPU, thread count, Polars version and cargo profile, and covers
+  each column kind, both branches of the unique draw, the cartesian, rule,
+  foreign-key and composite-key passes, and a sink. `record` writes a local
+  baseline and `check` exits non-zero when a case regresses past a tolerance;
+  repeated measurements now agree to within about 2%.
+- The benchmark table in the comparison guide is re-measured. It had been
+  recorded on 2026-09-03, which is before both 0.2.0 and 0.3.0, so it had been
+  describing an engine two releases old: the four-column frame at twenty
+  million rows was published as 0.0827s, measures 0.1409s on v0.3.0, and
+  0.1127s here. Some of that gap is still unaccounted for and is worth
+  chasing. The NumPy and pure-Python columns re-measure to within 1% of what
+  was published, which is what says the difference is polspec's and not the
+  machine's.
 
 ## [0.3.0] - 2026-09-06
 

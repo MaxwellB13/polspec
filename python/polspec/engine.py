@@ -15,7 +15,6 @@ from polspec.constants import (
     _DEFAULT_FLOAT_BOUND,
     _DEFAULT_STRING_LEN,
     _DEFAULT_WIDE_INT_BOUND,
-    _INT_DTYPE_BOUNDS,
     _MAX_CARTESIAN_ROWS,
 )
 from polspec.dtypes import (
@@ -121,12 +120,19 @@ def _default_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
 
     A fixed-width int dtype defaults to its own range, temporal dtypes to a
     reasonable era or span, and anything else to the wide/default constants.
+
+    "Its own range" is read from `_dtype_value_limits` rather than kept as a
+    second table here: what an Int16 may hold and what an Int16 generates
+    within are the same nine words, and two copies of them is one copy that
+    can go stale. The 64-bit types are the exception -- their full range is
+    not a useful default -- so they fall through to the wide bound below.
     """
     kind = _column_kind(spec.dtype)
     if kind == "int":
-        if spec.dtype in _INT_DTYPE_BOUNDS:
-            lo, hi = _INT_DTYPE_BOUNDS[spec.dtype]
-            return lo, hi
+        if spec.dtype not in (pl.Int64, pl.UInt64):
+            limits = _dtype_value_limits(spec.dtype)
+            if limits is not None:
+                return limits
         if spec.dtype.is_unsigned_integer():
             return 0, _DEFAULT_WIDE_INT_BOUND
         return -_DEFAULT_WIDE_INT_BOUND, _DEFAULT_WIDE_INT_BOUND

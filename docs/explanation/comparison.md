@@ -8,7 +8,7 @@ are still the better tool, and the actual numbers behind the speed claim.
 
 ## Benchmarks
 
-`benchmarks/bench_generate.py` generates the same four-column frame — a
+`benchmarks/bench.py compare` generates the same four-column frame — a
 non-nullable string, a nullable enum, a nullable bounded int, a nullable
 bounded float — three ways: polspec's Rust generator, a hand-vectorized NumPy
 implementation, and a pure-Python loop using `random`. All three produce an
@@ -17,22 +17,22 @@ hand back a usable frame," not raw loop speed in isolation.
 
 | n_rows     | polspec (Rust) |     NumPy |    Python |
 |-----------:|---------------:|----------:|----------:|
-|      1,000 |        0.0003s |   0.0008s |   0.0016s |
-|     10,000 |        0.0006s |   0.0052s |   0.0145s |
-|    100,000 |        0.0027s |   0.0480s |   0.1447s |
-|  1,000,000 |        0.0083s |   0.4867s |   1.4862s |
-|  5,000,000 |        0.0256s |   2.4326s |   skipped |
-| 20,000,000 |        0.0827s |   9.7523s |   skipped |
+|      1,000 |        0.0001s |   0.0006s |   0.0014s |
+|     10,000 |        0.0003s |   0.0049s |   skipped |
+|    100,000 |        0.0020s |   0.0472s |   0.1454s |
+|  1,000,000 |        0.0069s |   0.4797s |   1.4837s |
+|  5,000,000 |        0.0286s |   2.4156s |   skipped |
+| 20,000,000 |        0.1127s |   9.7757s |   skipped |
 
-Measured 2026-09-03 on an Intel 13900K with 64GB DDR5, by
-`benchmarks/bench_generate.py`; yours will differ, and the shape matters more
-than the absolute numbers. Two things worth reading off it:
+Measured 2026-09-08 on an Intel 13900K with 64GB DDR5; yours will differ, and
+the shape matters more than the absolute numbers. Three things worth reading
+off it:
 
 - **The gap widens with size, not just the ratio.** At 1,000 rows all three
   are fast enough that the difference doesn't matter to a test suite. At
   20,000,000, pure Python is impractical (skipped past a 5-second cutoff at
   a much smaller size) and NumPy's ~2 million rows/second becomes a real wait
-  in a CI loop, while polspec is still under 100ms.
+  in a CI loop, while polspec is still around a tenth of a second.
 - **NumPy's implementation is the hard-won version.** Its string column uses
   a fixed-width byte-array trick because NumPy has no efficient way to
   vectorize *ragged* per-row lengths — the other two implementations generate
@@ -41,10 +41,28 @@ than the absolute numbers. Two things worth reading off it:
   the fast version needs a specific trick per dtype, and someone has to know
   it.
 
+- **A benchmark is a measurement of a machine, not only of code.** Every
+  number here is the fastest of several runs, each in a process of its own so
+  that one case cannot leave the allocator warm for the next, and the run
+  records the CPU, the thread count, the Polars version and the cargo profile
+  beside the timings. That last one matters more than it sounds: building the
+  extension as a single codegen unit moves the `unique` path by a factor of two
+  on its own.
+
 Reproduce it yourself:
 
 ```bash
-uv run --group bench python benchmarks/bench_generate.py
+uv run --group bench python benchmarks/bench.py compare
+```
+
+The same harness guards against regressions. `record` writes a baseline for
+the machine you are on, and `check` re-measures every case — each column kind,
+both branches of the unique draw, the cartesian and rule and foreign-key
+passes, the sinks — and exits non-zero if one has regressed:
+
+```bash
+uv run --group bench python benchmarks/bench.py record   # before a change
+uv run --group bench python benchmarks/bench.py check    # after it
 ```
 
 Generation speed is only half the story — [validation](../how-to/validating.md)

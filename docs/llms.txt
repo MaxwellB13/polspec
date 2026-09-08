@@ -38,7 +38,8 @@ https://maxwellb13.github.io/polspec/llms-full.txt
 - [Predicates](https://maxwellb13.github.io/polspec/reference/api/predicates/): `col()` builds the conditions a `ColRule` or a `Check` carries.
 - [Specs](https://maxwellb13.github.io/polspec/reference/api/specs/): A spec is a `TableSpec`: an immutable record of columns and constraints.
 - [Registry and categories](https://maxwellb13.github.io/polspec/reference/api/registry/): A declared set of specs, and the shared category domains they draw on.
-- [Validation results](https://maxwellb13.github.io/polspec/reference/api/validation/): `inspect()` returns a report; `validate()` raises one.
+- [Generation](https://maxwellb13.github.io/polspec/reference/api/generation/): Every function here takes a `TableSpec` as its first argument, and every one has a `FrameSpec` classmethod that forwards to it with `cls.spec` -- see Generating data for what the options mean and Specs as values for when to reach for which.
+- [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/): `inspect()` returns a report; `validate()` raises one.
 - [Profiling](https://maxwellb13.github.io/polspec/reference/api/profiling/): Inferring a spec from data you already have.
 - [Exceptions](https://maxwellb13.github.io/polspec/reference/api/errors/): Every error polspec raises descends from `PolspecError`, so one `except` clause catches the lot.
 - [Errors and findings](https://maxwellb13.github.io/polspec/reference/errors/): Everything polspec raises on its own behalf derives from one base class, so a caller can separate "polspec objected" from "something else went wrong" with a single clause
