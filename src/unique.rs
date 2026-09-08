@@ -4,14 +4,27 @@
 //! `unique` column used to emit duplicates its own spec rejected. These draw
 //! *without replacement* instead.
 //!
-//! Two strategies, picked by how much room the domain has. When a domain of
-//! size `D` is barely larger than the `n` values wanted, rejection sampling
-//! would spend most of its time rediscovering values it already holds, so the
-//! domain is materialised and partially shuffled -- Fisher-Yates, stopped
-//! after `n` draws. When `D` is comfortably larger, materialising it would be
-//! absurd (a `UInt64` column's domain does not fit in memory), so values are
-//! drawn and rejected against a set instead. `CROWDED` is the line between the
-//! two: at `D = 8n` rejection expects about 1.07 draws per value.
+//! An enumerable domain -- an integer range, a set of categories, the two
+//! booleans -- is drawn one of two ways, and which one depends on how much
+//! room the domain has over the `k` values wanted.
+//!
+//! With room to spare, values are drawn and rejected against a set. Nearly
+//! every draw is new, so this costs about one draw per value, from a range the
+//! sampler prepares once. `CROWDED` is the line: at `D = 8k` rejection expects
+//! about 1.07 draws per value.
+//!
+//! Below that line rejection degrades -- it spends its time rediscovering
+//! values it already holds -- so the draw switches to Floyd's algorithm, which
+//! takes exactly `k` steps whatever the ratio, and holds only the values it
+//! has chosen. That last part is the point. The obvious way to serve a crowded
+//! domain is to materialise and shuffle it, and that allocates in proportion
+//! to `D` rather than to `k`: ten million distinct values from a range of
+//! eighty million used to reserve well over a gigabyte before writing anything.
+//! Floyd's needs no more room than its own output.
+//!
+//! A float range and the strings of a given length range are not enumerable --
+//! there are no offsets to draw -- so those two always reject, sharing one
+//! helper with one budget between them.
 //!
 //! Nulls are exempt, as they are everywhere else in polspec: a null means "no
 //! value", and repeating it is not repeating a value. So the null mask is
@@ -22,37 +35,51 @@
 //! column, so it cannot be established chunk by chunk.
 
 use std::collections::HashSet;
+use std::hash::Hash;
 
 use polars::prelude::*;
 use polars_core::chunked_array::builder::{
     BooleanChunkedBuilder, PrimitiveChunkedBuilder, StringChunkedBuilder,
 };
-use rand::distributions::{Distribution as _, Uniform};
-use rand::prelude::*;
+use rand::distr::{Bernoulli, Distribution as _, Uniform};
+use rand::{RngExt, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
-use rand_xoshiro::rand_core::SeedableRng;
 
 use crate::plan::{ColumnPlan, Kind};
 use crate::sample::{CHARSET, random_ascii, seed_for_chunk};
 
-/// Above this ratio of domain size to values wanted, reject rather than shuffle.
+/// Above this ratio of domain size to values wanted, draw and reject; at or
+/// below it, use Floyd's. At `D = 8k` rejection expects about 1.07 draws per
+/// value, which is where paying for a set lookup beats paying for Floyd's
+/// varying-range draw and its shuffle.
 const CROWDED: u128 = 8;
 
 /// How many draws a rejection loop may take per value before giving up. A
-/// domain wide enough for rejection needs barely more than one; this only
-/// stops a domain that is secretly too small from looping forever.
+/// domain wide enough to be rejected against needs barely more than one; this
+/// only stops a domain that is secretly too small -- three-character strings,
+/// a hair's breadth of float range -- from looping forever.
 const MAX_DRAWS_PER_VALUE: usize = 64;
 
 /// Which rows are null, and how many are not.
-fn null_mask(plan: &ColumnPlan, n: usize, rng: &mut Xoshiro256PlusPlus) -> (Vec<bool>, usize) {
+fn null_mask(
+    plan: &ColumnPlan,
+    n: usize,
+    rng: &mut Xoshiro256PlusPlus,
+) -> Result<(Vec<bool>, usize), String> {
     if !plan.nullable || plan.null_probability <= 0.0 {
-        return (vec![false; n], n);
+        return Ok((vec![false; n], n));
     }
-    let mask: Vec<bool> = (0..n)
-        .map(|_| rng.gen_bool(plan.null_probability))
-        .collect();
+    // Built once, not once per row: `random_bool` constructs one of these on
+    // every call.
+    let bernoulli = Bernoulli::new(plan.null_probability).map_err(|e| {
+        format!(
+            "Invalid null_probability {} for column '{}': {e}",
+            plan.null_probability, plan.name
+        )
+    })?;
+    let mask: Vec<bool> = (0..n).map(|_| bernoulli.sample(rng)).collect();
     let wanted = mask.iter().filter(|is_null| !**is_null).count();
-    (mask, wanted)
+    Ok((mask, wanted))
 }
 
 fn too_small(plan: &ColumnPlan, wanted: usize, domain: u128) -> String {
@@ -64,6 +91,10 @@ fn too_small(plan: &ColumnPlan, wanted: usize, domain: u128) -> String {
 }
 
 /// `wanted` distinct offsets into a domain of `domain` values, in random order.
+///
+/// Rejection while the domain has room, Floyd's algorithm once it does not;
+/// see the module documentation for why the line falls where it does. Neither
+/// branch allocates more than the output it returns.
 fn distinct_offsets(
     plan: &ColumnPlan,
     wanted: usize,
@@ -77,32 +108,71 @@ fn distinct_offsets(
         return Ok(Vec::new());
     }
 
-    if domain <= CROWDED * wanted as u128 {
-        // Small enough to hold: shuffle the domain, keep the first `wanted`.
-        // Bounded by CROWDED * wanted, so the allocation stays proportional to
-        // the output rather than to the dtype's range.
-        let mut pool: Vec<u128> = (0..domain).collect();
-        for i in 0..wanted {
-            let j = rng.gen_range(i as u128..domain) as usize;
-            pool.swap(i, j);
-        }
-        pool.truncate(wanted);
-        return Ok(pool);
-    }
-
     let mut seen: HashSet<u128> = HashSet::with_capacity(wanted);
-    let mut out = Vec::with_capacity(wanted);
-    let budget = wanted.saturating_mul(MAX_DRAWS_PER_VALUE);
-    for _ in 0..budget {
-        let candidate = rng.gen_range(0..domain);
-        if seen.insert(candidate) {
-            out.push(candidate);
-            if out.len() == wanted {
-                return Ok(out);
+    let mut out: Vec<u128> = Vec::with_capacity(wanted);
+
+    if domain > CROWDED * wanted as u128 {
+        // Roomy: one draw per value, over a range that does not change.
+        for _ in 0..wanted.saturating_mul(MAX_DRAWS_PER_VALUE) {
+            let candidate = rng.random_range(0..domain);
+            if seen.insert(candidate) {
+                out.push(candidate);
+                if out.len() == wanted {
+                    return Ok(out);
+                }
             }
         }
+        return Err(too_small(plan, wanted, domain));
     }
-    Err(too_small(plan, wanted, domain))
+
+    // Crowded: for each `j` in the last `wanted` positions of the domain, draw
+    // a candidate in `[0, j]` and take it if it is new, or take `j` itself if
+    // it is not -- `j` cannot already be held, since every value taken so far
+    // came from a strictly smaller range. That yields every `wanted`-sized
+    // subset with equal probability, in exactly `wanted` steps.
+    for j in (domain - wanted as u128)..domain {
+        let candidate = rng.random_range(0..=j);
+        out.push(if seen.insert(candidate) {
+            candidate
+        } else {
+            seen.insert(j);
+            j
+        });
+    }
+
+    // Floyd's builds its subset biased toward increasing order, so it is
+    // shuffled before being returned -- `wanted` swaps, not `domain`.
+    for i in (1..out.len()).rev() {
+        out.swap(i, rng.random_range(0..=i));
+    }
+    Ok(out)
+}
+
+/// `wanted` distinct values drawn by rejection, for a domain with no offsets.
+///
+/// `key` is what "distinct" means for the value type: a float's bit pattern,
+/// a string's own text. Returns None when the budget runs out, which is the
+/// caller's cue to explain what its domain could not supply.
+fn distinct_by_rejection<T, K>(
+    wanted: usize,
+    mut draw: impl FnMut() -> T,
+    key: impl Fn(&T) -> K,
+) -> Option<Vec<T>>
+where
+    K: Eq + Hash,
+{
+    let mut seen: HashSet<K> = HashSet::with_capacity(wanted);
+    let mut out: Vec<T> = Vec::with_capacity(wanted);
+    for _ in 0..wanted.saturating_mul(MAX_DRAWS_PER_VALUE) {
+        if out.len() == wanted {
+            break;
+        }
+        let candidate = draw();
+        if seen.insert(key(&candidate)) {
+            out.push(candidate);
+        }
+    }
+    (out.len() == wanted).then_some(out)
 }
 
 /// Spreads `values` over the non-null rows of `mask`.
@@ -141,7 +211,7 @@ macro_rules! impl_unique_int_column {
             let domain = (hi as i128 - lo as i128 + 1) as u128;
 
             let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed_for_chunk(seed, 0));
-            let (mask, wanted) = null_mask(plan, n, &mut rng);
+            let (mask, wanted) = null_mask(plan, n, &mut rng)?;
             let offsets = distinct_offsets(plan, wanted, domain, &mut rng)?;
             let values: Vec<$native_type> = offsets
                 .into_iter()
@@ -184,30 +254,28 @@ macro_rules! impl_unique_float_column {
             let (lo, hi) = if lo <= hi { (lo, hi) } else { (hi, lo) };
 
             let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed_for_chunk(seed, 0));
-            let (mask, wanted) = null_mask(plan, n, &mut rng);
+            let (mask, wanted) = null_mask(plan, n, &mut rng)?;
 
-            // A float range is not enumerable, so there is no domain to
-            // shuffle: draw and reject on the bit pattern.
-            let uniform = Uniform::new_inclusive(lo, hi);
-            let mut seen: HashSet<u64> = HashSet::with_capacity(wanted);
-            let mut values: Vec<$native_type> = Vec::with_capacity(wanted);
-            let budget = wanted.saturating_mul(MAX_DRAWS_PER_VALUE);
-            for _ in 0..budget {
-                let candidate = uniform.sample(&mut rng);
-                if seen.insert((candidate as f64).to_bits()) {
-                    values.push(candidate);
-                    if values.len() == wanted {
-                        break;
-                    }
-                }
-            }
-            if values.len() < wanted {
-                return Err(format!(
+            // A float range is not enumerable, so there is no domain to draw
+            // offsets from: draw and reject on the bit pattern.
+            let range = Uniform::new_inclusive(lo, hi).map_err(|e| {
+                format!(
+                    "Cannot sample column '{}' over the range [{lo}, {hi}]: {e}",
+                    plan.name
+                )
+            })?;
+            let values = distinct_by_rejection(
+                wanted,
+                || range.sample(&mut rng),
+                |v: &$native_type| (*v as f64).to_bits(),
+            )
+            .ok_or_else(|| {
+                format!(
                     "Column '{}' is unique, but {wanted} distinct value(s) could not be \
                      drawn from [{lo}, {hi}]. Widen its bounds, or generate fewer rows.",
                     plan.name
-                ));
-            }
+                )
+            })?;
             Ok(place!(builder, mask, values))
         }
     };
@@ -223,7 +291,7 @@ fn unique_bool(plan: &ColumnPlan, n: usize, seed: u64) -> Result<BooleanChunked,
         return Ok(builder.finish());
     }
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed_for_chunk(seed, 0));
-    let (mask, wanted) = null_mask(plan, n, &mut rng);
+    let (mask, wanted) = null_mask(plan, n, &mut rng)?;
     let offsets = distinct_offsets(plan, wanted, 2, &mut rng)?;
     let values: Vec<bool> = offsets.into_iter().map(|o| o == 1).collect();
     Ok(place!(builder, mask, values))
@@ -241,7 +309,7 @@ fn unique_index(plan: &ColumnPlan, n: usize, seed: u64) -> Result<UInt32Chunked,
     // here. Python refuses the combination before it reaches this point.
     let domain = plan.n_categories.unwrap_or(0) as u128;
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed_for_chunk(seed, 0));
-    let (mask, wanted) = null_mask(plan, n, &mut rng);
+    let (mask, wanted) = null_mask(plan, n, &mut rng)?;
     let offsets = distinct_offsets(plan, wanted, domain, &mut rng)?;
     let values: Vec<u32> = offsets.into_iter().map(|o| o as u32).collect();
     Ok(place!(builder, mask, values))
@@ -255,38 +323,39 @@ fn unique_string(plan: &ColumnPlan, n: usize, seed: u64) -> Result<StringChunked
     }
     let min_len = plan.str_min_len;
     let max_len = plan.str_max_len.max(min_len);
-    let len_dist = (max_len > min_len).then(|| Uniform::new_inclusive(min_len, max_len));
+    let len_dist = match max_len > min_len {
+        true => Some(Uniform::new_inclusive(min_len, max_len).map_err(|e| {
+            format!(
+                "Cannot sample string lengths for column '{}' over [{min_len}, {max_len}]: {e}",
+                plan.name
+            )
+        })?),
+        false => None,
+    };
 
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed_for_chunk(seed, 0));
-    let (mask, wanted) = null_mask(plan, n, &mut rng);
+    let (mask, wanted) = null_mask(plan, n, &mut rng)?;
 
-    let mut seen: HashSet<String> = HashSet::with_capacity(wanted);
-    let mut values: Vec<String> = Vec::with_capacity(wanted);
-    let budget = wanted.saturating_mul(MAX_DRAWS_PER_VALUE);
     let mut scratch = vec![0u8; max_len];
-    for _ in 0..budget {
-        let len = len_dist.as_ref().map_or(min_len, |d| d.sample(&mut rng));
-        random_ascii(&mut rng, &mut scratch, len);
-        // SAFETY: CHARSET holds only ASCII bytes.
-        let candidate = unsafe { std::str::from_utf8_unchecked(&scratch[..len]) };
-        if !seen.contains(candidate) {
-            let owned = candidate.to_owned();
-            seen.insert(owned.clone());
-            values.push(owned);
-            if values.len() == wanted {
-                break;
-            }
-        }
-    }
-    if values.len() < wanted {
-        return Err(format!(
+    let values = distinct_by_rejection(
+        wanted,
+        || {
+            let len = len_dist.as_ref().map_or(min_len, |d| d.sample(&mut rng));
+            random_ascii(&mut rng, &mut scratch, len);
+            // SAFETY: CHARSET holds only ASCII bytes.
+            unsafe { std::str::from_utf8_unchecked(&scratch[..len]) }.to_owned()
+        },
+        |s: &String| s.clone(),
+    )
+    .ok_or_else(|| {
+        format!(
             "Column '{}' is unique, but {wanted} distinct string(s) of length {min_len}..\
              {max_len} could not be drawn from a {}-character alphabet. Allow longer \
              strings, or generate fewer rows.",
             plan.name,
             CHARSET.len()
-        ));
-    }
+        )
+    })?;
     Ok(place!(builder, mask, values))
 }
 
@@ -312,7 +381,7 @@ pub fn generate_unique_series(plan: &ColumnPlan, n: usize, seed: u64) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plan::Limit;
+    use crate::plan::{Limit, PlanArgs};
 
     fn plan(
         kind: &str,
@@ -320,40 +389,29 @@ mod tests {
         max: Option<Limit>,
         n_categories: Option<usize>,
     ) -> ColumnPlan {
-        ColumnPlan::build(
-            "c".into(),
+        ColumnPlan::build(PlanArgs {
+            name: "c".into(),
             kind,
-            false,
-            0.0,
             min,
             max,
             n_categories,
-            None,
-            None,
-            None,
-            None,
-            None,
-            true,
-        )
+            unique: true,
+            ..Default::default()
+        })
         .expect("valid plan")
     }
 
     fn nullable(kind: &str, min: Option<Limit>, max: Option<Limit>, null_p: f64) -> ColumnPlan {
-        ColumnPlan::build(
-            "c".into(),
+        ColumnPlan::build(PlanArgs {
+            name: "c".into(),
             kind,
-            true,
-            null_p,
+            nullable: true,
+            null_probability: null_p,
             min,
             max,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            true,
-        )
+            unique: true,
+            ..Default::default()
+        })
         .expect("valid plan")
     }
 
@@ -362,9 +420,10 @@ mod tests {
     }
 
     #[test]
-    fn a_crowded_domain_is_shuffled_rather_than_rejected() {
-        // 100 values from a domain of exactly 100: rejection would stall, so
-        // this only terminates because the shuffle path takes it.
+    fn a_crowded_domain_is_drawn_without_stalling() {
+        // 100 values from a domain of exactly 100: rejection sampling would
+        // never finish, so this only terminates because Floyd's does not
+        // rediscover values it already holds.
         let p = plan("int64", Some(Limit::Int(1)), Some(Limit::Int(100)), None);
         let s = generate_unique_series(&p, 100, 7).unwrap();
         assert_eq!(s.len(), 100);
@@ -409,6 +468,30 @@ mod tests {
             let s = generate_unique_series(&p, 150, 11).unwrap_or_else(|e| panic!("{kind}: {e}"));
             assert_eq!(distinct_count(&s), 150, "{kind} repeated a value");
         }
+    }
+
+    #[test]
+    fn a_whole_domain_is_covered_exactly_once() {
+        // Asking for every value a domain holds is the tightest case Floyd's
+        // has to get right: the result is a permutation, not a sample.
+        let p = plan("index", None, None, Some(64));
+        let s = generate_unique_series(&p, 64, 5).unwrap();
+        let mut values: Vec<u32> = s.u32().unwrap().into_no_null_iter().collect();
+        values.sort_unstable();
+        assert_eq!(values, (0..64).collect::<Vec<u32>>());
+    }
+
+    #[test]
+    fn offsets_are_not_returned_in_ascending_order() {
+        // Floyd's builds the subset biased toward increasing order; without
+        // the shuffle a unique column would arrive sorted, which is a
+        // surprising thing for "random" data to be.
+        let p = plan("int64", Some(Limit::Int(0)), Some(Limit::Int(9_999)), None);
+        let s = generate_unique_series(&p, 1_000, 13).unwrap();
+        let values: Vec<i64> = s.i64().unwrap().into_no_null_iter().collect();
+        let mut sorted = values.clone();
+        sorted.sort_unstable();
+        assert_ne!(values, sorted, "the draw came back in ascending order");
     }
 
     #[test]

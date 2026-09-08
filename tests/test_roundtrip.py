@@ -15,9 +15,9 @@ reports XPASS, which pytest turns into a *failure*. That is the signal to
 delete the marker -- so this file tells you when each bug is genuinely fixed
 rather than silently going quiet.
 
-Two constraint kinds sit deliberately outside the property, because
-generation makes no claim to satisfy them; see the "boundaries" section at
-the bottom for the tests that pin that down.
+Three things sit deliberately outside the property, because generation makes
+no claim to satisfy them; see the "boundaries" section at the bottom for the
+tests that pin that down.
 """
 
 import datetime as dt
@@ -665,10 +665,14 @@ def test_profiled_spec_roundtrips():
 # ---------------------------------------------------------------------------
 # Boundaries of the property.
 #
-# These two constraint kinds wrap arbitrary polars expressions. Generation
-# cannot in general produce data satisfying an arbitrary predicate, and does
-# not try to -- so they are excluded from the property above by design, not by
-# oversight. The tests below record that decision so a future change to it is
+# Three things sit outside it on purpose. `__checks__` and `ColSpec.validators`
+# wrap arbitrary polars expressions, and generation cannot in general produce
+# data satisfying an arbitrary predicate, so it does not try. A self-
+# referencing foreign key is the third and a different shape of boundary: what
+# it promises is satisfied exactly, and the thing it does *not* promise is one
+# people expect anyway.
+#
+# The tests below record those decisions so a future change to any of them is
 # a deliberate one.
 # ---------------------------------------------------------------------------
 
@@ -697,3 +701,66 @@ def test_column_validators_are_validation_only():
     spec_cls.validate(df, validate_validators=False)
     with pytest.raises(Exception, match="validator"):
         spec_cls.validate(df)
+
+
+class HierarchySpec(FrameSpec):
+    """A parent/child table: every row points at another row of the same table.
+
+    `parent` is not nullable, which is what makes the test below deterministic
+    rather than a matter of luck -- see its docstring.
+    """
+
+    ref = ColSpec(pl.Int64, unique=True, bounds=(1, 10_000))
+    parent = ColSpec(pl.Int64)
+    __foreign_keys__ = [ForeignKey("parent", references="self", ref_columns="ref")]
+
+
+def _reaches_a_cycle(parent_of: dict, start) -> bool:
+    """Whether walking parents from `start` ever revisits a row.
+
+    Floyd's tortoise and hare, so a chain that never terminates is detected
+    without holding the path.
+    """
+    slow = fast = start
+    while True:
+        slow = parent_of[slow]
+        fast = parent_of[parent_of[fast]]
+        if slow == fast:
+            return True
+
+
+def test_a_self_referencing_key_is_referential_not_acyclic():
+    """A self-referencing ForeignKey guarantees every parent exists. It does
+    not guarantee the result is a tree, and here it certainly is not.
+
+    The key samples parents from the frame as it stands, which builds a random
+    functional graph rather than a hierarchy. With `parent` non-nullable every
+    row has an outgoing edge, and a finite graph in which every node has one
+    must contain a cycle -- so this holds for every seed, not just this one.
+
+    Both halves are asserted: the promise generation makes is kept, and the
+    promise it does not make is visibly not kept. `validate()` accepts the
+    result either way, because no part of a spec can currently say "acyclic".
+    """
+    df = HierarchySpec.generate(ROWS, seed=SEED)
+
+    # The promise: every parent is a row of this same frame, and the keys are
+    # distinct. This is what the ForeignKey and `unique=True` declare.
+    refs = set(df["ref"].to_list())
+    assert df["ref"].n_unique() == df.height
+    assert set(df["parent"].to_list()) <= refs
+    HierarchySpec.validate(df)
+
+    # The boundary: parents form cycles, and nothing objects.
+    parent_of = dict(zip(df["ref"].to_list(), df["parent"].to_list(), strict=True))
+    assert all(_reaches_a_cycle(parent_of, r) for r in refs)
+
+
+def test_a_hand_built_cycle_still_validates():
+    """The boundary from the other side: cyclic data is not a finding.
+
+    Constructed rather than generated, so this pins `validate()`'s behaviour
+    even if generation stops producing cycles of its own accord.
+    """
+    cyclic = pl.DataFrame({"ref": [1, 2, 3], "parent": [2, 1, 3]})
+    HierarchySpec.validate(cyclic)

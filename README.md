@@ -76,8 +76,8 @@ uv run --group docs zensical build --strict
 uv run python examples/related_specs.py
 ```
 
-`uv run --group bench python benchmarks/bench_generate.py` runs the generator
-benchmark. See [CONTRIBUTING.md](CONTRIBUTING.md) for conventions and the
+`uv run --group bench python benchmarks/bench.py compare` runs the generator
+benchmark; `record` then `check` guard a change against a local baseline. See [CONTRIBUTING.md](CONTRIBUTING.md) for conventions and the
 release process, and [CHANGELOG.md](CHANGELOG.md) for what changed.
 
 ## License

@@ -16,12 +16,20 @@ from polspec.errors import (
 from polspec.expr import Pred, col
 from polspec.foreign_key import ForeignKey
 from polspec.framespec import FrameSpec
+from polspec.generation import (
+    generate,
+    generate_batches,
+    sink_csv,
+    sink_ipc,
+    sink_ndjson,
+    sink_parquet,
+)
 from polspec.profiler import profile_dataframe
 from polspec.registry import Registry
 from polspec.rules import ColRule
 from polspec.spec import ColSpec
 from polspec.tablespec import TableSpec
-from polspec.validation import Finding, ValidationReport
+from polspec.validation import Finding, ValidationReport, inspect, validate
 
 __all__ = [
     "Bound",
@@ -45,5 +53,13 @@ __all__ = [
     "ValidationError",
     "ValidationReport",
     "col",
+    "generate",
+    "generate_batches",
+    "inspect",
     "profile_dataframe",
+    "sink_csv",
+    "sink_ipc",
+    "sink_ndjson",
+    "sink_parquet",
+    "validate",
 ]

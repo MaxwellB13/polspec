@@ -12,6 +12,7 @@ crate-type = ["cdylib"]
 [profile.release]
 opt-level = 3
 lto = "thin"
+codegen-units = 1
 
 [dependencies]
 polars = { version = "0.55.2", features = [
@@ -21,6 +22,7 @@ polars = { version = "0.55.2", features = [
     "dtype-u8",
     "dtype-u16",
 ] }
+polars-arrow = "0.55.2"
 polars-core = { version = "0.55.2", features = [
     "dtype-i8",
     "dtype-i16",
@@ -36,7 +38,7 @@ pyo3-polars = { version = "0.28.0", features = [
     "dtype-categorical",
     "dtype-full",
 ] }
-rand = { version = "0.8" }
-rand_distr = "0.4"
-rand_xoshiro = "0.6"
+rand = "0.10"
+rand_distr = "0.6"
+rand_xoshiro = "0.8"
 rayon = "1.12.0"

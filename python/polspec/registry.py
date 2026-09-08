@@ -515,11 +515,15 @@ class Registry:
         as `reports`, keyed by spec name.
         """
         named = self._named(frames)
+        specs = self._bind(require_known=False)
         reports = self.inspect_all(named, references=references, **options)
         if any(not report.passed for report in reports.values()):
             raise MultiValidationError(reports)
+        # The bound spec, matching the one each report was produced against:
+        # transforming with the unbound copy would apply one spec's report to
+        # a different spec's columns the moment binding ever changes them.
         return {
-            name: validation._transformed(self._specs[name], named[name], report)
+            name: validation._transformed(specs[name], named[name], report)
             for name, report in reports.items()
         }
 

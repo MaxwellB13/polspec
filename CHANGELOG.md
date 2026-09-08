@@ -8,6 +8,132 @@ seed produces; see
 
 ## [Unreleased]
 
+The internals release. 0.2.0 and 0.3.0 settled the vocabulary; this one goes
+underneath it, to the Rust generator and the places where the same table was
+being maintained in two or three languages.
+
+Nothing about how a spec is written changes. One thing does break, and it is
+the same thing the roadmap has always reserved: **the values a given seed
+produces are different**. Any test asserting on specific generated values
+needs re-baselining; a test asserting on their *properties* -- bounds,
+distinctness, null share, distribution shape -- does not. polspec's own suite
+needed no changes, which is the shape of test this library is built to support.
+
+Generation got faster, by between a tenth and a third depending on the column.
+Measured A/B against v0.3.0 on one machine, same build profile, twenty million
+rows: the four-column frame in `benchmarks/bench.py` 1.30x, a
+`unique=True` Int64 column 1.21x, a bounded nullable Int64 column 1.17x, an
+Enum column 1.25x, a String column unchanged. Treat the ratios rather than the
+absolute numbers as the claim.
+
+### Added
+
+- `generate`, `generate_batches`, `inspect`, `validate`, `sink_parquet`,
+  `sink_ipc`, `sink_csv` and `sink_ndjson` are exported from `polspec` itself.
+  Each takes a `TableSpec` as its first argument and each is what the matching
+  `FrameSpec` classmethod already called -- but they lived in
+  `polspec.generation` / `polspec.validation`, which the API reference calls
+  internal and free to change in a patch release. So the `TableSpec`-first
+  half of the library had no stable import path; now it does, and both halves
+  appear in [the API reference](https://maxwellb13.github.io/polspec/reference/api/).
+
+### Changed
+
+- **Breaking: the values a given seed produces have changed.** polspec now
+  builds on `rand` 0.10 (from 0.8), whose samplers draw differently. Same seed,
+  same version, same frame -- as before; across this version boundary, not.
+- A generated numeric, boolean, temporal or categorical column arrives as
+  **one chunk** rather than one per 65,536 rows. The values buffer and the
+  validity bitmap are each allocated once at full length and filled in parallel
+  through disjoint slices, instead of being built per chunk and appended
+  together. Nothing downstream now pays for a column split into hundreds of
+  pieces -- the gather behind a `choices` domain, the cast behind a temporal
+  dtype, every `sink_*` write.
+
+  String columns are the exception and stay chunked, because Polars backs them
+  with view arrays: merging those copies no string bytes, but it does copy
+  sixteen bytes of view per row, which costs more than the split it removes.
+  They still gain the other half of the change -- the chunks are collected in
+  one go rather than appended one at a time, and an append rescanned both sides
+  for their first and last non-null value to maintain a sorted flag that random
+  strings will not have set anyway.
+- Drawing a `unique=True` column no longer materialises its domain. A domain
+  only a little wider than the row count used to be built in full and partially
+  shuffled, which allocates in proportion to the domain rather than to the
+  output: ten million distinct values from a range of eighty million reserved
+  1.4 GB before writing anything. That branch is now Floyd's algorithm, which
+  holds only the values it has chosen -- the same case now peaks at 491 MB.
+  Roomier domains keep drawing and rejecting, which is faster there and was
+  never the memory problem.
+- Every character of the generated-string alphabet is now exactly equally
+  likely. Six random bits give 64 values for a 62-character alphabet, and the
+  two spare ones fell back on `% 62` over a fresh 32-bit draw, which is biased
+  by about one part in 70 million -- far too little to see, but free to remove:
+  the fallback now rejects properly instead.
+- `rand` 0.8 was compiled alongside the `rand` 0.10 that Polars already links,
+  so the extension carried two copies of `rand`, `rand_core` and their chacha
+  backends. There is now one of each.
+- The release profile builds the crate as a single codegen unit. Measured on
+  one machine against otherwise identical v0.3.0 code, that alone is worth
+  2.1x on the `unique=True` path, for about twenty seconds of build time. Fat
+  LTO on top of it was tried and dropped: a further 5% for eight more minutes
+  per build.
+
+### Documentation
+
+- A self-referencing `ForeignKey` guarantees that every parent value exists,
+  and nothing more -- in particular not that the result is a tree. Parents are
+  sampled from the whole frame, so some rows end up in a cycle or pointing at
+  themselves, which is what makes a recursive query fail to terminate, and
+  `validate()` does not report it because no part of a spec can say "acyclic".
+  [Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/)
+  now says so, with a recipe for a genuine hierarchy, and the roadmap carries
+  what closing the gap would need. Two tests pin the behaviour.
+
+### Fixed
+
+- `Registry.validate_all` applies each report's structural transformations
+  using the same bound spec the report was produced against, rather than the
+  unbound copy.
+
+### Internal
+
+- `ColumnPlan::build` takes a `PlanArgs` struct instead of thirteen positional
+  arguments, so a call site names what it sets and leaves the rest to
+  `Default`. Four `#[allow(clippy::too_many_arguments)]` and a great many
+  `None`s went with it.
+- `Kind`'s three parallel lists -- the names, the parse, the reverse lookup --
+  are generated from one declaration, so a new column kind cannot be added to
+  two of them and forgotten in the third.
+- The fixed-width integer ranges were written three times: once as polspec's
+  default generation range, once as the limits a declared bound may not exceed,
+  and once as the Rust samplers' defaults. The first is now read from the
+  second.
+- The four `sink_*` functions share a typed batch-stream helper rather than
+  forwarding `**kwargs`.
+- `benchmarks/bench_generate.py` is replaced by `benchmarks/bench.py`, which
+  measures the same comparison and adds a regression mode. The old harness
+  timed one run per case, in a process shared with the implementations it was
+  comparing against, and recorded nothing about the machine -- so its numbers
+  varied by around 25% between runs and could not be compared across days. It
+  also measured exactly one column shape, which is how a change that made the
+  `unique` path half as fast came within an afternoon of being released as a
+  speed-up. The new one takes the fastest of several runs, gives every
+  measurement its own process, repeats a short case until its floor settles,
+  records the CPU, thread count, Polars version and cargo profile, and covers
+  each column kind, both branches of the unique draw, the cartesian, rule,
+  foreign-key and composite-key passes, and a sink. `record` writes a local
+  baseline and `check` exits non-zero when a case regresses past a tolerance;
+  repeated measurements now agree to within about 2%.
+- The benchmark table in the comparison guide is re-measured. It had been
+  recorded on 2026-09-03, which is before both 0.2.0 and 0.3.0, so it had been
+  describing an engine two releases old: the four-column frame at twenty
+  million rows was published as 0.0827s, measures 0.1409s on v0.3.0, and
+  0.1127s here. Some of that gap is still unaccounted for and is worth
+  chasing. The NumPy and pure-Python columns re-measure to within 1% of what
+  was published, which is what says the difference is polspec's and not the
+  machine's.
+
 ## [0.3.0] - 2026-09-06
 
 The refactor 0.2.0 started, finished. `CatSpec` was the one declarative

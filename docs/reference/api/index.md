@@ -16,6 +16,14 @@ cannot describe a signature the code does not have.
 | [`ForeignKey`][polspec.ForeignKey] | [Specs](specs.md) |
 | [`Registry`][polspec.Registry] | [Registry](registry.md) |
 | [`CatSpec`][polspec.CatSpec] | [Registry](registry.md) |
+| [`generate`][polspec.generate] | [Generation](generation.md) |
+| [`generate_batches`][polspec.generate_batches] | [Generation](generation.md) |
+| [`sink_parquet`][polspec.sink_parquet] | [Generation](generation.md) |
+| [`sink_ipc`][polspec.sink_ipc] | [Generation](generation.md) |
+| [`sink_csv`][polspec.sink_csv] | [Generation](generation.md) |
+| [`sink_ndjson`][polspec.sink_ndjson] | [Generation](generation.md) |
+| [`inspect`][polspec.inspect] | [Validation](validation.md) |
+| [`validate`][polspec.validate] | [Validation](validation.md) |
 | [`ValidationReport`][polspec.ValidationReport] | [Validation](validation.md) |
 | [`Finding`][polspec.Finding] | [Validation](validation.md) |
 | [`profile_dataframe`][polspec.profile_dataframe] | [Profiling](profiling.md) |

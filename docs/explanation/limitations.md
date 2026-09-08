@@ -22,6 +22,55 @@ and nothing can generate data satisfying an arbitrary predicate. Validate
 generated data with `validate_checks=False` / `validate_validators=False`, or
 construct the rows those invariants describe yourself.
 
+### A self-referencing foreign key is referential, not acyclic
+
+A `ForeignKey(..., references="self")` guarantees exactly what it says: every
+non-null value in the child column is a value that exists in the referenced
+column of the same frame. It does **not** guarantee the result is a tree.
+
+Parents are sampled from the frame as it stands, which builds a random
+functional graph — so a row can be its own parent, and two rows can be each
+other's. This is not rare:
+
+```python
+class Node(FrameSpec):
+    Reference = ColSpec(pl.String, unique=True)
+    Parent    = ColSpec(pl.String, nullable=True, null_probability=0.2)
+    __foreign_keys__ = [
+        ForeignKey("Parent", references="self", ref_columns="Reference")
+    ]
+```
+
+At 20 rows that typically leaves a handful of rows inside a cycle and one or
+two pointing at themselves; at 20,000 it is a fraction of a percent. Rare is
+not the same as safe — a cycle is exactly what makes a recursive CTE or a
+hierarchy walk fail to terminate, and `validate()` will not report one, because
+nothing in a spec can currently say "acyclic".
+
+Where you need a genuine hierarchy, draw each row's parent from a row that
+precedes it. A parent that always comes earlier cannot close a loop:
+
+```python
+import random
+
+df = Node.generate(1_000, seed=7)
+rng = random.Random(7)
+refs = df["Reference"].to_list()
+df = df.with_columns(
+    pl.Series(
+        "Parent",
+        [
+            None if i == 0 or rng.random() < 0.2 else refs[rng.randrange(i)]
+            for i in range(df.height)
+        ],
+        dtype=pl.String,
+    )
+)
+```
+
+The result is a forest, and it still validates against the same unmodified
+spec.
+
 ## Cartesian generation
 
 ### `n` is a minimum, not a count

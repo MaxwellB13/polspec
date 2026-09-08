@@ -46,7 +46,7 @@ limits on distribution parameters, on cartesian dimensionality, on batch
 sizing.
 
 **Constraints `generate()` doesn't enforce**, which is a different, more
-interesting problem. What is left of it is `__checks__` and
+interesting problem. Most of what is left is `__checks__` and
 `ColSpec.validators`, and that one is by design: both wrap arbitrary Polars
 expressions, and nothing can generate data satisfying an arbitrary predicate.
 Everything else on this list has been worked through — rule and foreign-key
@@ -142,6 +142,17 @@ is only *that* it drifted. Diffing a spec against data — new enum variants,
 bounds exceeded, cardinality moved — would say how. The same machinery diffs
 two specs against each other, which is what reviewing a schema change in a pull
 request actually needs.
+
+**Hierarchies from a self-referencing key.** A
+`ForeignKey(..., references="self")` fills its column with values that exist,
+which is what it promises and all it promises — parents are sampled from the
+whole frame, so the result is a random functional graph and some rows sit in a
+cycle (see [known limitations](limitations.md)). A parent/child table is the
+commonest reason to reach for a self-referencing key and almost never wants
+that, and the fix is small: draw each row's parent from a row that precedes
+it. What is less obvious is the declaration — whether acyclicity is a flag on
+the key, a separate constraint kind, and what `validate()` should then say
+about data that has a cycle in it.
 
 **Test-framework integration.** A pytest fixture or plugin, or a Hypothesis
 strategy built from a spec, are the natural adjacent surfaces for a library

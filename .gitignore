@@ -165,3 +165,7 @@ cython_debug/
 *.pyd
 
 *sandbox*
+
+# A benchmark baseline is only meaningful on the machine and build
+# that recorded it, so it is written locally rather than committed.
+benchmarks/baseline.json
