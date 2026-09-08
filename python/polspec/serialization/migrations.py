@@ -27,7 +27,7 @@ from polspec.distributions import canonicalize_params, normalize_distribution
 from polspec.errors import SerializationError
 from polspec.expr import Pred, col
 
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 
 
 # ---------------------------------------------------------------------------
@@ -190,10 +190,21 @@ def _registry_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
     return dict(data)
 
 
+def _unchanged(data: dict[str, Any]) -> dict[str, Any]:
+    """A version step that adds a key rather than changing one.
+
+    Version 3 introduced `hierarchy:`, which older files simply do not carry.
+    Nothing has to be rewritten, but the step still has to exist: the version
+    on the file is what tells a *newer* reader whether to expect the key, and
+    what tells this reader to refuse a file from the future.
+    """
+    return dict(data)
+
+
 MIGRATIONS: dict[str, dict[int, Callable[[dict[str, Any]], dict[str, Any]]]] = {
-    "spec": {1: _spec_v1_to_v2},
-    "catspec": {1: _catspec_v1_to_v2},
-    "registry": {1: _registry_v1_to_v2},
+    "spec": {1: _spec_v1_to_v2, 2: _unchanged},
+    "catspec": {1: _catspec_v1_to_v2, 2: _unchanged},
+    "registry": {1: _registry_v1_to_v2, 2: _unchanged},
 }
 
 

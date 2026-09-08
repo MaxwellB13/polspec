@@ -56,8 +56,11 @@ def _prepare(spec: TableSpec, path: str | Path, n: int, batch_size: int) -> Path
     Eager rather than folded into the batch generator, so an invalid call
     fails before any destination file is opened.
     """
+    from polspec.generation import _requires_whole_frame
+
     if not spec.columns:
         raise SpecError(f"{spec.name} declares no ColSpec columns")
+    _requires_whole_frame(spec, "a sink")
     if n < 0:
         raise ValueError("n must be >= 0")
     if batch_size <= 0:

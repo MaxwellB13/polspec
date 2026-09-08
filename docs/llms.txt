@@ -27,6 +27,7 @@ https://maxwellb13.github.io/polspec/llms-full.txt
 - [Shared categories](https://maxwellb13.github.io/polspec/how-to/categories/): A `CatSpec` is a registry of `Enum` and `Categorical` definitions shared across specs, so several tables agree on a domain instead of each restating it.
 - [Specs as files](https://maxwellb13.github.io/polspec/how-to/files/): A spec can live in a file instead of a class body, so tooling outside Python can read it and so it can be reviewed as a document.
 - [Multiple specs](https://maxwellb13.github.io/polspec/how-to/registry/): A `ForeignKey` names the spec it points at, and a single spec knows nothing beyond that name.
+- [Hierarchies](https://maxwellb13.github.io/polspec/how-to/hierarchies/): A link table is an edge list: one column holds a reference, the other holds the reference it points at, and both draw on the same set of values.
 - [Generated documentation](https://maxwellb13.github.io/polspec/how-to/documenting/): A spec already holds everything a data dictionary needs, so polspec renders one rather than asking you to keep a second copy in step.
 - [Test pipelines](https://maxwellb13.github.io/polspec/how-to/testing/): A spec is a schema and a data source at once, which makes it a natural fit for the tests around a data pipeline: declare what a stage of the pipeline expects, generate data that matches, and validate what it produces.
 - [Command line](https://maxwellb13.github.io/polspec/how-to/cli/): `polspec` has two things to do with a schema: create one, and turn one into a test.

@@ -29,6 +29,7 @@ from polspec.catspec import CatSpec
 from polspec.check import Check
 from polspec.errors import SpecError
 from polspec.foreign_key import ForeignKey
+from polspec.hierarchy import Hierarchy
 from polspec.profiler import profile_dataframe
 from polspec.report import framespec_to_markdown, framespec_to_mermaid
 from polspec.spec import ColSpec
@@ -82,6 +83,20 @@ def _pop_declaration[T](
     return out
 
 
+def _pop_hierarchy(ns: dict[str, Any]) -> Hierarchy | None:
+    """Removes `__hierarchy__` from a class body, under either spelling."""
+    for attr in ("__hierarchy__", "hierarchy"):
+        if attr in ns and _is_declaration_value(ns[attr]):
+            value = ns.pop(attr)
+            if not isinstance(value, Hierarchy):
+                raise SpecError(
+                    f"__hierarchy__ must be a Hierarchy instance, got "
+                    f"{type(value).__name__}"
+                )
+            return value
+    return None
+
+
 def _pop_unique_together(ns: dict[str, Any]) -> Any:
     for attr in ("__unique_together__", "unique_together"):
         if attr in ns and _is_declaration_value(ns[attr]):
@@ -98,6 +113,7 @@ def _build_table_spec(
     checks: Sequence[Check],
     foreign_keys: Sequence[ForeignKey],
     unique_together: Any,
+    hierarchy: Hierarchy | None,
 ) -> tuple[TableSpec, dict[str, str]]:
     """Merges inherited specs with a class body's own declarations.
 
@@ -174,12 +190,21 @@ def _build_table_spec(
         if group not in all_unique:
             all_unique.append(group)
 
+    # A subclass that declares none of its own inherits whichever parent
+    # declared one, the same way columns and checks are inherited.
+    if hierarchy is None:
+        for parent in parents:
+            if parent.spec.hierarchy is not None:
+                hierarchy = parent.spec.hierarchy
+                break
+
     spec = TableSpec(
         name,
         columns,
         checks=all_checks,
         unique_together=all_unique,
         foreign_keys=all_fks,
+        hierarchy=hierarchy,
     )
     return spec, attr_to_col
 
@@ -206,6 +231,7 @@ class _FrameSpecMeta(type):
             ns, ("__foreign_keys__", "foreign_keys"), ForeignKey
         )
         unique_together = _pop_unique_together(ns)
+        hierarchy = _pop_hierarchy(ns)
         # A non-ColSpec value assigned over an inherited column attribute
         # removes that column; the value itself stays an ordinary attribute.
         removed = {
@@ -228,6 +254,7 @@ class _FrameSpecMeta(type):
                 checks,
                 foreign_keys,
                 unique_together,
+                hierarchy,
             )
         return cls
 
@@ -410,6 +437,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
         references: References = None,
+        cycles: int = 0,
+        self_references: int = 0,
         lazy: Literal[False] = False,
     ) -> pl.DataFrame: ...
 
@@ -422,6 +451,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
         references: References = None,
+        cycles: int = 0,
+        self_references: int = 0,
         lazy: Literal[True],
     ) -> pl.LazyFrame: ...
 
@@ -433,14 +464,25 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         method: Literal["random", "cartesian"] = "random",
         seed: int | None = None,
         references: References = None,
+        cycles: int = 0,
+        self_references: int = 0,
         lazy: bool = False,
     ) -> pl.DataFrame | pl.LazyFrame:
         """Generates a DataFrame (or LazyFrame) matching this spec.
 
-        See `polspec.generation.generate` for the full contract.
+        `cycles` and `self_references` apply only to a spec declaring a
+        `__hierarchy__`, and deliberately violate it. See
+        `polspec.generation.generate` for the full contract.
         """
         return generation.generate(
-            cls.spec, n, method=method, seed=seed, references=references, lazy=lazy
+            cls.spec,
+            n,
+            method=method,
+            seed=seed,
+            references=references,
+            cycles=cycles,
+            self_references=self_references,
+            lazy=lazy,
         )
 
     @classmethod

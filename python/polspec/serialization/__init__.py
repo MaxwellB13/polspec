@@ -29,6 +29,7 @@ from polspec.serialization.fields import (
     check_unknown_keys,
     colspec_to_source,
     fk_to_source,
+    hierarchy_to_source,
     needs_datetime_import,
     tablespec_from_data,
     tablespec_to_data,
@@ -237,6 +238,8 @@ def to_python(spec: TableSpec, source: str | Path) -> None:
     imports += ["ColSpec", "FrameSpec"]
     if spec.foreign_keys:
         imports.append("ForeignKey")
+    if spec.hierarchy is not None:
+        imports.append("Hierarchy")
     if has_rules or has_validators or persistable_checks:
         imports.append("col")
 
@@ -254,6 +257,8 @@ def to_python(spec: TableSpec, source: str | Path) -> None:
     if spec.foreign_keys:
         fks = ", ".join(fk_to_source(fk) for fk in spec.foreign_keys)
         lines.append(f"    __foreign_keys__ = [{fks}]")
+    if spec.hierarchy is not None:
+        lines.append(f"    __hierarchy__ = {hierarchy_to_source(spec.hierarchy)}")
     if persistable_checks:
         checks = ", ".join(check_to_source(c) for c in persistable_checks)
         lines.append(f"    __checks__ = [{checks}]")

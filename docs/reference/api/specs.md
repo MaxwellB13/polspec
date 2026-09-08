@@ -14,3 +14,7 @@ A spec is a `TableSpec`: an immutable record of columns and constraints.
 ## ForeignKey
 
 ::: polspec.ForeignKey
+
+## Hierarchy
+
+::: polspec.Hierarchy

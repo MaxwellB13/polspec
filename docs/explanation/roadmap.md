@@ -143,17 +143,6 @@ bounds exceeded, cardinality moved — would say how. The same machinery diffs
 two specs against each other, which is what reviewing a schema change in a pull
 request actually needs.
 
-**Hierarchies from a self-referencing key.** A
-`ForeignKey(..., references="self")` fills its column with values that exist,
-which is what it promises and all it promises — parents are sampled from the
-whole frame, so the result is a random functional graph and some rows sit in a
-cycle (see [known limitations](limitations.md)). A parent/child table is the
-commonest reason to reach for a self-referencing key and almost never wants
-that, and the fix is small: draw each row's parent from a row that precedes
-it. What is less obvious is the declaration — whether acyclicity is a flag on
-the key, a separate constraint kind, and what `validate()` should then say
-about data that has a cycle in it.
-
 **Test-framework integration.** A pytest fixture or plugin, or a Hypothesis
 strategy built from a spec, are the natural adjacent surfaces for a library
 whose whole pitch is that fixtures and contracts stay in step. Adjacent,

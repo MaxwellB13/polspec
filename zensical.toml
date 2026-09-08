@@ -21,6 +21,7 @@ nav = [
     { "Shared categories" = "how-to/categories.md" },
     { "Specs as files" = "how-to/files.md" },
     { "Multiple specs" = "how-to/registry.md" },
+    { "Hierarchies" = "how-to/hierarchies.md" },
     { "Generated documentation" = "how-to/documenting.md" },
     { "Test pipelines" = "how-to/testing.md" },
     { "Command line" = "how-to/cli.md" },

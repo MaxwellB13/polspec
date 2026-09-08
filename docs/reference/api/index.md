@@ -14,6 +14,7 @@ cannot describe a signature the code does not have.
 | [`TableSpec`][polspec.TableSpec] | [Specs](specs.md) |
 | [`FrameSpec`][polspec.FrameSpec] | [Specs](specs.md) |
 | [`ForeignKey`][polspec.ForeignKey] | [Specs](specs.md) |
+| [`Hierarchy`][polspec.Hierarchy] | [Specs](specs.md) |
 | [`Registry`][polspec.Registry] | [Registry](registry.md) |
 | [`CatSpec`][polspec.CatSpec] | [Registry](registry.md) |
 | [`generate`][polspec.generate] | [Generation](generation.md) |
