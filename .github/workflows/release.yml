@@ -121,6 +121,11 @@ jobs:
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v3
         with:
+          # Asks GitHub to write the body from the commits since the previous
+          # tag, sorted into the categories `.github/release.yml` declares.
+          # Without it that file does nothing: it says how notes should be
+          # grouped, not that they should be generated.
+          generate_notes: true
           files: |
             dist/*.whl
             dist/*.tar.gz
