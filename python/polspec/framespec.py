@@ -29,12 +29,13 @@ from polspec.catspec import CatSpec
 from polspec.check import Check
 from polspec.errors import SpecError
 from polspec.foreign_key import ForeignKey
-from polspec.frames import References
+from polspec.frames import Method, References
 from polspec.hierarchy import Hierarchy
 from polspec.profiler import profile_dataframe
 from polspec.report import framespec_to_markdown, framespec_to_mermaid
 from polspec.spec import ColSpec
 from polspec.tablespec import TableSpec, _parse_unique_together
+from polspec.validation import ValidationOptions
 
 
 def _is_declaration_value(value: Any) -> bool:
@@ -504,25 +505,125 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             references=references,
         )
 
-    @classmethod
-    def sink_parquet(cls, path: str | Path, n: int, **kwargs: Any) -> None:
-        """Generates `n` rows and streams them to a Parquet file in batches."""
-        generation.sink_parquet(cls.spec, path, n, **kwargs)
+    # The sink options are spelled out here rather than forwarded as
+    # `**kwargs`, for the reason `generation.sinks` gives: a typo in one of
+    # them fails here, with completion, rather than inside a writer several
+    # frames away. The trailing `**kwargs` is the writer passthrough each
+    # sink documents, and is the one thing that has to stay open.
 
     @classmethod
-    def sink_csv(cls, path: str | Path, n: int, **kwargs: Any) -> None:
-        """Generates `n` rows and streams them to a CSV file in batches."""
-        generation.sink_csv(cls.spec, path, n, **kwargs)
+    def sink_parquet(
+        cls,
+        path: str | Path,
+        n: int,
+        *,
+        batch_size: int = 100_000,
+        compression: str = "zstd",
+        method: Method = "random",
+        seed: int | None = None,
+        references: References = None,
+        **kwargs: Any,
+    ) -> None:
+        """Generates `n` rows and streams them to a Parquet file in batches.
+
+        Extra keyword arguments go to `pyarrow.parquet.ParquetWriter`.
+        """
+        generation.sink_parquet(
+            cls.spec,
+            path,
+            n,
+            batch_size=batch_size,
+            compression=compression,
+            method=method,
+            seed=seed,
+            references=references,
+            **kwargs,
+        )
 
     @classmethod
-    def sink_ipc(cls, path: str | Path, n: int, **kwargs: Any) -> None:
-        """Generates `n` rows and streams them to an Arrow IPC file in batches."""
-        generation.sink_ipc(cls.spec, path, n, **kwargs)
+    def sink_csv(
+        cls,
+        path: str | Path,
+        n: int,
+        *,
+        batch_size: int = 100_000,
+        include_header: bool = True,
+        method: Method = "random",
+        seed: int | None = None,
+        references: References = None,
+        **kwargs: Any,
+    ) -> None:
+        """Generates `n` rows and streams them to a CSV file in batches.
+
+        Extra keyword arguments go to `pl.DataFrame.write_csv`.
+        """
+        generation.sink_csv(
+            cls.spec,
+            path,
+            n,
+            batch_size=batch_size,
+            include_header=include_header,
+            method=method,
+            seed=seed,
+            references=references,
+            **kwargs,
+        )
 
     @classmethod
-    def sink_ndjson(cls, path: str | Path, n: int, **kwargs: Any) -> None:
-        """Generates `n` rows and streams them to an NDJSON file in batches."""
-        generation.sink_ndjson(cls.spec, path, n, **kwargs)
+    def sink_ipc(
+        cls,
+        path: str | Path,
+        n: int,
+        *,
+        batch_size: int = 100_000,
+        compression: str | None = "zstd",
+        method: Method = "random",
+        seed: int | None = None,
+        references: References = None,
+        **kwargs: Any,
+    ) -> None:
+        """Generates `n` rows and streams them to an Arrow IPC file in batches.
+
+        Extra keyword arguments go to `pyarrow.ipc.new_file`.
+        """
+        generation.sink_ipc(
+            cls.spec,
+            path,
+            n,
+            batch_size=batch_size,
+            compression=compression,
+            method=method,
+            seed=seed,
+            references=references,
+            **kwargs,
+        )
+
+    @classmethod
+    def sink_ndjson(
+        cls,
+        path: str | Path,
+        n: int,
+        *,
+        batch_size: int = 100_000,
+        method: Method = "random",
+        seed: int | None = None,
+        references: References = None,
+        **kwargs: Any,
+    ) -> None:
+        """Generates `n` rows and streams them to an NDJSON file in batches.
+
+        Extra keyword arguments go to `pl.DataFrame.write_ndjson`.
+        """
+        generation.sink_ndjson(
+            cls.spec,
+            path,
+            n,
+            batch_size=batch_size,
+            method=method,
+            seed=seed,
+            references=references,
+            **kwargs,
+        )
 
     # ------------------------------------------------------------------
     # Documentation
@@ -546,9 +647,31 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     # Validation
     # ------------------------------------------------------------------
 
+    # Every validation option is named here, for completion and so a typo is
+    # a `TypeError` from this signature rather than from somewhere inside
+    # `validation`. The defaults are not repeated: `None` means "whatever
+    # `ValidationOptions` says", and only the keywords actually given are
+    # forwarded, so `options=` still conflicts with a keyword exactly when
+    # the caller wrote both.
+
     @classmethod
     def inspect(
-        cls, df: pl.DataFrame | pl.LazyFrame, **options: Any
+        cls,
+        df: pl.DataFrame | pl.LazyFrame,
+        *,
+        options: ValidationOptions | None = None,
+        references: References = None,
+        extra_cols: Literal["drop", "allow", "raise"] | None = None,
+        missing_cols: Literal["add", "allow", "raise"] | None = None,
+        strict_dtypes: bool | None = None,
+        validate_rules: bool | None = None,
+        validate_validators: bool | None = None,
+        validate_unique: bool | None = None,
+        validate_checks: bool | None = None,
+        validate_foreign_keys: bool | None = None,
+        validate_hierarchy: bool | None = None,
+        cast: bool | None = None,
+        streaming: bool | None = None,
     ) -> validation.ValidationReport:
         """Everything this spec has to say about `df`, as a `ValidationReport`.
 
@@ -557,29 +680,138 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         offending rows reachable lazily through `report.rows(finding)` or
         `report.failing_rows()`. Takes the same options as `validate`.
         """
-        return validation.inspect(cls.spec, df, **options)
+        return validation.inspect(
+            cls.spec,
+            df,
+            options=options,
+            references=references,
+            **_given(
+                extra_cols=extra_cols,
+                missing_cols=missing_cols,
+                strict_dtypes=strict_dtypes,
+                validate_rules=validate_rules,
+                validate_validators=validate_validators,
+                validate_unique=validate_unique,
+                validate_checks=validate_checks,
+                validate_foreign_keys=validate_foreign_keys,
+                validate_hierarchy=validate_hierarchy,
+                cast=cast,
+                streaming=streaming,
+            ),
+        )
 
     @overload
     @classmethod
-    def validate(cls, df: pl.DataFrame, **options: Any) -> pl.DataFrame: ...
+    def validate(
+        cls,
+        df: pl.DataFrame,
+        *,
+        options: ValidationOptions | None = None,
+        references: References = None,
+        extra_cols: Literal["drop", "allow", "raise"] | None = None,
+        missing_cols: Literal["add", "allow", "raise"] | None = None,
+        strict_dtypes: bool | None = None,
+        validate_rules: bool | None = None,
+        validate_validators: bool | None = None,
+        validate_unique: bool | None = None,
+        validate_checks: bool | None = None,
+        validate_foreign_keys: bool | None = None,
+        validate_hierarchy: bool | None = None,
+        cast: bool | None = None,
+        streaming: bool | None = None,
+    ) -> pl.DataFrame: ...
 
     @overload
     @classmethod
-    def validate(cls, df: pl.LazyFrame, **options: Any) -> pl.LazyFrame: ...
+    def validate(
+        cls,
+        df: pl.LazyFrame,
+        *,
+        options: ValidationOptions | None = None,
+        references: References = None,
+        extra_cols: Literal["drop", "allow", "raise"] | None = None,
+        missing_cols: Literal["add", "allow", "raise"] | None = None,
+        strict_dtypes: bool | None = None,
+        validate_rules: bool | None = None,
+        validate_validators: bool | None = None,
+        validate_unique: bool | None = None,
+        validate_checks: bool | None = None,
+        validate_foreign_keys: bool | None = None,
+        validate_hierarchy: bool | None = None,
+        cast: bool | None = None,
+        streaming: bool | None = None,
+    ) -> pl.LazyFrame: ...
 
     @classmethod
     def validate(
-        cls, df: pl.DataFrame | pl.LazyFrame, **options: Any
+        cls,
+        df: pl.DataFrame | pl.LazyFrame,
+        *,
+        options: ValidationOptions | None = None,
+        references: References = None,
+        extra_cols: Literal["drop", "allow", "raise"] | None = None,
+        missing_cols: Literal["add", "allow", "raise"] | None = None,
+        strict_dtypes: bool | None = None,
+        validate_rules: bool | None = None,
+        validate_validators: bool | None = None,
+        validate_unique: bool | None = None,
+        validate_checks: bool | None = None,
+        validate_foreign_keys: bool | None = None,
+        validate_hierarchy: bool | None = None,
+        cast: bool | None = None,
+        streaming: bool | None = None,
     ) -> pl.DataFrame | pl.LazyFrame:
         """Validates a DataFrame or LazyFrame against this spec.
 
         Raises `ValidationError` carrying a `ValidationReport` of every
-        violation, or returns the (optionally transformed) frame. Use
-        `inspect` for the report without the exception. See
-        `polspec.validation.validate` for
-        every option: `extra_cols`, `missing_cols`, `strict_dtypes`,
-        `validate_rules`, `validate_validators`, `validate_unique`,
-        `validate_checks`, `validate_foreign_keys`, `references`, `cast`,
-        `streaming`.
+        violation, or returns the (optionally transformed) frame -- a
+        LazyFrame if `df` was one. Use `inspect` for the report without the
+        exception.
+
+        Parameters
+        ----------
+        df : pl.DataFrame | pl.LazyFrame
+            The frame to validate.
+        options : ValidationOptions, optional
+            Every option at once, as a value. Cannot be combined with the
+            keywords below.
+        references : mapping, optional
+            Parent frames for foreign keys into other specs, keyed by that
+            spec, its FrameSpec class, or its name.
+        extra_cols, missing_cols, strict_dtypes, cast, streaming
+            The structural options, named as on `ValidationOptions`.
+        validate_rules, validate_validators, validate_unique, validate_checks, validate_foreign_keys, validate_hierarchy
+            The check switches: `validate_` in front of the field they set.
+
+        A keyword left as `None` takes the `ValidationOptions` default; see
+        that class for what every option means.
         """
-        return validation.validate(cls.spec, df, **options)
+        return validation.validate(
+            cls.spec,
+            df,
+            options=options,
+            references=references,
+            **_given(
+                extra_cols=extra_cols,
+                missing_cols=missing_cols,
+                strict_dtypes=strict_dtypes,
+                validate_rules=validate_rules,
+                validate_validators=validate_validators,
+                validate_unique=validate_unique,
+                validate_checks=validate_checks,
+                validate_foreign_keys=validate_foreign_keys,
+                validate_hierarchy=validate_hierarchy,
+                cast=cast,
+                streaming=streaming,
+            ),
+        )
+
+
+def _given(**options: Any) -> dict[str, Any]:
+    """The validation keywords the caller actually passed.
+
+    `None` is the facade's "not given", so the defaults live on
+    `ValidationOptions` alone and `options=` conflicts with a keyword only
+    when the caller wrote both.
+    """
+    return {name: value for name, value in options.items() if value is not None}

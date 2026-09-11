@@ -25,6 +25,8 @@ from polspec import (
     ValidationError,
     ValidationOptions,
     col,
+    inspect,
+    validate,
 )
 
 
@@ -296,17 +298,53 @@ def test_a_null_rate_left_behind_by_turning_nullability_off_stays_quiet():
 
 
 def test_an_unknown_validation_option_names_the_one_you_meant():
+    """The functional API takes its options as keywords, so a typo is caught
+    there by name rather than by the dataclass it feeds.
+    """
+
     class Rows(FrameSpec):
         a = ColSpec(pl.Int64, bounds=(1, 10))
 
     df = Rows.generate(5, seed=1)
     with pytest.raises(TypeError) as excinfo:
-        Rows.inspect(df, validate_uniqe=True)
+        inspect(Rows.spec, df, validate_uniqe=True)
     message = str(excinfo.value)
     assert "validate_uniqe" in message
     assert "did you mean 'validate_unique'?" in message
     # The private options dataclass is no longer what gets named.
     assert "ValidationOptions" not in message
+
+
+def test_the_facade_refuses_a_typo_from_its_own_signature():
+    """`FrameSpec.validate` spells every option out, so a typo never reaches
+    the function it forwards to -- and an editor sees it before Python does.
+    """
+
+    class Rows(FrameSpec):
+        a = ColSpec(pl.Int64, bounds=(1, 10))
+
+    df = Rows.generate(5, seed=1)
+    for verb in (Rows.inspect, Rows.validate):
+        with pytest.raises(
+            TypeError, match="unexpected keyword argument 'validate_uniqe'"
+        ):
+            verb(df, validate_uniqe=True)
+
+
+def test_the_facade_names_exactly_the_options_the_function_accepts():
+    """One list of options, on `ValidationOptions`; the facade's explicit
+    signature is a copy, and this is what keeps the copy honest.
+    """
+    from inspect import signature
+
+    from polspec.validation import _ACCEPTED_OPTIONS
+
+    for verb in (FrameSpec.inspect, FrameSpec.validate):
+        params = signature(verb).parameters
+        named = {name for name in params if name not in ("df", "options", "references")}
+        assert named == set(_ACCEPTED_OPTIONS), verb.__name__
+        # `None` is "not given": the defaults stay on the dataclass alone.
+        assert all(params[name].default is None for name in named), verb.__name__
 
 
 def test_the_option_switches_have_one_spelling():
@@ -318,8 +356,11 @@ def test_the_option_switches_have_one_spelling():
     dupes = pl.DataFrame({"a": [1, 1, 2]})
     assert Rows.inspect(dupes, validate_unique=False).passed
     assert Rows.validate(dupes, validate_unique=False).height == 3
-    for verb in (Rows.inspect, Rows.validate):
+    for verb in (inspect, validate):
         with pytest.raises(TypeError, match="Unknown validation option"):
+            verb(Rows.spec, dupes, unique=False)
+    for verb in (Rows.inspect, Rows.validate):
+        with pytest.raises(TypeError, match="unexpected keyword argument 'unique'"):
             verb(dupes, unique=False)
 
 

@@ -3211,17 +3211,17 @@ data -- go through `__columns__`:
 
 - `FrameSpec.generate_batches(cls, n: 'int', *, batch_size: 'int' = 100000, method: "Literal['random', 'cartesian']" = 'random', seed: 'int | None' = None, references: 'References' = None) -> 'Iterator[pl.DataFrame]'` -- Yields chunks of generated rows without holding all `n` in memory.
 
-- `FrameSpec.inspect(cls, df: 'pl.DataFrame | pl.LazyFrame', **options: 'Any') -> 'validation.ValidationReport'` -- Everything this spec has to say about `df`, as a `ValidationReport`.
+- `FrameSpec.inspect(cls, df: 'pl.DataFrame | pl.LazyFrame', *, options: 'ValidationOptions | None' = None, references: 'References' = None, extra_cols: "Literal['drop', 'allow', 'raise'] | None" = None, missing_cols: "Literal['add', 'allow', 'raise'] | None" = None, strict_dtypes: 'bool | None' = None, validate_rules: 'bool | None' = None, validate_validators: 'bool | None' = None, validate_unique: 'bool | None' = None, validate_checks: 'bool | None' = None, validate_foreign_keys: 'bool | None' = None, validate_hierarchy: 'bool | None' = None, cast: 'bool | None' = None, streaming: 'bool | None' = None) -> 'validation.ValidationReport'` -- Everything this spec has to say about `df`, as a `ValidationReport`.
 
 - `FrameSpec.schema(cls) -> 'pl.Schema'` -- The Polars schema this spec declares: column name to dtype.
 
-- `FrameSpec.sink_csv(cls, path: 'str | Path', n: 'int', **kwargs: 'Any') -> 'None'` -- Generates `n` rows and streams them to a CSV file in batches.
+- `FrameSpec.sink_csv(cls, path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, include_header: 'bool' = True, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'` -- Generates `n` rows and streams them to a CSV file in batches.
 
-- `FrameSpec.sink_ipc(cls, path: 'str | Path', n: 'int', **kwargs: 'Any') -> 'None'` -- Generates `n` rows and streams them to an Arrow IPC file in batches.
+- `FrameSpec.sink_ipc(cls, path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, compression: 'str | None' = 'zstd', method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'` -- Generates `n` rows and streams them to an Arrow IPC file in batches.
 
-- `FrameSpec.sink_ndjson(cls, path: 'str | Path', n: 'int', **kwargs: 'Any') -> 'None'` -- Generates `n` rows and streams them to an NDJSON file in batches.
+- `FrameSpec.sink_ndjson(cls, path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'` -- Generates `n` rows and streams them to an NDJSON file in batches.
 
-- `FrameSpec.sink_parquet(cls, path: 'str | Path', n: 'int', **kwargs: 'Any') -> 'None'` -- Generates `n` rows and streams them to a Parquet file in batches.
+- `FrameSpec.sink_parquet(cls, path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, compression: 'str' = 'zstd', method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'` -- Generates `n` rows and streams them to a Parquet file in batches.
 
 - `FrameSpec.tag(cls, *tags: 'str | Sequence[str]', match: "Literal['any', 'all']" = 'any') -> 'list[str]'` -- Column names carrying any (or all) of the tags, in declaration order.
 
@@ -3235,7 +3235,7 @@ data -- go through `__columns__`:
 
 - `FrameSpec.unique_together(cls) -> 'tuple[tuple[str, ...], ...]'` -- The composite unique column groups defined on this FrameSpec.
 
-- `FrameSpec.validate(cls, df: 'pl.DataFrame | pl.LazyFrame', **options: 'Any') -> 'pl.DataFrame | pl.LazyFrame'` -- Validates a DataFrame or LazyFrame against this spec.
+- `FrameSpec.validate(cls, df: 'pl.DataFrame | pl.LazyFrame', *, options: 'ValidationOptions | None' = None, references: 'References' = None, extra_cols: "Literal['drop', 'allow', 'raise'] | None" = None, missing_cols: "Literal['add', 'allow', 'raise'] | None" = None, strict_dtypes: 'bool | None' = None, validate_rules: 'bool | None' = None, validate_validators: 'bool | None' = None, validate_unique: 'bool | None' = None, validate_checks: 'bool | None' = None, validate_foreign_keys: 'bool | None' = None, validate_hierarchy: 'bool | None' = None, cast: 'bool | None' = None, streaming: 'bool | None' = None) -> 'pl.DataFrame | pl.LazyFrame'` -- Validates a DataFrame or LazyFrame against this spec.
 
 - `FrameSpec.with_catspec(cls, catspec: 'CatSpec | type[CatSpec]', *, name: 'str | None' = None) -> 'type[FrameSpec]'` -- A new FrameSpec subclass with columns re-typed against `catspec`.
 ## ForeignKey
@@ -4649,6 +4649,15 @@ seed produces; see
   and an override, so passing both raises instead of quietly picking one.
 
 ### Changed
+
+- `FrameSpec.validate`, `inspect` and the four `sink_*` classmethods spell
+  their options out instead of forwarding `**kwargs`. Editors complete
+  them, a type checker sees a typo, and a mistyped option is a `TypeError`
+  from the classmethod's own signature rather than from a function several
+  frames away. The validation keywords default to `None`, meaning "the
+  `ValidationOptions` default", so the defaults are still defined once. The
+  sinks keep their trailing `**kwargs`: that is the documented passthrough
+  to the underlying writer, not a gap.
 
 - A misspelled spec name in `references={...}` now warns instead of passing
   silently. A key nothing points at was skipped without a word, so the column
