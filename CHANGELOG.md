@@ -8,7 +8,59 @@ seed produces; see
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- A misspelled spec name in `references={...}` now warns instead of passing
+  silently. A key nothing points at was skipped without a word, so the column
+  was generated freely while the caller believed the parent had been used --
+  and `validate()` then reported the key as unresolved, which is the round
+  trip failing with only its second half audible. The warning names the key
+  that went unfilled and suggests the one supplied:
+
+  ```
+  Orders: references={...} supplied ['Custmers'] that no foreign key points
+  at, while 'Customers' (supplied 'Custmers'?) went unfilled.
+  ```
+
+  It takes both halves to warn -- something supplied that went unused *and*
+  something unused that went unfilled -- so supplying no parent at all stays
+  silent, as documented, and a `Registry` handing every spec the whole set of
+  frames says nothing either. `generate_batches` warns once per call rather
+  than once per batch.
+- `ColSpec(pl.Int64, null_probability=0.9)` now warns. `nullable=False` still
+  wins and the rate is still ignored -- turning nullability off should not
+  also require deleting the rate beside it -- but the same silence covered
+  asking for nulls and forgetting `nullable=True`, where the column generates
+  none and nothing says why. Only a rate that cannot be a leftover warns: the
+  default and an explicit `0.0` already agree with `nullable=False`.
+- `references=` given something that is not a mapping raises `SpecError`
+  naming the three key forms it accepts, rather than an `AttributeError` from
+  inside `resolve_references`. Every collection argument elsewhere in the API
+  is a sequence, so passing one here was an easy mistake with an unhelpful
+  answer, and it was the one complaint polspec made that was not a
+  `PolspecError`.
+- An unknown validation option names the option you meant. It used to surface
+  as `ValidationOptions.__init__() got an unexpected keyword argument
+  'validate_uniqe'`, naming a private class that is not exported and not the
+  option intended; it is now `Unknown validation option(s): 'validate_uniqe'
+  (did you mean 'validate_unique'?)`, with the accepted list.
+
+### Documentation
+
+- `Decimal` joins `List`, `Struct` and `Array` on the list of dtypes that
+  declare and validate but cannot be generated. It had been missing from both
+  [Dtype coverage](https://maxwellb13.github.io/polspec/explanation/roadmap/)
+  and [Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/),
+  and it is the one people miss, being the only one of the four that is not a
+  nested type.
+- A `Datetime` carrying a `time_zone` generates, which the docs had never said
+  either way and readers assumed meant no. Both claims are now pinned by tests
+  in `tests/test_roundtrip.py`, so neither page can go stale.
+
+### Internal
+
+- The four copies of "declares no ColSpec columns" are one
+  `tablespec.require_columns`.
 
 ## [0.4.1] - 2026-09-09
 

@@ -78,7 +78,10 @@ produce nothing.
 ## Smaller sharp edges
 
 - **Unsupported dtypes are accepted at declaration.** `ColSpec(pl.List(...))`
-  constructs and validates; only `generate()` objects.
+  constructs and validates; only `generate()` objects. The four are `List`,
+  `Struct`, `Array` and `Decimal` — `Decimal` is easy to miss, being the only
+  one that is not a nested type. See
+  [Dtype coverage](roadmap.md#dtype-coverage-is-not-complete-yet).
 - **`missing_cols="add"` can produce a frame that fails re-validation**, since
   columns are added after validation runs, including for non-nullable columns.
 - **Rules overwrite nulls**, so a nullable column with a rule ends up with

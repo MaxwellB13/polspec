@@ -14,8 +14,7 @@ from typing import Any, Literal
 
 import polars as pl
 
-from polspec.errors import SpecError
-from polspec.tablespec import TableSpec
+from polspec.tablespec import TableSpec, require_columns
 
 Method = Literal["random", "cartesian"]
 References = Mapping[Any, pl.DataFrame | pl.LazyFrame] | None
@@ -58,8 +57,7 @@ def _prepare(spec: TableSpec, path: str | Path, n: int, batch_size: int) -> Path
     """
     from polspec.generation import _requires_whole_frame
 
-    if not spec.columns:
-        raise SpecError(f"{spec.name} declares no ColSpec columns")
+    require_columns(spec)
     _requires_whole_frame(spec, "a sink")
     if n < 0:
         raise ValueError("n must be >= 0")
