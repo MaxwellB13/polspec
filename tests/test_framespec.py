@@ -350,3 +350,38 @@ def test_tags_given_as_a_set_are_ordered_the_same_in_every_process():
         for _ in range(4)
     }
     assert len(runs) == 1, f"tag order differs between processes: {runs}"
+
+
+# ---------------------------------------------------------------------------
+# The facade forwards to functions over `cls.spec`, with the same signature.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "verb",
+    [
+        "generate",
+        "generate_batches",
+        "sink_parquet",
+        "sink_csv",
+        "sink_ipc",
+        "sink_ndjson",
+    ],
+)
+def test_the_facade_spells_out_the_signature_it_forwards_to(verb):
+    """`generation.sinks` spells its options out so a typo fails by name;
+    a `**kwargs` facade in front of it would defeat that where most calls
+    are made. So the classmethod carries the function's parameters, minus
+    `spec`, and this keeps the two from drifting.
+    """
+    from inspect import signature
+
+    from polspec import generation
+
+    facade = signature(getattr(FrameSpec, verb)).parameters
+    function = signature(getattr(generation, verb)).parameters
+    assert next(iter(function)) == "spec"
+    expected = {name: p for name, p in function.items() if name != "spec"}
+    assert {n: p.default for n, p in facade.items()} == {
+        n: p.default for n, p in expected.items()
+    }, verb

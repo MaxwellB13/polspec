@@ -47,6 +47,15 @@ seed produces; see
 
 ### Changed
 
+- `FrameSpec.validate`, `inspect` and the four `sink_*` classmethods spell
+  their options out instead of forwarding `**kwargs`. Editors complete
+  them, a type checker sees a typo, and a mistyped option is a `TypeError`
+  from the classmethod's own signature rather than from a function several
+  frames away. The validation keywords default to `None`, meaning "the
+  `ValidationOptions` default", so the defaults are still defined once. The
+  sinks keep their trailing `**kwargs`: that is the documented passthrough
+  to the underlying writer, not a gap.
+
 - A misspelled spec name in `references={...}` now warns instead of passing
   silently. A key nothing points at was skipped without a word, so the column
   was generated freely while the caller believed the parent had been used --
