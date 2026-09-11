@@ -5,6 +5,8 @@ each subclass keeps the built-in type it replaced so `except ValueError` and
 `except TypeError` written against earlier versions still catch it.
 """
 
+import warnings
+
 import polars as pl
 import pytest
 import yaml
@@ -16,6 +18,7 @@ from polspec import (
     FrameSpec,
     GenerationError,
     PolspecError,
+    Registry,
     RegistryError,
     SerializationError,
     SpecError,
@@ -153,3 +156,153 @@ def test_one_clause_catches_them_all():
         except FileNotFoundError:
             caught.append("FileNotFoundError")
     assert caught == ["SpecError", "FileNotFoundError"]
+
+
+# ---------------------------------------------------------------------------
+# Declarations and arguments that used to fail silently or unhelpfully
+#
+# Each of these is a case where polspec accepted something that could not mean
+# what it said, or reported it in a way that named nothing the caller could
+# act on. The message is asserted, not just the type: the message is the whole
+# value of these.
+# ---------------------------------------------------------------------------
+
+
+def test_references_must_be_a_mapping_not_a_sequence():
+    """A list of parents reached `.items()` and raised a bare AttributeError."""
+
+    class Parent(FrameSpec):
+        pid = ColSpec(pl.Int64, bounds=(1, 50), unique=True)
+
+    class Child(FrameSpec):
+        pid = ColSpec(pl.Int64, bounds=(1, 50))
+        __foreign_keys__ = [ForeignKey("pid", references="Parent", ref_columns="pid")]
+
+    parent = Parent.generate(10, seed=1)
+    with pytest.raises(SpecError, match="references= must be a mapping"):
+        Child.generate(5, references=[parent])
+    # And it is a PolspecError, which an AttributeError was not.
+    with pytest.raises(PolspecError):
+        Child.generate(5, references=[parent])
+
+
+def test_a_misspelled_reference_key_warns_rather_than_passing_silently():
+    """The typo generated freely and said nothing; validate() then complained."""
+
+    class Customers(FrameSpec):
+        cid = ColSpec(pl.Int64, bounds=(1, 50), unique=True)
+
+    class Orders(FrameSpec):
+        cid = ColSpec(pl.Int64, bounds=(1, 50))
+        __foreign_keys__ = [
+            ForeignKey("cid", references="Customers", ref_columns="cid")
+        ]
+
+    customers = Customers.generate(20, seed=1)
+    with pytest.warns(UserWarning, match="Custmers") as caught:
+        Orders.generate(10, seed=1, references={"Custmers": customers})
+    message = str(caught[0].message)
+    # It names the key that went unfilled, and suggests the one supplied.
+    assert "'Customers'" in message
+    assert "supplied 'Custmers'?" in message
+
+
+def test_a_correct_reference_key_warns_about_nothing():
+    class Customers(FrameSpec):
+        cid = ColSpec(pl.Int64, bounds=(1, 50), unique=True)
+
+    class Orders(FrameSpec):
+        cid = ColSpec(pl.Int64, bounds=(1, 50))
+        __foreign_keys__ = [
+            ForeignKey("cid", references="Customers", ref_columns="cid")
+        ]
+
+    customers = Customers.generate(20, seed=1)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        Orders.generate(10, seed=1, references={"Customers": customers})
+
+
+def test_supplying_no_references_at_all_warns_about_nothing():
+    """An unfilled key on its own is documented behaviour, not a mistake."""
+
+    class Orders(FrameSpec):
+        cid = ColSpec(pl.Int64, bounds=(1, 50))
+        __foreign_keys__ = [
+            ForeignKey("cid", references="Customers", ref_columns="cid")
+        ]
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        Orders.generate(10, seed=1)
+
+
+def test_a_registry_handing_over_every_frame_warns_about_nothing():
+    """Registry passes each spec the whole set, so unused parents are normal."""
+
+    class Customers(FrameSpec):
+        cid = ColSpec(pl.Int64, bounds=(1, 50), unique=True)
+
+    class Products(FrameSpec):
+        sku = ColSpec(pl.Int64, bounds=(1, 50), unique=True)
+
+    class Orders(FrameSpec):
+        cid = ColSpec(pl.Int64, bounds=(1, 50))
+        __foreign_keys__ = [
+            ForeignKey("cid", references="Customers", ref_columns="cid")
+        ]
+
+    registry = Registry(Customers, Products, Orders)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        registry.generate_all(10, seed=1)
+
+
+def test_batched_generation_warns_once_not_once_per_batch():
+    class Customers(FrameSpec):
+        cid = ColSpec(pl.Int64, bounds=(1, 50), unique=True)
+
+    class Orders(FrameSpec):
+        cid = ColSpec(pl.Int64, bounds=(1, 50))
+        __foreign_keys__ = [
+            ForeignKey("cid", references="Customers", ref_columns="cid")
+        ]
+
+    customers = Customers.generate(20, seed=1)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        batches = list(
+            Orders.generate_batches(
+                50, batch_size=10, seed=1, references={"Custmers": customers}
+            )
+        )
+    assert len(batches) == 5
+    assert sum("Custmers" in str(w.message) for w in caught) == 1
+
+
+def test_null_probability_without_nullable_warns():
+    with pytest.warns(UserWarning, match="nullable=False"):
+        ColSpec(pl.Int64, null_probability=0.9)
+
+
+def test_a_null_rate_left_behind_by_turning_nullability_off_stays_quiet():
+    """The default and an explicit zero already agree with nullable=False."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        ColSpec(pl.Int64)
+        ColSpec(pl.Int64, null_probability=0.0)
+        ColSpec(pl.Int64, nullable=True, null_probability=0.9)
+
+
+def test_an_unknown_validation_option_names_the_one_you_meant():
+    class Rows(FrameSpec):
+        a = ColSpec(pl.Int64, bounds=(1, 10))
+
+    df = Rows.generate(5, seed=1)
+    with pytest.raises(TypeError) as excinfo:
+        Rows.inspect(df, validate_uniqe=True)
+    message = str(excinfo.value)
+    assert "validate_uniqe" in message
+    assert "did you mean 'validate_unique'?" in message
+    # The private options dataclass is no longer what gets named.
+    assert "ValidationOptions" not in message

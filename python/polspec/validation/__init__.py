@@ -12,14 +12,16 @@ Two entry points over the same machinery:
 
 from __future__ import annotations
 
+import dataclasses
+import difflib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, overload
 
 import polars as pl
 
-from polspec.errors import SpecError, ValidationError
-from polspec.tablespec import TableSpec, resolve_references
+from polspec.errors import ValidationError
+from polspec.tablespec import TableSpec, require_columns, resolve_references
 from polspec.validation.constraints import (
     _column_constraints,
     _Constraint,
@@ -84,16 +86,34 @@ class ValidationOptions:
 _Options = ValidationOptions
 
 
+_RENAMED_OPTIONS = {
+    "validate_rules": "rules",
+    "validate_validators": "validators",
+    "validate_unique": "unique",
+    "validate_checks": "checks",
+    "validate_foreign_keys": "foreign_keys",
+    "validate_hierarchy": "hierarchy",
+}
+
+
 def _options_from(**options: Any) -> ValidationOptions:
-    renamed = {
-        "validate_rules": "rules",
-        "validate_validators": "validators",
-        "validate_unique": "unique",
-        "validate_checks": "checks",
-        "validate_foreign_keys": "foreign_keys",
-        "validate_hierarchy": "hierarchy",
-    }
-    return ValidationOptions(**{renamed.get(k, k): v for k, v in options.items()})
+    fields = {f.name for f in dataclasses.fields(ValidationOptions)}
+    unknown = [k for k in options if k not in fields and k not in _RENAMED_OPTIONS]
+    if unknown:
+        # Naming the option the caller meant, rather than letting the
+        # dataclass raise about a private class they cannot look up.
+        accepted = sorted(fields | set(_RENAMED_OPTIONS))
+        hints = []
+        for name in unknown:
+            close = difflib.get_close_matches(name, accepted, n=1)
+            hints.append(f"{name!r}{f' (did you mean {close[0]!r}?)' if close else ''}")
+        raise TypeError(
+            f"Unknown validation option(s): {', '.join(hints)}. "
+            f"Accepted: {', '.join(accepted)}."
+        )
+    return ValidationOptions(
+        **{_RENAMED_OPTIONS.get(k, k): v for k, v in options.items()}
+    )
 
 
 def _to_lazy(frame: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
@@ -143,8 +163,7 @@ def inspect(
     the report, with `report.rows(finding)` and `report.failing_rows()`
     giving the offending rows back lazily. See `validate` for the options.
     """
-    if not spec.columns:
-        raise SpecError(f"{spec.name} declares no ColSpec columns")
+    require_columns(spec)
     opts = _options_from(**options)
     lf = _to_lazy(df)
     columns = dict(spec.columns)

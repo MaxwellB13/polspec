@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import warnings
 from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
@@ -94,7 +95,11 @@ class ColSpec:
         `weights`, a non-uniform `distribution`, or `rules`, none of which
         survive a draw without replacement.
     null_probability : float, optional
-        Probability of a value being null. Must be between 0 and 1.
+        Probability of a value being null. Must be between 0 and 1, and only
+        has effect alongside `nullable=True` -- so that turning nullability
+        off does not also require deleting the rate beside it. Declaring a
+        rate of your own without `nullable=True` warns, since that reads as
+        asking for nulls rather than as a leftover.
     string_length : Bound | tuple[int, int] | list[int] | None, optional
         The inclusive range of string lengths, where that applies.
     distribution : str | None, optional
@@ -304,6 +309,35 @@ class ColSpec:
     def _validate_probabilities(self) -> None:
         if not 0.0 <= self.null_probability <= 1.0:
             raise SpecError("null_probability must be between 0 and 1")
+        self._warn_unused_null_probability()
+
+    def _warn_unused_null_probability(self) -> None:
+        """Warns about a null rate on a column that cannot hold a null.
+
+        `nullable=False` wins and the rate is ignored, which is deliberate:
+        turning nullability off should not also require deleting the rate
+        beside it. But the same silence covers a genuine mistake -- asking for
+        nulls and forgetting `nullable=True` -- where the column generates
+        none and nothing says why.
+
+        So this warns rather than raising, and only for a rate that cannot
+        have been left behind by turning nullability off: the default is what
+        every non-nullable column carries, and an explicit zero already agrees
+        with `nullable=False`. Anything else was written on purpose and does
+        not do what it says.
+        """
+        if self.nullable or self.null_probability in (
+            0.0,
+            _DEFAULT_NULL_PROBABILITY,
+        ):
+            return
+        warnings.warn(
+            f"ColSpec declares null_probability={self.null_probability} with "
+            "nullable=False, so no nulls will be generated and validation will "
+            "reject any it finds. Add nullable=True to get that rate, or drop "
+            "null_probability to say the column holds no nulls.",
+            stacklevel=4,
+        )
 
     def _validate_bounds_dtype_support(self) -> None:
         if self.bounds is not None and not (

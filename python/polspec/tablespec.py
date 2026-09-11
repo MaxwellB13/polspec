@@ -692,11 +692,32 @@ def as_spec_name(obj: Any) -> str:
     return as_table_spec(obj).name
 
 
+def require_columns(spec: TableSpec) -> None:
+    """Refuses a spec with nothing to generate, validate or write.
+
+    Every verb needs at least one column, and each used to raise this itself;
+    one copy so the four of them keep saying the same thing.
+    """
+    if not spec.columns:
+        raise SpecError(f"{spec.name} declares no ColSpec columns")
+
+
 def resolve_references(
     references: Mapping[Any, pl.DataFrame | pl.LazyFrame] | None,
     coerce: Callable[[pl.DataFrame | pl.LazyFrame], Any],
 ) -> dict[str, Any]:
-    """Keys a `references=` mapping by spec name, coercing each frame."""
+    """Keys a `references=` mapping by spec name, coercing each frame.
+
+    A mapping, specifically: every other collection this API takes is a
+    sequence, so passing one here is an easy mistake and used to surface as an
+    `AttributeError` from this function rather than as a polspec error.
+    """
     if not references:
         return {}
+    if not isinstance(references, Mapping):
+        raise SpecError(
+            "references= must be a mapping of parent spec to its DataFrame, got "
+            f"{type(references).__name__}. Key it by the spec, its FrameSpec "
+            "class, or its name: references={Customers: customers_df}."
+        )
     return {as_spec_name(key): coerce(frame) for key, frame in references.items()}

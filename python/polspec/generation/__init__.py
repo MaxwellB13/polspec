@@ -9,7 +9,9 @@ each pass reads and writes. `generate_batches` and the `sink_*` functions in
 
 from __future__ import annotations
 
+import difflib
 import random
+import warnings
 from collections.abc import Callable, Iterator, Mapping
 from typing import Any, Literal, overload
 
@@ -24,7 +26,7 @@ from polspec.generation.sinks import sink_csv, sink_ipc, sink_ndjson, sink_parqu
 from polspec.hierarchy import _apply_hierarchy
 from polspec.rules import _apply_column_rules
 from polspec.spec import ColSpec
-from polspec.tablespec import TableSpec, resolve_references
+from polspec.tablespec import TableSpec, require_columns, resolve_references
 
 __all__ = [
     "generate",
@@ -37,11 +39,6 @@ __all__ = [
 
 Method = Literal["random", "cartesian"]
 References = Mapping[Any, pl.DataFrame | pl.LazyFrame] | None
-
-
-def _require_columns(spec: TableSpec) -> None:
-    if not spec.columns:
-        raise SpecError(f"{spec.name} declares no ColSpec columns")
 
 
 def _check_faults(spec: TableSpec, cycles: int, self_references: int) -> None:
@@ -83,6 +80,40 @@ def _check_counts(n: int, batch_size: int | None = None) -> None:
 
 def _collect(frame: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame:
     return frame.collect() if isinstance(frame, pl.LazyFrame) else frame
+
+
+def _warn_unused_references(spec: TableSpec, parents: dict[str, Any]) -> None:
+    """Warns when a supplied parent went unused *and* a key went unfilled.
+
+    A foreign key whose target has no data is left exactly as freely
+    generated, which is documented and deliberate -- `references` is optional.
+    What is not deliberate is supplying a parent under a name nothing asked
+    for: the caller believes that key was satisfied, generation quietly did
+    not satisfy it, and `validate()` then reports the key as unresolved. A
+    misspelled spec name is the usual cause.
+
+    Both halves have to hold before this says anything. A `Registry` hands
+    every spec the whole set of frames generated so far, most of which any one
+    spec has no key for, so an unused parent on its own is ordinary.
+    """
+    if not parents:
+        return
+    targets = {fk.references for fk in spec.foreign_keys if fk.references != "self"}
+    unfilled = sorted(targets - parents.keys())
+    unused = sorted(parents.keys() - targets)
+    if not unfilled or not unused:
+        return
+    hints = []
+    for name in unfilled:
+        close = difflib.get_close_matches(name, unused, n=1)
+        hints.append(f"{name!r}{f' (supplied {close[0]!r}?)' if close else ''}")
+    warnings.warn(
+        f"{spec.name}: references={{...}} supplied {unused} that no foreign key "
+        f"points at, while {', '.join(hints)} went unfilled. Those columns are "
+        "generated freely, so validate() will report the key as unresolved. "
+        f"{spec.name} references: {sorted(targets)}.",
+        stacklevel=3,
+    )
 
 
 @overload
@@ -167,7 +198,7 @@ def generate(
 
     lazy=True returns a `pl.LazyFrame` around the generated DataFrame.
     """
-    _require_columns(spec)
+    require_columns(spec)
     _check_counts(n)
     _check_faults(spec, cycles, self_references)
 
@@ -235,6 +266,7 @@ def _run_passes(
 
     if spec.foreign_keys:
         parents = resolve_references(references, _collect)
+        _warn_unused_references(spec, parents)
         for fk in spec.foreign_keys:
             seed = rng.randrange(2**63)
             if fk.references == "self":
@@ -280,7 +312,7 @@ def generate_batches(
     a `__unique_together__` group, and a foreign-key column sampled without
     replacement alike.
     """
-    _require_columns(spec)
+    require_columns(spec)
     _requires_whole_frame(spec, "generate_batches")
     _check_counts(n, batch_size)
     if method not in ("random", "cartesian"):
@@ -292,7 +324,15 @@ def generate_batches(
     # Left as given, a `LazyFrame` reference would be collected inside each
     # batch's foreign-key pass -- once per batch rather than once per call,
     # which is the whole parent re-read however many batches there are.
-    references = resolve_references(references, _collect) or None
+    resolved = resolve_references(references, _collect)
+    if spec.foreign_keys:
+        # Once per call, not once per batch: the parents are the same every
+        # time round, so the batches below are handed only the keys a foreign
+        # key actually points at and find nothing left to report.
+        _warn_unused_references(spec, resolved)
+        targets = {fk.references for fk in spec.foreign_keys if fk.references != "self"}
+        resolved = {k: v for k, v in resolved.items() if k in targets}
+    references = resolved or None
 
     rng = random.Random(seed)
     rows_remaining = n

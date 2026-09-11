@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 import yaml
 
-from polspec.errors import SerializationError, SpecError
+from polspec.errors import SerializationError
 from polspec.serialization.dtypes import physical_name
 from polspec.serialization.fields import (
     CHECK_FIELDS,
@@ -35,7 +35,7 @@ from polspec.serialization.fields import (
     tablespec_to_data,
 )
 from polspec.serialization.migrations import FORMAT_VERSION, migrate
-from polspec.tablespec import TableSpec
+from polspec.tablespec import TableSpec, require_columns
 
 if TYPE_CHECKING:
     from polspec.catspec import CatSpec
@@ -112,11 +112,6 @@ def _warn_unserializable(spec: TableSpec, source: str | Path, kind: str) -> None
         )
 
 
-def _require_columns(spec: TableSpec) -> None:
-    if not spec.columns:
-        raise SpecError(f"{spec.name} declares no ColSpec columns")
-
-
 # ---------------------------------------------------------------------------
 # TableSpec <-> data
 # ---------------------------------------------------------------------------
@@ -154,7 +149,7 @@ def to_yaml(spec: TableSpec, source: str | Path) -> None:
     Defaults are omitted so the file shows only what was declared. Checks and
     validators over raw expressions cannot be written and warn.
     """
-    _require_columns(spec)
+    require_columns(spec)
     _warn_unserializable(spec, source, "yaml")
     p = Path(source)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -222,7 +217,7 @@ def to_python(spec: TableSpec, source: str | Path) -> None:
     data is not always a valid identifier. Checks and validators over raw
     expressions cannot be written and warn.
     """
-    _require_columns(spec)
+    require_columns(spec)
     _warn_unserializable(spec, source, "python")
 
     data = tablespec_to_data(spec)

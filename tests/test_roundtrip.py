@@ -33,7 +33,9 @@ from polspec import (
     FrameSpec,
     GenerationError,
     SpecError,
+    TableSpec,
     col,
+    generate,
 )
 
 ROWS = 300
@@ -764,3 +766,38 @@ def test_a_hand_built_cycle_still_validates():
     """
     cyclic = pl.DataFrame({"ref": [1, 2, 3], "parent": [2, 1, 3]})
     HierarchySpec.validate(cyclic)
+
+
+# ---------------------------------------------------------------------------
+# Which dtypes the property covers
+#
+# The round-trip needs both halves, so a dtype validate() understands but
+# generate() cannot fill is outside it. Docs name those four; these pin the
+# list so the page cannot go stale, and pin the one people assume is missing
+# and is not.
+# ---------------------------------------------------------------------------
+
+UNGENERATABLE_DTYPES = [
+    pl.List(pl.Int64),
+    pl.Array(pl.Int64, 3),
+    pl.Struct({"a": pl.Int64}),
+    pl.Decimal(10, 2),
+]
+
+
+@pytest.mark.parametrize("dtype", UNGENERATABLE_DTYPES, ids=str)
+def test_an_ungeneratable_dtype_declares_and_refuses_only_at_generate(dtype):
+    """Accepted at declaration, named at generation -- see limitations.md."""
+    spec = TableSpec("Ungeneratable", {"c": ColSpec(dtype)})
+    with pytest.raises(SpecError, match="cannot generate data for dtype"):
+        generate(spec, ROWS, seed=SEED)
+
+
+def test_a_time_zoned_datetime_completes_the_round_trip():
+    """The one people assume is on the list above. It is not."""
+    spec_cls = _spec_for(
+        "tz_datetime", ColSpec(pl.Datetime("us", "UTC"), nullable=True)
+    )
+    df = spec_cls.generate(ROWS, seed=SEED)
+    assert df["c"].dtype == pl.Datetime("us", "UTC")
+    spec_cls.validate(df)
