@@ -54,6 +54,7 @@ dev = [
     "maturin>=1.7",
     "numpy>=2.5.2",
     "pyarrow>=14.0.0",
+    "mypy>=1.13",
     "ruff>=0.16.5",
 ]
 docs = [
@@ -107,3 +108,55 @@ ignore = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["python/polspec"]
+# polars ships its own types; nothing else here is imported untyped.
+ignore_missing_imports = true
+
+# The package ships py.typed, so every consumer's type checker trusts these
+# signatures -- which means nothing in this list is cosmetic. The modules below
+# are the backlog from first turning the checker on, kept module by module so
+# that everything absent from the list is enforced, and so the list can only
+# shrink. Two declarations account for most of it:
+#
+#   * `ColSpec.dtype` is annotated `pl.DataType | type[pl.DataType]`, which is
+#     what the constructor accepts (`ColSpec(pl.Int64)` and `ColSpec(pl.Int64())`
+#     both work). `__post_init__` instantiates the class, so a constructed
+#     ColSpec always holds an instance -- but the annotation still says it might
+#     not, and every `spec.dtype.is_integer()` and `_column_kind(spec.dtype)`
+#     downstream is an error against it. 77 of the 247.
+#   * `ForeignKey.references` has the same shape: a spec, a class or a name in,
+#     always a name once stored. 10 more.
+#
+# Narrowing either one means separating "what the constructor takes" from "what
+# the instance holds", which is a real design decision on a public field rather
+# than a fix. Until it is made, these stay listed.
+[[tool.mypy.overrides]]
+module = [
+    "polspec.bound",
+    "polspec.catspec",
+    "polspec.check",
+    "polspec.cli",
+    "polspec.constants",
+    "polspec.constraints.domain",
+    "polspec.constraints.passes",
+    "polspec.dtypes",
+    "polspec.engine",
+    "polspec.foreign_key",
+    "polspec.framespec",
+    "polspec.generation",
+    "polspec.hierarchy",
+    "polspec.registry",
+    "polspec.report",
+    "polspec.rules",
+    "polspec.serialization",
+    "polspec.serialization.dtypes",
+    "polspec.serialization.fields",
+    "polspec.spec",
+    "polspec.tablespec",
+    "polspec.validation",
+    "polspec.validation.constraints",
+]
+ignore_errors = true

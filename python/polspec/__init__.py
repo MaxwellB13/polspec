@@ -30,7 +30,13 @@ from polspec.registry import Registry
 from polspec.rules import ColRule
 from polspec.spec import ColSpec
 from polspec.tablespec import TableSpec
-from polspec.validation import Finding, ValidationReport, inspect, validate
+from polspec.validation import (
+    Finding,
+    ValidationOptions,
+    ValidationReport,
+    inspect,
+    validate,
+)
 
 __all__ = [
     "Bound",
@@ -53,6 +59,7 @@ __all__ = [
     "SpecError",
     "TableSpec",
     "ValidationError",
+    "ValidationOptions",
     "ValidationReport",
     "col",
     "generate",

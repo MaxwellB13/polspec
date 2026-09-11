@@ -12,7 +12,7 @@ from __future__ import annotations
 import difflib
 import random
 import warnings
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator
 from typing import Any, Literal, overload
 
 import polars as pl
@@ -21,6 +21,7 @@ from polspec.constraints import ordered_passes, rewritable_members
 from polspec.engine import _generate_cartesian, _generate_random
 from polspec.errors import SpecError
 from polspec.foreign_key import _apply_foreign_key
+from polspec.frames import Method, References, to_eager
 from polspec.generation.composite import apply_unique_together
 from polspec.generation.sinks import sink_csv, sink_ipc, sink_ndjson, sink_parquet
 from polspec.hierarchy import _apply_hierarchy
@@ -36,9 +37,6 @@ __all__ = [
     "sink_ndjson",
     "sink_parquet",
 ]
-
-Method = Literal["random", "cartesian"]
-References = Mapping[Any, pl.DataFrame | pl.LazyFrame] | None
 
 
 def _check_faults(spec: TableSpec, cycles: int, self_references: int) -> None:
@@ -76,10 +74,6 @@ def _check_counts(n: int, batch_size: int | None = None) -> None:
         raise ValueError("n must be >= 0")
     if batch_size is not None and batch_size <= 0:
         raise ValueError("batch_size must be > 0")
-
-
-def _collect(frame: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame:
-    return frame.collect() if isinstance(frame, pl.LazyFrame) else frame
 
 
 def _warn_unused_references(spec: TableSpec, parents: dict[str, Any]) -> None:
@@ -265,7 +259,7 @@ def _run_passes(
         )
 
     if spec.foreign_keys:
-        parents = resolve_references(references, _collect)
+        parents = resolve_references(references, to_eager)
         _warn_unused_references(spec, parents)
         for fk in spec.foreign_keys:
             seed = rng.randrange(2**63)
@@ -324,7 +318,7 @@ def generate_batches(
     # Left as given, a `LazyFrame` reference would be collected inside each
     # batch's foreign-key pass -- once per batch rather than once per call,
     # which is the whole parent re-read however many batches there are.
-    resolved = resolve_references(references, _collect)
+    resolved = resolve_references(references, to_eager)
     if spec.foreign_keys:
         # Once per call, not once per batch: the parents are the same every
         # time round, so the batches below are handed only the keys a foreign

@@ -29,13 +29,12 @@ from polspec.catspec import CatSpec
 from polspec.check import Check
 from polspec.errors import SpecError
 from polspec.foreign_key import ForeignKey
+from polspec.frames import References
 from polspec.hierarchy import Hierarchy
 from polspec.profiler import profile_dataframe
 from polspec.report import framespec_to_markdown, framespec_to_mermaid
 from polspec.spec import ColSpec
 from polspec.tablespec import TableSpec, _parse_unique_together
-
-References = Mapping[Any, pl.DataFrame | pl.LazyFrame] | None
 
 
 def _is_declaration_value(value: Any) -> bool:

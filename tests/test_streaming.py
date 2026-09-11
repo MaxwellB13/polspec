@@ -218,7 +218,7 @@ def test_a_lazy_parent_is_collected_once_not_once_per_batch(monkeypatch):
 
     parent = Parent.generate(200, seed=1)
     collected = 0
-    real_collect = generation._collect
+    real_collect = generation.to_eager
 
     def counting_collect(frame):
         nonlocal collected
@@ -226,7 +226,7 @@ def test_a_lazy_parent_is_collected_once_not_once_per_batch(monkeypatch):
             collected += 1
         return real_collect(frame)
 
-    monkeypatch.setattr(generation, "_collect", counting_collect)
+    monkeypatch.setattr(generation, "to_eager", counting_collect)
 
     batches = list(
         Child.generate_batches(

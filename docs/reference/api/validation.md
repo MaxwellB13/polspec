@@ -11,6 +11,10 @@ findings as data -- see [Validating data](../../how-to/validating.md).
 
 ::: polspec.validate
 
+## ValidationOptions
+
+::: polspec.ValidationOptions
+
 ## ValidationReport
 
 ::: polspec.ValidationReport

@@ -1369,18 +1369,38 @@ Orders.validate(
     validate_unique=True,
     validate_checks=True,
     validate_foreign_keys=True,
+    validate_hierarchy=True,
 )
 ```
 
-Every one of these is a field of `polspec.validation.ValidationOptions`, which
-is what a report carries as `report.options` — so a report says what it was
-asked to check, not only what it found:
+Every one of these is a field of `ValidationOptions`, which is what a report
+carries as `report.options` — so a report says what it was asked to check, not
+only what it found:
 
 ```python
 report = Orders.inspect(df, validate_checks=False)
 report.options.checks        # False
 report.options.extra_cols    # "raise"
 ```
+
+The six `validate_*` switches are named for what they switch, so
+`validate_checks` is `options.checks`. An option name polspec does not accept
+is a `TypeError` naming the closest one it does.
+
+You can also pass the whole set as one value, which is the shape to reach for
+when the same settings go through several calls:
+
+```python
+from polspec import ValidationOptions
+
+lenient = ValidationOptions(extra_cols="drop", checks=False)
+
+for frame in (df, df.head(10)):
+    Orders.validate(frame, options=lenient)
+```
+
+`options=` and the individual keywords are alternatives, not a base and an
+override — passing both raises rather than quietly picking one.
 
 ### Structural mismatches
 
@@ -2730,6 +2750,7 @@ cannot describe a signature the code does not have.
 | [`sink_ndjson`][polspec.sink_ndjson] | [Generation](https://maxwellb13.github.io/polspec/reference/api/generation/) |
 | [`inspect`][polspec.inspect] | [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/) |
 | [`validate`][polspec.validate] | [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/) |
+| [`ValidationOptions`][polspec.ValidationOptions] | [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/) |
 | [`ValidationReport`][polspec.ValidationReport] | [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/) |
 | [`Finding`][polspec.Finding] | [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/) |
 | [`profile_dataframe`][polspec.profile_dataframe] | [Profiling](https://maxwellb13.github.io/polspec/reference/api/profiling/) |
@@ -2908,6 +2929,8 @@ A reference to a column, the starting point of every predicate.
 
 Base class of every predicate node. Build one with `col()`.
 
+- `Pred.children(self) -> 'tuple[Pred, ...]'` -- The operand nodes this one is built from, in written order.
+
 - `Pred.equals(self, other: 'object') -> 'bool'` -- Structural equality, since `==` builds a predicate.
 
 - `Pred.is_between(self, lower: 'Any', upper: 'Any') -> 'Between'` -- A predicate true where this value falls within `[lower, upper]`.
@@ -2919,6 +2942,8 @@ Base class of every predicate node. Build one with `col()`.
 - `Pred.is_null(self) -> 'IsNull'` -- A predicate true where this value is null.
 
 - `Pred.literals(self) -> 'list[Any]'` -- Every constant this predicate compares against.
+
+- `Pred.rebuild(self, children: 'tuple[Pred, ...]') -> 'Pred'` -- This node with `children` in place of its own, same order.
 
 - `Pred.rename(self, mapping: 'Mapping[str, str]') -> 'Pred'` -- The same predicate with its columns renamed by `mapping`.
 
@@ -3387,7 +3412,7 @@ findings as data -- see [Validating data](https://maxwellb13.github.io/polspec/h
 
 ## inspect
 
-### inspect(spec: 'TableSpec', df: 'pl.DataFrame | pl.LazyFrame', *, references: 'References' = None, **options: 'Any') -> 'ValidationReport'
+### inspect(spec: 'TableSpec', df: 'pl.DataFrame | pl.LazyFrame', *, options: 'ValidationOptions | None' = None, references: 'References' = None, **option_kwargs: 'Any') -> 'ValidationReport'
 
 Everything `spec` has to say about `df`, as a `ValidationReport`.
 
@@ -3396,7 +3421,7 @@ the report, with `report.rows(finding)` and `report.failing_rows()`
 giving the offending rows back lazily. See `validate` for the options.
 ## validate
 
-### validate(spec: 'TableSpec', df: 'pl.DataFrame | pl.LazyFrame', *, extra_cols: "Literal['drop', 'allow', 'raise']" = 'raise', missing_cols: "Literal['add', 'allow', 'raise']" = 'raise', strict_dtypes: 'bool' = False, validate_rules: 'bool' = True, validate_validators: 'bool' = True, validate_unique: 'bool' = True, validate_checks: 'bool' = True, validate_foreign_keys: 'bool' = True, validate_hierarchy: 'bool' = True, references: 'References' = None, cast: 'bool' = False, streaming: 'bool' = False) -> 'pl.DataFrame | pl.LazyFrame'
+### validate(spec: 'TableSpec', df: 'pl.DataFrame | pl.LazyFrame', *, options: 'ValidationOptions | None' = None, references: 'References' = None, **option_kwargs: 'Any') -> 'pl.DataFrame | pl.LazyFrame'
 
 Validates a DataFrame or LazyFrame against `spec`.
 
@@ -3404,30 +3429,41 @@ Parameters
 ----------
 df : pl.DataFrame | pl.LazyFrame
     The frame to validate. A LazyFrame comes back as a LazyFrame.
-extra_cols : {"drop", "allow", "raise"}
-    Columns present in `df` but not declared: raise a ValidationError
-    naming them, drop them from the returned frame, or keep them.
-missing_cols : {"add", "allow", "raise"}
-    Declared columns absent from `df`: raise, add them as nulls of the
-    declared dtype, or skip them.
-strict_dtypes : bool
-    Require identical dtypes, rather than accepting a compatible one
-    (a narrower integer, a String where an Enum was declared).
-validate_rules, validate_validators, validate_unique, validate_checks,
-validate_foreign_keys, validate_hierarchy : bool
-    Switch off individual kinds of check.
+options : ValidationOptions, optional
+    Every option at once, as a value -- useful for passing one setting
+    through several calls. Cannot be combined with the keywords below.
 references : mapping
     Parent frames for foreign keys that reference another spec, keyed by
     that spec, its FrameSpec class, or its name. A key with no entry is
     reported as a `foreign_key_unresolved` finding.
-cast : bool
-    Cast validated columns to their declared dtype in the returned frame.
-streaming : bool
-    Use Polars' streaming engine for the aggregation.
+**option_kwargs
+    The fields of `ValidationOptions`, one at a time, with the six check
+    switches spelled `validate_rules`, `validate_validators`,
+    `validate_unique`, `validate_checks`, `validate_foreign_keys` and
+    `validate_hierarchy`. See `ValidationOptions` for what each means and
+    what it defaults to; an unknown name raises `TypeError` naming the
+    closest match.
 
-Returns the validated, optionally transformed frame. Raises
-`ValidationError` carrying a `ValidationReport` of every violation, or
-`ValueError` for an invalid option.
+Returns
+-------
+The validated, optionally transformed frame -- a LazyFrame if `df` was one.
+
+Raises
+------
+ValidationError
+    Carrying a `ValidationReport` of every violation.
+TypeError
+    For an option name this does not accept.
+ValueError
+    For an accepted option given a value outside its choices.
+## ValidationOptions
+
+### ValidationOptions(extra_cols: "Literal['drop', 'allow', 'raise']" = 'raise', missing_cols: "Literal['add', 'allow', 'raise']" = 'raise', strict_dtypes: 'bool' = False, rules: 'bool' = True, validators: 'bool' = True, unique: 'bool' = True, checks: 'bool' = True, foreign_keys: 'bool' = True, hierarchy: 'bool' = True, cast: 'bool' = False, streaming: 'bool' = False) -> None
+
+Which checks to run and what to do about structural mismatches.
+
+Grouped rather than passed as ten separate arguments, so adding a check
+does not widen every signature between here and `FrameSpec.validate`.
 ## ValidationReport
 
 ### ValidationReport(spec_name: 'str', findings: 'tuple[Finding, ...]', frame: 'pl.LazyFrame', options: 'ValidationOptions' = None) -> None
@@ -4415,6 +4451,21 @@ seed produces; see
 
 ## [Unreleased]
 
+### Added
+
+- `ValidationOptions` is exported from `polspec`, and `validate()` and
+  `inspect()` take it as `options=`. Every switch as one value, for when the
+  same settings go through several calls:
+
+  ```python
+  lenient = ValidationOptions(extra_cols="drop", checks=False)
+  Orders.validate(df, options=lenient)
+  Customers.validate(other_df, options=lenient)
+  ```
+
+  `options=` and the individual keywords are alternatives rather than a base
+  and an override, so passing both raises instead of quietly picking one.
+
 ### Changed
 
 - A misspelled spec name in `references={...}` now warns instead of passing
@@ -4452,6 +4503,14 @@ seed produces; see
   option intended; it is now `Unknown validation option(s): 'validate_uniqe'
   (did you mean 'validate_unique'?)`, with the accepted list.
 
+- **Breaking, narrowly: the check switches have one spelling.**
+  `inspect(spec, df, unique=False)` used to work alongside
+  `validate_unique=False`, while `validate(spec, df, unique=False)` raised --
+  a second public spelling reachable through half the API, from a rename map
+  that was meant to be internal. Only the `validate_*` form is accepted now,
+  by both verbs. The bare names live on as the fields of `ValidationOptions`,
+  which is where they were always meant to be.
+
 ### Documentation
 
 - `Decimal` joins `List`, `Struct` and `Array` on the list of dtypes that
@@ -4468,6 +4527,30 @@ seed produces; see
 
 - The four copies of "declares no ColSpec columns" are one
   `tablespec.require_columns`.
+- **mypy runs in CI.** The package ships `py.typed` and a stub for the Rust
+  extension, so every consumer's type checker trusts these signatures, and
+  nothing was checking them. The first run found 247 errors, of which 87 trace
+  to two declarations: `ColSpec.dtype` and `ForeignKey.references` are both
+  annotated with what the constructor accepts rather than what the instance
+  ends up holding. Narrowing either is a design decision on a public field, so
+  the modules carrying that backlog are listed in `pyproject.toml` and
+  everything else is enforced -- the list can only shrink.
+- The predicate nodes in `expr.py` no longer each carry their own
+  `root_names`, `literals` and `rename`. A node reports its operands through
+  `children()` and the three traversals are derived from that on `Pred`, which
+  turns thirty-six implementations into twelve. `rename` is the one that
+  mattered: the base implementation returned `self`, so a node that forgot to
+  override it left a renamed spec pointing at a column that no longer existed,
+  with nothing raised. Forgetting `children()` now raises.
+- `References` and `Method` were declared identically in four and two modules;
+  `_collect`/`_to_lazy` in three. They are one `polspec.frames`.
+- The four `sink_*` functions built the same six-argument batch-stream call
+  each. `_prepare` now returns the checked call as one value. The public
+  signatures stay spelled out, which is what makes a typo in one of them fail
+  at the call site.
+- `registry.py` imported `serialization` lazily in five methods and `report` in
+  a sixth, while importing `generation` and `validation` at module level. There
+  was no cycle; all six are hoisted.
 
 ## [0.4.1] - 2026-09-09
 

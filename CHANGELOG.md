@@ -8,6 +8,21 @@ seed produces; see
 
 ## [Unreleased]
 
+### Added
+
+- `ValidationOptions` is exported from `polspec`, and `validate()` and
+  `inspect()` take it as `options=`. Every switch as one value, for when the
+  same settings go through several calls:
+
+  ```python
+  lenient = ValidationOptions(extra_cols="drop", checks=False)
+  Orders.validate(df, options=lenient)
+  Customers.validate(other_df, options=lenient)
+  ```
+
+  `options=` and the individual keywords are alternatives rather than a base
+  and an override, so passing both raises instead of quietly picking one.
+
 ### Changed
 
 - A misspelled spec name in `references={...}` now warns instead of passing
@@ -45,6 +60,14 @@ seed produces; see
   option intended; it is now `Unknown validation option(s): 'validate_uniqe'
   (did you mean 'validate_unique'?)`, with the accepted list.
 
+- **Breaking, narrowly: the check switches have one spelling.**
+  `inspect(spec, df, unique=False)` used to work alongside
+  `validate_unique=False`, while `validate(spec, df, unique=False)` raised --
+  a second public spelling reachable through half the API, from a rename map
+  that was meant to be internal. Only the `validate_*` form is accepted now,
+  by both verbs. The bare names live on as the fields of `ValidationOptions`,
+  which is where they were always meant to be.
+
 ### Documentation
 
 - `Decimal` joins `List`, `Struct` and `Array` on the list of dtypes that
@@ -61,6 +84,30 @@ seed produces; see
 
 - The four copies of "declares no ColSpec columns" are one
   `tablespec.require_columns`.
+- **mypy runs in CI.** The package ships `py.typed` and a stub for the Rust
+  extension, so every consumer's type checker trusts these signatures, and
+  nothing was checking them. The first run found 247 errors, of which 87 trace
+  to two declarations: `ColSpec.dtype` and `ForeignKey.references` are both
+  annotated with what the constructor accepts rather than what the instance
+  ends up holding. Narrowing either is a design decision on a public field, so
+  the modules carrying that backlog are listed in `pyproject.toml` and
+  everything else is enforced -- the list can only shrink.
+- The predicate nodes in `expr.py` no longer each carry their own
+  `root_names`, `literals` and `rename`. A node reports its operands through
+  `children()` and the three traversals are derived from that on `Pred`, which
+  turns thirty-six implementations into twelve. `rename` is the one that
+  mattered: the base implementation returned `self`, so a node that forgot to
+  override it left a renamed spec pointing at a column that no longer existed,
+  with nothing raised. Forgetting `children()` now raises.
+- `References` and `Method` were declared identically in four and two modules;
+  `_collect`/`_to_lazy` in three. They are one `polspec.frames`.
+- The four `sink_*` functions built the same six-argument batch-stream call
+  each. `_prepare` now returns the checked call as one value. The public
+  signatures stay spelled out, which is what makes a typo in one of them fail
+  at the call site.
+- `registry.py` imported `serialization` lazily in five methods and `report` in
+  a sixth, while importing `generation` and `validation` at module level. There
+  was no cycle; all six are hoisted.
 
 ## [0.4.1] - 2026-09-09
 
