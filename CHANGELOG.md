@@ -8,6 +8,14 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-11
+
+The headline is `format=`: a `String` column that says what its values look
+like, and is generated to satisfy its own validator. Around it, the release
+closes five silent edges, settles the validation option surface, spells out
+the `FrameSpec` signatures, and puts a type checker in CI. One narrow
+breaking change, under *Changed*.
+
 ### Added
 
 - `ColSpec(format=...)`: a `String` column that says what its values look
@@ -777,7 +785,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/MaxwellB13/polspec/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/MaxwellB13/polspec/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/MaxwellB13/polspec/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/MaxwellB13/polspec/compare/v0.2.0...v0.3.0
