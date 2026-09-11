@@ -52,9 +52,11 @@ production will reject.
 
     Every dtype polspec can generate — integers, floats, booleans, strings,
     binary, all four temporal types, `Enum` and `Categorical` — plus
-    nullability, bounds, string lengths and value domains.
+    nullability, bounds, string lengths, value domains and named string
+    formats such as `uuid4` and `email`.
 
-    [Declaring columns](https://maxwellb13.github.io/polspec/how-to/columns/)
+    [Declaring columns](https://maxwellb13.github.io/polspec/how-to/columns/) ·
+    [String formats](https://maxwellb13.github.io/polspec/how-to/formats/)
 
 - **Rules and invariants**
 
@@ -437,6 +439,7 @@ ColSpec(
     unique=False,
     null_probability=0.1,
     string_length=None,
+    format=None,
     distribution=None,
     distribution_params=None,
     choices=None,
@@ -587,6 +590,23 @@ ColSpec(pl.String, string_length=(8, 8))    # fixed width
 ColSpec(pl.Binary, string_length=(16, 64))
 ```
 
+## String formats
+
+`format=` names the shape a `String` column's values take, and both sides
+read it: generation fills the column from that format's sampler and
+validation checks every value against it.
+
+```python
+ColSpec(pl.String, format="uuid4", unique=True)
+ColSpec(pl.String, format="email", nullable=True)
+```
+
+The set is `uuid4`, `email`, `ipv4`, `ipv6`, `mac`, `hostname`,
+`iso_country` and `iso_currency`. A format owns the column's domain, so it
+cannot sit beside `choices` or `string_length`, and only a `String` column
+can carry one. See [String formats](https://maxwellb13.github.io/polspec/how-to/formats/) for what each generates,
+what each accepts, and what none of them promises.
+
 ## Distributions
 
 Numeric and temporal columns can be drawn from a shape other than uniform:
@@ -712,6 +732,125 @@ method survive. The dict key already is the column name, so a `col_name` that
 disagrees with its key is rejected. `from_dataframe`, `from_yaml` and
 `to_python` all declare columns this way, since their names come from data
 rather than from someone's class body.
+
+---
+
+# String formats
+Source: https://maxwellb13.github.io/polspec/how-to/formats/
+
+# String formats
+
+A `String` column can say how long its values are. `format=` lets it say what
+they look like, and the two sides of the spec read that one word: generation
+fills the column from the format's own sampler, and validation checks every
+value against the format's own test.
+
+```python
+class Users(FrameSpec):
+    user_id = ColSpec(pl.String, format="uuid4", unique=True)
+    email   = ColSpec(pl.String, format="email")
+    host    = ColSpec(pl.String, format="ipv4", nullable=True)
+
+df = Users.generate(10_000, seed=42)
+Users.validate(df)   # passes -- which is the point
+```
+
+Without a format, a column carrying a validator as ordinary as
+`col("email").str.contains("@")` could not be generated to satisfy its own
+spec. With one it can, because the sampler and the validator are one
+declaration in `polspec.formats`, reviewed in one diff and pinned by one
+round-trip test per format.
+
+## The formats
+
+| `format` | Generates | Validates |
+|:--|:--|:--|
+| `uuid4` | 32 hex digits in 8-4-4-4-12 groups, version nibble `4`, variant `8`–`b` | the same shape, either case |
+| `email` | a local part, `@`, a domain and a TLD from a small pool | one `@`, non-empty both sides, a dot in the domain |
+| `ipv4` | four dotted octets | four dotted decimals, each 0–255 |
+| `ipv6` | eight colon-separated four-digit hextets | eight colon-separated hextets of 1–4 hex digits, uncompressed |
+| `mac` | six colon-separated hex pairs | the same shape, either case |
+| `hostname` | two or three labels ending in a TLD | dot-separated RFC 1123 labels, at most 253 characters |
+| `iso_country` | one of the 249 ISO 3166-1 alpha-2 codes | membership in that list |
+| `iso_currency` | one of the ISO 4217 alpha-3 codes of circulating currencies | membership in that list |
+
+A validator is deliberately wider than its sampler where real data is: an
+uppercase UUID from another system validates, even though polspec generates
+lowercase ones. It is never wider than the standard it names.
+
+The set is closed. A named format is a twenty-line sampler with an
+unambiguous test; a `pattern=<regex>` would need a regex-to-sampler compiler
+and has no answer for `.*`. Validation of an arbitrary pattern is what
+`validators=[col("c").str.contains(...)]` is for.
+
+## What a format promises
+
+Syntax. `format="email"` generates a well-formed address and validates a
+well-formed address; nothing is looked up, so `nobody@example.invalid` is
+accepted and no generated address is deliverable. `hostname` accepts
+`localhost`; `ipv4` accepts `0.0.0.0`. See
+[Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/).
+
+## What a format combines with
+
+A format owns the column's whole domain, so it refuses anything that says
+what the values are a second time:
+
+<!-- docs: raises -->
+```python
+ColSpec(pl.String, format="email", choices=["a@b.co"])
+# SpecError: ColSpec cannot carry both format='email' and choices: each is a
+# complete description of the column's domain, and they cannot both hold.
+
+ColSpec(pl.String, format="uuid4", string_length=(36, 36))
+# SpecError: ... the format already fixes how long a value is.
+
+ColSpec(pl.Int64, format="uuid4")
+# SpecError: ColSpec.format is only supported for pl.String, got Int64.
+```
+
+Everything that says how the values are *distributed* still applies:
+
+- `nullable` and `null_probability` work as on any column.
+- `unique=True` draws without replacement. `uuid4` has room for any frame;
+  `iso_country` runs out at 249 rows and says so by name, the way a small
+  `choices` list does.
+- `validators` run alongside the format check. A column can carry
+  `format="email"` and a validator on the domain it should come from.
+- `tags` and `col_name` are untouched.
+
+## Foreign keys
+
+A format is part of the column's domain, so a key into a formatted parent is
+checked at declaration like every other domain narrowing. A child column with
+`format="uuid4"` accepts a parent with the same format and refuses one with
+another format or none; a plain `String` child accepts any parent. A parent
+whose `choices` are listed is checked value by value.
+
+```python
+class Sessions(FrameSpec):
+    user_id = ColSpec(pl.String, format="uuid4")
+    __foreign_keys__ = [ForeignKey("user_id", references=Users)]
+
+users = Users.generate(100, seed=1)
+sessions = Sessions.generate(1_000, seed=2, references={Users: users})
+Sessions.validate(sessions, references={Users: users})
+```
+
+## Reports and files
+
+The `format` finding reports values that do not match, with the format named
+and samples listed:
+
+```
+Column 'host': found 3 value(s) that are not ipv4 (four dotted decimal
+octets, each 0-255). Invalid samples: ['300.1.1.1', 'abc']
+```
+
+A format is one scalar key in a spec file -- `format: email` -- and one
+keyword in generated Python. Neither changes the file format version.
+`from_dataframe()` does not infer formats: guessing `email` from a sample is a
+guess, and the profiler's contract is to describe what is there.
 
 ---
 
@@ -1453,6 +1592,7 @@ Orders.validate(Orders.generate(1_000, seed=1), validate_checks=False)
 | Value in domain | `choices`, `Enum` categories |
 | Value within range | `bounds` |
 | Length within range | `string_length` |
+| Value has the declared shape | `format` |
 | Conditional values hold | `rules` |
 | Single-column predicates | `validators` |
 | Values distinct | `unique` |
@@ -1739,7 +1879,7 @@ as its default is the worst outcome -- pass `strict=False` to
 | | Round-trips |
 |:--|:--:|
 | dtypes, including parametrized `Enum` / `Datetime` / `Duration` / named `Categorical` | yes |
-| `nullable`, `null_probability`, `bounds`, `string_length`, `unique`, `tags` | yes |
+| `nullable`, `null_probability`, `bounds`, `string_length`, `format`, `unique`, `tags` | yes |
 | `choices`, `weights`, `distribution`, `distribution_params` | yes |
 | `rules` (`ColRule`) | yes |
 | `__unique_together__` | yes |
@@ -2777,7 +2917,7 @@ What one column declares, and the pieces that make up a declaration.
 
 ## ColSpec
 
-### ColSpec(dtype: 'pl.DataType | type[pl.DataType]', col_name: 'str | None' = None, nullable: 'bool' = False, bounds: 'Bound | tuple[Any, Any] | list[Any] | None' = None, tags: 'str | Sequence[str]' = (), unique: 'bool' = False, null_probability: 'float' = 0.1, string_length: 'Bound | tuple[int, int] | list[int] | None' = None, distribution: 'str | None' = None, distribution_params: 'dict[str, float] | None' = None, choices: 'tuple | list | dict | None' = None, weights: 'tuple[float, ...] | list[float] | None' = None, rules: 'tuple[ColRule, ...]' = (), validators: 'Check | pl.Expr | Pred | Sequence[Check | pl.Expr | Pred] | None' = ()) -> None
+### ColSpec(dtype: 'pl.DataType | type[pl.DataType]', col_name: 'str | None' = None, nullable: 'bool' = False, bounds: 'Bound | tuple[Any, Any] | list[Any] | None' = None, tags: 'str | Sequence[str]' = (), unique: 'bool' = False, null_probability: 'float' = 0.1, string_length: 'Bound | tuple[int, int] | list[int] | None' = None, format: 'str | None' = None, distribution: 'str | None' = None, distribution_params: 'dict[str, float] | None' = None, choices: 'tuple | list | dict | None' = None, weights: 'tuple[float, ...] | list[float] | None' = None, rules: 'tuple[ColRule, ...]' = (), validators: 'Check | pl.Expr | Pred | Sequence[Check | pl.Expr | Pred] | None' = ()) -> None
 
 One column's declaration: its type, and every claim made about its values.
 
@@ -2828,6 +2968,16 @@ null_probability : float, optional
     asking for nulls rather than as a leftover.
 string_length : Bound | tuple[int, int] | list[int] | None, optional
     The inclusive range of string lengths, where that applies.
+format : str | None, optional
+    The shape a `String` column's values take, by name: `"uuid4"`,
+    `"email"`, `"ipv4"`, `"ipv6"`, `"mac"`, `"hostname"`,
+    `"iso_country"` or `"iso_currency"`. Generation fills the column
+    from that format's own sampler and validation checks every value
+    against it, so a column carrying `format="email"` is generated to
+    satisfy its own spec. A format owns the column's whole domain:
+    it cannot be combined with `choices` or `string_length`, and only a
+    `String` column can carry one. What it promises is syntax -- an
+    address that is well-formed, not one that is deliverable.
 distribution : str | None, optional
     The name of the probability distribution for the column's values
     (e.g. `"uniform"`, `"normal"`).
@@ -3663,6 +3813,7 @@ through `report.rows(finding)`; structural ones describe the frame's shape.
 | `choices` | row-level | a value is outside `choices` or the `Enum` categories |
 | `bounds` | row-level | a value is outside `bounds`; `details` carry the extremes found |
 | `string_length` | row-level | a string or binary value's length is outside `string_length` |
+| `format` | row-level | a string value does not have the declared `format`; `details` name the format |
 | `rule` | row-level | a row matched a `ColRule` but holds a value outside its choices |
 | `validator` | row-level | a `ColSpec.validators` predicate is false |
 | `unique` | row-level | a `unique=True` column holds duplicates |
@@ -4030,6 +4181,15 @@ from two ten-category enums yields 100.
 It emits the whole coverage set, unlike `generate(0)` and the sinks, which all
 produce nothing.
 
+## A `format` promises syntax, not existence
+
+`format="email"` generates a well-formed address, not a deliverable one, and
+validates the shape, not whether anything answers. Nothing is looked up on
+either side, so `nobody@example.invalid` passes, `hostname` accepts
+`localhost`, and `ipv4` accepts `0.0.0.0`. A column that has to hold *real*
+identifiers is a `choices` list or a foreign key into the table that owns
+them. See [String formats](https://maxwellb13.github.io/polspec/how-to/formats/).
+
 ## Smaller sharp edges
 
 - **Unsupported dtypes are accepted at declaration.** `ColSpec(pl.List(...))`
@@ -4344,15 +4504,15 @@ wide domain would do. What remains is narrowing the gap from the other end:
 letting a column *describe* its values well enough that a validator becomes
 generatable.
 
-**Domains generation cannot currently express.** A `String` column generates
-random characters within its `string_length`, and there is no way to say more
-than that about its shape. This is why a column carrying a validator as
-ordinary as `pl.col("email").str.contains("@")` cannot be generated to satisfy
-its own spec. A pattern or named format on `ColSpec` — a regex, or something
-like `format="email"` — would let generation produce values its own validators
-accept, converting a whole class of the gap above into something that
-round-trips rather than something documented. It is also most of what stands
-between generated fixtures and fixtures that look like data.
+**Domains generation can only partly express.** A `String` column can now
+say what its values look like through a named
+[`format`](https://maxwellb13.github.io/polspec/how-to/formats/) — `uuid4`, `email`, `ipv4` and five
+others — and is generated to satisfy it, so the validator
+`col("email").str.contains("@")` no longer has to fail its own spec. The set
+is closed, and that is the remaining gap: a `pattern=<regex>` for *validation
+only* is the natural follow-up, because polspec can check any regex today and
+can generate a curated set. Generating from an arbitrary pattern is a much
+larger piece of work with no answer for `.*`, and is not planned.
 
 Both directions are active. Neither has a fixed shape yet, so the specific
 options `generate()` accepts may well change under you.
@@ -4452,6 +4612,28 @@ seed produces; see
 ## [Unreleased]
 
 ### Added
+
+- `ColSpec(format=...)`: a `String` column that says what its values look
+  like, and is generated to satisfy its own validator. Eight formats --
+  `uuid4`, `email`, `ipv4`, `ipv6`, `mac`, `hostname`, `iso_country`,
+  `iso_currency` -- each with a sampler in the engine and a check in
+  validation declared side by side in `polspec.formats`, and pinned by a
+  round trip per format:
+
+  ```python
+  class Users(FrameSpec):
+      user_id = ColSpec(pl.String, format="uuid4", unique=True)
+      email   = ColSpec(pl.String, format="email")
+
+  Users.validate(Users.generate(1_000_000, seed=42))   # passes
+  ```
+
+  Validation reports a new `format` finding. A format is one `format:` key in
+  a spec file and takes part in the domain check a foreign key runs at
+  declaration. It cannot be combined with `choices` or `string_length`, and
+  only a `String` column can carry one; each is refused with a message
+  saying which to drop. What a format promises is syntax: see *Known
+  limitations*.
 
 - `ValidationOptions` is exported from `polspec`, and `validate()` and
   `inspect()` take it as `options=`. Every switch as one value, for when the

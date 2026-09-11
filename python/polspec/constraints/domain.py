@@ -22,6 +22,8 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 
 from polspec.bound import Bound
+from polspec.formats import Format
+from polspec.formats import lookup as _lookup_format
 
 if TYPE_CHECKING:
     from polspec.spec import ColSpec
@@ -60,20 +62,23 @@ class Domain:
     """The values one column is declared to hold.
 
     `values` is the finite set the column draws from -- its `choices`, an
-    `Enum`'s categories, or the two narrowed against each other -- and is
-    None for a column with no finite domain. `bounds` is the inclusive
-    range, None when unconstrained on both sides. A column may have either,
-    both or neither.
+    `Enum`'s categories, a finite `format`'s list, or the first two narrowed
+    against each other -- and is None for a column with no finite domain.
+    `bounds` is the inclusive range, None when unconstrained on both sides.
+    `format` is the shape a `String` value takes, for a format that is not
+    a finite list. A column may have any of these, or none.
     """
 
     dtype: pl.DataType
     values: tuple[Any, ...] | None = None
     bounds: Bound | None = None
+    format: Format | None = None
 
     @classmethod
     def of(cls, spec: ColSpec) -> Domain:
         """The domain a `ColSpec` declares."""
         values: tuple[Any, ...] | None = None
+        fmt: Format | None = None
         if isinstance(spec.dtype, pl.Enum):
             categories = spec.dtype.categories.to_list()
             values = (
@@ -83,22 +88,28 @@ class Domain:
             )
         elif spec.choices is not None:
             values = tuple(spec.choices)
+        elif spec.format is not None:
+            fmt = _lookup_format(spec.format)
+            if fmt.is_finite:
+                values, fmt = fmt.values, None
 
         bounds = spec.bounds if spec.bounds is not None else None
         if bounds is not None and bounds.is_open_both:
             bounds = None
-        return cls(dtype=spec.dtype, values=values, bounds=bounds)
+        return cls(dtype=spec.dtype, values=values, bounds=bounds, format=fmt)
 
     @property
     def is_open(self) -> bool:
         """True when nothing about this column's values is declared."""
-        return self.values is None and self.bounds is None
+        return self.values is None and self.bounds is None and self.format is None
 
     def __str__(self) -> str:
         if self.values is not None:
             return f"one of {_listed(self.values)}"
         if self.bounds is not None:
             return f"bounds {self.bounds}"
+        if self.format is not None:
+            return f"format {self.format.name!r}"
         return f"any {self.dtype}"
 
     # ------------------------------------------------------------------
@@ -135,6 +146,28 @@ class Domain:
             return None
 
     def _rejects(self, other: Domain) -> str | None:
+        if self.format is not None:
+            if other.format is not None:
+                if other.format.name == self.format.name:
+                    return None
+                return f"{other} is not {self}"
+            if other.values is None:
+                return f"{other} is not limited to {self}"
+            # A finite domain can be checked outright: run the format's own
+            # test over the listed values, the way validation would.
+            listed = pl.Series(list(other.values), dtype=pl.String, strict=False)
+            passes = listed.to_frame("v").select(self.format.check(pl.col("v")))
+            outside = [
+                raw
+                for raw, ok in zip(
+                    other.values, passes.to_series().to_list(), strict=True
+                )
+                if not ok
+            ]
+            if outside:
+                return f"{_listed(outside)} is not {self}"
+            return None
+
         if self.values is not None:
             mine = set(self._comparable(self.values, self.dtype))
             if other.values is None:

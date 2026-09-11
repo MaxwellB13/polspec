@@ -2,11 +2,13 @@
 //! sampling code, and nothing else.
 //!
 //! - `plan.rs` -- `ColumnPlan`, the typed instructions for one column.
+//! - `format.rs` -- `Template`, the shape of a string with a format.
 //! - `dist.rs` -- the distributions and their canonical parameters.
 //! - `sample.rs` -- filling a column, in seeded parallel chunks.
 //! - `unique.rs` -- filling a column whose values must all differ.
 
 mod dist;
+mod format;
 mod plan;
 mod sample;
 mod unique;

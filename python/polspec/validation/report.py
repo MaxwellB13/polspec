@@ -33,6 +33,7 @@ FindingCode = Literal[
     "choices",
     "bounds",
     "string_length",
+    "format",
     "rule",
     "validator",
     "unique",

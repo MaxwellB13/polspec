@@ -11,6 +11,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 use crate::dist::Distribution;
+use crate::format::{RawPart, Template};
 
 /// Declares `Kind` alongside the three views of it that have to stay in step:
 /// the list of names, the parse, and the reverse lookup. One list, so a new
@@ -61,11 +62,15 @@ declare_kinds! {
     Bool => "bool",
     String => "string",
     Index => "index",
+    Template => "template",
 }
 
 impl Kind {
     pub fn is_numeric(self) -> bool {
-        !matches!(self, Kind::Bool | Kind::String | Kind::Index)
+        !matches!(
+            self,
+            Kind::Bool | Kind::String | Kind::Index | Kind::Template
+        )
     }
 }
 
@@ -131,6 +136,7 @@ pub struct PlanArgs<'a> {
     pub distribution: Option<&'a str>,
     pub params: Option<&'a HashMap<String, f64>>,
     pub unique: bool,
+    pub template: Option<&'a [RawPart]>,
 }
 
 /// One column's generation instructions.
@@ -169,6 +175,8 @@ pub struct ColumnPlan {
     /// Whether every non-null value must differ from every other.
     #[pyo3(get)]
     pub unique: bool,
+    /// The shape of a `Template` column's values. `None` for every other kind.
+    pub template: Option<Template>,
 }
 
 pub const DEFAULT_STR_MIN_LEN: usize = 5;
@@ -191,6 +199,7 @@ impl ColumnPlan {
             distribution,
             params,
             unique,
+            template,
         } = args;
 
         let kind = Kind::parse(kind).ok_or_else(|| {
@@ -224,6 +233,21 @@ impl ColumnPlan {
                 return Err(format!("Weights for column '{name}' must not all be zero"));
             }
         }
+        let template = match (kind, template) {
+            (Kind::Template, Some(raw)) => Some(Template::compile(raw, &name)?),
+            (Kind::Template, None) => {
+                return Err(format!(
+                    "Column '{name}' has kind 'template' but no template"
+                ));
+            }
+            (_, Some(_)) => {
+                return Err(format!(
+                    "Column '{name}' carries a template but has kind '{}', not 'template'",
+                    kind.name()
+                ));
+            }
+            (_, None) => None,
+        };
         match kind {
             Kind::Index => {
                 let n = n_categories.ok_or_else(|| {
@@ -294,6 +318,7 @@ impl ColumnPlan {
             distribution,
             p_true,
             unique,
+            template,
         })
     }
 }
@@ -304,7 +329,7 @@ impl ColumnPlan {
     #[pyo3(signature = (
         name, kind, *, nullable=false, null_probability=0.0, min=None, max=None,
         n_categories=None, weights=None, str_min_len=None, str_max_len=None,
-        distribution=None, params=None, unique=false,
+        distribution=None, params=None, unique=false, template=None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -321,6 +346,7 @@ impl ColumnPlan {
         distribution: Option<&str>,
         params: Option<HashMap<String, f64>>,
         unique: bool,
+        template: Option<Vec<RawPart>>,
     ) -> PyResult<Self> {
         ColumnPlan::build(PlanArgs {
             name,
@@ -336,6 +362,7 @@ impl ColumnPlan {
             distribution,
             params: params.as_ref(),
             unique,
+            template: template.as_deref(),
         })
         .map_err(PyValueError::new_err)
     }

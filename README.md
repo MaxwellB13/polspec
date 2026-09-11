@@ -54,6 +54,7 @@ Full docs: **[maxwellb13.github.io/polspec](https://maxwellb13.github.io/polspec
 - **Tutorial** — [Getting started](https://maxwellb13.github.io/polspec/tutorial/getting-started/) ·
   [Related tables](https://maxwellb13.github.io/polspec/tutorial/related-tables/)
 - **How-to** — [Declare columns](https://maxwellb13.github.io/polspec/how-to/columns/) ·
+  [String formats](https://maxwellb13.github.io/polspec/how-to/formats/) ·
   [Constraints](https://maxwellb13.github.io/polspec/how-to/constraints/) ·
   [Generate](https://maxwellb13.github.io/polspec/how-to/generating/) ·
   [Validate](https://maxwellb13.github.io/polspec/how-to/validating/) ·

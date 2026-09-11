@@ -10,6 +10,28 @@ seed produces; see
 
 ### Added
 
+- `ColSpec(format=...)`: a `String` column that says what its values look
+  like, and is generated to satisfy its own validator. Eight formats --
+  `uuid4`, `email`, `ipv4`, `ipv6`, `mac`, `hostname`, `iso_country`,
+  `iso_currency` -- each with a sampler in the engine and a check in
+  validation declared side by side in `polspec.formats`, and pinned by a
+  round trip per format:
+
+  ```python
+  class Users(FrameSpec):
+      user_id = ColSpec(pl.String, format="uuid4", unique=True)
+      email   = ColSpec(pl.String, format="email")
+
+  Users.validate(Users.generate(1_000_000, seed=42))   # passes
+  ```
+
+  Validation reports a new `format` finding. A format is one `format:` key in
+  a spec file and takes part in the domain check a foreign key runs at
+  declaration. It cannot be combined with `choices` or `string_length`, and
+  only a `String` column can carry one; each is refused with a message
+  saying which to drop. What a format promises is syntax: see *Known
+  limitations*.
+
 - `ValidationOptions` is exported from `polspec`, and `validate()` and
   `inspect()` take it as `options=`. Every switch as one value, for when the
   same settings go through several calls:

@@ -359,6 +359,39 @@ fn unique_string(plan: &ColumnPlan, n: usize, seed: u64) -> Result<StringChunked
     Ok(place!(builder, mask, values))
 }
 
+/// A templated string column drawn without replacement.
+///
+/// Rejection against a set, like `unique_string`. The refusal names the
+/// template's own cardinality, so `format="uuid4"` can ask for a billion rows
+/// and an `iso_country` column is told at 250 that there is nothing left.
+fn unique_template(plan: &ColumnPlan, n: usize, seed: u64) -> Result<StringChunked, String> {
+    let name = PlSmallStr::from(plan.name.as_str());
+    let mut builder = StringChunkedBuilder::new(name, n);
+    if n == 0 {
+        return Ok(builder.finish());
+    }
+    let template = plan
+        .template
+        .as_ref()
+        .ok_or_else(|| format!("Column '{}' has kind 'template' but no template", plan.name))?;
+    let sampler = template.sampler();
+
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed_for_chunk(seed, 0));
+    let (mask, wanted) = null_mask(plan, n, &mut rng)?;
+    if (wanted as u128) > template.cardinality() {
+        return Err(too_small(plan, wanted, template.cardinality()));
+    }
+
+    let mut scratch = Vec::with_capacity(template.max_bytes());
+    let values = distinct_by_rejection(
+        wanted,
+        || sampler.draw(&mut rng, &mut scratch),
+        |s: &String| s.clone(),
+    )
+    .ok_or_else(|| too_small(plan, wanted, template.cardinality()))?;
+    Ok(place!(builder, mask, values))
+}
+
 /// Fills one column whose values must all differ.
 pub fn generate_unique_series(plan: &ColumnPlan, n: usize, seed: u64) -> Result<Series, String> {
     Ok(match plan.kind {
@@ -375,6 +408,7 @@ pub fn generate_unique_series(plan: &ColumnPlan, n: usize, seed: u64) -> Result<
         Kind::Bool => unique_bool(plan, n, seed)?.into_series(),
         Kind::String => unique_string(plan, n, seed)?.into_series(),
         Kind::Index => unique_index(plan, n, seed)?.into_series(),
+        Kind::Template => unique_template(plan, n, seed)?.into_series(),
     })
 }
 

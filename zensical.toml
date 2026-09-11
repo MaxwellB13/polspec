@@ -14,6 +14,7 @@ nav = [
   ] },
   { "How-to guides" = [
     { "Declare columns" = "how-to/columns.md" },
+    { "String formats" = "how-to/formats.md" },
     { "Specs as values" = "how-to/tablespec.md" },
     { "Constraints" = "how-to/constraints.md" },
     { "Generate data" = "how-to/generating.md" },
