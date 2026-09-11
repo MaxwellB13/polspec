@@ -108,7 +108,14 @@ which is a placeholder.
    uv lock
    ```
 
-   Then move the *Unreleased* section of `CHANGELOG.md` under the new version.
-2. Commit, then tag `vX.Y.Z` and push the tag.
-3. The release workflow checks the tag matches `pyproject.toml`, builds wheels,
-   publishes to PyPI, and attaches the wheels to a GitHub release.
+   A feature is a *minor* bump, not a patch one, whatever its size.
+2. Move the *Unreleased* section of `CHANGELOG.md` under a
+   `## [X.Y.Z] - YYYY-MM-DD` heading, add its compare link at the foot of the
+   file, and leave a fresh empty *Unreleased* behind. The release workflow
+   refuses a tag whose version has neither, so this is not a step that can be
+   skipped and fixed later — v0.4.0 and v0.4.1 both were, and shipped
+   claiming a released breaking change had not happened yet.
+3. Commit, then tag `vX.Y.Z` and push the tag.
+4. The release workflow checks the tag against `pyproject.toml` and
+   `CHANGELOG.md`, builds wheels, publishes to PyPI, and attaches the wheels
+   to a GitHub release.

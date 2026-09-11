@@ -8,23 +8,15 @@ seed produces; see
 
 ## [Unreleased]
 
-The internals release. 0.2.0 and 0.3.0 settled the vocabulary; this one goes
-underneath it, to the Rust generator and the places where the same table was
-being maintained in two or three languages.
+Nothing yet.
 
-Nothing about how a spec is written changes. One thing does break, and it is
-the same thing the roadmap has always reserved: **the values a given seed
-produces are different**. Any test asserting on specific generated values
-needs re-baselining; a test asserting on their *properties* -- bounds,
-distinctness, null share, distribution shape -- does not. polspec's own suite
-needed no changes, which is the shape of test this library is built to support.
+## [0.4.1] - 2026-09-09
 
-Generation got faster, by between a tenth and a third depending on the column.
-Measured A/B against v0.3.0 on one machine, same build profile, twenty million
-rows: the four-column frame in `benchmarks/bench.py` 1.30x, a
-`unique=True` Int64 column 1.21x, a bounded nullable Int64 column 1.17x, an
-Enum column 1.25x, a String column unchanged. Treat the ratios rather than the
-absolute numbers as the claim.
+The hierarchy release. A self-referencing `ForeignKey` says that every parent
+value exists somewhere in the frame, and nothing more. This adds the
+declaration that says the rest of it -- one parent per reference, a bounded
+depth, no cycles -- and makes `generate()` satisfy it rather than leaving it to
+the draw.
 
 ### Added
 
@@ -63,6 +55,38 @@ absolute numbers as the claim.
   `generate_batches` and the `sink_*` functions refuse a spec carrying one: a
   forest spans the whole frame, and batches are generated independently. See
   [Hierarchies and link tables](https://maxwellb13.github.io/polspec/how-to/hierarchies/).
+
+### Documentation
+
+- The spec file format is version 3, which adds the `hierarchy:` key. A
+  version 2 file loads unchanged.
+- [Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/)
+  now points a self-referencing `ForeignKey` at `Hierarchy` for the case that
+  wants a real tree, rather than carrying a recipe of its own. Two tests pin
+  the two apart.
+
+## [0.4.0] - 2026-09-08
+
+The internals release. 0.2.0 and 0.3.0 settled the vocabulary; this one goes
+underneath it, to the Rust generator and the places where the same table was
+being maintained in two or three languages.
+
+Nothing about how a spec is written changes. One thing does break, and it is
+the same thing the roadmap has always reserved: **the values a given seed
+produces are different**. Any test asserting on specific generated values
+needs re-baselining; a test asserting on their *properties* -- bounds,
+distinctness, null share, distribution shape -- does not. polspec's own suite
+needed no changes, which is the shape of test this library is built to support.
+
+Generation got faster, by between a tenth and a third depending on the column.
+Measured A/B against v0.3.0 on one machine, same build profile, twenty million
+rows: the four-column frame in `benchmarks/bench.py` 1.30x, a
+`unique=True` Int64 column 1.21x, a bounded nullable Int64 column 1.17x, an
+Enum column 1.25x, a String column unchanged. Treat the ratios rather than the
+absolute numbers as the claim.
+
+### Added
+
 - `generate`, `generate_batches`, `inspect`, `validate`, `sink_parquet`,
   `sink_ipc`, `sink_csv` and `sink_ndjson` are exported from `polspec` itself.
   Each takes a `TableSpec` as its first argument and each is what the matching
@@ -116,16 +140,14 @@ absolute numbers as the claim.
 
 ### Documentation
 
-- The spec file format is version 3, which adds the `hierarchy:` key. A
-  version 2 file loads unchanged.
 - A self-referencing `ForeignKey` guarantees that every parent value exists,
   and nothing more -- in particular not that the result is a tree. Parents are
   sampled from the whole frame, so some rows end up in a cycle or pointing at
   themselves, which is what makes a recursive query fail to terminate, and
   `validate()` does not report it because no part of a spec can say "acyclic".
   [Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/)
-  now says so, and points at `Hierarchy` for the case that wants a real tree.
-  Two tests pin the behaviour, so the two stay told apart.
+  now says so, with a recipe for a genuine hierarchy, and the roadmap carries
+  what closing the gap would need. Two tests pin the behaviour.
 
 ### Fixed
 
@@ -625,7 +647,9 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/MaxwellB13/polspec/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/MaxwellB13/polspec/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/MaxwellB13/polspec/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/MaxwellB13/polspec/compare/v0.1.5...v0.2.0
 [0.1.5]: https://github.com/MaxwellB13/polspec/compare/v0.1.4...v0.1.5
