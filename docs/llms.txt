@@ -20,6 +20,7 @@ https://maxwellb13.github.io/polspec/llms-full.txt
 ## How-to guides
 
 - [Declare columns](https://maxwellb13.github.io/polspec/how-to/columns/): A `ColSpec` describes one column.
+- [String formats](https://maxwellb13.github.io/polspec/how-to/formats/): A `String` column can say how long its values are.
 - [Specs as values](https://maxwellb13.github.io/polspec/how-to/tablespec/): A `FrameSpec` class body is the convenient way to *write* a spec.
 - [Constraints](https://maxwellb13.github.io/polspec/how-to/constraints/): Beyond the shape of a single value, a spec can assert relationships.
 - [Generate data](https://maxwellb13.github.io/polspec/how-to/generating/): Columns are generated independently and in parallel by the Rust extension, then cast to their declared dtypes in one Polars pass.

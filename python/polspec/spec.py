@@ -20,6 +20,7 @@ from polspec.distributions import (
 from polspec.dtypes import _bound_endpoint_to_physical, _dtype_value_limits
 from polspec.errors import SpecError
 from polspec.expr import Pred
+from polspec.formats import lookup as _lookup_format
 from polspec.rules import ColRule, _reject_duplicate_choices
 
 
@@ -102,6 +103,16 @@ class ColSpec:
         asking for nulls rather than as a leftover.
     string_length : Bound | tuple[int, int] | list[int] | None, optional
         The inclusive range of string lengths, where that applies.
+    format : str | None, optional
+        The shape a `String` column's values take, by name: `"uuid4"`,
+        `"email"`, `"ipv4"`, `"ipv6"`, `"mac"`, `"hostname"`,
+        `"iso_country"` or `"iso_currency"`. Generation fills the column
+        from that format's own sampler and validation checks every value
+        against it, so a column carrying `format="email"` is generated to
+        satisfy its own spec. A format owns the column's whole domain:
+        it cannot be combined with `choices` or `string_length`, and only a
+        `String` column can carry one. What it promises is syntax -- an
+        address that is well-formed, not one that is deliverable.
     distribution : str | None, optional
         The name of the probability distribution for the column's values
         (e.g. `"uniform"`, `"normal"`).
@@ -134,6 +145,7 @@ class ColSpec:
     unique: bool = False
     null_probability: float = _DEFAULT_NULL_PROBABILITY
     string_length: Bound | tuple[int, int] | list[int] | None = None
+    format: str | None = None
     distribution: str | None = None
     distribution_params: dict[str, float] | None = None
     choices: tuple | list | dict | None = None
@@ -155,6 +167,7 @@ class ColSpec:
         self._normalize_distribution()
 
         self._validate_probabilities()
+        self._validate_format()
         self._validate_bounds_dtype_support()
         self._validate_bounds_fit_dtype()
         self._validate_weights()
@@ -338,6 +351,39 @@ class ColSpec:
             "null_probability to say the column holds no nulls.",
             stacklevel=4,
         )
+
+    def _validate_format(self) -> None:
+        """Rejects a format on a column it cannot describe, or beside a
+        second definition of the same domain.
+
+        A format is the whole story of what a `String` value looks like, so
+        anything else that says what the values are -- `choices`, or the
+        length a `uuid4` already fixes at 36 -- is a contradiction of the
+        kind `_validate_choices_against_domain` already refuses, and is
+        refused here in the same voice: drop one or the other.
+        """
+        if self.format is None:
+            return
+        fmt = _lookup_format(self.format)  # raises, naming the nearest format
+        object.__setattr__(self, "format", fmt.name)
+        if self.dtype not in (pl.String, pl.Utf8):
+            raise SpecError(
+                f"ColSpec.format is only supported for pl.String, got "
+                f"{self.dtype!r}. A format describes the text a value is "
+                "written as, which no other dtype holds."
+            )
+        if self.choices is not None:
+            raise SpecError(
+                f"ColSpec cannot carry both format={fmt.name!r} and choices: "
+                "each is a complete description of the column's domain, and "
+                "they cannot both hold. Drop the choices, or the format."
+            )
+        if self.string_length is not None:
+            raise SpecError(
+                f"ColSpec cannot carry both format={fmt.name!r} and "
+                "string_length: the format already fixes how long a value is. "
+                "Drop the string_length, or the format."
+            )
 
     def _validate_bounds_dtype_support(self) -> None:
         if self.bounds is not None and not (

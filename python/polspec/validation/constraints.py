@@ -19,12 +19,14 @@ import polars as pl
 
 from polspec.constraints import is_textual as _is_textual
 from polspec.dtypes import _typed_values
+from polspec.formats import lookup as _lookup_format
 from polspec.validation.report import Finding
 
 if TYPE_CHECKING:
     from polspec.bound import Bound
     from polspec.check import Check
     from polspec.foreign_key import ForeignKey
+    from polspec.formats import Format
     from polspec.hierarchy import Hierarchy
     from polspec.rules import ColRule
     from polspec.spec import ColSpec
@@ -185,6 +187,25 @@ class _StringLength(_Constraint):
             f"Column '{self.column}': found {count} value(s) with string length "
             f"outside [{self.length.min}, {self.length.max}]. "
             f"Invalid samples: {samples}"
+        )
+
+
+@dataclass
+class _Format(_Constraint):
+    column: str = ""
+    format: Format | None = None
+    code: str = "format"
+
+    def involved(self) -> tuple[str, ...]:
+        return (self.column,)
+
+    def details(self, stats: dict[str, list]) -> dict[str, Any]:
+        return {"format": self.format.name}
+
+    def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
+        return (
+            f"Column '{self.column}': found {count} value(s) that are not "
+            f"{self.format}. Invalid samples: {samples}"
         )
 
 
@@ -420,6 +441,18 @@ def _column_constraints(
                     length=spec.string_length,
                 )
             )
+
+    if spec.format is not None:
+        fmt = _lookup_format(spec.format)
+        constraints.append(
+            _Format(
+                key=f"{name}__format",
+                mask=present & ~fmt.check(column),
+                sample_expr=column,
+                column=name,
+                format=fmt,
+            )
+        )
 
     if options.rules and spec.rules:
         constraints.extend(_rule_constraints(name, spec, actual_dtype, df_col_names))

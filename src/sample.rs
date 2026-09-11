@@ -483,6 +483,58 @@ fn gen_string_column(plan: &ColumnPlan, n: usize, seed: u64) -> Result<StringChu
     ))
 }
 
+/// A templated string column: each row filled from the plan's `Template`.
+///
+/// Chunked and collected the same way as `gen_string_column`, and for the
+/// same reasons; the only difference is where the bytes come from.
+fn gen_template_column(plan: &ColumnPlan, n: usize, seed: u64) -> Result<StringChunked, String> {
+    let name = PlSmallStr::from(plan.name.as_str());
+    if n == 0 {
+        return Ok(StringChunkedBuilder::new(name, 0).finish());
+    }
+    let template = plan
+        .template
+        .as_ref()
+        .ok_or_else(|| format!("Column '{}' has kind 'template' but no template", plan.name))?;
+    let sampler = template.sampler();
+    let bernoulli = draws_nulls(plan)
+        .then(|| null_bernoulli(plan))
+        .transpose()?;
+
+    let chunks: Vec<StringChunked> = (0..n.div_ceil(CHUNK_SIZE))
+        .into_par_iter()
+        .map(|i| {
+            let start = i * CHUNK_SIZE;
+            let len = (start + CHUNK_SIZE).min(n) - start;
+            let mut builder = StringChunkedBuilder::new(name.clone(), len);
+            let mut rng = chunk_rng(seed, i);
+            let mut scratch: Vec<u8> = Vec::with_capacity(template.max_bytes());
+            for _ in 0..len {
+                if bernoulli.as_ref().is_some_and(|b| b.sample(&mut rng)) {
+                    builder.append_null();
+                    continue;
+                }
+                sampler.fill(&mut rng, &mut scratch);
+                // SAFETY: every template part is ASCII or a `String`, so the
+                // buffer is valid UTF-8 -- see `format::Template::compile`.
+                let s = unsafe { std::str::from_utf8_unchecked(&scratch) };
+                builder.append_value(s);
+            }
+            builder.finish()
+        })
+        .collect();
+
+    Ok(StringChunked::from_chunk_iter(
+        name,
+        chunks.iter().map(|ca| {
+            ca.downcast_iter()
+                .next()
+                .expect("one chunk per part")
+                .clone()
+        }),
+    ))
+}
+
 /// Fills one column according to its plan.
 pub fn generate_series(plan: &ColumnPlan, n: usize, seed: u64) -> Result<Series, String> {
     if plan.unique {
@@ -503,6 +555,7 @@ pub fn generate_series(plan: &ColumnPlan, n: usize, seed: u64) -> Result<Series,
         Kind::Float32 => gen_float32_column(plan, n, seed)?.into_series(),
         Kind::Bool => gen_bool_column(plan, n, seed)?.into_series(),
         Kind::String => gen_string_column(plan, n, seed)?.into_series(),
+        Kind::Template => gen_template_column(plan, n, seed)?.into_series(),
         Kind::Index => gen_index_column(plan, n, seed)?.into_series(),
     })
 }

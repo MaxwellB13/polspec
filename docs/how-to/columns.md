@@ -12,6 +12,7 @@ ColSpec(
     unique=False,
     null_probability=0.1,
     string_length=None,
+    format=None,
     distribution=None,
     distribution_params=None,
     choices=None,
@@ -161,6 +162,23 @@ ColSpec(pl.String, choices=[1, "1"])
 ColSpec(pl.String, string_length=(8, 8))    # fixed width
 ColSpec(pl.Binary, string_length=(16, 64))
 ```
+
+## String formats
+
+`format=` names the shape a `String` column's values take, and both sides
+read it: generation fills the column from that format's sampler and
+validation checks every value against it.
+
+```python
+ColSpec(pl.String, format="uuid4", unique=True)
+ColSpec(pl.String, format="email", nullable=True)
+```
+
+The set is `uuid4`, `email`, `ipv4`, `ipv6`, `mac`, `hostname`,
+`iso_country` and `iso_currency`. A format owns the column's domain, so it
+cannot sit beside `choices` or `string_length`, and only a `String` column
+can carry one. See [String formats](formats.md) for what each generates,
+what each accepts, and what none of them promises.
 
 ## Distributions
 

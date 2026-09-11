@@ -49,6 +49,7 @@ through `report.rows(finding)`; structural ones describe the frame's shape.
 | `choices` | row-level | a value is outside `choices` or the `Enum` categories |
 | `bounds` | row-level | a value is outside `bounds`; `details` carry the extremes found |
 | `string_length` | row-level | a string or binary value's length is outside `string_length` |
+| `format` | row-level | a string value does not have the declared `format`; `details` name the format |
 | `rule` | row-level | a row matched a `ColRule` but holds a value outside its choices |
 | `validator` | row-level | a `ColSpec.validators` predicate is false |
 | `unique` | row-level | a `unique=True` column holds duplicates |

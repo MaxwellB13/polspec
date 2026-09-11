@@ -41,9 +41,11 @@ production will reject.
 
     Every dtype polspec can generate — integers, floats, booleans, strings,
     binary, all four temporal types, `Enum` and `Categorical` — plus
-    nullability, bounds, string lengths and value domains.
+    nullability, bounds, string lengths, value domains and named string
+    formats such as `uuid4` and `email`.
 
-    [Declaring columns](how-to/columns.md)
+    [Declaring columns](how-to/columns.md) ·
+    [String formats](how-to/formats.md)
 
 - **Rules and invariants**
 

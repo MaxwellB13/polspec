@@ -24,6 +24,7 @@ from polspec.dtypes import (
     _typed_values,
 )
 from polspec.errors import GenerationError
+from polspec.formats import lookup as _lookup_format
 from polspec.spec import ColSpec, _column_kind
 
 if TYPE_CHECKING:
@@ -173,15 +174,19 @@ _ENGINE_KINDS: dict[pl.DataType, str] = {
 def _domain(spec: ColSpec) -> pl.Series | None:
     """The finite, typed domain a column draws from, if it has one.
 
-    Declared `choices`, or an Enum's categories. The engine samples *indices*
-    into this and the values are gathered back on the Python side, so a
-    choice keeps its type -- a `datetime`, a `bytes`, a `True` -- with no
-    string round-trip.
+    Declared `choices`, an Enum's categories, or a finite `format`'s list.
+    The engine samples *indices* into this and the values are gathered back
+    on the Python side, so a choice keeps its type -- a `datetime`, a
+    `bytes`, a `True` -- with no string round-trip.
     """
     if spec.choices is not None:
         return _typed_values(spec.choices, spec.dtype)
     if isinstance(spec.dtype, pl.Enum):
         return pl.Series(spec.dtype.categories, dtype=spec.dtype)
+    if spec.format is not None:
+        fmt = _lookup_format(spec.format)
+        if fmt.is_finite:
+            return _typed_values(fmt.values, spec.dtype)
     return None
 
 
@@ -240,6 +245,11 @@ def _plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None
                 k: float(v) for k, v in spec.distribution_params.items()
             }
         return column_plan(name, "bool", weights=weights, **options), None
+
+    # A shaped string: the engine fills each value from the format's template.
+    if spec.format is not None:
+        template = list(_lookup_format(spec.format).template or ())
+        return column_plan(name, "template", template=template, **options), None
 
     # Free strings: String, Binary, and a Categorical with no pinned domain.
     length = spec.string_length or Bound(*_DEFAULT_STRING_LEN)

@@ -306,6 +306,7 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
         from_data=_bound_from_data,
         to_source=_bound_to_source,
     ),
+    Field("format", since=3),
     Field("distribution"),
     Field(
         "distribution_params",

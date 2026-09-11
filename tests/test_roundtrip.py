@@ -37,6 +37,7 @@ from polspec import (
     col,
     generate,
 )
+from polspec.formats import FORMATS
 
 ROWS = 300
 SEED = 11
@@ -109,6 +110,21 @@ COLUMN_CASES: dict[str, ColSpec] = {
     "string_choices_weighted": ColSpec(pl.String, choices={"a": 1.0, "b": 2.0}),
     "binary": ColSpec(pl.Binary),
     "binary_len": ColSpec(pl.Binary, string_length=(2, 4)),
+    # formats: a String column generated to satisfy its own validator
+    "format_uuid4": ColSpec(pl.String, format="uuid4"),
+    "format_email": ColSpec(pl.String, format="email"),
+    "format_ipv4": ColSpec(pl.String, format="ipv4"),
+    "format_ipv6": ColSpec(pl.String, format="ipv6"),
+    "format_mac": ColSpec(pl.String, format="mac"),
+    "format_hostname": ColSpec(pl.String, format="hostname"),
+    "format_iso_country": ColSpec(pl.String, format="iso_country"),
+    "format_iso_currency": ColSpec(pl.String, format="iso_currency"),
+    "format_nullable": ColSpec(
+        pl.String, format="email", nullable=True, null_probability=0.3
+    ),
+    "format_with_validator": ColSpec(
+        pl.String, format="email", validators=[col("c").str.contains("@")]
+    ),
     # temporal
     "date": ColSpec(pl.Date),
     "date_bounded": ColSpec(
@@ -202,6 +218,7 @@ COLUMN_CASES: dict[str, ColSpec] = {
     "unique_nullable": ColSpec(
         pl.Int32, bounds=(1, 400), unique=True, nullable=True, null_probability=0.3
     ),
+    "unique_format": ColSpec(pl.String, format="uuid4", unique=True),
 }
 
 
@@ -222,6 +239,20 @@ def test_a_unique_column_with_no_room_refuses_by_name():
         spec_cls.generate(300, seed=SEED)
     # 256 rows is the whole domain exactly, and still round-trips.
     assert_roundtrip(spec_cls, n=256)
+
+
+def test_a_unique_finite_format_covers_its_list_exactly_once():
+    """A finite format is a domain like `choices`: `unique=True` can use all
+    of it and not one row more, and the refusal counts the list.
+    """
+    currencies = len(FORMATS["iso_currency"].values)
+    spec_cls = _spec_for(
+        "currency", ColSpec(pl.String, format="iso_currency", unique=True)
+    )
+    with pytest.raises(GenerationError, match=f"only {currencies} distinct value"):
+        spec_cls.generate(currencies + 1, seed=SEED)
+    df = assert_roundtrip(spec_cls, n=currencies)
+    assert df["c"].n_unique() == currencies
 
 
 # ---------------------------------------------------------------------------
@@ -653,6 +684,23 @@ def test_with_catspec_keeps_weights_that_still_fit():
     assert retyped.spec.columns["code"].weights == (1.0, 1.0, 2.0)
 
 
+@pytest.mark.parametrize("name", sorted(FORMATS))
+def test_every_format_survives_a_file_round_trip(name, tmp_path):
+    """generate -> validate -> to_yaml -> from_yaml -> generate -> validate.
+
+    The sampler and the check for a format are one declaration in
+    `polspec.formats`; the file is the one place a column's format is
+    reduced to its name alone, so this is where the name has to be enough.
+    """
+    spec_cls = _spec_for(f"file_{name}", ColSpec(pl.String, format=name))
+    assert_roundtrip(spec_cls)
+    path = tmp_path / f"{name}.yaml"
+    spec_cls.to_yaml(path)
+    reloaded = FrameSpec.from_yaml(path)
+    assert reloaded.spec.columns["c"].format == name
+    assert_roundtrip(reloaded).equals(assert_roundtrip(spec_cls))
+
+
 def test_yaml_roundtrip_preserves_the_property(tmp_path):
     path = tmp_path / "spec.yaml"
     MixedSpec.to_yaml(path)
@@ -703,6 +751,27 @@ def test_column_validators_are_validation_only():
     spec_cls.validate(df, validate_validators=False)
     with pytest.raises(Exception, match="validator"):
         spec_cls.validate(df)
+
+
+@pytest.mark.parametrize(
+    "name, well_formed",
+    [
+        ("email", "nobody@example.invalid"),
+        ("ipv4", "0.0.0.0"),  # noqa: S104
+        ("hostname", "localhost"),
+        ("uuid4", "00000000-0000-4000-8000-000000000000"),
+    ],
+)
+def test_a_format_promises_syntax_not_existence(name, well_formed):
+    """`format="email"` is a well-formed address, not a deliverable one.
+
+    Generation produces values of the right shape and validation checks the
+    shape; neither side looks anything up. So a value that is syntactically
+    perfect and points nowhere is accepted, and that is the boundary
+    `limitations.md` states.
+    """
+    spec_cls = _spec_for(f"syntax_{name}", ColSpec(pl.String, format=name))
+    spec_cls.validate(pl.DataFrame({"c": [well_formed]}))
 
 
 class HierarchySpec(FrameSpec):

@@ -75,6 +75,15 @@ from two ten-category enums yields 100.
 It emits the whole coverage set, unlike `generate(0)` and the sinks, which all
 produce nothing.
 
+## A `format` promises syntax, not existence
+
+`format="email"` generates a well-formed address, not a deliverable one, and
+validates the shape, not whether anything answers. Nothing is looked up on
+either side, so `nobody@example.invalid` passes, `hostname` accepts
+`localhost`, and `ipv4` accepts `0.0.0.0`. A column that has to hold *real*
+identifiers is a `choices` list or a foreign key into the table that owns
+them. See [String formats](../how-to/formats.md).
+
 ## Smaller sharp edges
 
 - **Unsupported dtypes are accepted at declaration.** `ColSpec(pl.List(...))`

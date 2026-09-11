@@ -71,15 +71,15 @@ wide domain would do. What remains is narrowing the gap from the other end:
 letting a column *describe* its values well enough that a validator becomes
 generatable.
 
-**Domains generation cannot currently express.** A `String` column generates
-random characters within its `string_length`, and there is no way to say more
-than that about its shape. This is why a column carrying a validator as
-ordinary as `pl.col("email").str.contains("@")` cannot be generated to satisfy
-its own spec. A pattern or named format on `ColSpec` — a regex, or something
-like `format="email"` — would let generation produce values its own validators
-accept, converting a whole class of the gap above into something that
-round-trips rather than something documented. It is also most of what stands
-between generated fixtures and fixtures that look like data.
+**Domains generation can only partly express.** A `String` column can now
+say what its values look like through a named
+[`format`](../how-to/formats.md) — `uuid4`, `email`, `ipv4` and five
+others — and is generated to satisfy it, so the validator
+`col("email").str.contains("@")` no longer has to fail its own spec. The set
+is closed, and that is the remaining gap: a `pattern=<regex>` for *validation
+only* is the natural follow-up, because polspec can check any regex today and
+can generate a curated set. Generating from an arbitrary pattern is a much
+larger piece of work with no answer for `.*`, and is not planned.
 
 Both directions are active. Neither has a fixed shape yet, so the specific
 options `generate()` accepts may well change under you.

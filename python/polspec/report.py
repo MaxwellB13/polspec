@@ -53,6 +53,13 @@ def _describe_dtype(dtype: pl.DataType) -> str:
     return str(dtype)
 
 
+def _describe_domain(cs) -> str:
+    """The Domain column of the table: the choices, or the format."""
+    if cs.format is not None:
+        return f"format `{cs.format}`"
+    return _describe_choices(cs.choices)
+
+
 def _describe_choices(choices) -> str:
     if choices is None:
         return "-"
@@ -100,7 +107,7 @@ def _columns_section(spec: TableSpec) -> list[str]:
             f"| `{_describe_dtype(cs.dtype)}` "
             f"| {'Yes' if cs.nullable else 'No'} "
             f"| {str(cs.bounds) if cs.bounds else '-'} "
-            f"| {_describe_choices(cs.choices)} "
+            f"| {_describe_domain(cs)} "
             f"| {length} "
             f"| {', '.join(f'`{t}`' for t in cs.tags) if cs.tags else '-'} "
             f"| {f'{len(cs.rules)} rule(s)' if cs.rules else '-'} "
@@ -248,6 +255,8 @@ def _entity_lines(spec: TableSpec, entity_name: str) -> list[str]:
                 comments.append(f"choices: [{', '.join(str(c) for c in ch)}]")
             else:
                 comments.append(f"choices: [{len(ch)} items]")
+        elif cs.format is not None:
+            comments.append(f"format: {cs.format}")
         if cs.tags:
             comments.append(f"tags: [{', '.join(cs.tags)}]")
         if cs.string_length is not None:
