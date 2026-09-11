@@ -169,3 +169,9 @@ cython_debug/
 # A benchmark baseline is only meaningful on the machine and build
 # that recorded it, so it is written locally rather than committed.
 benchmarks/baseline.json
+
+# Scratch data written while trying things out. Generating a fixture from a
+# spec is one call, so there is never a reason to commit one.
+*.parquet
+*.ipc
+*.feather

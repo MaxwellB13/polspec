@@ -7,7 +7,7 @@ on:
 
 jobs:
   check-version:
-    name: Tag matches pyproject.toml version
+    name: Tag matches pyproject.toml and CHANGELOG.md
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -17,6 +17,21 @@ jobs:
           declared="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
           if [ "$tag" != "$declared" ]; then
             echo "Tag v$tag does not match pyproject.toml version $declared" >&2
+            exit 1
+          fi
+      # v0.4.0 and v0.4.1 both shipped with their notes still under
+      # *Unreleased*, which left the changelog claiming a released breaking
+      # change had not happened yet. A tag now has to carry its own section.
+      - name: Changelog has a section for this version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          if ! grep -q "^## \[$tag\] - " CHANGELOG.md; then
+            echo "CHANGELOG.md has no '## [$tag] - YYYY-MM-DD' section." >&2
+            echo "Move the Unreleased notes under the new version before tagging." >&2
+            exit 1
+          fi
+          if ! grep -q "^\[$tag\]: https" CHANGELOG.md; then
+            echo "CHANGELOG.md has no compare link for [$tag] at the foot." >&2
             exit 1
           fi
 
