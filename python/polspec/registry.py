@@ -26,10 +26,12 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import polars as pl
 
-from polspec import generation, validation
+from polspec import generation, serialization, validation
 from polspec.catspec import CatSpec, _declared_categories_from, as_catspec
 from polspec.engine import _stable_seed
 from polspec.errors import MultiValidationError, RegistryError, SpecError
+from polspec.frames import to_eager
+from polspec.report import registry_to_mermaid
 from polspec.tablespec import TableSpec, as_spec_name, as_table_spec, resolve_references
 
 if TYPE_CHECKING:
@@ -38,10 +40,6 @@ if TYPE_CHECKING:
 __all__ = ["Registry"]
 
 Frames = Mapping[Any, pl.DataFrame | pl.LazyFrame]
-
-
-def _collect(frame: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame:
-    return frame.collect() if isinstance(frame, pl.LazyFrame) else frame
 
 
 def _spec_of(value: Any) -> TableSpec | None:
@@ -207,7 +205,6 @@ class Registry:
         key; a directory is walked for both. Importing a Python file runs
         it, so point this only at files you would import anyway.
         """
-        from polspec import serialization
 
         registry = cls(categories=categories)
         for path in _spec_files(paths):
@@ -410,7 +407,7 @@ class Registry:
     ) -> dict[str, pl.DataFrame]:
         counts = self._counts(n, names)
         specs = self._bind(require_known=False)
-        supplied = resolve_references(references, _collect)
+        supplied = resolve_references(references, to_eager)
         for name in names:
             for parent in self.parents(name):
                 if parent not in self._specs and parent not in supplied:
@@ -576,7 +573,6 @@ class Registry:
 
     def to_dict(self) -> dict[str, Any]:
         """This registry as plain data: every spec, plus shared categories."""
-        from polspec import serialization
 
         return serialization.registry_to_dict(self)
 
@@ -586,13 +582,11 @@ class Registry:
 
         `strict=False` downgrades an unknown key from an error to a warning.
         """
-        from polspec import serialization
 
         return serialization.registry_from_dict(data, strict=strict)
 
     def to_yaml(self, source: str | Path) -> None:
         """Writes every spec, and the declared categories, to one file."""
-        from polspec import serialization
 
         serialization.registry_to_yaml(self, source)
 
@@ -602,13 +596,11 @@ class Registry:
 
         `strict=False` downgrades an unknown key from an error to a warning.
         """
-        from polspec import serialization
 
         return serialization.registry_from_yaml(source, strict=strict)
 
     def to_mermaid(self, path: str | Path | None = None) -> str:
         """One entity-relationship diagram with every spec and every key."""
-        from polspec.report import registry_to_mermaid
 
         return registry_to_mermaid(self.specs, path)
 

@@ -23,6 +23,7 @@ from polspec import (
     SerializationError,
     SpecError,
     ValidationError,
+    ValidationOptions,
     col,
 )
 
@@ -306,3 +307,32 @@ def test_an_unknown_validation_option_names_the_one_you_meant():
     assert "did you mean 'validate_unique'?" in message
     # The private options dataclass is no longer what gets named.
     assert "ValidationOptions" not in message
+
+
+def test_the_option_switches_have_one_spelling():
+    """`inspect` used to accept a second, bare spelling that `validate` did not."""
+
+    class Rows(FrameSpec):
+        a = ColSpec(pl.Int64, unique=True, bounds=(1, 1000))
+
+    dupes = pl.DataFrame({"a": [1, 1, 2]})
+    assert Rows.inspect(dupes, validate_unique=False).passed
+    assert Rows.validate(dupes, validate_unique=False).height == 3
+    for verb in (Rows.inspect, Rows.validate):
+        with pytest.raises(TypeError, match="Unknown validation option"):
+            verb(dupes, unique=False)
+
+
+def test_options_can_be_passed_as_one_value():
+    class Rows(FrameSpec):
+        a = ColSpec(pl.Int64, unique=True, bounds=(1, 1000))
+
+    dupes = pl.DataFrame({"a": [1, 1, 2]})
+    opts = ValidationOptions(unique=False)
+    assert Rows.inspect(dupes, options=opts).passed
+    assert Rows.validate(dupes, options=opts).height == 3
+
+    with pytest.raises(TypeError, match="not both"):
+        Rows.validate(dupes, options=opts, validate_unique=False)
+    with pytest.raises(TypeError, match="must be a ValidationOptions"):
+        Rows.validate(dupes, options={"unique": False})

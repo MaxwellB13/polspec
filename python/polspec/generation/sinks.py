@@ -8,48 +8,72 @@ Polars alone.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import polars as pl
 
+from polspec.frames import Method, References
 from polspec.tablespec import TableSpec, require_columns
 
-Method = Literal["random", "cartesian"]
-References = Mapping[Any, pl.DataFrame | pl.LazyFrame] | None
+
+@dataclass(frozen=True, slots=True)
+class _Run:
+    """One sink call, once its arguments have been checked.
+
+    The four generation options are the whole of what a sink passes through,
+    and each sink used to write the call out in full. They are still spelled
+    out on every public signature -- that is what makes a typo in one a
+    failure at the call site rather than a `TypeError` from inside the
+    generator, several frames away -- but past `_prepare` there is one of
+    these instead of four copies of the same six arguments.
+    """
+
+    spec: TableSpec
+    path: Path
+    n: int
+    batch_size: int
+    method: Method
+    seed: int | None
+    references: References
+
+    def batches(self) -> Iterator[pl.DataFrame]:
+        """The batch stream this sink writes."""
+        from polspec.generation import generate_batches
+
+        return generate_batches(
+            self.spec,
+            self.n,
+            batch_size=self.batch_size,
+            method=self.method,
+            seed=self.seed,
+            references=self.references,
+        )
+
+    def empty(self) -> pl.DataFrame | None:
+        """A no-row frame for a zero-row call, so the file still carries a schema.
+
+        None for any other call, so a sink that fails part-way through does
+        not quietly leave an empty file behind.
+        """
+        from polspec.generation import generate
+
+        if self.n != 0:
+            return None
+        return generate(self.spec, 0, references=self.references)
 
 
-def _stream(
+def _prepare(
     spec: TableSpec,
+    path: str | Path,
     n: int,
-    *,
     batch_size: int,
     method: Method,
     seed: int | None,
     references: References,
-) -> Iterator[pl.DataFrame]:
-    """The batch stream every sink writes.
-
-    Named and typed rather than forwarding `**kwargs`: these four options are
-    the whole of what a sink passes through to generation, and spelling them
-    out is what makes a typo in one of them a failure here rather than a
-    `TypeError` from inside the generator, several frames away.
-    """
-    from polspec.generation import generate_batches
-
-    return generate_batches(
-        spec, n, batch_size=batch_size, method=method, seed=seed, references=references
-    )
-
-
-def _empty(spec: TableSpec, references: References) -> pl.DataFrame:
-    from polspec.generation import generate
-
-    return generate(spec, 0, references=references)
-
-
-def _prepare(spec: TableSpec, path: str | Path, n: int, batch_size: int) -> Path:
+) -> _Run:
     """The argument checks and directory creation every sink repeats.
 
     Eager rather than folded into the batch generator, so an invalid call
@@ -63,9 +87,9 @@ def _prepare(spec: TableSpec, path: str | Path, n: int, batch_size: int) -> Path
         raise ValueError("n must be >= 0")
     if batch_size <= 0:
         raise ValueError("batch_size must be > 0")
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    return _Run(spec, target, n, batch_size, method, seed, references)
 
 
 def _sink_arrow(
@@ -118,20 +142,13 @@ def sink_parquet(
             'pyarrow is required for sink_parquet(). Install it with "polspec[arrow]".'
         ) from exc
 
-    path = _prepare(spec, path, n, batch_size)
+    run = _prepare(spec, path, n, batch_size, method, seed, references)
     _sink_arrow(
-        _stream(
-            spec,
-            n,
-            batch_size=batch_size,
-            method=method,
-            seed=seed,
-            references=references,
-        ),
+        run.batches(),
         lambda schema: pq.ParquetWriter(
-            str(path), schema, compression=compression, **kwargs
+            str(run.path), schema, compression=compression, **kwargs
         ),
-        empty_frame=_empty(spec, references) if n == 0 else None,
+        empty_frame=run.empty(),
     )
 
 
@@ -158,24 +175,17 @@ def sink_ipc(
             'pyarrow is required for sink_ipc(). Install it with "polspec[arrow]".'
         ) from exc
 
-    path = _prepare(spec, path, n, batch_size)
-    with open(path, "wb") as f:
+    run = _prepare(spec, path, n, batch_size, method, seed, references)
+    with open(run.path, "wb") as f:
         _sink_arrow(
-            _stream(
-                spec,
-                n,
-                batch_size=batch_size,
-                method=method,
-                seed=seed,
-                references=references,
-            ),
+            run.batches(),
             lambda schema: ipc.new_file(
                 f,
                 schema,
                 options=ipc.IpcWriteOptions(compression=compression),
                 **kwargs,
             ),
-            empty_frame=_empty(spec, references) if n == 0 else None,
+            empty_frame=run.empty(),
         )
 
 
@@ -195,21 +205,15 @@ def sink_csv(
 
     Extra keyword arguments go to `pl.DataFrame.write_csv`.
     """
-    path = _prepare(spec, path, n, batch_size)
+    run = _prepare(spec, path, n, batch_size, method, seed, references)
     header_needed = include_header
-    with open(path, "wb") as f:
-        if n == 0:
+    with open(run.path, "wb") as f:
+        empty = run.empty()
+        if empty is not None:
             if include_header:
-                _empty(spec, references).write_csv(f, include_header=True, **kwargs)
+                empty.write_csv(f, include_header=True, **kwargs)
             return
-        for batch_df in _stream(
-            spec,
-            n,
-            batch_size=batch_size,
-            method=method,
-            seed=seed,
-            references=references,
-        ):
+        for batch_df in run.batches():
             batch_df.write_csv(f, include_header=header_needed, **kwargs)
             header_needed = False
 
@@ -229,14 +233,7 @@ def sink_ndjson(
 
     Extra keyword arguments go to `pl.DataFrame.write_ndjson`.
     """
-    path = _prepare(spec, path, n, batch_size)
-    with open(path, "wb") as f:
-        for batch_df in _stream(
-            spec,
-            n,
-            batch_size=batch_size,
-            method=method,
-            seed=seed,
-            references=references,
-        ):
+    run = _prepare(spec, path, n, batch_size, method, seed, references)
+    with open(run.path, "wb") as f:
+        for batch_df in run.batches():
             batch_df.write_ndjson(f, **kwargs)

@@ -78,20 +78,43 @@ class Pred:
         """This predicate as the `col(...)` Python that would rebuild it."""
         raise NotImplementedError
 
+    def children(self) -> tuple[Pred, ...]:
+        """The operand nodes this one is built from, in written order.
+
+        The three traversals below are derived from this, so a node only has
+        to say what it is made of. A leaf returns nothing.
+        """
+        raise NotImplementedError
+
+    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+        """This node with `children` in place of its own, same order.
+
+        A leaf ignores them and returns itself.
+        """
+        raise NotImplementedError
+
     def root_names(self) -> set[str]:
         """Every column name this predicate reads."""
-        return set()
+        return set().union(*(c.root_names() for c in self.children()))
 
     def literals(self) -> list[Any]:
         """Every constant this predicate compares against.
 
         Used to check a rule's operands against the column's own domain.
         """
-        return []
+        return [v for c in self.children() for v in c.literals()]
 
     def rename(self, mapping: Mapping[str, str]) -> Pred:
-        """The same predicate with its columns renamed by `mapping`."""
-        return self
+        """The same predicate with its columns renamed by `mapping`.
+
+        Derived, so a node cannot be added that silently fails to rename --
+        which would leave a rule pointing at a column that no longer exists
+        and only surface much later, as a spec failing its own validation.
+        """
+        children = self.children()
+        if not children:
+            return self
+        return self.rebuild(tuple(c.rename(mapping) for c in children))
 
     def equals(self, other: object) -> bool:
         """Structural equality, since `==` builds a predicate."""
@@ -202,10 +225,17 @@ class Col(Pred):
     def to_source(self) -> str:
         return f"col({self.name!r})"
 
+    def children(self) -> tuple[Pred, ...]:
+        return ()
+
+    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+        return self
+
     def root_names(self) -> set[str]:
         return {self.name}
 
     def rename(self, mapping: Mapping[str, str]) -> Pred:
+        # The only node a rename actually changes.
         return Col(mapping.get(self.name, self.name))
 
 
@@ -224,6 +254,12 @@ class Lit(Pred):
 
     def to_source(self) -> str:
         return repr(self.value)
+
+    def children(self) -> tuple[Pred, ...]:
+        return ()
+
+    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+        return self
 
     def literals(self) -> list[Any]:
         return [self.value]
@@ -259,14 +295,11 @@ class Cmp(Pred):
         )
         return f"{left} {_CMP_SYMBOLS[self.op]} {_source(self.right)}"
 
-    def root_names(self) -> set[str]:
-        return self.left.root_names() | self.right.root_names()
+    def children(self) -> tuple[Pred, ...]:
+        return (self.left, self.right)
 
-    def literals(self) -> list[Any]:
-        return self.left.literals() + self.right.literals()
-
-    def rename(self, mapping: Mapping[str, str]) -> Pred:
-        return Cmp(self.op, self.left.rename(mapping), self.right.rename(mapping))
+    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+        return Cmp(self.op, *children)
 
 
 @dataclass(frozen=True, slots=True, eq=False, repr=False)
@@ -290,14 +323,11 @@ class Arith(Pred):
     def to_source(self) -> str:
         return f"{_source(self.left)} {_ARITH_SYMBOLS[self.op]} {_source(self.right)}"
 
-    def root_names(self) -> set[str]:
-        return self.left.root_names() | self.right.root_names()
+    def children(self) -> tuple[Pred, ...]:
+        return (self.left, self.right)
 
-    def literals(self) -> list[Any]:
-        return self.left.literals() + self.right.literals()
-
-    def rename(self, mapping: Mapping[str, str]) -> Pred:
-        return Arith(self.op, self.left.rename(mapping), self.right.rename(mapping))
+    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+        return Arith(self.op, *children)
 
 
 @dataclass(frozen=True, slots=True, eq=False, repr=False)
@@ -313,14 +343,11 @@ class And(Pred):
     def to_source(self) -> str:
         return " & ".join(_source(item) for item in self.items)
 
-    def root_names(self) -> set[str]:
-        return set().union(*(item.root_names() for item in self.items))
+    def children(self) -> tuple[Pred, ...]:
+        return self.items
 
-    def literals(self) -> list[Any]:
-        return [v for item in self.items for v in item.literals()]
-
-    def rename(self, mapping: Mapping[str, str]) -> Pred:
-        return And(tuple(item.rename(mapping) for item in self.items))
+    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+        return And(children)
 
 
 @dataclass(frozen=True, slots=True, eq=False, repr=False)
@@ -336,14 +363,11 @@ class Or(Pred):
     def to_source(self) -> str:
         return " | ".join(_source(item) for item in self.items)
 
-    def root_names(self) -> set[str]:
-        return set().union(*(item.root_names() for item in self.items))
+    def children(self) -> tuple[Pred, ...]:
+        return self.items
 
-    def literals(self) -> list[Any]:
-        return [v for item in self.items for v in item.literals()]
-
-    def rename(self, mapping: Mapping[str, str]) -> Pred:
-        return Or(tuple(item.rename(mapping) for item in self.items))
+    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+        return Or(children)
 
 
 @dataclass(frozen=True, slots=True, eq=False, repr=False)
@@ -361,14 +385,11 @@ class Not(Pred):
             return f"{_source(self.item.item)}.is_not_null()"
         return f"~{_source(self.item)}"
 
-    def root_names(self) -> set[str]:
-        return self.item.root_names()
+    def children(self) -> tuple[Pred, ...]:
+        return (self.item,)
 
-    def literals(self) -> list[Any]:
-        return self.item.literals()
-
-    def rename(self, mapping: Mapping[str, str]) -> Pred:
-        return Not(self.item.rename(mapping))
+    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+        return Not(*children)
 
 
 @dataclass(frozen=True, slots=True, eq=False, repr=False)
@@ -385,14 +406,15 @@ class IsIn(Pred):
     def to_source(self) -> str:
         return f"{_source(self.item)}.is_in({list(self.values)!r})"
 
-    def root_names(self) -> set[str]:
-        return self.item.root_names()
+    def children(self) -> tuple[Pred, ...]:
+        return (self.item,)
+
+    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+        return IsIn(children[0], self.values)
 
     def literals(self) -> list[Any]:
+        # Its own values are operands too, though they are not nodes.
         return self.item.literals() + list(self.values)
-
-    def rename(self, mapping: Mapping[str, str]) -> Pred:
-        return IsIn(self.item.rename(mapping), self.values)
 
 
 @dataclass(frozen=True, slots=True, eq=False, repr=False)
@@ -408,14 +430,11 @@ class IsNull(Pred):
     def to_source(self) -> str:
         return f"{_source(self.item)}.is_null()"
 
-    def root_names(self) -> set[str]:
-        return self.item.root_names()
+    def children(self) -> tuple[Pred, ...]:
+        return (self.item,)
 
-    def literals(self) -> list[Any]:
-        return self.item.literals()
-
-    def rename(self, mapping: Mapping[str, str]) -> Pred:
-        return IsNull(self.item.rename(mapping))
+    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+        return IsNull(*children)
 
 
 @dataclass(frozen=True, slots=True, eq=False, repr=False)
@@ -440,20 +459,11 @@ class Between(Pred):
             f"{self.lower.to_source()}, {self.upper.to_source()})"
         )
 
-    def root_names(self) -> set[str]:
-        return (
-            self.item.root_names() | self.lower.root_names() | self.upper.root_names()
-        )
+    def children(self) -> tuple[Pred, ...]:
+        return (self.item, self.lower, self.upper)
 
-    def literals(self) -> list[Any]:
-        return self.item.literals() + self.lower.literals() + self.upper.literals()
-
-    def rename(self, mapping: Mapping[str, str]) -> Pred:
-        return Between(
-            self.item.rename(mapping),
-            self.lower.rename(mapping),
-            self.upper.rename(mapping),
-        )
+    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+        return Between(*children)
 
 
 @dataclass(frozen=True, slots=True, eq=False, repr=False)
@@ -479,14 +489,11 @@ class StrPred(Pred):
     def to_source(self) -> str:
         return f"{_source(self.item)}.str.{self.op}({self.pattern!r})"
 
-    def root_names(self) -> set[str]:
-        return self.item.root_names()
+    def children(self) -> tuple[Pred, ...]:
+        return (self.item,)
 
-    def literals(self) -> list[Any]:
-        return self.item.literals()
-
-    def rename(self, mapping: Mapping[str, str]) -> Pred:
-        return StrPred(self.op, self.item.rename(mapping), self.pattern)
+    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+        return StrPred(self.op, children[0], self.pattern)
 
 
 @dataclass(frozen=True, slots=True, eq=False, repr=False)
@@ -502,14 +509,11 @@ class StrLen(Pred):
     def to_source(self) -> str:
         return f"{_source(self.item)}.str.len_chars()"
 
-    def root_names(self) -> set[str]:
-        return self.item.root_names()
+    def children(self) -> tuple[Pred, ...]:
+        return (self.item,)
 
-    def literals(self) -> list[Any]:
-        return self.item.literals()
-
-    def rename(self, mapping: Mapping[str, str]) -> Pred:
-        return StrLen(self.item.rename(mapping))
+    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+        return StrLen(*children)
 
 
 class _StrNamespace:

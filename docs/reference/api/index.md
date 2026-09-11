@@ -25,6 +25,7 @@ cannot describe a signature the code does not have.
 | [`sink_ndjson`][polspec.sink_ndjson] | [Generation](generation.md) |
 | [`inspect`][polspec.inspect] | [Validation](validation.md) |
 | [`validate`][polspec.validate] | [Validation](validation.md) |
+| [`ValidationOptions`][polspec.ValidationOptions] | [Validation](validation.md) |
 | [`ValidationReport`][polspec.ValidationReport] | [Validation](validation.md) |
 | [`Finding`][polspec.Finding] | [Validation](validation.md) |
 | [`profile_dataframe`][polspec.profile_dataframe] | [Profiling](profiling.md) |

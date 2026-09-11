@@ -28,6 +28,12 @@ jobs:
       - name: ruff format
         run: uv run --no-sync ruff format --check .
 
+      # The package ships py.typed, so a consumer's type checker trusts these
+      # signatures. Modules still carrying the backlog are listed in
+      # pyproject.toml; everything else has to stay clean.
+      - name: mypy
+        run: uv run --no-sync mypy
+
   rust:
     name: Rust (fmt, clippy, test)
     runs-on: ubuntu-latest

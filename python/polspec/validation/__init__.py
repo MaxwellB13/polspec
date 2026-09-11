@@ -14,13 +14,13 @@ from __future__ import annotations
 
 import dataclasses
 import difflib
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, overload
 
 import polars as pl
 
 from polspec.errors import ValidationError
+from polspec.frames import References, to_lazy
 from polspec.tablespec import TableSpec, require_columns, resolve_references
 from polspec.validation.constraints import (
     _column_constraints,
@@ -48,8 +48,6 @@ __all__ = [
     "inspect",
     "validate",
 ]
-
-References = Mapping[Any, pl.DataFrame | pl.LazyFrame] | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,45 +84,56 @@ class ValidationOptions:
 _Options = ValidationOptions
 
 
-_RENAMED_OPTIONS = {
-    "validate_rules": "rules",
-    "validate_validators": "validators",
-    "validate_unique": "unique",
-    "validate_checks": "checks",
-    "validate_foreign_keys": "foreign_keys",
-    "validate_hierarchy": "hierarchy",
-}
+# The switches are spelled `validate_*` in the public signature and named for
+# what they switch on the dataclass. One mapping between the two, rather than a
+# second spelling reachable through `inspect` alone, which is what it used to
+# be: `inspect(spec, df, unique=False)` worked and `validate(spec, df,
+# unique=False)` did not.
+_SWITCHES = ("rules", "validators", "unique", "checks", "foreign_keys", "hierarchy")
+_RENAMED_OPTIONS = {f"validate_{name}": name for name in _SWITCHES}
+_ACCEPTED_OPTIONS = sorted(
+    {f.name for f in dataclasses.fields(ValidationOptions) if f.name not in _SWITCHES}
+    | set(_RENAMED_OPTIONS)
+)
 
 
-def _options_from(**options: Any) -> ValidationOptions:
-    fields = {f.name for f in dataclasses.fields(ValidationOptions)}
-    unknown = [k for k in options if k not in fields and k not in _RENAMED_OPTIONS]
+def _options_from(
+    options_obj: ValidationOptions | None = None, /, **options: Any
+) -> ValidationOptions:
+    """The options for one call, from an object, keywords, or neither."""
+    if options_obj is not None:
+        if options:
+            raise TypeError(
+                "Pass options= or the individual keyword options, not both. "
+                f"Given options= alongside {', '.join(sorted(options))}."
+            )
+        if not isinstance(options_obj, ValidationOptions):
+            raise TypeError(
+                f"options= must be a ValidationOptions, got {type(options_obj).__name__}"
+            )
+        return options_obj
+    unknown = [k for k in options if k not in _ACCEPTED_OPTIONS]
     if unknown:
         # Naming the option the caller meant, rather than letting the
         # dataclass raise about a private class they cannot look up.
-        accepted = sorted(fields | set(_RENAMED_OPTIONS))
         hints = []
         for name in unknown:
-            close = difflib.get_close_matches(name, accepted, n=1)
+            close = difflib.get_close_matches(name, _ACCEPTED_OPTIONS, n=1)
             hints.append(f"{name!r}{f' (did you mean {close[0]!r}?)' if close else ''}")
         raise TypeError(
             f"Unknown validation option(s): {', '.join(hints)}. "
-            f"Accepted: {', '.join(accepted)}."
+            f"Accepted: {', '.join(_ACCEPTED_OPTIONS)}."
         )
     return ValidationOptions(
         **{_RENAMED_OPTIONS.get(k, k): v for k, v in options.items()}
     )
 
 
-def _to_lazy(frame: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
-    return frame.lazy() if isinstance(frame, pl.DataFrame) else frame
-
-
 def _resolve_foreign_keys(
     spec: TableSpec, references: References
 ) -> tuple[list[tuple[Any, pl.LazyFrame | None]], list[Finding]]:
     """Pairs each key with its parent frame; a key with no parent is a finding."""
-    parents = resolve_references(references, _to_lazy)
+    parents = resolve_references(references, to_lazy)
     resolved: list[tuple[Any, pl.LazyFrame | None]] = []
     findings: list[Finding] = []
     for fk in spec.foreign_keys:
@@ -154,8 +163,9 @@ def inspect(
     spec: TableSpec,
     df: pl.DataFrame | pl.LazyFrame,
     *,
+    options: ValidationOptions | None = None,
     references: References = None,
-    **options: Any,
+    **option_kwargs: Any,
 ) -> ValidationReport:
     """Everything `spec` has to say about `df`, as a `ValidationReport`.
 
@@ -164,8 +174,8 @@ def inspect(
     giving the offending rows back lazily. See `validate` for the options.
     """
     require_columns(spec)
-    opts = _options_from(**options)
-    lf = _to_lazy(df)
+    opts = _options_from(options, **option_kwargs)
+    lf = to_lazy(df)
     columns = dict(spec.columns)
 
     df_schema = lf.collect_schema()
@@ -272,18 +282,9 @@ def validate(
     spec: TableSpec,
     df: pl.DataFrame | pl.LazyFrame,
     *,
-    extra_cols: Literal["drop", "allow", "raise"] = "raise",
-    missing_cols: Literal["add", "allow", "raise"] = "raise",
-    strict_dtypes: bool = False,
-    validate_rules: bool = True,
-    validate_validators: bool = True,
-    validate_unique: bool = True,
-    validate_checks: bool = True,
-    validate_foreign_keys: bool = True,
-    validate_hierarchy: bool = True,
+    options: ValidationOptions | None = None,
     references: References = None,
-    cast: bool = False,
-    streaming: bool = False,
+    **option_kwargs: Any,
 ) -> pl.DataFrame | pl.LazyFrame:
     """Validates a DataFrame or LazyFrame against `spec`.
 
@@ -291,47 +292,35 @@ def validate(
     ----------
     df : pl.DataFrame | pl.LazyFrame
         The frame to validate. A LazyFrame comes back as a LazyFrame.
-    extra_cols : {"drop", "allow", "raise"}
-        Columns present in `df` but not declared: raise a ValidationError
-        naming them, drop them from the returned frame, or keep them.
-    missing_cols : {"add", "allow", "raise"}
-        Declared columns absent from `df`: raise, add them as nulls of the
-        declared dtype, or skip them.
-    strict_dtypes : bool
-        Require identical dtypes, rather than accepting a compatible one
-        (a narrower integer, a String where an Enum was declared).
-    validate_rules, validate_validators, validate_unique, validate_checks,
-    validate_foreign_keys, validate_hierarchy : bool
-        Switch off individual kinds of check.
+    options : ValidationOptions, optional
+        Every option at once, as a value -- useful for passing one setting
+        through several calls. Cannot be combined with the keywords below.
     references : mapping
         Parent frames for foreign keys that reference another spec, keyed by
         that spec, its FrameSpec class, or its name. A key with no entry is
         reported as a `foreign_key_unresolved` finding.
-    cast : bool
-        Cast validated columns to their declared dtype in the returned frame.
-    streaming : bool
-        Use Polars' streaming engine for the aggregation.
+    **option_kwargs
+        The fields of `ValidationOptions`, one at a time, with the six check
+        switches spelled `validate_rules`, `validate_validators`,
+        `validate_unique`, `validate_checks`, `validate_foreign_keys` and
+        `validate_hierarchy`. See `ValidationOptions` for what each means and
+        what it defaults to; an unknown name raises `TypeError` naming the
+        closest match.
 
-    Returns the validated, optionally transformed frame. Raises
-    `ValidationError` carrying a `ValidationReport` of every violation, or
-    `ValueError` for an invalid option.
+    Returns
+    -------
+    The validated, optionally transformed frame -- a LazyFrame if `df` was one.
+
+    Raises
+    ------
+    ValidationError
+        Carrying a `ValidationReport` of every violation.
+    TypeError
+        For an option name this does not accept.
+    ValueError
+        For an accepted option given a value outside its choices.
     """
-    report = inspect(
-        spec,
-        df,
-        references=references,
-        extra_cols=extra_cols,
-        missing_cols=missing_cols,
-        strict_dtypes=strict_dtypes,
-        validate_rules=validate_rules,
-        validate_validators=validate_validators,
-        validate_unique=validate_unique,
-        validate_checks=validate_checks,
-        validate_foreign_keys=validate_foreign_keys,
-        validate_hierarchy=validate_hierarchy,
-        cast=cast,
-        streaming=streaming,
-    )
+    report = inspect(spec, df, options=options, references=references, **option_kwargs)
     report.raise_if_failed()
     return _transformed(spec, df, report)
 

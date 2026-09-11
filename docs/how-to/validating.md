@@ -101,18 +101,38 @@ Orders.validate(
     validate_unique=True,
     validate_checks=True,
     validate_foreign_keys=True,
+    validate_hierarchy=True,
 )
 ```
 
-Every one of these is a field of `polspec.validation.ValidationOptions`, which
-is what a report carries as `report.options` — so a report says what it was
-asked to check, not only what it found:
+Every one of these is a field of `ValidationOptions`, which is what a report
+carries as `report.options` — so a report says what it was asked to check, not
+only what it found:
 
 ```python
 report = Orders.inspect(df, validate_checks=False)
 report.options.checks        # False
 report.options.extra_cols    # "raise"
 ```
+
+The six `validate_*` switches are named for what they switch, so
+`validate_checks` is `options.checks`. An option name polspec does not accept
+is a `TypeError` naming the closest one it does.
+
+You can also pass the whole set as one value, which is the shape to reach for
+when the same settings go through several calls:
+
+```python
+from polspec import ValidationOptions
+
+lenient = ValidationOptions(extra_cols="drop", checks=False)
+
+for frame in (df, df.head(10)):
+    Orders.validate(frame, options=lenient)
+```
+
+`options=` and the individual keywords are alternatives, not a base and an
+override — passing both raises rather than quietly picking one.
 
 ### Structural mismatches
 

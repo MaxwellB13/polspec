@@ -194,3 +194,81 @@ def test_colrules_compare_structurally():
     assert a != c
     assert ColSpec(pl.String, rules=[a]) == ColSpec(pl.String, rules=[b])
     assert ColSpec(pl.String, rules=[a]) != ColSpec(pl.String, rules=[c])
+
+
+# ---------------------------------------------------------------------------
+# The traversals are derived, not copied
+#
+# `root_names`, `literals` and `rename` are written once on `Pred` and walk
+# whatever `children()` returns. That only holds if every node reports its
+# operands, so these check the contract rather than each node's answer -- a
+# node added without `children()` fails here instead of silently returning
+# the wrong thing. `rename` is the one that used to fail silently: the base
+# implementation returned `self`, so a node that forgot to override it left a
+# rule pointing at a column that no longer existed.
+# ---------------------------------------------------------------------------
+
+
+def _every_node_type() -> list[type[Pred]]:
+    seen: list[type[Pred]] = []
+    stack = [Pred]
+    while stack:
+        cls = stack.pop()
+        stack.extend(cls.__subclasses__())
+        if cls is not Pred:
+            seen.append(cls)
+    return seen
+
+
+def _sample_of(cls: type[Pred]) -> Pred:
+    """One instance of every node type, built through the public API."""
+    samples = {
+        "Col": col("a"),
+        "Lit": lit(3),
+        "Cmp": col("a") > 1,
+        "Arith": col("a") + col("b"),
+        "And": (col("a") > 1) & (col("b") < 5),
+        "Or": (col("a") > 1) | (col("b") < 5),
+        "Not": ~(col("a") > 1),
+        "IsIn": col("a").is_in([1, 2]),
+        "IsNull": col("a").is_null(),
+        "Between": col("a").is_between(1, 5),
+        "StrPred": col("s").str.contains("al"),
+        "StrLen": col("s").str.len_chars(),
+    }
+    return samples[cls.__name__]
+
+
+def test_every_node_type_reports_its_children():
+    for cls in _every_node_type():
+        node = _sample_of(cls)
+        children = node.children()
+        assert isinstance(children, tuple)
+        assert all(isinstance(c, Pred) for c in children)
+
+
+def test_rebuild_puts_the_same_children_back():
+    """`rebuild` with a node's own children is the identity."""
+    for cls in _every_node_type():
+        node = _sample_of(cls)
+        assert node.rebuild(node.children()).equals(node)
+
+
+def test_rename_reaches_every_column_a_node_reads():
+    """The property the derived rename exists to guarantee."""
+    for cls in _every_node_type():
+        node = _sample_of(cls)
+        before = node.root_names()
+        renamed = node.rename({name: f"{name}_new" for name in before})
+        assert renamed.root_names() == {f"{name}_new" for name in before}
+
+
+def test_a_node_that_forgets_children_is_not_silently_wrong():
+    """The whole reason the traversals are derived rather than copied."""
+
+    class Forgetful(Pred):
+        def to_expr(self):  # pragma: no cover - never evaluated
+            return pl.lit(True)
+
+    with pytest.raises(NotImplementedError):
+        Forgetful().root_names()
