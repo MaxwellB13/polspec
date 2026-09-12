@@ -36,6 +36,18 @@ seed produces; see
   or one red test. `DriftReport`, `DriftFinding` and `DriftOptions` are
   exported from `polspec`.
 
+- `ColSpec(pattern=...)`: a regular expression every value of a `String`
+  column must match, **checked by validation only**. Generation does not
+  read it -- the column is filled with ordinary random text, and the round
+  trip holds only with `validate_pattern=False`, exactly as for
+  `validators`. That is the honest half of the split `format=` made: any
+  regex can be checked, the curated set can be generated. A `pattern`
+  finding code, a `validate_pattern` switch on `ValidationOptions`, one
+  `pattern:` key in spec files (the format version stays at 3: an added
+  optional key is not a new version, and `migrations.py` now says so).
+  Cannot be combined with `format`; compiled by Polars' own engine at
+  declaration, so a pattern Polars cannot run is refused with its message.
+
 - **Three CLI verbs.** `polspec generate SPEC -n N -o FILE` writes generated
   rows to any format the CLI reads (`--seed`, `--method`, `--references`
   as for `validate`); `polspec diff OLD NEW` and `polspec drift SPEC DATA`

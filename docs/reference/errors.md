@@ -50,6 +50,7 @@ through `report.rows(finding)`; structural ones describe the frame's shape.
 | `bounds` | row-level | a value is outside `bounds`; `details` carry the extremes found |
 | `string_length` | row-level | a string or binary value's length is outside `string_length` |
 | `format` | row-level | a string value does not have the declared `format`; `details` name the format |
+| `pattern` | row-level | a string value does not match the declared `pattern`; `details` carry it |
 | `rule` | row-level | a row matched a `ColRule` but holds a value outside its choices |
 | `validator` | row-level | a `ColSpec.validators` predicate is false |
 | `unique` | row-level | a `unique=True` column holds duplicates |
@@ -81,4 +82,4 @@ otherwise. See [Schema and data drift](../how-to/drift.md).
 | `cardinality_moved` | `drift` | compatible | declared values the data never holds |
 | `constraint_added` | `diff` | breaking | `unique`, a validator, rule, check, composite key, foreign key or hierarchy present only in the new spec |
 | `constraint_removed` | `diff` | compatible | the reverse |
-| `field_changed` | `diff` | compatible | `tags`, `weights`, `distribution`, `distribution_params` or `null_probability` differ |
+| `field_changed` | `diff` | compatible | `tags`, `weights`, `distribution`, `distribution_params`, `null_probability` or `pattern` differ |

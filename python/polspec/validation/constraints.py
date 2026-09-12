@@ -210,6 +210,25 @@ class _Format(_Constraint):
 
 
 @dataclass
+class _Pattern(_Constraint):
+    column: str = ""
+    pattern: str = ""
+    code: str = "pattern"
+
+    def involved(self) -> tuple[str, ...]:
+        return (self.column,)
+
+    def details(self, stats: dict[str, list]) -> dict[str, Any]:
+        return {"pattern": self.pattern}
+
+    def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
+        return (
+            f"Column '{self.column}': found {count} value(s) not matching "
+            f"pattern {self.pattern!r}. Invalid samples: {samples}"
+        )
+
+
+@dataclass
 class _RuleHolds(_Constraint):
     column: str = ""
     rule: ColRule | None = None
@@ -451,6 +470,17 @@ def _column_constraints(
                 sample_expr=column,
                 column=name,
                 format=fmt,
+            )
+        )
+
+    if options.pattern and spec.pattern is not None:
+        constraints.append(
+            _Pattern(
+                key=f"{name}__pattern",
+                mask=present & ~column.str.contains(spec.pattern),
+                sample_expr=column,
+                column=name,
+                pattern=spec.pattern,
             )
         )
 

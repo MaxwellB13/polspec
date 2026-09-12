@@ -774,6 +774,19 @@ def test_a_format_promises_syntax_not_existence(name, well_formed):
     spec_cls.validate(pl.DataFrame({"c": [well_formed]}))
 
 
+def test_a_pattern_is_validation_only():
+    """`pattern=` is the honest half of the split `format=` made: any regex
+    can be checked, only a curated set can be generated. So a String column
+    with a pattern is filled with ordinary random text, and the round trip
+    holds only with the check switched off -- exactly as for `validators`.
+    """
+    spec_cls = _spec_for("patterned", ColSpec(pl.String, pattern=r"^[A-Z]{3}-\d{4}$"))
+    df = spec_cls.generate(ROWS, seed=SEED)
+    spec_cls.validate(df, validate_pattern=False)
+    with pytest.raises(Exception, match="not matching pattern"):
+        spec_cls.validate(df)
+
+
 class HierarchySpec(FrameSpec):
     """A parent/child table: every row points at another row of the same table.
 

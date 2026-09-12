@@ -113,6 +113,16 @@ class ColSpec:
         it cannot be combined with `choices` or `string_length`, and only a
         `String` column can carry one. What it promises is syntax -- an
         address that is well-formed, not one that is deliverable.
+    pattern : str | None, optional
+        A regular expression every value of a `String` column must match,
+        checked by validation only. Generation does not read it: a `String`
+        column with a pattern is filled with ordinary random text, and the
+        round trip that holds for every other field does not hold here --
+        the same boundary as `validators`. Prefer `format` for a shape
+        polspec can generate; use `pattern` for a shape it cannot. Cannot
+        be combined with `format`, which already is a pattern with a
+        sampler. Polars regex syntax; a pattern that does not compile is
+        refused at declaration.
     distribution : str | None, optional
         The name of the probability distribution for the column's values
         (e.g. `"uniform"`, `"normal"`).
@@ -146,6 +156,7 @@ class ColSpec:
     null_probability: float = _DEFAULT_NULL_PROBABILITY
     string_length: Bound | tuple[int, int] | list[int] | None = None
     format: str | None = None
+    pattern: str | None = None
     distribution: str | None = None
     distribution_params: dict[str, float] | None = None
     choices: tuple | list | dict | None = None
@@ -168,6 +179,7 @@ class ColSpec:
 
         self._validate_probabilities()
         self._validate_format()
+        self._validate_pattern()
         self._validate_bounds_dtype_support()
         self._validate_bounds_fit_dtype()
         self._validate_weights()
@@ -384,6 +396,40 @@ class ColSpec:
                 "string_length: the format already fixes how long a value is. "
                 "Drop the string_length, or the format."
             )
+
+    def _validate_pattern(self) -> None:
+        """Refuses a pattern on a column it cannot describe, beside a format,
+        or one Polars cannot compile.
+
+        Compiled by Polars itself rather than Python's `re`: the two dialects
+        differ (look-around, for one), and the engine that will run the
+        check is the one whose opinion counts.
+        """
+        if self.pattern is None:
+            return
+        if not isinstance(self.pattern, str) or not self.pattern:
+            raise SpecError(
+                f"ColSpec.pattern must be a non-empty string, got {self.pattern!r}"
+            )
+        if self.dtype not in (pl.String, pl.Utf8):
+            raise SpecError(
+                f"ColSpec.pattern is only supported for pl.String, got "
+                f"{self.dtype!r}. A pattern describes the text a value is "
+                "written as, which no other dtype holds."
+            )
+        if self.format is not None:
+            raise SpecError(
+                f"ColSpec cannot carry both format={self.format!r} and pattern: "
+                "a format is a pattern polspec can also generate. Drop the "
+                "pattern, or the format."
+            )
+        try:
+            pl.select(pl.lit("").str.contains(self.pattern))
+        except Exception as exc:
+            raise SpecError(
+                f"ColSpec.pattern {self.pattern!r} is not a valid regular "
+                f"expression: {' '.join(str(exc).split())}"
+            ) from exc
 
     def _validate_bounds_dtype_support(self) -> None:
         if self.bounds is not None and not (

@@ -15,12 +15,16 @@ to be updated.
 
 ## Generation does not enforce these
 
-### `__checks__` and `ColSpec.validators` are validation-only
+### `__checks__`, `ColSpec.validators` and `ColSpec.pattern` are validation-only
 
-This one is by design, not a defect: both wrap arbitrary Polars expressions,
-and nothing can generate data satisfying an arbitrary predicate. Validate
-generated data with `validate_checks=False` / `validate_validators=False`, or
-construct the rows those invariants describe yourself.
+This one is by design, not a defect: checks and validators wrap arbitrary
+Polars expressions, and a pattern is an arbitrary regex; nothing can generate
+data satisfying an arbitrary predicate, and generating from an arbitrary
+regex has no answer for `.*`. Validate generated data with
+`validate_checks=False` / `validate_validators=False` /
+`validate_pattern=False`, or construct the rows those invariants describe
+yourself. For a shape polspec *can* generate, declare a
+[`format`](../how-to/formats.md) instead of a pattern.
 
 ### A self-referencing foreign key is referential, not acyclic
 

@@ -102,6 +102,7 @@ Orders.validate(
     validate_checks=True,
     validate_foreign_keys=True,
     validate_hierarchy=True,
+    validate_pattern=True,
 )
 ```
 
@@ -186,6 +187,7 @@ Orders.validate(Orders.generate(1_000, seed=1), validate_checks=False)
 | Value within range | `bounds` |
 | Length within range | `string_length` |
 | Value has the declared shape | `format` |
+| Value matches the regex | `pattern` |
 | Conditional values hold | `rules` |
 | Single-column predicates | `validators` |
 | Values distinct | `unique` |
