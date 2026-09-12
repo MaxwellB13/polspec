@@ -71,15 +71,15 @@ wide domain would do. What remains is narrowing the gap from the other end:
 letting a column *describe* its values well enough that a validator becomes
 generatable.
 
-**Domains generation can only partly express.** A `String` column can now
+**Domains generation can only partly express.** A `String` column can
 say what its values look like through a named
 [`format`](../how-to/formats.md) — `uuid4`, `email`, `ipv4` and five
 others — and is generated to satisfy it, so the validator
 `col("email").str.contains("@")` no longer has to fail its own spec. The set
-is closed, and that is the remaining gap: a `pattern=<regex>` for *validation
-only* is the natural follow-up, because polspec can check any regex today and
-can generate a curated set. Generating from an arbitrary pattern is a much
-larger piece of work with no answer for `.*`, and is not planned.
+is closed, and [`pattern=`](../how-to/columns.md#string-patterns) is the
+honest other half: any regex can be *validated*, and only the curated set
+can be generated. Generating from an arbitrary pattern is a much larger
+piece of work with no answer for `.*`, and is not planned.
 
 Both directions are active. Neither has a fixed shape yet, so the specific
 options `generate()` accepts may well change under you.

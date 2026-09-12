@@ -39,9 +39,10 @@ uppercase UUID from another system validates, even though polspec generates
 lowercase ones. It is never wider than the standard it names.
 
 The set is closed. A named format is a twenty-line sampler with an
-unambiguous test; a `pattern=<regex>` would need a regex-to-sampler compiler
-and has no answer for `.*`. Validation of an arbitrary pattern is what
-`validators=[col("c").str.contains(...)]` is for.
+unambiguous test; generating from an arbitrary regex would need a
+regex-to-sampler compiler and has no answer for `.*`. Validation of an
+arbitrary regex is what [`pattern=`](columns.md#string-patterns) is for --
+checked like a format, generated like nothing at all.
 
 ## What a format promises
 

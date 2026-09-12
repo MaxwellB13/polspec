@@ -13,6 +13,7 @@ ColSpec(
     null_probability=0.1,
     string_length=None,
     format=None,
+    pattern=None,
     distribution=None,
     distribution_params=None,
     choices=None,
@@ -179,6 +180,25 @@ The set is `uuid4`, `email`, `ipv4`, `ipv6`, `mac`, `hostname`,
 cannot sit beside `choices` or `string_length`, and only a `String` column
 can carry one. See [String formats](formats.md) for what each generates,
 what each accepts, and what none of them promises.
+
+## String patterns
+
+`pattern=` is a regular expression every value must match -- **checked by
+validation only**. Generation does not read it: a column with a pattern is
+filled with ordinary random text, so the round trip holds only with
+`validate_pattern=False`, exactly as for `validators`. That is the honest
+half of the split `format=` makes: polspec can check any regex, and can
+generate a curated set.
+
+```python
+ColSpec(pl.String, pattern=r"^[A-Z]{3}-\d{4}$")     # a SKU shape polspec cannot generate
+```
+
+Reach for `format` when the shape is one polspec has; reach for `pattern`
+when it is not. The two cannot be combined -- a format already *is* a
+pattern with a sampler. A pattern is compiled by Polars' regex engine at
+declaration, so one Polars cannot run (look-around, for instance) is refused
+with the engine's own message rather than failing on the first validation.
 
 ## Distributions
 

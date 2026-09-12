@@ -596,6 +596,9 @@ FIELD_COMPARATORS: dict[str, Comparator] = {
     "choices": _compare_domain,
     "format": _compare_domain,
     "string_length": _compare_string_length,
+    # A pattern is not part of `Domain`: whether one regex contains another
+    # is not a decision worth guessing, so a change is reported as a change.
+    "pattern": _compare_field("pattern"),
     "null_probability": _compare_null_rate,
     "unique": _compare_unique,
     "rules": _compare_rules,

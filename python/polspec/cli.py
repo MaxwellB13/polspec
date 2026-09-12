@@ -514,6 +514,14 @@ def _skip_reasons(spec_cls: type[FrameSpec]) -> tuple[dict[str, bool], list[str]
             "cannot be made to satisfy"
         )
 
+    if any(c.pattern is not None for c in spec_cls.spec.columns.values()):
+        flags["validate_pattern"] = False
+        reasons.append(
+            "ColSpec.pattern is checked by validation only; generation fills "
+            "the column with ordinary random text (use format= for a shape "
+            "polspec can generate)"
+        )
+
     return flags, reasons
 
 

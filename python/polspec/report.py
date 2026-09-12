@@ -59,6 +59,8 @@ def _describe_domain(cs) -> str:
     """The Domain column of the table: the choices, or the format."""
     if cs.format is not None:
         return f"format `{cs.format}`"
+    if cs.pattern is not None:
+        return f"pattern `{cs.pattern}`"
     return _describe_choices(cs.choices)
 
 
@@ -314,6 +316,8 @@ def _entity_lines(spec: TableSpec, entity_name: str) -> list[str]:
                 comments.append(f"choices: [{len(ch)} items]")
         elif cs.format is not None:
             comments.append(f"format: {cs.format}")
+        elif cs.pattern is not None:
+            comments.append(f"pattern: {cs.pattern}")
         if cs.tags:
             comments.append(f"tags: [{', '.join(cs.tags)}]")
         if cs.string_length is not None:

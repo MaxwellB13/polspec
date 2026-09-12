@@ -67,6 +67,7 @@ class ValidationOptions:
     checks: bool = True
     foreign_keys: bool = True
     hierarchy: bool = True
+    pattern: bool = True
     cast: bool = False
     streaming: bool = False
 
@@ -89,7 +90,15 @@ _Options = ValidationOptions
 # second spelling reachable through `inspect` alone, which is what it used to
 # be: `inspect(spec, df, unique=False)` worked and `validate(spec, df,
 # unique=False)` did not.
-_SWITCHES = ("rules", "validators", "unique", "checks", "foreign_keys", "hierarchy")
+_SWITCHES = (
+    "rules",
+    "validators",
+    "unique",
+    "checks",
+    "foreign_keys",
+    "hierarchy",
+    "pattern",
+)
 _RENAMED_OPTIONS = {f"validate_{name}": name for name in _SWITCHES}
 _ACCEPTED_OPTIONS = sorted(
     {f.name for f in dataclasses.fields(ValidationOptions) if f.name not in _SWITCHES}
@@ -302,8 +311,9 @@ def validate(
     **option_kwargs
         The fields of `ValidationOptions`, one at a time, with the six check
         switches spelled `validate_rules`, `validate_validators`,
-        `validate_unique`, `validate_checks`, `validate_foreign_keys` and
-        `validate_hierarchy`. See `ValidationOptions` for what each means and
+        `validate_unique`, `validate_checks`, `validate_foreign_keys`,
+        `validate_hierarchy` and `validate_pattern`. See `ValidationOptions`
+        for what each means and
         what it defaults to; an unknown name raises `TypeError` naming the
         closest match.
 

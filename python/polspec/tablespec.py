@@ -628,23 +628,26 @@ def _retype_column(
     `dataclasses.replace` rather than a field-by-field rebuild: a rebuild
     silently drops whatever field it forgets to list.
 
-    Three fields a dtype change can genuinely invalidate are handled
+    Four fields a dtype change can genuinely invalidate are handled
     explicitly: `choices`, which may name values outside the new dtype's
     domain; `weights`, which is positional over a domain that just changed
-    size; and `format`, which only a `String` column can carry. Each is
+    size; and `format` and `pattern`, which only a `String` column can
+    carry. Each is
     dropped with a warning rather than carried into a confusing ColSpec
     error further down.
     """
     updates: dict[str, Any] = {"dtype": dtype}
 
-    if spec.format is not None:
-        warnings.warn(
-            f"Column {col_name!r}: dropping format={spec.format!r} while "
-            f"re-typing to {dtype!r}, which cannot carry one. The registry's "
-            "categories become the column's domain.",
-            stacklevel=4,
-        )
-        updates["format"] = None
+    for field_name in ("format", "pattern"):
+        value = getattr(spec, field_name)
+        if value is not None:
+            warnings.warn(
+                f"Column {col_name!r}: dropping {field_name}={value!r} while "
+                f"re-typing to {dtype!r}, which cannot carry one. The registry's "
+                "categories become the column's domain.",
+                stacklevel=4,
+            )
+            updates[field_name] = None
 
     new_choices = tuple(choices) if choices is not None else spec.choices
     if choices is None and new_choices is not None and isinstance(dtype, pl.Enum):

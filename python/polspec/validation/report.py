@@ -34,6 +34,7 @@ FindingCode = Literal[
     "bounds",
     "string_length",
     "format",
+    "pattern",
     "rule",
     "validator",
     "unique",
