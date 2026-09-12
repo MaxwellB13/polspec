@@ -117,5 +117,8 @@ which is a placeholder.
    claiming a released breaking change had not happened yet.
 3. Commit, then tag `vX.Y.Z` and push the tag.
 4. The release workflow checks the tag against `pyproject.toml` and
-   `CHANGELOG.md`, builds wheels, publishes to PyPI, and attaches the wheels
-   to a GitHub release.
+   `CHANGELOG.md`, builds wheels, publishes to PyPI, and *drafts* a GitHub
+   release with the wheels attached and notes generated from the merged
+   pull requests, grouped by label as `.github/release.yml` says.
+5. Read the draft, edit the notes if they need it, and publish it from the
+   release page. Nothing on GitHub is public until then; PyPI already is.

@@ -8,6 +8,34 @@ seed produces; see
 
 ## [Unreleased]
 
+### Added
+
+- **Drift as a report.** `polspec.drift.diff(old, new)` says what changed
+  between two declarations; `polspec.drift.drift(spec, df)` says how data
+  has moved relative to what its spec declares -- values outside the
+  domain, a bound exceeded and by how much, a format no longer matched, a
+  null rate that moved, declared values never seen. Both return one
+  `DriftReport`, also reachable as `Orders.diff(Other)` and
+  `Orders.drift(df)`:
+
+  ```python
+  report = OrdersV1.diff(OrdersV2)
+  report.breaking          # a narrowed bound, an added column, a new constraint
+  report.compatible        # a widened domain, a removed check
+  report.to_markdown()     # the shape of a pull-request comment
+  ```
+
+  Every finding carries a `severity` under one mechanical rule: *breaking*
+  when a frame that satisfied the old side could fail the new one --
+  decided, for dtypes, by the same function validation uses. Two tests hold
+  the two sides to it: what `generate()` produces never drifts breakingly
+  from its own spec, and every breaking finding against data is a column
+  `validate()` reports. Sixteen closed finding codes, a `DriftOptions`
+  with explicit tolerances, and a comparator per `ColSpec` and `TableSpec`
+  field with a parity test, so a field added to a declaration is one entry
+  or one red test. `DriftReport`, `DriftFinding` and `DriftOptions` are
+  exported from `polspec`.
+
 ## [0.5.0] - 2026-09-11
 
 The headline is `format=`: a `String` column that says what its values look

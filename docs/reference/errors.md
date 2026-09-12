@@ -56,3 +56,29 @@ through `report.rows(finding)`; structural ones describe the frame's shape.
 | `unique_together` | row-level | a composite key holds duplicate combinations |
 | `check` | row-level | a `__checks__` predicate is false |
 | `foreign_key` | row-level | a key value has no matching parent row (also structural when the parent lacks the referenced columns) |
+
+## Drift codes
+
+A `DriftReport` (from `diff()` or `drift()`) carries `DriftFinding`s with one
+of these codes. Each also carries a `severity`: **breaking** when a frame
+that satisfied the old side could fail the new one, **compatible**
+otherwise. See [Schema and data drift](../how-to/drift.md).
+
+| Code | From | Severity | Raised when |
+|:--|:--|:--|:--|
+| `column_added` | both | breaking | the new spec declares a column the old lacks, or the data has an undeclared column |
+| `column_removed` | both | breaking | the old spec declares a column the new lacks, or the data lacks a declared column |
+| `column_renamed` | `diff` | compatible | a rename given through `renames=` |
+| `dtype_changed` | both | as validation decides | the dtypes differ; compatible when the old values would still validate |
+| `nullability_changed` | both | off → on compatible; on → off breaking; nulls in a non-nullable column breaking | |
+| `domain_widened` | `diff` | compatible | bounds, choices, format or string length accept more than before |
+| `domain_narrowed` | `diff` | breaking | they accept less |
+| `domain_changed` | `diff` | breaking | neither is inside the other |
+| `bounds_exceeded` | `drift` | breaking | values escape `bounds` or `string_length`; `details` say which and by how much |
+| `new_values` | `drift` | breaking | values outside `choices`, an `Enum` or a finite format |
+| `format_violated` | `drift` | breaking | values that do not match the declared `format` |
+| `null_rate_moved` | `drift` | compatible | the null rate sits further from `null_probability` than the tolerance |
+| `cardinality_moved` | `drift` | compatible | declared values the data never holds |
+| `constraint_added` | `diff` | breaking | `unique`, a validator, rule, check, composite key, foreign key or hierarchy present only in the new spec |
+| `constraint_removed` | `diff` | compatible | the reverse |
+| `field_changed` | `diff` | compatible | `tags`, `weights`, `distribution`, `distribution_params` or `null_probability` differ |

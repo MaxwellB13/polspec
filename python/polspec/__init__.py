@@ -3,6 +3,7 @@ from __future__ import annotations
 from polspec.bound import Bound
 from polspec.catspec import CatSpec
 from polspec.check import Check
+from polspec.drift import DriftFinding, DriftOptions, DriftReport
 from polspec.errors import (
     CliError,
     GenerationError,
@@ -45,6 +46,9 @@ __all__ = [
     "CliError",
     "ColRule",
     "ColSpec",
+    "DriftFinding",
+    "DriftOptions",
+    "DriftReport",
     "Finding",
     "ForeignKey",
     "FrameSpec",
