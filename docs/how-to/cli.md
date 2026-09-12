@@ -1,14 +1,19 @@
 # Command line
 
-`polspec` has two things to do with a schema: create one, and turn one into a
-test. Both are thin wrappers over `FrameSpec` methods that already exist —
-`from_dataframe`, `to_yaml`, `generate`, `validate` — so the CLI is argument
-parsing and templating, not new behaviour.
+`polspec` does at the shell what a spec does in Python: create one from data,
+turn one into a test, generate data from one, check data against one, and
+say what moved. Every verb is a thin wrapper over a `FrameSpec` method that
+already exists — `from_dataframe`, `to_yaml`, `generate`, `validate`, `diff`,
+`drift` — so the CLI is argument parsing and templating, not new behaviour.
 
 ```bash
 polspec schema infer orders.parquet -o orders.yaml
 polspec schema new Orders -o orders.py
 polspec test orders.yaml -o test_orders.py
+polspec generate orders.yaml -n 1000 -o orders.parquet --seed 1
+polspec validate orders.yaml orders.parquet
+polspec diff orders_v1.yaml orders_v2.yaml --markdown
+polspec drift orders.yaml orders.parquet
 ```
 
 ## `schema infer` — profile data into a spec
@@ -168,6 +173,26 @@ This file is only overwritten by running that command again -- edit freely.
 It is a plain file, not managed state — add assertions, rename the functions,
 delete the parts you don't want. Nothing re-reads it.
 
+## `generate` — data from a schema
+
+```bash
+polspec generate orders.yaml -n 1000 -o orders.parquet --seed 1
+polspec generate specs.py --class Orders -n 500 -o orders.csv --references Customers=customers.parquet
+polspec generate orders.yaml -n 50 -o edge_cases.ndjson --method cartesian
+```
+
+Generates `-n` rows and writes one file; the extension picks the format
+(`.parquet`/`.pq`, `.csv`, `.tsv`, `.ndjson`/`.jsonl`, `.json`,
+`.arrow`/`.ipc`/`.feather` — the same set `validate` and `drift` read).
+`--seed` makes the file reproducible; `--method cartesian` guarantees
+coverage the way [`generate()`](generating.md#coverage-methodcartesian)
+does; `--references NAME=PATH` supplies parent data for a foreign key, as
+for `validate`.
+
+The frame is built in memory and written once. For a file too large to hold,
+the streaming [`sink_*`](generating.md#writing-straight-to-a-file) functions
+are a Python surface.
+
 ## `validate` — check data against a schema
 
 ```bash
@@ -188,11 +213,42 @@ spec, by that spec's name; repeat it for several. `--allow-extra` and
 `--allow-missing` relax the structural checks; `--strict-dtypes` tightens the
 dtype check.
 
+## `diff` and `drift` — what moved
+
+```bash
+polspec diff orders_v1.yaml orders_v2.yaml                 # two schemas
+polspec diff specs_v1.py specs_v2.py --class Orders --rename id=order_id
+polspec drift orders.yaml last_night.parquet               # a schema and data
+polspec drift orders.yaml last_night.parquet --markdown > drift.md
+```
+
+`diff` runs [`diff()`](drift.md#two-declarations) between two spec files;
+`drift` runs [`drift()`](drift.md#a-declaration-and-data) between a spec and
+a data file. Both print the report as text, `--json`, or `--markdown` (the
+shape of a pull-request comment, breaking findings first).
+
+The exit status is decided by `--fail-on`: `breaking` (the default) exits
+`1` when any finding would break validation; `any` exits `1` on any finding
+at all, a widened bound included; `none` always exits `0`, for posting a
+report without gating on it. So a schema change in a pull request, or a
+nightly load, can be gated with no Python:
+
+```bash
+polspec diff main/orders.yaml pr/orders.yaml --markdown --fail-on breaking
+```
+
+`--strict-dtypes` makes any dtype change breaking, as it does for
+`validate`. `drift` also takes `--null-rate-tolerance`, `--no-unseen`,
+`--max-samples` and `--sample N` — see
+[`DriftOptions`](drift.md#options).
+
 ## Exit codes and errors
 
 Every subcommand returns `0` on success and `1` on a reported error, printed
 as `error: ...` on stderr rather than a traceback — a missing file, an
-unreadable format, an invalid class name.
+unreadable format, an invalid class name. `validate`, `diff` and `drift`
+also return `1` when the report itself fails, so a `1` means "look at the
+output", whichever kind of problem it was.
 
 ```console
 $ polspec schema infer nope.csv -o out.yaml
