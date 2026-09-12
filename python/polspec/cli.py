@@ -12,6 +12,9 @@ parsing and templating, not new behaviour.
     polspec schema new Orders -o orders.py
     polspec test orders.yaml -o test_orders.py
     polspec validate orders.yaml orders.parquet --references Customers=customers.parquet
+    polspec generate orders.yaml -n 1000 -o orders.parquet --seed 1
+    polspec diff orders_v1.yaml orders_v2.yaml --markdown
+    polspec drift orders.yaml orders.parquet --fail-on breaking
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ from pathlib import Path
 import polars as pl
 
 from polspec import FrameSpec
+from polspec.drift import DriftOptions, DriftReport, diff, drift
 from polspec.errors import CliError, PolspecError
 
 try:
@@ -52,9 +56,32 @@ _DATA_READERS = {
 }
 
 
+# One writer per reader, so what `generate` writes, `validate` and `drift`
+# read back; a suffix in one map and not the other is a red test.
+_DATA_WRITERS = {
+    ".csv": pl.DataFrame.write_csv,
+    ".tsv": lambda df, p: df.write_csv(p, separator="\t"),
+    ".parquet": pl.DataFrame.write_parquet,
+    ".pq": pl.DataFrame.write_parquet,
+    ".ndjson": pl.DataFrame.write_ndjson,
+    ".jsonl": pl.DataFrame.write_ndjson,
+    ".json": pl.DataFrame.write_json,
+    ".arrow": pl.DataFrame.write_ipc,
+    ".ipc": pl.DataFrame.write_ipc,
+    ".feather": pl.DataFrame.write_ipc,
+}
+
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
+
+def _existing(path_text: str, *, what: str = "file") -> Path:
+    path = Path(path_text)
+    if not path.exists():
+        raise CliError(f"no such {what}: {path}")
+    return path
 
 
 def _read_data_file(path: Path, sample: int | None) -> pl.DataFrame:
@@ -72,6 +99,43 @@ def _read_data_file(path: Path, sample: int | None) -> pl.DataFrame:
     except Exception as exc:
         raise CliError(f"could not read {path}: {exc}") from exc
     return df.head(sample) if sample is not None else df
+
+
+def _write_data_file(df: pl.DataFrame, path: Path) -> None:
+    writer = _DATA_WRITERS.get(path.suffix.lower())
+    if writer is None:
+        raise CliError(
+            f"don't know how to write {path.suffix!r} files ({path}). "
+            f"Supported: {', '.join(sorted(_DATA_WRITERS))}"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        writer(df, path)
+    except ImportError as exc:
+        hint = ' Try: pip install "polspec[arrow]"' if "pyarrow" in str(exc) else ""
+        raise CliError(f"could not write {path}: {exc}.{hint}") from exc
+
+
+def _single_spec(source: Path, class_name: str | None) -> type[FrameSpec]:
+    """The one FrameSpec a file defines, or the one `--class` picks out."""
+    specs = _loaded_specs(source, class_name, source)
+    if len(specs) != 1:
+        names = ", ".join(name for name, _, _ in specs)
+        raise CliError(
+            f"{source} defines several specs ({names}); pick one with --class"
+        )
+    return specs[0][1]
+
+
+def _references_from(items: list[str] | None) -> dict[str, pl.DataFrame] | None:
+    """`--references NAME=PATH ...` as the mapping `references=` takes."""
+    references: dict[str, pl.DataFrame] = {}
+    for item in items or ():
+        name, path = _parse_reference(item)
+        if not path.exists():
+            raise CliError(f"no such file for reference {name!r}: {path}")
+        references[name] = _read_data_file(path, None)
+    return references or None
 
 
 def _class_name_from(text: str) -> str:
@@ -226,32 +290,15 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     Exit status 0 when the data passes, 1 when it does not; a problem with
     the arguments or files is reported like any other CLI error.
     """
-    source = Path(args.spec)
-    if not source.exists():
-        raise CliError(f"no such file: {source}")
-    data_path = Path(args.data)
-    if not data_path.exists():
-        raise CliError(f"no such file: {data_path}")
-
-    specs = _loaded_specs(source, args.cls, source)
-    if len(specs) != 1:
-        names = ", ".join(name for name, _, _ in specs)
-        raise CliError(
-            f"{source} defines several specs ({names}); pick one with --class"
-        )
-    _, spec_cls, _ = specs[0]
-
-    references: dict[str, pl.DataFrame] = {}
-    for item in args.references or ():
-        name, path = _parse_reference(item)
-        if not path.exists():
-            raise CliError(f"no such file for reference {name!r}: {path}")
-        references[name] = _read_data_file(path, None)
+    source = _existing(args.spec)
+    data_path = _existing(args.data)
+    spec_cls = _single_spec(source, args.cls)
+    references = _references_from(args.references)
 
     df = _read_data_file(data_path, None)
     report = spec_cls.inspect(
         df,
-        references=references or None,
+        references=references,
         extra_cols="allow" if args.allow_extra else "raise",
         missing_cols="allow" if args.allow_missing else "raise",
         strict_dtypes=args.strict_dtypes,
@@ -262,6 +309,101 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     else:
         print(str(report))
     return 0 if report.passed else 1
+
+
+# ---------------------------------------------------------------------------
+# generate
+# ---------------------------------------------------------------------------
+
+
+def _cmd_generate(args: argparse.Namespace) -> int:
+    """Generates rows from a spec and writes them to one data file.
+
+    Eager: the frame is built in memory and written once. The streaming
+    sinks (`sink_parquet` and friends) stay a Python surface -- a file too
+    large to hold is a file too large to inspect at the shell anyway.
+    """
+    source = _existing(args.spec)
+    if args.rows < 0:
+        raise CliError(f"-n/--rows must be non-negative, got {args.rows}")
+    spec_cls = _single_spec(source, args.cls)
+    references = _references_from(args.references)
+    output = Path(args.output)
+    if output.suffix.lower() not in _DATA_WRITERS:
+        raise CliError(
+            f"don't know how to write {output.suffix!r} files ({output}). "
+            f"Supported: {', '.join(sorted(_DATA_WRITERS))}"
+        )
+    df = spec_cls.generate(
+        args.rows, method=args.method, seed=args.seed, references=references
+    )
+    _write_data_file(df, output)
+    print(f"Wrote {df.height} row(s) of {spec_cls.__name__} to {output}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# diff and drift
+# ---------------------------------------------------------------------------
+
+_FAIL_ON = ("breaking", "any", "none")
+
+
+def _print_drift(report: DriftReport, args: argparse.Namespace) -> int:
+    """Prints a drift report the way `--json`/`--markdown` ask, and decides
+    the exit status from `--fail-on`: 1 when a finding at or above that
+    level is present, 0 otherwise. `none` never fails, for posting a report
+    without gating on it.
+    """
+    if args.json:
+        print(report.to_json())
+    elif args.markdown:
+        print(report.to_markdown(), end="")
+    else:
+        print(str(report))
+    if args.fail_on == "none":
+        return 0
+    failing = report.findings if args.fail_on == "any" else report.breaking
+    return 1 if failing else 0
+
+
+def _parse_rename(text: str) -> tuple[str, str]:
+    old, sep, new = text.partition("=")
+    if not sep or not old or not new:
+        raise CliError(
+            f"--rename expects OLD=NEW, got {text!r} "
+            "(a column's name in the first spec, and its name in the second)"
+        )
+    return old, new
+
+
+def _cmd_diff(args: argparse.Namespace) -> int:
+    """Compares two spec files; exit 1 when the change is breaking."""
+    old_cls = _single_spec(_existing(args.old), args.cls)
+    new_cls = _single_spec(_existing(args.new), args.cls)
+    renames = dict(_parse_rename(item) for item in args.rename or ())
+    report = diff(
+        old_cls,
+        new_cls,
+        renames=renames or None,
+        options=DriftOptions(strict_dtypes=args.strict_dtypes),
+    )
+    return _print_drift(report, args)
+
+
+def _cmd_drift(args: argparse.Namespace) -> int:
+    """Measures a data file against a spec; exit 1 when the data fails it."""
+    source = _existing(args.spec)
+    data_path = _existing(args.data)
+    spec_cls = _single_spec(source, args.cls)
+    df = _read_data_file(data_path, args.sample)
+    options = DriftOptions(
+        null_rate_tolerance=args.null_rate_tolerance,
+        unseen_values=not args.no_unseen,
+        strict_dtypes=args.strict_dtypes,
+        max_samples=args.max_samples,
+    )
+    return _print_drift(drift(spec_cls, df, options=options), args)
 
 
 # ---------------------------------------------------------------------------
@@ -645,6 +787,117 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Print the report as JSON instead of text",
     )
     validate.set_defaults(func=_cmd_validate)
+
+    generate = subparsers.add_parser(
+        "generate", help="Generate rows from a schema into a data file"
+    )
+    generate.add_argument("spec", help="A .yaml/.yml spec, or a .py file defining one")
+    generate.add_argument(
+        "-n", "--rows", type=int, required=True, metavar="N", help="Rows to generate"
+    )
+    generate.add_argument(
+        "-o",
+        "--output",
+        required=True,
+        help="File to write; the extension picks the format (.parquet, .csv, ...)",
+    )
+    generate.add_argument("--seed", type=int, help="Generation seed (default: random)")
+    generate.add_argument(
+        "--method",
+        choices=("random", "cartesian"),
+        default="random",
+        help="Sampling method (default: random)",
+    )
+    generate.add_argument(
+        "--references",
+        action="append",
+        metavar="NAME=PATH",
+        help="Parent data for a foreign key to another spec; repeat for several",
+    )
+    generate.add_argument(
+        "--class",
+        dest="cls",
+        metavar="NAME",
+        help="Generate from only this class (a .py source may define several)",
+    )
+    generate.set_defaults(func=_cmd_generate)
+
+    def add_report_options(sub: argparse.ArgumentParser) -> None:
+        output = sub.add_mutually_exclusive_group()
+        output.add_argument(
+            "--json", action="store_true", help="Print the report as JSON"
+        )
+        output.add_argument(
+            "--markdown",
+            action="store_true",
+            help="Print the report as Markdown, for a pull-request comment",
+        )
+        sub.add_argument(
+            "--fail-on",
+            choices=_FAIL_ON,
+            default="breaking",
+            help=(
+                "Which findings make the exit status 1: breaking (default), "
+                "any, or none"
+            ),
+        )
+        sub.add_argument(
+            "--strict-dtypes",
+            action="store_true",
+            help="A dtype change is breaking unless the dtypes are identical",
+        )
+        sub.add_argument(
+            "--class",
+            dest="cls",
+            metavar="NAME",
+            help="Use only this class (a .py source may define several)",
+        )
+
+    diff_parser = subparsers.add_parser(
+        "diff", help="What changed between two schemas, and whether it breaks"
+    )
+    diff_parser.add_argument("old", help="The earlier spec: .yaml/.yml, or a .py file")
+    diff_parser.add_argument("new", help="The later spec")
+    diff_parser.add_argument(
+        "--rename",
+        action="append",
+        metavar="OLD=NEW",
+        help="A column renamed between the two; repeat for several",
+    )
+    add_report_options(diff_parser)
+    diff_parser.set_defaults(func=_cmd_diff)
+
+    drift_parser = subparsers.add_parser(
+        "drift", help="How a data file has moved relative to its schema"
+    )
+    drift_parser.add_argument(
+        "spec", help="A .yaml/.yml spec, or a .py file defining one"
+    )
+    drift_parser.add_argument("data", help="Path to a CSV, Parquet, NDJSON or IPC file")
+    drift_parser.add_argument(
+        "--sample", type=int, metavar="N", help="Measure only the first N rows"
+    )
+    drift_parser.add_argument(
+        "--null-rate-tolerance",
+        type=float,
+        default=0.05,
+        metavar="F",
+        help="How far the null rate may sit from null_probability (default: 0.05)",
+    )
+    drift_parser.add_argument(
+        "--no-unseen",
+        action="store_true",
+        help="Do not report declared values the data never holds",
+    )
+    drift_parser.add_argument(
+        "--max-samples",
+        type=int,
+        default=10,
+        metavar="N",
+        help="Offending values to carry per finding (default: 10)",
+    )
+    add_report_options(drift_parser)
+    drift_parser.set_defaults(func=_cmd_drift)
 
     return parser
 

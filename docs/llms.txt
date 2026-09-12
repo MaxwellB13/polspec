@@ -32,7 +32,7 @@ https://maxwellb13.github.io/polspec/llms-full.txt
 - [Hierarchies](https://maxwellb13.github.io/polspec/how-to/hierarchies/): A link table is an edge list: one column holds a reference, the other holds the reference it points at, and both draw on the same set of values.
 - [Generated documentation](https://maxwellb13.github.io/polspec/how-to/documenting/): A spec already holds everything a data dictionary needs, so polspec renders one rather than asking you to keep a second copy in step.
 - [Test pipelines](https://maxwellb13.github.io/polspec/how-to/testing/): A spec is a schema and a data source at once, which makes it a natural fit for the tests around a data pipeline: declare what a stage of the pipeline expects, generate data that matches, and validate what it produces.
-- [Command line](https://maxwellb13.github.io/polspec/how-to/cli/): `polspec` has two things to do with a schema: create one, and turn one into a test.
+- [Command line](https://maxwellb13.github.io/polspec/how-to/cli/): `polspec` does at the shell what a spec does in Python: create one from data, turn one into a test, generate data from one, check data against one, and say what moved.
 
 ## Reference
 

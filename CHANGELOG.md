@@ -36,6 +36,19 @@ seed produces; see
   or one red test. `DriftReport`, `DriftFinding` and `DriftOptions` are
   exported from `polspec`.
 
+- **Three CLI verbs.** `polspec generate SPEC -n N -o FILE` writes generated
+  rows to any format the CLI reads (`--seed`, `--method`, `--references`
+  as for `validate`); `polspec diff OLD NEW` and `polspec drift SPEC DATA`
+  print a drift report as text, `--json` or `--markdown`, and gate on it
+  with `--fail-on breaking|any|none` -- so a schema change in a pull
+  request, or a nightly load, can fail CI with no Python:
+
+  ```bash
+  polspec generate orders.yaml -n 1000 -o orders.parquet --seed 1
+  polspec drift orders.yaml orders.parquet
+  polspec diff main/orders.yaml pr/orders.yaml --markdown --fail-on breaking
+  ```
+
 ## [0.5.0] - 2026-09-11
 
 The headline is `format=`: a `String` column that says what its values look
