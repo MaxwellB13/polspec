@@ -1623,6 +1623,174 @@ from the single-pass aggregation above.
 
 ---
 
+# Schema and data drift
+Source: https://maxwellb13.github.io/polspec/how-to/drift/
+
+# Schema and data drift
+
+`validate()` says whether data meets its spec. Drift says *what moved* --
+between two versions of a declaration, or between a declaration and the
+data it is supposed to describe -- and whether each move would break
+validation.
+
+<!-- docs: skip -->
+```python
+from polspec.drift import diff, drift
+
+report = diff(OldOrders, NewOrders)   # two declarations
+report = drift(Orders, df)            # a declaration and a frame
+```
+
+Both are also methods on a spec: `OldOrders.diff(NewOrders)` and
+`Orders.drift(df)`. Either way the result is a `DriftReport`.
+
+## One rule for severity
+
+Every finding is `breaking` or `compatible`, and the line between them is
+mechanical: a finding is **breaking when a frame that satisfied the old side
+could fail the new one**. For `drift()`, that means this frame fails this
+spec on that column. Nothing else is a judgement call:
+
+| Change | Severity | Because |
+|:--|:--|:--|
+| a bound or domain narrowed | breaking | values that validated before now fail |
+| a bound or domain widened | compatible | nothing that passed now fails |
+| a column added | breaking | a frame without it fails `missing_cols="raise"` |
+| a column removed | breaking | a frame carrying it fails `extra_cols="raise"` |
+| a constraint added (`unique`, a validator, a check, a key) | breaking | rows that passed may fail |
+| a constraint removed | compatible | |
+| `nullable` turned off | breaking | nulls that validated before now fail |
+| a null rate that moved within a nullable column | compatible | the data still validates; the declaration describes it less well |
+
+A column added is breaking under this rule, which surprises people in a pull
+request. It is the honest answer -- validation of the old data would fail --
+and the CLI's `--fail-on` is how a team decides what to gate on.
+
+## Two declarations
+
+```python
+import datetime as dt
+
+class OrdersV1(FrameSpec):
+    order_id = ColSpec(pl.Int64, bounds=(1, None), unique=True)
+    status   = ColSpec(pl.Enum(["NEW", "PAID"]))
+    total    = ColSpec(pl.Float64, bounds=(0.0, 1_000.0))
+    placed   = ColSpec(pl.Date, bounds=(dt.date(2024, 1, 1), dt.date(2025, 1, 1)))
+
+class OrdersV2(FrameSpec):
+    order_id = ColSpec(pl.Int64, bounds=(1, None), unique=True)
+    status   = ColSpec(pl.Enum(["NEW", "PAID", "SHIPPED"]))   # widened
+    total    = ColSpec(pl.Float64, bounds=(0.0, 500.0))         # narrowed
+    placed   = ColSpec(pl.Date)                                 # widened
+    channel  = ColSpec(pl.Enum(["web", "store"]))               # added
+
+report = OrdersV1.diff(OrdersV2)
+print(report)
+```
+
+```
+Drift: 2 breaking, 3 compatible, 'OrdersV1' and 'OrdersV2'
+  - [breaking] Column 'channel' added; a frame without it fails missing_cols='raise'
+  - [breaking] Column 'total': domain narrowed from bounds [0.0, 1000.0] to bounds [0.0, 500.0]; values that validated before now fail
+  - [compatible] Column 'status': dtype changed from Enum(categories=['NEW', 'PAID']) to Enum(categories=['NEW', 'PAID', 'SHIPPED'])
+  - [compatible] Column 'status': domain widened from one of ['NEW', 'PAID'] to one of ['NEW', 'PAID', 'SHIPPED']; values that failed before are now accepted
+  - [compatible] Column 'placed': domain widened from bounds [2024-01-01, 2025-01-01] to any Date; values that failed before are now accepted
+```
+
+Widened and narrowed are decided by the same `Domain` comparison a foreign
+key uses at declaration, run in both directions. A change that is neither --
+`choices=["A", "B"]` to `["B", "C"]`, or `format="email"` to `"uuid4"` -- is
+`domain_changed`, and breaking.
+
+A rename is not guessed from similar names. Say it, and it is reported as
+one `column_renamed` finding instead of a column removed and another added:
+
+```python
+class Renamed(FrameSpec):
+    order_ref = ColSpec(pl.Int64, bounds=(1, None), unique=True)
+    status    = ColSpec(pl.Enum(["NEW", "PAID"]))
+    total     = ColSpec(pl.Float64, bounds=(0.0, 1_000.0))
+    placed    = ColSpec(pl.Date, bounds=(dt.date(2024, 1, 1), dt.date(2025, 1, 1)))
+
+assert [f.code for f in OrdersV1.diff(Renamed, renames={"order_id": "order_ref"})] == [
+    "column_renamed"
+]
+```
+
+## A declaration and data
+
+`drift()` asks the frame the questions the spec makes answerable: is
+anything outside the declared bounds, and by how much; which values are
+outside the declared `choices`, `Enum` or `format`; which declared values
+never appear; has the null rate moved.
+
+```python
+good = OrdersV1.generate(2_000, seed=1)
+assert OrdersV1.drift(good).unchanged
+
+moved = good.with_columns(
+    total=pl.col("total") * 3,
+    placed=pl.col("placed") + pl.duration(days=200),
+    status=pl.lit("PAID").cast(pl.String),
+)
+print(OrdersV1.drift(moved))
+```
+
+```
+Drift: 2 breaking, 2 compatible, DataFrame against 'OrdersV1'
+  - [breaking] Column 'total': values escape bounds [0.0, 1000.0]: max found 2999.36861541796 by 1999.36861541796 above. Widen the bounds, or fix the source
+  - [breaking] Column 'placed': values escape bounds [2024-01-01, 2025-01-01]: max found 2025-07-20 by 200 days above. Widen the bounds, or fix the source
+  - [compatible] Column 'status': holds String, declared Enum(categories=['NEW', 'PAID'])
+  - [compatible] Column 'status': 1 of 2 declared value(s) never appear: ['NEW']
+```
+
+The generated frame drifts by nothing, and that is pinned by a test: what
+`generate()` produces never drifts breakingly from the spec that produced
+it, the same round trip validation is held to. The other direction is pinned
+too -- every breaking finding is a column `validate()` would report -- so
+`breaking` never means more than "validation fails here".
+
+What `drift()` does **not** measure is what validation already does:
+uniqueness, composite keys, foreign keys and checks are pass/fail claims
+about rows, not summaries that move. `validate()` is still the verdict.
+
+### Options
+
+```python
+from polspec import DriftOptions
+
+lenient = DriftOptions(null_rate_tolerance=0.2, unseen_values=False)
+OrdersV1.drift(good, options=lenient)
+OrdersV1.drift(good, null_rate_tolerance=0.2)   # or one keyword at a time, not both
+```
+
+| Option | Default | Meaning |
+|:--|:--|:--|
+| `null_rate_tolerance` | `0.05` | how far the observed null rate may sit from `null_probability` before `null_rate_moved` is reported; absolute, not relative |
+| `unseen_values` | `True` | report declared values the data never holds (`cardinality_moved`) |
+| `strict_dtypes` | `False` | the same switch as validation's, decided by the same function: whether a `dtype_changed` is breaking |
+| `max_samples` | `10` | how many offending values a finding's `details` carry |
+
+## The report
+
+A `DriftReport` is data first. `report.breaking` and `report.compatible`
+are the two halves; `by_column()` and `by_code()` slice it; `to_dict()` and
+`to_json()` serialise it; `bool(report)` is `report.unchanged`, the way
+`bool(ValidationReport)` is `passed`.
+
+`to_markdown()` renders the shape of a pull-request comment, breaking
+findings first:
+
+```python
+text = OrdersV1.diff(OrdersV2).to_markdown()
+assert text.index("## Breaking") < text.index("## Compatible")
+```
+
+The finding codes are listed with the validation codes in
+[Errors and findings](https://maxwellb13.github.io/polspec/reference/errors/#drift-codes).
+
+---
+
 # Shared categories
 Source: https://maxwellb13.github.io/polspec/how-to/categories/
 
@@ -2893,6 +3061,9 @@ cannot describe a signature the code does not have.
 | [`ValidationOptions`][polspec.ValidationOptions] | [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/) |
 | [`ValidationReport`][polspec.ValidationReport] | [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/) |
 | [`Finding`][polspec.Finding] | [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/) |
+| [`DriftOptions`][polspec.DriftOptions] | [Drift](https://maxwellb13.github.io/polspec/reference/api/drift/) |
+| [`DriftReport`][polspec.DriftReport] | [Drift](https://maxwellb13.github.io/polspec/reference/api/drift/) |
+| [`DriftFinding`][polspec.DriftFinding] | [Drift](https://maxwellb13.github.io/polspec/reference/api/drift/) |
 | [`profile_dataframe`][polspec.profile_dataframe] | [Profiling](https://maxwellb13.github.io/polspec/reference/api/profiling/) |
 | [`PolspecError`][polspec.PolspecError] | [Errors](https://maxwellb13.github.io/polspec/reference/api/errors/) |
 | [`SpecError`][polspec.SpecError] | [Errors](https://maxwellb13.github.io/polspec/reference/api/errors/) |
@@ -3198,6 +3369,10 @@ data -- go through `__columns__`:
 - `FrameSpec.checks(cls) -> 'tuple[Check, ...]'` -- The Check constraints defined on this FrameSpec.
 
 - `FrameSpec.col(cls, name: 'str') -> 'ColSpec'` -- The declaration of one column, whatever it is called.
+
+- `FrameSpec.diff(cls, other: 'TableSpec | type[FrameSpec]', *, renames: 'Mapping[str, str] | None' = None, options: 'DriftOptions | None' = None) -> 'DriftReport'` -- What changed from this spec to `other`, as a `DriftReport`.
+
+- `FrameSpec.drift(cls, df: 'pl.DataFrame | pl.LazyFrame', *, options: 'DriftOptions | None' = None, null_rate_tolerance: 'float | None' = None, unseen_values: 'bool | None' = None, strict_dtypes: 'bool | None' = None, max_samples: 'int | None' = None) -> 'DriftReport'` -- How `df` has moved relative to this spec, as a `DriftReport`.
 
 - `FrameSpec.foreign_keys(cls) -> 'tuple[ForeignKey, ...]'` -- The ForeignKey constraints defined on this FrameSpec.
 
@@ -3665,6 +3840,134 @@ details : Mapping
 
 ---
 
+# Drift
+Source: https://maxwellb13.github.io/polspec/reference/api/drift/
+
+# Drift
+
+`polspec.drift.diff()` compares two declarations; `polspec.drift.drift()`
+compares a declaration to a frame. Both return a `DriftReport`, and both are
+reachable from a spec as `Orders.diff(...)` and `Orders.drift(df)` -- see
+[Schema and data drift](https://maxwellb13.github.io/polspec/how-to/drift/).
+
+## diff
+
+### diff(old: 'TableSpec | type', new: 'TableSpec | type', *, renames: 'Mapping[str, str] | None' = None, options: 'DriftOptions | None' = None) -> 'DriftReport'
+
+What changed between two declarations, as a `DriftReport`.
+
+Parameters
+----------
+old, new : TableSpec | FrameSpec class
+    The two declarations. A spec's name is not compared: the report is
+    about what the two say, not what they are called.
+renames : mapping, optional
+    Columns renamed between the two, `{old_name: new_name}`. Applied to
+    `old` first, through `TableSpec.rename`, so a rename is reported
+    as `column_renamed` rather than as a column removed and another
+    added. The caller asserts the rename; nothing is guessed from
+    similar names.
+options : DriftOptions, optional
+    Only `strict_dtypes` is read when diffing two specs.
+
+A finding is *breaking* when a frame that satisfied `old` could fail
+`new`: a narrowed domain, a dropped nullability, a column added (a frame
+that lacks it fails `missing_cols="raise"`), a constraint added. A
+widened domain or a removed constraint is *compatible*.
+## drift
+
+### drift(spec: 'TableSpec | type', df: 'Frame', *, options: 'DriftOptions | None' = None, **option_kwargs: 'Any') -> 'DriftReport'
+
+How `df` has moved relative to what `spec` declares, as a `DriftReport`.
+
+Parameters
+----------
+spec : TableSpec | FrameSpec class
+    The declaration.
+df : pl.DataFrame | pl.LazyFrame
+    The frame. A LazyFrame is collected: every measurement here is a
+    summary of the whole column.
+options : DriftOptions, optional
+    Every option at once. Cannot be combined with the keywords.
+**option_kwargs
+    The fields of `DriftOptions`, one at a time.
+
+A finding is *breaking* when this frame fails this spec on that column:
+values outside the domain, a bound exceeded, nulls where none are
+allowed, a format not matched. A null rate that moved within a nullable
+column, or declared values the data never holds, is *compatible* -- the
+data still validates; the declaration has stopped describing it well.
+
+Uniqueness, composite keys, foreign keys and checks are not measured
+here; they are pass/fail claims that `validate()` already reports.
+## DriftOptions
+
+### DriftOptions(null_rate_tolerance: 'float' = 0.05, unseen_values: 'bool' = True, strict_dtypes: 'bool' = False, max_samples: 'int' = 10) -> None
+
+What counts as drift, said once.
+
+Parameters
+----------
+null_rate_tolerance : float, default 0.05
+    How far the observed null rate may sit from a nullable column's
+    `null_probability` before `null_rate_moved` is reported. Absolute,
+    not relative: a relative tolerance is unstable near zero.
+unseen_values : bool, default True
+    Whether to report declared `choices` or `Enum` categories the data
+    never holds (`cardinality_moved`).
+strict_dtypes : bool, default False
+    The same switch as `ValidationOptions.strict_dtypes`, and decided by
+    the same function: whether a `dtype_changed` is breaking.
+max_samples : int, default 10
+    How many offending values a finding's `details` carry.
+## DriftReport
+
+### DriftReport(kind: 'Kind', old: 'str', new: 'str', findings: 'tuple[DriftFinding, ...]', options: 'DriftOptions | None' = None) -> None
+
+Every difference between two specs, or between a spec and a frame.
+
+`kind` says which: `"diff"` compares `old` to `new`, both declarations;
+`"drift"` compares the declaration `old` to data, and `new` is what the
+data was called. `bool(report)` is `report.unchanged`, the way
+`bool(ValidationReport)` is `passed`.
+
+- `DriftReport.by_code(self, code: 'DriftCode') -> 'tuple[DriftFinding, ...]'` -- Every finding of one kind, such as `"domain_narrowed"`.
+
+- `DriftReport.by_column(self) -> 'dict[str, tuple[DriftFinding, ...]]'` -- Findings grouped by column; table-level findings under `""`.
+
+- `DriftReport.to_dict(self) -> 'dict[str, Any]'` -- This report as JSON-ready data.
+
+- `DriftReport.to_json(self, *, indent: 'int | None' = 2) -> 'str'` -- This report as a JSON string. `indent=None` for one line.
+
+- `DriftReport.to_markdown(self, path: 'str | Path | None' = None) -> 'str'` -- This report as Markdown, written to `path` if given.
+## DriftFinding
+
+### DriftFinding(code: 'DriftCode', severity: 'Severity', key: 'str', message: 'str', columns: 'tuple[str, ...]' = (), details: 'Mapping[str, Any]' = <factory>) -> None
+
+One difference between two declarations, or a declaration and data.
+
+Attributes
+----------
+code : DriftCode
+    Which kind of difference.
+severity : "breaking" | "compatible"
+    Breaking when data that satisfied the old side could fail the new
+    one; compatible otherwise.
+key : str
+    A stable identifier within the report, such as `"total__bounds"` or
+    `"check:total_covers_subtotal"`.
+message : str
+    What changed, naming the column, and what to do about it.
+columns : tuple[str, ...]
+    The columns involved; empty for table-level differences.
+details : Mapping
+    Code-specific facts: the old and new value, how far a bound was
+    exceeded, which values were new.
+
+- `DriftFinding.to_dict(self) -> 'dict[str, Any]'` -- This finding as JSON-ready data.
+
+---
+
 # Profiling
 Source: https://maxwellb13.github.io/polspec/reference/api/profiling/
 
@@ -3820,6 +4123,32 @@ through `report.rows(finding)`; structural ones describe the frame's shape.
 | `unique_together` | row-level | a composite key holds duplicate combinations |
 | `check` | row-level | a `__checks__` predicate is false |
 | `foreign_key` | row-level | a key value has no matching parent row (also structural when the parent lacks the referenced columns) |
+
+## Drift codes
+
+A `DriftReport` (from `diff()` or `drift()`) carries `DriftFinding`s with one
+of these codes. Each also carries a `severity`: **breaking** when a frame
+that satisfied the old side could fail the new one, **compatible**
+otherwise. See [Schema and data drift](https://maxwellb13.github.io/polspec/how-to/drift/).
+
+| Code | From | Severity | Raised when |
+|:--|:--|:--|:--|
+| `column_added` | both | breaking | the new spec declares a column the old lacks, or the data has an undeclared column |
+| `column_removed` | both | breaking | the old spec declares a column the new lacks, or the data lacks a declared column |
+| `column_renamed` | `diff` | compatible | a rename given through `renames=` |
+| `dtype_changed` | both | as validation decides | the dtypes differ; compatible when the old values would still validate |
+| `nullability_changed` | both | off → on compatible; on → off breaking; nulls in a non-nullable column breaking | |
+| `domain_widened` | `diff` | compatible | bounds, choices, format or string length accept more than before |
+| `domain_narrowed` | `diff` | breaking | they accept less |
+| `domain_changed` | `diff` | breaking | neither is inside the other |
+| `bounds_exceeded` | `drift` | breaking | values escape `bounds` or `string_length`; `details` say which and by how much |
+| `new_values` | `drift` | breaking | values outside `choices`, an `Enum` or a finite format |
+| `format_violated` | `drift` | breaking | values that do not match the declared `format` |
+| `null_rate_moved` | `drift` | compatible | the null rate sits further from `null_probability` than the tolerance |
+| `cardinality_moved` | `drift` | compatible | declared values the data never holds |
+| `constraint_added` | `diff` | breaking | `unique`, a validator, rule, check, composite key, foreign key or hierarchy present only in the new spec |
+| `constraint_removed` | `diff` | compatible | the reverse |
+| `field_changed` | `diff` | compatible | `tags`, `weights`, `distribution`, `distribution_params` or `null_probability` differ |
 
 ---
 
@@ -4610,6 +4939,34 @@ seed produces; see
 [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/).
 
 ## [Unreleased]
+
+### Added
+
+- **Drift as a report.** `polspec.drift.diff(old, new)` says what changed
+  between two declarations; `polspec.drift.drift(spec, df)` says how data
+  has moved relative to what its spec declares -- values outside the
+  domain, a bound exceeded and by how much, a format no longer matched, a
+  null rate that moved, declared values never seen. Both return one
+  `DriftReport`, also reachable as `Orders.diff(Other)` and
+  `Orders.drift(df)`:
+
+  ```python
+  report = OrdersV1.diff(OrdersV2)
+  report.breaking          # a narrowed bound, an added column, a new constraint
+  report.compatible        # a widened domain, a removed check
+  report.to_markdown()     # the shape of a pull-request comment
+  ```
+
+  Every finding carries a `severity` under one mechanical rule: *breaking*
+  when a frame that satisfied the old side could fail the new one --
+  decided, for dtypes, by the same function validation uses. Two tests hold
+  the two sides to it: what `generate()` produces never drifts breakingly
+  from its own spec, and every breaking finding against data is a column
+  `validate()` reports. Sixteen closed finding codes, a `DriftOptions`
+  with explicit tolerances, and a comparator per `ColSpec` and `TableSpec`
+  field with a parity test, so a field added to a declaration is one entry
+  or one red test. `DriftReport`, `DriftFinding` and `DriftOptions` are
+  exported from `polspec`.
 
 ## [0.5.0] - 2026-09-11
 

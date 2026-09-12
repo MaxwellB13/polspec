@@ -18,11 +18,13 @@ from polspec.tablespec import TableSpec, as_table_spec
 
 if TYPE_CHECKING:
     from polspec.catspec import CatSpec
+    from polspec.drift import DriftFinding, DriftReport
     from polspec.foreign_key import ForeignKey
 
 __all__ = [
     "catspec_to_markdown",
     "catspec_to_mermaid",
+    "drift_to_markdown",
     "framespec_to_markdown",
     "framespec_to_mermaid",
     "registry_to_mermaid",
@@ -202,6 +204,61 @@ def framespec_to_markdown(
         *_columns_section(spec),
         *_constraints_section(spec),
     ]
+    return _write_if_asked("\n".join(lines) + "\n", path)
+
+
+# ---------------------------------------------------------------------------
+# Drift reports
+# ---------------------------------------------------------------------------
+
+
+def _drift_rows(findings: Iterable[DriftFinding]) -> list[str]:
+    rows = []
+    for finding in findings:
+        column = ", ".join(f"`{c}`" for c in finding.columns) or "-"
+        # The message already names the column; the table has a column for it.
+        detail = finding.message
+        prefix = f"Column '{finding.columns[0]}': " if len(finding.columns) == 1 else ""
+        if detail.startswith(prefix):
+            detail = detail[len(prefix) :]
+        rows.append(
+            f"| {column} | `{finding.code}` | {detail.replace('|', chr(92) + '|')} |"
+        )
+    return rows
+
+
+def drift_to_markdown(report: DriftReport, path: str | Path | None = None) -> str:
+    """A `DriftReport` as Markdown -- the shape of a pull-request comment.
+
+    Breaking findings first, under their own heading, so the part a
+    reviewer has to read is the part at the top.
+    """
+    what = (
+        f"`{report.old}` -> `{report.new}`"
+        if report.kind == "diff"
+        else f"{report.new} against `{report.old}`"
+    )
+    lines = [f"# Drift: {what}", ""]
+    if report.unchanged:
+        lines.append("No drift.")
+    else:
+        lines.append(
+            f"{len(report.breaking)} breaking, {len(report.compatible)} compatible."
+        )
+        for heading, findings in (
+            ("Breaking", report.breaking),
+            ("Compatible", report.compatible),
+        ):
+            if not findings:
+                continue
+            lines += [
+                "",
+                f"## {heading}",
+                "",
+                "| Column | Change | Detail |",
+                "|:---|:---|:---|",
+                *_drift_rows(findings),
+            ]
     return _write_if_asked("\n".join(lines) + "\n", path)
 
 

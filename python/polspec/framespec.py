@@ -24,9 +24,11 @@ from typing import Any, ClassVar, Literal, overload
 
 import polars as pl
 
+from polspec import drift as drift_module
 from polspec import generation, serialization, validation
 from polspec.catspec import CatSpec
 from polspec.check import Check
+from polspec.drift import DriftOptions, DriftReport
 from polspec.errors import SpecError
 from polspec.foreign_key import ForeignKey
 from polspec.frames import Method, References
@@ -623,6 +625,52 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             seed=seed,
             references=references,
             **kwargs,
+        )
+
+    # ------------------------------------------------------------------
+    # Drift
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def diff(
+        cls,
+        other: TableSpec | type[FrameSpec],
+        *,
+        renames: Mapping[str, str] | None = None,
+        options: DriftOptions | None = None,
+    ) -> DriftReport:
+        """What changed from this spec to `other`, as a `DriftReport`.
+
+        This spec is the *old* side. See `polspec.drift.diff`.
+        """
+        return drift_module.diff(cls.spec, other, renames=renames, options=options)
+
+    @classmethod
+    def drift(
+        cls,
+        df: pl.DataFrame | pl.LazyFrame,
+        *,
+        options: DriftOptions | None = None,
+        null_rate_tolerance: float | None = None,
+        unseen_values: bool | None = None,
+        strict_dtypes: bool | None = None,
+        max_samples: int | None = None,
+    ) -> DriftReport:
+        """How `df` has moved relative to this spec, as a `DriftReport`.
+
+        Each keyword left as `None` takes the `DriftOptions` default. See
+        `polspec.drift.drift`.
+        """
+        return drift_module.drift(
+            cls.spec,
+            df,
+            options=options,
+            **_given(
+                null_rate_tolerance=null_rate_tolerance,
+                unseen_values=unseen_values,
+                strict_dtypes=strict_dtypes,
+                max_samples=max_samples,
+            ),
         )
 
     # ------------------------------------------------------------------

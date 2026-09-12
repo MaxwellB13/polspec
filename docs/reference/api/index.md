@@ -28,6 +28,9 @@ cannot describe a signature the code does not have.
 | [`ValidationOptions`][polspec.ValidationOptions] | [Validation](validation.md) |
 | [`ValidationReport`][polspec.ValidationReport] | [Validation](validation.md) |
 | [`Finding`][polspec.Finding] | [Validation](validation.md) |
+| [`DriftOptions`][polspec.DriftOptions] | [Drift](drift.md) |
+| [`DriftReport`][polspec.DriftReport] | [Drift](drift.md) |
+| [`DriftFinding`][polspec.DriftFinding] | [Drift](drift.md) |
 | [`profile_dataframe`][polspec.profile_dataframe] | [Profiling](profiling.md) |
 | [`PolspecError`][polspec.PolspecError] | [Errors](errors.md) |
 | [`SpecError`][polspec.SpecError] | [Errors](errors.md) |

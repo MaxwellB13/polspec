@@ -25,6 +25,7 @@ https://maxwellb13.github.io/polspec/llms-full.txt
 - [Constraints](https://maxwellb13.github.io/polspec/how-to/constraints/): Beyond the shape of a single value, a spec can assert relationships.
 - [Generate data](https://maxwellb13.github.io/polspec/how-to/generating/): Columns are generated independently and in parallel by the Rust extension, then cast to their declared dtypes in one Polars pass.
 - [Validate data](https://maxwellb13.github.io/polspec/how-to/validating/): `validate()` accepts a `DataFrame` or a `LazyFrame` and returns the same kind, so it drops into a pipeline.
+- [Schema and data drift](https://maxwellb13.github.io/polspec/how-to/drift/): `validate()` says whether data meets its spec.
 - [Shared categories](https://maxwellb13.github.io/polspec/how-to/categories/): A `CatSpec` is a registry of `Enum` and `Categorical` definitions shared across specs, so several tables agree on a domain instead of each restating it.
 - [Specs as files](https://maxwellb13.github.io/polspec/how-to/files/): A spec can live in a file instead of a class body, so tooling outside Python can read it and so it can be reviewed as a document.
 - [Multiple specs](https://maxwellb13.github.io/polspec/how-to/registry/): A `ForeignKey` names the spec it points at, and a single spec knows nothing beyond that name.
@@ -42,6 +43,7 @@ https://maxwellb13.github.io/polspec/llms-full.txt
 - [Registry and categories](https://maxwellb13.github.io/polspec/reference/api/registry/): A declared set of specs, and the shared category domains they draw on.
 - [Generation](https://maxwellb13.github.io/polspec/reference/api/generation/): Every function here takes a `TableSpec` as its first argument, and every one has a `FrameSpec` classmethod that forwards to it with `cls.spec` -- see Generating data for what the options mean and Specs as values for when to reach for which.
 - [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/): `inspect()` returns a report; `validate()` raises one.
+- [Drift](https://maxwellb13.github.io/polspec/reference/api/drift/): `polspec.drift.diff()` compares two declarations; `polspec.drift.drift()` compares a declaration to a frame.
 - [Profiling](https://maxwellb13.github.io/polspec/reference/api/profiling/): Inferring a spec from data you already have.
 - [Exceptions](https://maxwellb13.github.io/polspec/reference/api/errors/): Every error polspec raises descends from `PolspecError`, so one `except` clause catches the lot.
 - [Errors and findings](https://maxwellb13.github.io/polspec/reference/errors/): Everything polspec raises on its own behalf derives from one base class, so a caller can separate "polspec objected" from "something else went wrong" with a single clause

@@ -120,7 +120,7 @@ jobs:
           skip-existing: true
 
   release:
-    name: Attach artifacts to GitHub Release
+    name: Draft the GitHub Release
     needs: [build, sdist]
     runs-on: ubuntu-latest
     permissions:
@@ -133,7 +133,7 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Upload to GitHub Release
+      - name: Draft the GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           # Asks GitHub to write the body from the commits since the previous
@@ -141,6 +141,10 @@ jobs:
           # Without it that file does nothing: it says how notes should be
           # grouped, not that they should be generated.
           generate_notes: true
+          # A draft, so the generated notes can be read and edited before
+          # anyone else sees them. Publishing is a button on the release
+          # page; PyPI is published by the job above regardless.
+          draft: true
           files: |
             dist/*.whl
             dist/*.tar.gz
