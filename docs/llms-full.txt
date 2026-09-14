@@ -5061,6 +5061,15 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-14
+
+The headline is drift: a report of what changed between two specs, or
+between a spec and the data it describes, with a severity per finding under
+one mechanical rule -- and three CLI verbs so that report can gate a pull
+request or a nightly load with no Python. Alongside it, `pattern=` completes
+the split `format=` began. Nothing in the engine changes; no seed produces a
+different frame, and no spec file needs migrating.
+
 ### Added
 
 - **Drift as a report.** `polspec.drift.diff(old, new)` says what changed
@@ -5113,6 +5122,19 @@ seed produces; see
   polspec drift orders.yaml orders.parquet
   polspec diff main/orders.yaml pr/orders.yaml --markdown --fail-on breaking
   ```
+
+### Documentation
+
+- Five claims the docs had stopped being true about are fixed, and one of
+  them is pinned: `unique=True` and `__unique_together__` had been listed as
+  work generation does not attempt (generated since 0.2.0); `generate()` on
+  an unsupported dtype raises `SpecError`, not `TypeError`; every yaml
+  example carried `version: 2` at format version 3, and a test now holds
+  each `version:` in the docs to `FORMAT_VERSION`.
+- The [roadmap](https://maxwellb13.github.io/polspec/explanation/roadmap/)
+  gains a *Deferred on purpose* section, starting with the `ColSpec` ->
+  `Domain` restructure that two release plans had set aside without saying
+  so on the page, and the condition under which it would be revisited.
 
 ## [0.5.0] - 2026-09-11
 
@@ -5891,7 +5913,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/MaxwellB13/polspec/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/MaxwellB13/polspec/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/MaxwellB13/polspec/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/MaxwellB13/polspec/compare/v0.3.0...v0.4.0
