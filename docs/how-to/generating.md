@@ -93,10 +93,11 @@ orders = Orders.generate(10_000, seed=2, references={Customers: customers})
 ## What generation does not enforce
 
 Generation satisfies dtypes, nullability, bounds, string lengths, value
-domains, weights, distributions, `ColRule`s and — when given parent data —
+domains, `format`s, weights, distributions, `unique=True`,
+`__unique_together__`, `ColRule`s, hierarchies and — when given parent data —
 foreign keys.
 
-It does **not** attempt `unique=True`, `__unique_together__`,
-`ColSpec.validators` or `__checks__`. The last two are impossible in general
-(they hold arbitrary expressions); the first two are open work. See
-[Known limitations](../explanation/limitations.md).
+It does **not** attempt `ColSpec.validators`, `__checks__` or
+`ColSpec.pattern`, by design: the first two hold arbitrary expressions and the
+third an arbitrary regex, and nothing can generate data to satisfy either in
+general. See [Known limitations](../explanation/limitations.md).

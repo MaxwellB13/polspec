@@ -105,7 +105,7 @@ categories, and every spec keyed by name. Foreign keys are written as names
 and bound again by `resolve()` on the way back:
 
 ```yaml
-version: 2
+version: 3
 categories:
   enums:
     STATUS: [NEW, PAID, SHIPPED]

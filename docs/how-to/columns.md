@@ -38,8 +38,9 @@ for you, so `pl.Int64` and `pl.Int64()` mean the same thing.
 | Temporal | `Date` `Time` `Datetime` `Duration` |
 | Categorical | `Enum` `Categorical` |
 
-Anything else — `List`, `Struct`, `Array` — can be *validated* but not
-generated; `generate()` raises `TypeError` naming the dtype.
+Anything else — `List`, `Struct`, `Array` and `Decimal` — can be
+*validated* but not generated; `generate()` raises `SpecError` naming the
+dtype.
 
 ## Nullability
 
