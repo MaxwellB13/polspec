@@ -22,10 +22,11 @@ df = Orders.generate(1_000_000, seed=42)   # a million rows in well under a seco
 Orders.validate(df)                        # raises ValidationError on any breach
 ```
 
-A validation library tells you when production data drifted. A fixture
-library gives you something to test against. Keeping both behind one
-declaration means the fixtures and the contract cannot quietly disagree — and
-where they still can, it is written down in
+A validation library tells you when production data drifted, and
+`Orders.drift(df)` says what moved. A fixture library gives you something to
+test against. Keeping both behind one declaration means the fixtures and the
+contract cannot quietly disagree — and where they still can, it is written
+down in
 [Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/),
 each backed by a test that fails the moment it stops being true.
 

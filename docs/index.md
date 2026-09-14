@@ -68,11 +68,18 @@ production will reject.
 
     [YAML specs](how-to/files.md)
 
+- **What changed**
+
+    Diff two versions of a spec, or a spec against data, into a report that
+    says what moved and whether a frame that passed before could fail now.
+
+    [Drift](how-to/drift.md)
+
 - **From the command line**
 
-    `polspec schema infer data.parquet -o spec.yaml` profiles a data file into
-    a schema; `polspec test spec.yaml -o test_spec.py` turns a schema into a
-    pytest round-trip test.
+    `polspec generate` writes a data file from a spec, `polspec validate`
+    checks one, `polspec diff` and `polspec drift` gate a pull request on
+    what changed, and `polspec test` turns a schema into a pytest round-trip.
 
     [Command line](how-to/cli.md)
 

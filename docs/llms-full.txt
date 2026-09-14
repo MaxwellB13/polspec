@@ -79,11 +79,18 @@ production will reject.
 
     [YAML specs](https://maxwellb13.github.io/polspec/how-to/files/)
 
+- **What changed**
+
+    Diff two versions of a spec, or a spec against data, into a report that
+    says what moved and whether a frame that passed before could fail now.
+
+    [Drift](https://maxwellb13.github.io/polspec/how-to/drift/)
+
 - **From the command line**
 
-    `polspec schema infer data.parquet -o spec.yaml` profiles a data file into
-    a schema; `polspec test spec.yaml -o test_spec.py` turns a schema into a
-    pytest round-trip test.
+    `polspec generate` writes a data file from a spec, `polspec validate`
+    checks one, `polspec diff` and `polspec drift` gate a pull request on
+    what changed, and `polspec test` turns a schema into a pytest round-trip.
 
     [Command line](https://maxwellb13.github.io/polspec/how-to/cli/)
 
@@ -465,8 +472,9 @@ for you, so `pl.Int64` and `pl.Int64()` mean the same thing.
 | Temporal | `Date` `Time` `Datetime` `Duration` |
 | Categorical | `Enum` `Categorical` |
 
-Anything else — `List`, `Struct`, `Array` — can be *validated* but not
-generated; `generate()` raises `TypeError` naming the dtype.
+Anything else — `List`, `Struct`, `Array` and `Decimal` — can be
+*validated* but not generated; `generate()` raises `SpecError` naming the
+dtype.
 
 ## Nullability
 
@@ -1413,13 +1421,14 @@ orders = Orders.generate(10_000, seed=2, references={Customers: customers})
 ## What generation does not enforce
 
 Generation satisfies dtypes, nullability, bounds, string lengths, value
-domains, weights, distributions, `ColRule`s and — when given parent data —
+domains, `format`s, weights, distributions, `unique=True`,
+`__unique_together__`, `ColRule`s, hierarchies and — when given parent data —
 foreign keys.
 
-It does **not** attempt `unique=True`, `__unique_together__`,
-`ColSpec.validators` or `__checks__`. The last two are impossible in general
-(they hold arbitrary expressions); the first two are open work. See
-[Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/).
+It does **not** attempt `ColSpec.validators`, `__checks__` or
+`ColSpec.pattern`, by design: the first two hold arbitrary expressions and the
+third an arbitrary regex, and nothing can generate data to satisfy either in
+general. See [Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/).
 
 ---
 
@@ -2036,7 +2045,7 @@ The output is plain, readable YAML — defaults are omitted so the file shows
 only what you actually declared:
 
 ```yaml
-version: 2
+version: 3
 name: Orders
 columns:
   order_id:
@@ -2315,7 +2324,7 @@ categories, and every spec keyed by name. Foreign keys are written as names
 and bound again by `resolve()` on the way back:
 
 ```yaml
-version: 2
+version: 3
 categories:
   enums:
     STATUS: [NEW, PAID, SHIPPED]
@@ -4486,17 +4495,20 @@ genuinely say the same thing.
 
 ## Where the gap remains
 
-Three claims are validated and not generated, and one of them is permanent:
+Three claims are validated and not generated, and all three are permanent:
 
-`__checks__` and `ColSpec.validators` wrap arbitrary Polars expressions.
-Nothing can generate data satisfying an arbitrary predicate — that is a
-statement about predicates, not about polspec — so generation makes no
-attempt, and the boundary is pinned by its own tests rather than papered over.
+`__checks__` and `ColSpec.validators` wrap arbitrary Polars expressions, and
+`ColSpec.pattern` is an arbitrary regex. Nothing can generate data satisfying
+an arbitrary predicate — that is a statement about predicates, not about
+polspec — so generation makes no attempt, and each boundary is pinned by its
+own test rather than papered over.
 
 The way to close *that* gap is not a cleverer generator. It is a richer
-vocabulary for describing values: a `pattern=` or a `format="email"` on
-`ColSpec` says the same thing as the validator, in a shape a sampler can use.
-See the [roadmap](https://maxwellb13.github.io/polspec/explanation/roadmap/).
+vocabulary for describing values, and `format="email"` is what that looks
+like: it says the same thing as `col("email").str.contains("@")`, in a shape
+a sampler can use. `pattern=` is the same vocabulary without the sampler —
+any regex can be checked, the curated set can be generated. See
+[String formats](https://maxwellb13.github.io/polspec/how-to/formats/) and the [roadmap](https://maxwellb13.github.io/polspec/explanation/roadmap/).
 
 Everything else on the list has been closed rather than documented away:
 uniqueness by drawing without replacement, rule and foreign-key dependencies
@@ -4918,9 +4930,10 @@ limits on distribution parameters, on cartesian dimensionality, on batch
 sizing.
 
 **Constraints `generate()` doesn't enforce**, which is a different, more
-interesting problem. Most of what is left is `__checks__` and
-`ColSpec.validators`, and that one is by design: both wrap arbitrary Polars
-expressions, and nothing can generate data satisfying an arbitrary predicate.
+interesting problem. What is left is `__checks__`, `ColSpec.validators` and
+`ColSpec.pattern`, and that is by design: the first two wrap arbitrary Polars
+expressions, the third is an arbitrary regex, and nothing can generate data
+satisfying an arbitrary predicate.
 Everything else on this list has been worked through — rule and foreign-key
 dependencies by ordering the passes rather than asserting the dependencies
 don't exist, and uniqueness by drawing without replacement instead of hoping a
@@ -4980,7 +4993,7 @@ Two things this project has made no compatibility promise about yet:
 
 The first of those is easier to live with than it sounds, because a spec file
 now says which format wrote it. Every file `to_yaml()` writes carries
-`version: 2`; a file with no `version:` key is read as version 1 and migrated
+`version: 3`; a file with no `version:` key is read as version 1 and migrated
 on load, and one written by a newer polspec than the reader is refused by name
 rather than misread. So a format change is a migration to write, not a class of
 file that silently stops loading — which is what makes the rest of this section
@@ -5008,17 +5021,30 @@ with `tags` marking which columns should be replaced outright rather than
 imitated — would serve the share-realistic-data-without-sharing-real-data case
 directly.
 
-**Drift as a report, not a pass/fail.** "A validation library tells you when
-production data drifted" is the claim on the front page, and today the answer
-is only *that* it drifted. Diffing a spec against data — new enum variants,
-bounds exceeded, cardinality moved — would say how. The same machinery diffs
-two specs against each other, which is what reviewing a schema change in a pull
-request actually needs.
+**A profiled spec that names a `format`.** `from_dataframe()` reads a
+string column as a `String` with a length range; it does not notice that
+every value is an email address. Inference is a decision about how sure to be
+before naming a format, and a wrong guess is a spec that rejects real data,
+so it has not been made. [Drift](https://maxwellb13.github.io/polspec/how-to/drift/) is the reason to want
+it: a `format_violated` finding on a column the profiler named would have
+been the drift that mattered.
 
 **Test-framework integration.** A pytest fixture or plugin, or a Hypothesis
 strategy built from a spec, are the natural adjacent surfaces for a library
 whose whole pitch is that fixtures and contracts stay in step. Adjacent,
 though — not core.
+
+## Deferred on purpose
+
+**`ColSpec` holding a `Domain` instead of `bounds`/`choices`/`format`.**
+`polspec.constraints.Domain` is already the one definition generation,
+validation, foreign keys and drift read; `ColSpec` still stores the three
+fields it is derived from, and every module re-derives it. Folding the fields
+into the domain would remove that repetition and nothing a user can see, at
+the cost of touching every attribute read in the library. It has been
+considered and set aside at each of the last two releases, and will be
+revisited only if nested dtypes force a richer domain model than the current
+one — not before.
 
 ---
 

@@ -3,8 +3,9 @@
 The API reference is rendered from docstrings, so it cannot describe a
 signature that does not exist -- but it can silently *omit* one. These tests
 pin the other direction: everything polspec exports is documented, every page
-the nav names exists, every relative link between pages resolves, and the
-files a language model reads are the ones the current docs produce.
+the nav names exists, every relative link between pages resolves, every yaml
+example carries the format version `to_yaml()` writes today, and the files a
+language model reads are the ones the current docs produce.
 """
 
 import importlib.util
@@ -14,6 +15,7 @@ import tomllib
 from pathlib import Path
 
 import polspec
+from polspec.serialization import FORMAT_VERSION
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
@@ -22,6 +24,8 @@ API = DOCS / "reference" / "api"
 DOC_PAGES = sorted(DOCS.rglob("*.md"))
 DIRECTIVE = re.compile(r"^::: +polspec\.(\w+)\s*$", re.M)
 RELATIVE_LINK = re.compile(r"\]\((?!https?:|/|#)([^)#]+\.md)(#[^)]*)?\)")
+# A `version:` line in a yaml fence, or `version: N` quoted in prose.
+YAML_VERSION = re.compile(r"(?:^|`)version: (\d+)(?:$|`)", re.M)
 
 
 def _nav_pages(nav: object, into: list[str]) -> list[str]:
@@ -77,6 +81,20 @@ def test_every_relative_link_resolves():
             if not (page.parent / target).resolve().exists():
                 broken.append(f"{page.relative_to(DOCS)} -> {target}")
     assert not broken, f"broken links: {broken}"
+
+
+def test_every_yaml_example_carries_the_current_format_version():
+    """A page that shows what `to_yaml()` writes shows today's version. The
+    prose that mentions the number is held to the same standard.
+    """
+    stale = []
+    for page in DOC_PAGES:
+        if page.name.startswith("llms"):
+            continue  # generated from the pages below
+        for version in YAML_VERSION.findall(page.read_text(encoding="utf-8")):
+            if int(version) != FORMAT_VERSION:
+                stale.append(f"{page.relative_to(DOCS)}: version: {version}")
+    assert not stale, f"yaml examples not at FORMAT_VERSION={FORMAT_VERSION}: {stale}"
 
 
 def _generator():

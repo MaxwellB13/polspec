@@ -14,7 +14,7 @@ The output is plain, readable YAML — defaults are omitted so the file shows
 only what you actually declared:
 
 ```yaml
-version: 2
+version: 3
 name: Orders
 columns:
   order_id:

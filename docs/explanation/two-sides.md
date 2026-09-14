@@ -61,17 +61,20 @@ genuinely say the same thing.
 
 ## Where the gap remains
 
-Three claims are validated and not generated, and one of them is permanent:
+Three claims are validated and not generated, and all three are permanent:
 
-`__checks__` and `ColSpec.validators` wrap arbitrary Polars expressions.
-Nothing can generate data satisfying an arbitrary predicate — that is a
-statement about predicates, not about polspec — so generation makes no
-attempt, and the boundary is pinned by its own tests rather than papered over.
+`__checks__` and `ColSpec.validators` wrap arbitrary Polars expressions, and
+`ColSpec.pattern` is an arbitrary regex. Nothing can generate data satisfying
+an arbitrary predicate — that is a statement about predicates, not about
+polspec — so generation makes no attempt, and each boundary is pinned by its
+own test rather than papered over.
 
 The way to close *that* gap is not a cleverer generator. It is a richer
-vocabulary for describing values: a `pattern=` or a `format="email"` on
-`ColSpec` says the same thing as the validator, in a shape a sampler can use.
-See the [roadmap](roadmap.md).
+vocabulary for describing values, and `format="email"` is what that looks
+like: it says the same thing as `col("email").str.contains("@")`, in a shape
+a sampler can use. `pattern=` is the same vocabulary without the sampler —
+any regex can be checked, the curated set can be generated. See
+[String formats](../how-to/formats.md) and the [roadmap](roadmap.md).
 
 Everything else on the list has been closed rather than documented away:
 uniqueness by drawing without replacement, rule and foreign-key dependencies

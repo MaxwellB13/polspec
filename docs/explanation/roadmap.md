@@ -61,9 +61,10 @@ limits on distribution parameters, on cartesian dimensionality, on batch
 sizing.
 
 **Constraints `generate()` doesn't enforce**, which is a different, more
-interesting problem. Most of what is left is `__checks__` and
-`ColSpec.validators`, and that one is by design: both wrap arbitrary Polars
-expressions, and nothing can generate data satisfying an arbitrary predicate.
+interesting problem. What is left is `__checks__`, `ColSpec.validators` and
+`ColSpec.pattern`, and that is by design: the first two wrap arbitrary Polars
+expressions, the third is an arbitrary regex, and nothing can generate data
+satisfying an arbitrary predicate.
 Everything else on this list has been worked through — rule and foreign-key
 dependencies by ordering the passes rather than asserting the dependencies
 don't exist, and uniqueness by drawing without replacement instead of hoping a
@@ -123,7 +124,7 @@ Two things this project has made no compatibility promise about yet:
 
 The first of those is easier to live with than it sounds, because a spec file
 now says which format wrote it. Every file `to_yaml()` writes carries
-`version: 2`; a file with no `version:` key is read as version 1 and migrated
+`version: 3`; a file with no `version:` key is read as version 1 and migrated
 on load, and one written by a newer polspec than the reader is refused by name
 rather than misread. So a format change is a migration to write, not a class of
 file that silently stops loading — which is what makes the rest of this section
@@ -151,14 +152,27 @@ with `tags` marking which columns should be replaced outright rather than
 imitated — would serve the share-realistic-data-without-sharing-real-data case
 directly.
 
-**Drift as a report, not a pass/fail.** "A validation library tells you when
-production data drifted" is the claim on the front page, and today the answer
-is only *that* it drifted. Diffing a spec against data — new enum variants,
-bounds exceeded, cardinality moved — would say how. The same machinery diffs
-two specs against each other, which is what reviewing a schema change in a pull
-request actually needs.
+**A profiled spec that names a `format`.** `from_dataframe()` reads a
+string column as a `String` with a length range; it does not notice that
+every value is an email address. Inference is a decision about how sure to be
+before naming a format, and a wrong guess is a spec that rejects real data,
+so it has not been made. [Drift](../how-to/drift.md) is the reason to want
+it: a `format_violated` finding on a column the profiler named would have
+been the drift that mattered.
 
 **Test-framework integration.** A pytest fixture or plugin, or a Hypothesis
 strategy built from a spec, are the natural adjacent surfaces for a library
 whose whole pitch is that fixtures and contracts stay in step. Adjacent,
 though — not core.
+
+## Deferred on purpose
+
+**`ColSpec` holding a `Domain` instead of `bounds`/`choices`/`format`.**
+`polspec.constraints.Domain` is already the one definition generation,
+validation, foreign keys and drift read; `ColSpec` still stores the three
+fields it is derived from, and every module re-derives it. Folding the fields
+into the domain would remove that repetition and nothing a user can see, at
+the cost of touching every attribute read in the library. It has been
+considered and set aside at each of the last two releases, and will be
+revisited only if nested dtypes force a richer domain model than the current
+one — not before.
