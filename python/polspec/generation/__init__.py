@@ -23,6 +23,7 @@ from polspec.errors import SpecError
 from polspec.foreign_key import _apply_foreign_key
 from polspec.frames import Method, References, to_eager
 from polspec.generation.composite import apply_unique_together
+from polspec.generation.seeds import pass_seed
 from polspec.generation.sinks import sink_csv, sink_ipc, sink_ndjson, sink_parquet
 from polspec.hierarchy import _apply_hierarchy
 from polspec.rules import _apply_column_rules
@@ -196,8 +197,10 @@ def generate(
     _check_counts(n)
     _check_faults(spec, cycles, self_references)
 
-    rng = random.Random(seed)
-    gen_seed = rng.randrange(2**63)
+    # The frame seed: the first draw of the caller's seed, as it always was,
+    # so every column's values are what they were. Every pass below derives
+    # its own seed from this one and a stable key.
+    gen_seed = random.Random(seed).randrange(2**63)
     columns = dict(spec.columns)
     if method == "random":
         df = _generate_random(columns, n, gen_seed)
@@ -211,7 +214,7 @@ def generate(
         columns,
         df,
         references,
-        rng,
+        gen_seed,
         cycles=cycles,
         self_references=self_references,
     )
@@ -224,31 +227,32 @@ def _run_passes(
     columns: dict[str, ColSpec],
     df: pl.DataFrame,
     references: References,
-    rng: random.Random,
+    frame_seed: int,
     *,
     cycles: int = 0,
     self_references: int = 0,
 ) -> pl.DataFrame:
     """Applies every rule and foreign-key pass, in dependency order.
 
-    Seeds are drawn per pass in *declaration* order, so which order the
-    passes end up running in does not change the values any one of them
-    samples. A cross-spec key the caller gave no data for still draws its
-    seed and is then skipped, so supplying references never reshuffles the
-    columns around it.
+    Each pass is seeded from the frame seed and a key naming what it is for
+    -- a rules column's seed name, a foreign key's name, a composite key's
+    members -- so neither the order the passes run in nor the columns
+    declared around them change the values any one of them samples. A
+    column inserted ahead of a rules column leaves it alone; a rules column
+    renamed with `seed_name` keeps its rule's draw as well as its own.
     """
     runners: dict[str, Callable[[pl.DataFrame], pl.DataFrame]] = {}
 
     for name, col in columns.items():
         if not col.rules:
             continue
-        seed = rng.randrange(2**63)
+        seed = pass_seed(frame_seed, f"rules:{col.seed_name or name}")
         runners[f"rules:{name}"] = lambda frame, name=name, col=col, seed=seed: (
             _apply_column_rules(frame, name, col, seed)
         )
 
     if (hierarchy := spec.hierarchy) is not None:
-        seed = rng.randrange(2**63)
+        seed = pass_seed(frame_seed, "hierarchy")
         runners["hierarchy"] = lambda frame, seed=seed: _apply_hierarchy(
             frame,
             columns,
@@ -262,7 +266,7 @@ def _run_passes(
         parents = resolve_references(references, to_eager)
         _warn_unused_references(spec, parents)
         for fk in spec.foreign_keys:
-            seed = rng.randrange(2**63)
+            seed = pass_seed(frame_seed, f"fk:{fk.name}")
             if fk.references == "self":
                 # The parent is this frame as it stands when the pass runs.
                 runners[f"fk:{fk.name}"] = lambda frame, fk=fk, seed=seed: (
@@ -276,9 +280,9 @@ def _run_passes(
                 )
 
     for index, group in enumerate(spec.unique_together):
-        seed = rng.randrange(2**63)
-        key = f"unique_together:{index}"
         members, writable = tuple(group), rewritable_members(spec, group)
+        seed = pass_seed(frame_seed, f"unique_together:{','.join(sorted(members))}")
+        key = f"unique_together:{index}"
         runners[key] = lambda frame, m=members, w=writable, seed=seed: (
             apply_unique_together(frame, columns, m, w, seed)
         )

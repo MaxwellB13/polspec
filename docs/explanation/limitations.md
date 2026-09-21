@@ -120,13 +120,6 @@ them. See [String formats](../how-to/formats.md).
   domain has to fit inside the column's own — a contradiction is refused at
   declaration — but within it, values come from the parent, so a declared
   `distribution` or `weights` on a foreign-keyed column is not what you get.
-- **`seed_name` survives a rename, not an insertion.** A column's own seed
-  comes from its name, and `seed_name` holds it across a rename. The passes
-  that run afterwards -- rules, hierarchy, foreign keys, composite
-  uniqueness -- draw their seeds in declaration order, so a rules column
-  inserted ahead of another still changes what the second one draws. And
-  nothing is promised across versions: see
-  [Roadmap and stability](roadmap.md#yaml-format-and-generated-values-may-change).
 - **Case-insensitive registry lookup** means a column named `status` binds to a
   registry entry named `STATUS`; entries differing only in case are ambiguous.
 - **`to_mermaid` marks every `unique=True` column `PK`**, so several unique

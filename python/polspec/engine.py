@@ -29,6 +29,7 @@ from polspec.dtypes import (
 )
 from polspec.errors import GenerationError
 from polspec.formats import lookup as _lookup_format
+from polspec.generation.seeds import pass_seed
 from polspec.spec import ColSpec, _column_kind
 
 if TYPE_CHECKING:
@@ -43,7 +44,7 @@ def _stable_seed(*parts: str) -> int:
     return int.from_bytes(digest[:8], "big")
 
 
-def _resolve_bounded_categorical(spec: ColSpec, seed: int) -> ColSpec:
+def _resolve_bounded_categorical(name: str, spec: ColSpec, frame_seed: int) -> ColSpec:
     """Pins `choices` for a bare Categorical whose physical dtype caps how
     many distinct categories it can hold (UInt8/UInt16).
 
@@ -52,13 +53,15 @@ def _resolve_bounded_categorical(spec: ColSpec, seed: int) -> ColSpec:
     capacity-limited registry allows. Instead, generate a pool of
     representative string values up to that dtype's own maximum capacity
     once, then treat it exactly like a user-supplied `choices` list, so
-    generation samples from (rather than overflows) the registry.
+    generation samples from (rather than overflows) the registry. The pool
+    is seeded by the column's seed name, like everything else about it.
     """
     if spec.choices is not None or not isinstance(spec.dtype, pl.Categorical):
         return spec
     capacity = _CATEGORICAL_PHYSICAL_CAPACITY.get(spec.dtype.categories.physical())
     if capacity is None:
         return spec
+    seed = pass_seed(frame_seed, f"categorical:{spec.seed_name or name}")
     length = spec.string_length or Bound(*_DEFAULT_STRING_LEN)
     cat_name = spec.dtype.categories.name()
     if cat_name:
@@ -342,7 +345,7 @@ def _finish(raw: pl.Series, spec: ColSpec, domain: pl.Series | None) -> pl.Serie
     return raw.cast(spec.dtype)
 
 
-def _coverage_values(spec: ColSpec, rng: random.Random) -> list | None:
+def _coverage_values(spec: ColSpec, seed: int) -> list | None:
     """The finite set of representative values a coverage dimension takes.
 
     Enum/Boolean contribute their whole domain; numeric columns contribute
@@ -360,6 +363,7 @@ def _coverage_values(spec: ColSpec, rng: random.Random) -> list | None:
 
     kind = _column_kind(spec.dtype)
     values: list = []
+    rng = random.Random(seed)
 
     if isinstance(spec.dtype, pl.Enum):
         values = list(spec.dtype.categories.to_list())
@@ -400,9 +404,9 @@ def _generate_random(
 ) -> pl.DataFrame:
     if not columns:
         return pl.DataFrame()
-    rng = random.Random(seed)
+    frame_seed = seed if seed is not None else random.randrange(2**63)
     columns = {
-        name: _resolve_bounded_categorical(spec, rng.randrange(2**63))
+        name: _resolve_bounded_categorical(name, spec, frame_seed)
         for name, spec in columns.items()
     }
     # `_column_kind` refuses what the engine cannot fill, so every column is
@@ -511,7 +515,8 @@ def _generate_cartesian(
     again, so unique columns are held back and drawn once over the finished
     frame -- where "once" is what makes them distinct.
     """
-    rng = random.Random(seed)
+    frame_seed = seed if seed is not None else random.randrange(2**63)
+    rng = random.Random(frame_seed)
 
     coverage_values: dict[str, list] = {}
     filler_columns: dict[str, ColSpec] = {}
@@ -520,7 +525,11 @@ def _generate_cartesian(
         if spec.unique:
             unique_columns[name] = spec
             continue
-        values = _coverage_values(spec, rng)
+        # Keyed by the column, so an inserted dimension leaves its
+        # neighbours' representatives alone.
+        values = _coverage_values(
+            spec, pass_seed(frame_seed, f"coverage:{spec.seed_name or name}")
+        )
         if values is None:
             filler_columns[name] = spec
         else:

@@ -820,16 +820,13 @@ def test_a_pattern_is_validation_only():
         spec_cls.validate(df)
 
 
-def test_a_seed_name_survives_a_rename_not_an_insertion():
-    """`seed_name` keeps a *renamed* column's data, and that is all it keeps.
+def test_a_seed_name_survives_a_rename_and_an_insertion():
+    """A column's values depend on its seed name and nothing else.
 
-    A column's own seed comes from its name, so a rename is the one edit
-    that moves it and `seed_name` the one thing that holds it. The passes a
-    generated frame goes through afterwards -- rules, hierarchy, foreign
-    keys, unique-together -- draw their seeds in declaration order, so a
-    rules column inserted ahead of another reshuffles it, seed name or not.
-    That is the boundary `limitations.md` states; an ordinary passing test
-    rather than an xfail, because it is deliberate.
+    Its own seed comes from that name, and so does the seed of the rule pass
+    that rewrites it -- keyed, not drawn in declaration order -- so a rules
+    column inserted ahead of another leaves it alone, and a rules column
+    renamed with `seed_name` keeps its rule's draw as well as its own.
     """
     rule = [ColRule(when=col("flag"), choices=tuple(range(50, 100)))]
 
@@ -848,7 +845,7 @@ def test_a_seed_name_survives_a_rename_not_an_insertion():
 
     original = Original.generate(ROWS, seed=SEED)["ruled"]
     assert Renamed.generate(ROWS, seed=SEED)["renamed"].equals(original)
-    assert not Inserted.generate(ROWS, seed=SEED)["ruled"].equals(original)
+    assert Inserted.generate(ROWS, seed=SEED)["ruled"].equals(original)
 
 
 class HierarchySpec(FrameSpec):

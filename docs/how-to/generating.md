@@ -13,7 +13,11 @@ A `seed` fixes the result across processes, machines and thread counts. Each
 column derives its own seed from the frame seed and its *name*, and each
 65,536-row chunk from its index, so the same seed gives the same frame
 regardless of how many threads did the work, and adding or reordering columns
-never changes the values of the others.
+never changes the values of the others. The passes that run after the columns
+are filled -- rules, the hierarchy, foreign keys, composite uniqueness -- are
+seeded the same way, from the frame seed and a key naming what the pass is
+for, so a column added beside a ruled or foreign-keyed one leaves it alone
+too.
 
 ```python
 Orders.generate(500, seed=7).equals(Orders.generate(500, seed=7))   # True
@@ -49,12 +53,10 @@ on the validation side. Two columns of one spec cannot share a seed name, and
 one cannot borrow another column's name -- they would draw identical values,
 which is what a [rule](constraints.md) is for.
 
-That is all `seed_name` holds. The passes a frame goes through after its
-columns are filled -- rules, hierarchy, foreign keys, composite uniqueness --
-draw their seeds in declaration order, so inserting a column that carries a
-rule ahead of another still changes what the second one draws, and nothing is
-promised across polspec versions. See
-[Known limitations](../explanation/limitations.md).
+`seed_name` covers the column's passes as well as its values: a ruled
+column renamed with one keeps its rule's draw. What no seed name holds is
+the frame across polspec *versions* -- see
+[Roadmap and stability](../explanation/roadmap.md#yaml-format-and-generated-values-may-change).
 
 ## Lazy output
 

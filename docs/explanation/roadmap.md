@@ -115,7 +115,10 @@ Two things this project has made no compatibility promise about yet:
   tests this project is built around. Determinism *across* versions is not
   guaranteed yet: a bug fix to a distribution, a change to how a chunk's seed
   is derived, or a fix to one of the [known limitations](limitations.md) can
-  all legitimately change what a given seed produces.
+  all legitimately change what a given seed produces. 0.7.0 was such a
+  release: every spec with rules, a foreign key, a hierarchy or a composite
+  key produces different values for the same seed than 0.6 did, once, so
+  that inserting a column never changes its neighbours again.
 
 The first of those is easier to live with than it sounds, because a spec file
 now says which format wrote it. Every file `to_yaml()` writes carries

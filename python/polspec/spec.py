@@ -96,11 +96,10 @@ class ColSpec:
         column's own. Generation seeds each column from the frame seed and
         the column *name*, so renaming a column changes the values it
         produces; a column declared with `seed_name="old"` keeps producing
-        the data it did as `"old"`. That is all it does: a column inserted
-        ahead of one carrying rules, a foreign key or a hierarchy still
-        reshuffles it, and nothing is promised across polspec versions.
-        Two columns of one spec cannot share a seed name, nor may one name
-        another column: they would draw identical values.
+        the data it did as `"old"`, its rules included. Nothing is promised
+        across polspec versions. Two columns of one spec cannot share a
+        seed name, nor may one name another column: they would draw
+        identical values.
     nullable : bool, optional
         Whether the column allows null values.
     bounds : Bound | tuple | list | None, optional
