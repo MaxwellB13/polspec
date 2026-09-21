@@ -24,7 +24,7 @@ from __future__ import annotations
 import datetime
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal
 
 import polars as pl
 
@@ -37,7 +37,6 @@ from polspec.validation.constraints import _is_dtype_compatible
 
 if TYPE_CHECKING:
     from polspec.bound import Bound
-    from polspec.check import Check
     from polspec.drift import DriftOptions
     from polspec.spec import ColSpec
     from polspec.tablespec import TableSpec
@@ -97,28 +96,6 @@ class Pair:
 Comparator = Callable[[Pair], list[DriftFinding]]
 
 
-# `ColSpec` annotates what its constructor accepts; `__post_init__` narrows
-# every field to one form. These read the narrowed form, so this module is
-# type-checked against what a constructed ColSpec actually holds.
-
-
-def _dtype(spec: ColSpec) -> pl.DataType:
-    return cast("pl.DataType", spec.dtype)
-
-
-def _bound(value: Any) -> Bound | None:
-    return cast("Bound | None", value)
-
-
-def _closed(bound: Bound) -> tuple[Any, Any]:
-    """Both endpoints of a bound that has both, as `string_length` does."""
-    return bound.min, bound.max
-
-
-def _validators(spec: ColSpec) -> tuple[Check, ...]:
-    return cast("tuple[Check, ...]", spec.validators)
-
-
 def _listed(values: Sequence[Any]) -> str:
     shown = [repr(v) for v in values[:MAX_LISTED]]
     if len(values) > MAX_LISTED:
@@ -146,9 +123,9 @@ def _compare_dtype(pair: Pair) -> list[DriftFinding]:
     values under the declaration they are now checked against."""
     if pair.mode == "diff":
         # Old data is what the new declaration would be checked against.
-        actual, expected = _dtype(pair.declared), _dtype(pair.new)
+        actual, expected = pair.declared.dtype, pair.new.dtype
     else:
-        actual, expected = pair.observed.dtype, _dtype(pair.declared)
+        actual, expected = pair.observed.dtype, pair.declared.dtype
     if _same_dtype(actual, expected):
         return []
     compatible = _is_dtype_compatible(
@@ -335,7 +312,7 @@ def _describe_excess(facts: Mapping[str, Any]) -> str:
 
 
 def _observed_bounds(pair: Pair) -> list[DriftFinding]:
-    declared, found = _bound(pair.declared.bounds), pair.observed.extent
+    declared, found = pair.declared.bounds, pair.observed.extent
     if declared is None or found is None:
         return []
     facts = _exceeded("bounds", declared, found, pair.observed.dtype)
@@ -415,7 +392,7 @@ def _length_relation(old: Bound | None, new: Bound | None) -> Relation:
         return "narrowed"
     if new is None:
         return "widened"
-    (old_min, old_max), (new_min, new_max) = _closed(old), _closed(new)
+    (old_min, old_max), (new_min, new_max) = old.closed(), new.closed()
     widened = new_min < old_min or new_max > old_max
     narrowed = new_min > old_min or new_max < old_max
     if widened and narrowed:
@@ -425,8 +402,8 @@ def _length_relation(old: Bound | None, new: Bound | None) -> Relation:
 
 def _compare_string_length(pair: Pair) -> list[DriftFinding]:
     if pair.mode == "diff":
-        old = _bound(pair.declared.string_length)
-        new = _bound(pair.new.string_length)
+        old = pair.declared.string_length
+        new = pair.new.string_length
         relation = _length_relation(old, new)
         if relation not in _RELATION_FINDINGS:
             return []
@@ -443,7 +420,7 @@ def _compare_string_length(pair: Pair) -> list[DriftFinding]:
                 new=[new.min, new.max] if new else None,
             )
         ]
-    declared = _bound(pair.declared.string_length)
+    declared = pair.declared.string_length
     found = pair.observed.length_extent
     if declared is None or found is None:
         return []
@@ -555,8 +532,8 @@ def _compare_validators(pair: Pair) -> list[DriftFinding]:
     return _compare_named(
         pair,
         "validator",
-        _validators(pair.declared),
-        _validators(pair.new),
+        pair.declared.validators,
+        pair.new.validators,
         lambda c: c.name,
     )
 

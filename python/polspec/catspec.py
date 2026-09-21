@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import polars as pl
 
+from polspec.dtypes import DtypeLike
 from polspec.errors import SpecError
 from polspec.serialization.dtypes import categories_from_data, physical_from_name
 from polspec.spec import _is_categorical_dtype
@@ -63,7 +64,7 @@ def _matches_patterns(name: str, patterns: Sequence[str]) -> bool:
     return any(re.search(pat, name, re.IGNORECASE) for pat in patterns)
 
 
-def _auto_physical(n_unique: int) -> pl.DataType:
+def _auto_physical(n_unique: int) -> DtypeLike:
     """The narrowest physical dtype that holds `n_unique` distinct codes."""
     if n_unique < 256:
         return pl.UInt8
@@ -161,6 +162,11 @@ class _CatSpecMeta(type):
     inherits and an entry named `get` is an entry rather than a collision.
     What is left reaches them through `cls.spec`.
     """
+
+    # What `__new__` sets on every class it builds.
+    _declared_enums: dict[str, list[str]]
+    _declared_categoricals: dict[str, pl.Categories]
+    _spec_cache: CatSpec | None
 
     def __new__(
         mcls, name: str, bases: tuple[type, ...], namespace: dict[str, Any], **kwargs
@@ -649,7 +655,7 @@ def _as_frame(df: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame:
 
 
 def _categories_of(
-    dtype: pl.DataType, name: str, physical: pl.DataType | None = None
+    dtype: pl.DataType, name: str, physical: DtypeLike | None = None
 ) -> pl.Categories:
     """The shared registry a Categorical column already names, or a new one."""
     declared = _declared_categories_from(dtype)

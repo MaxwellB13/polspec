@@ -20,10 +20,12 @@ Run with `uv run python scripts/generate_llms_txt.py`;
 
 from __future__ import annotations
 
+import ast
 import importlib
 import inspect
 import posixpath
 import re
+import textwrap
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -65,6 +67,30 @@ def walk_nav(node: Any, section: str = "") -> list[tuple[str, str, str]]:
 # ---------------------------------------------------------------------------
 
 
+def declared_signature(obj: object) -> str | None:
+    """The constructor signature a class spells out for type checkers.
+
+    A dataclass whose fields are annotated with what an instance *holds*
+    declares what its constructor *accepts* in an `__init__` under
+    `if TYPE_CHECKING:` -- which is the signature a reader needs, and one
+    `inspect.signature` cannot see. Read it from the source instead.
+    """
+    if not inspect.isclass(obj):
+        return None
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(obj)))
+    except (OSError, TypeError):
+        return None
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.If) and ast.unparse(node.test) == "TYPE_CHECKING"):
+            continue
+        for stmt in node.body:
+            if isinstance(stmt, ast.FunctionDef) and stmt.name == "__init__":
+                stmt.args.args = [a for a in stmt.args.args if a.arg != "self"]
+                return f"({ast.unparse(stmt.args)})"
+    return None
+
+
 def render_object(path: str) -> str:
     """One documented object as signature and docstring."""
     module_name, _, attr = path.rpartition(".")
@@ -72,7 +98,8 @@ def render_object(path: str) -> str:
 
     lines: list[str] = []
     try:
-        lines.append(f"### {attr}{inspect.signature(obj)}")
+        signature = declared_signature(obj) or str(inspect.signature(obj))
+        lines.append(f"### {attr}{signature}")
     except (TypeError, ValueError):
         lines.append(f"### {attr}")
     doc = inspect.getdoc(obj)

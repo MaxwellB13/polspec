@@ -19,6 +19,7 @@ from polspec.constants import (
 )
 from polspec.dtypes import (
     _TIME_UNIT_FACTORS,
+    DtypeLike,
     _bound_endpoint_to_physical,
     _dtype_value_limits,
     _typed_values,
@@ -73,8 +74,9 @@ def _resolve_bounded_categorical(spec: ColSpec, seed: int) -> ColSpec:
         )
     else:
         pool_seed = seed
+    shortest, longest = length.closed()
     pool_plan = column_plan(
-        "__pool", "string", str_min_len=int(length.min), str_max_len=int(length.max)
+        "__pool", "string", str_min_len=int(shortest), str_max_len=int(longest)
     )
     pool_df = _generate_dataframe([pool_plan], capacity, pool_seed)
     # maintain_order=True: unique()'s default order isn't stable across calls,
@@ -157,7 +159,7 @@ def _default_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
 # The name the Rust engine knows each fixed-width dtype by. Anything absent --
 # String, Binary, Boolean, Enum, Categorical -- keeps the kind `_column_kind`
 # already worked out.
-_ENGINE_KINDS: dict[pl.DataType, str] = {
+_ENGINE_KINDS: dict[DtypeLike, str] = {
     pl.Int8: "int8",
     pl.Int16: "int16",
     pl.Int32: "int32",
@@ -233,7 +235,10 @@ def _plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None
             # range -- but a temporal dtype's own domain is not optional:
             # it reaches the engine as a bare integer kind, and without this
             # clamp could produce values the dtype cannot represent.
-            options["min"], options["max"] = _dtype_value_limits(spec.dtype)
+            limits = _dtype_value_limits(spec.dtype)
+            if limits is None:  # pragma: no cover - every temporal dtype has limits
+                raise GenerationError(f"no value limits for {spec.dtype!r}")
+            options["min"], options["max"] = limits
         options["distribution"] = spec.distribution
         if spec.distribution_params:
             options["params"] = {
@@ -255,7 +260,8 @@ def _plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None
 
     # Free strings: String, Binary, and a Categorical with no pinned domain.
     length = spec.string_length or Bound(*_DEFAULT_STRING_LEN)
-    options["str_min_len"], options["str_max_len"] = int(length.min), int(length.max)
+    shortest, longest = length.closed()
+    options["str_min_len"], options["str_max_len"] = int(shortest), int(longest)
     return column_plan(name, "string", **options), None
 
 
@@ -309,7 +315,7 @@ def _coverage_values(spec: ColSpec, rng: random.Random) -> list | None:
     kind = _column_kind(spec.dtype)
     values: list = []
 
-    if kind == "enum":
+    if isinstance(spec.dtype, pl.Enum):
         values = list(spec.dtype.categories.to_list())
     elif kind == "bool":
         values = [True, False]
@@ -405,12 +411,13 @@ def _generate_cartesian(
             f"which exceeds the {_MAX_CARTESIAN_ROWS:,}-row safety cap"
         )
 
-    coverage_df: pl.DataFrame | None = None
-    for name, values in coverage_values.items():
-        dim_df = pl.DataFrame({name: values}, schema={name: columns[name].dtype})
-        coverage_df = (
-            dim_df if coverage_df is None else coverage_df.join(dim_df, how="cross")
-        )
+    dims = [
+        pl.DataFrame({name: values}, schema={name: columns[name].dtype})
+        for name, values in coverage_values.items()
+    ]
+    coverage_df = dims[0]
+    for dim_df in dims[1:]:
+        coverage_df = coverage_df.join(dim_df, how="cross")
 
     coverage_n = coverage_df.height
 

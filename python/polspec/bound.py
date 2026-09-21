@@ -18,8 +18,16 @@ class Bound[T]:
     max: T | None
 
     def __post_init__(self) -> None:
-        if self.min is not None and self.max is not None and self.min > self.max:
-            raise SpecError(f"Bound min ({self.min}) must be <= max ({self.max})")
+        lo: Any = self.min
+        hi: Any = self.max
+        if lo is not None and hi is not None and lo > hi:
+            raise SpecError(f"Bound min ({lo}) must be <= max ({hi})")
+
+    def closed(self) -> tuple[T, T]:
+        """Both endpoints of a bound that has both, as `string_length` does."""
+        if self.min is None or self.max is None:
+            raise SpecError(f"Bound {self} has an open end")
+        return self.min, self.max
 
     @property
     def is_open(self) -> bool:

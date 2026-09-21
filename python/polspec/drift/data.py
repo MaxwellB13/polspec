@@ -99,7 +99,7 @@ class Observed:
 
         domain = Domain.of(declared)
         if domain.values is not None and is_textual(series.dtype) == is_textual(
-            cast("pl.DataType", declared.dtype)
+            declared.dtype
         ):
             measured["outside"], measured["unseen"] = _against_domain(
                 values, domain, options.max_samples
@@ -141,19 +141,20 @@ def _against_domain(
     validation and `Domain` do, so an Enum category and the String choice
     that spells it are one value.
     """
+    declared_values = domain.values or ()
     if is_textual(values.dtype):
         observed = values.cast(pl.String)
-        declared = pl.Series(list(domain.values), dtype=pl.String, strict=False)  # type: ignore[arg-type]
+        declared = pl.Series(list(declared_values), dtype=pl.String, strict=False)
     else:
         observed = values
-        declared = pl.Series(list(domain.values), dtype=values.dtype, strict=False)  # type: ignore[arg-type]
+        declared = pl.Series(list(declared_values), dtype=values.dtype, strict=False)
     outside_mask = ~observed.is_in(declared.to_list())
     outside_values = observed.filter(outside_mask).unique(maintain_order=True)
     outside = (int(outside_mask.sum()), tuple(outside_values.head(max_samples)))
     present = set(observed.unique().to_list())
     unseen = tuple(
         raw
-        for raw, cmp in zip(domain.values, declared.to_list(), strict=True)  # type: ignore[arg-type]
+        for raw, cmp in zip(declared_values, declared.to_list(), strict=True)
         if cmp not in present
     )
     return outside, unseen

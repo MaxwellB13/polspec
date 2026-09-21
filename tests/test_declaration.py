@@ -7,11 +7,25 @@ that silently fails to exist, a name collision that disables a method, a
 the caller declared without saying so.
 """
 
+import ast
+import dataclasses
 import datetime as dt
+import inspect
+import textwrap
 
 import polars as pl
 import pytest
-from polspec import Bound, ColRule, ColSpec, FrameSpec, SpecError, ValidationError, col
+from polspec import (
+    Bound,
+    Check,
+    ColRule,
+    ColSpec,
+    ForeignKey,
+    FrameSpec,
+    SpecError,
+    ValidationError,
+    col,
+)
 
 
 def _spec_for(column: ColSpec) -> type[FrameSpec]:
@@ -409,3 +423,41 @@ def test_col_name_survives_yaml_roundtrip(tmp_path):
     loaded = FrameSpec.from_yaml(path)
     assert list(loaded.spec.columns) == ["Unit Price"]
     assert loaded.generate(10, seed=1).columns == ["Unit Price"]
+
+
+# ---------------------------------------------------------------------------
+# What the constructor accepts vs what the instance holds
+# ---------------------------------------------------------------------------
+
+
+def _type_checking_init(cls: type) -> ast.FunctionDef:
+    """The `__init__` a class spells out under `if TYPE_CHECKING:`."""
+    tree = ast.parse(textwrap.dedent(inspect.getsource(cls)))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and ast.unparse(node.test) == "TYPE_CHECKING":
+            for stmt in node.body:
+                if isinstance(stmt, ast.FunctionDef) and stmt.name == "__init__":
+                    return stmt
+    raise AssertionError(f"{cls.__name__} declares no TYPE_CHECKING __init__")
+
+
+@pytest.mark.parametrize("cls", [ColSpec, Check, ForeignKey], ids=lambda c: c.__name__)
+def test_the_declared_constructor_matches_the_fields(cls):
+    """`ColSpec`, `Check` and `ForeignKey` annotate their fields with what an
+    instance *holds* and spell out what the constructor *accepts* in an
+    `__init__` that exists only for type checkers. The dataclass generates
+    the real one from the fields, so the two must name the same parameters
+    in the same order, with a default on the same ones -- or a field added
+    to one is silently missing from the other.
+    """
+    stub = _type_checking_init(cls)
+    params = [a.arg for a in stub.args.args if a.arg != "self"]
+    fields = [f.name for f in dataclasses.fields(cls)]
+    assert params == fields
+    defaulted = params[len(params) - len(stub.args.defaults) :]
+    assert defaulted == [
+        f.name
+        for f in dataclasses.fields(cls)
+        if f.default is not dataclasses.MISSING
+        or f.default_factory is not dataclasses.MISSING
+    ]

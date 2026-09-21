@@ -12,13 +12,12 @@ Two entry points over the same machinery:
 
 from __future__ import annotations
 
-import dataclasses
-import difflib
 from dataclasses import dataclass
 from typing import Any, Literal, overload
 
 import polars as pl
 
+from polspec._options import accepted_options, options_from
 from polspec.errors import ValidationError
 from polspec.frames import References, to_lazy
 from polspec.tablespec import TableSpec, require_columns, resolve_references
@@ -100,41 +99,18 @@ _SWITCHES = (
     "pattern",
 )
 _RENAMED_OPTIONS = {f"validate_{name}": name for name in _SWITCHES}
-_ACCEPTED_OPTIONS = sorted(
-    {f.name for f in dataclasses.fields(ValidationOptions) if f.name not in _SWITCHES}
-    | set(_RENAMED_OPTIONS)
-)
+_ACCEPTED_OPTIONS = accepted_options(ValidationOptions, renames=_RENAMED_OPTIONS)
 
 
 def _options_from(
     options_obj: ValidationOptions | None = None, /, **options: Any
 ) -> ValidationOptions:
-    """The options for one call, from an object, keywords, or neither."""
-    if options_obj is not None:
-        if options:
-            raise TypeError(
-                "Pass options= or the individual keyword options, not both. "
-                f"Given options= alongside {', '.join(sorted(options))}."
-            )
-        if not isinstance(options_obj, ValidationOptions):
-            raise TypeError(
-                f"options= must be a ValidationOptions, got {type(options_obj).__name__}"
-            )
-        return options_obj
-    unknown = [k for k in options if k not in _ACCEPTED_OPTIONS]
-    if unknown:
-        # Naming the option the caller meant, rather than letting the
-        # dataclass raise about a private class they cannot look up.
-        hints = []
-        for name in unknown:
-            close = difflib.get_close_matches(name, _ACCEPTED_OPTIONS, n=1)
-            hints.append(f"{name!r}{f' (did you mean {close[0]!r}?)' if close else ''}")
-        raise TypeError(
-            f"Unknown validation option(s): {', '.join(hints)}. "
-            f"Accepted: {', '.join(_ACCEPTED_OPTIONS)}."
-        )
-    return ValidationOptions(
-        **{_RENAMED_OPTIONS.get(k, k): v for k, v in options.items()}
+    return options_from(
+        ValidationOptions,
+        options_obj,
+        options,
+        what="validation",
+        renames=_RENAMED_OPTIONS,
     )
 
 

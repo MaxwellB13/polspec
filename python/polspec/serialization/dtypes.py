@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
+from polspec.dtypes import DtypeLike
 from polspec.errors import SerializationError
 from polspec.spec import _is_categorical_dtype
 
@@ -21,7 +22,7 @@ if TYPE_CHECKING:
     from polspec.catspec import CatSpec
 
 # Every dtype with a fixed, unparametrized identity.
-DTYPE_NAMES: dict[pl.DataType, str] = {
+DTYPE_NAMES: dict[DtypeLike, str] = {
     pl.String: "String",
     pl.Boolean: "Boolean",
     pl.Int8: "Int8",
@@ -40,12 +41,12 @@ DTYPE_NAMES: dict[pl.DataType, str] = {
     pl.Duration: "Duration",
     pl.Binary: "Binary",
 }
-NAME_TO_DTYPE: dict[str, pl.DataType] = {name: dt for dt, name in DTYPE_NAMES.items()}
+NAME_TO_DTYPE: dict[str, DtypeLike] = {name: dt for dt, name in DTYPE_NAMES.items()}
 
 _DEFAULT_PHYSICAL = pl.UInt32
 
 
-def physical_name(dtype: pl.DataType) -> str:
+def physical_name(dtype: DtypeLike) -> str:
     """The name of a Categorical's physical dtype."""
     name = DTYPE_NAMES.get(dtype)
     if name is None:
@@ -53,7 +54,7 @@ def physical_name(dtype: pl.DataType) -> str:
     return name
 
 
-def physical_from_name(name: object) -> pl.DataType:
+def physical_from_name(name: object) -> DtypeLike:
     """The physical dtype a Categorical entry names; unknown names are an error."""
     if isinstance(name, pl.DataType):
         return name
@@ -195,7 +196,7 @@ _BUILDERS = {
 }
 
 
-def dtype_from_data(value: Any, categories: CatSpec | None = None) -> pl.DataType:
+def dtype_from_data(value: Any, categories: CatSpec | None = None) -> DtypeLike:
     """Reads a dtype back, resolving registry references as it goes."""
     if isinstance(value, dict):
         if len(value) == 1:

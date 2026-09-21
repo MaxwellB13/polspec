@@ -122,8 +122,8 @@ def _columns_section(spec: TableSpec) -> list[str]:
 
 def _constraints_section(spec: TableSpec) -> list[str]:
     """Everything the spec asserts beyond the shape of a single column."""
-    columns_with_rules = [(n, s) for n, s in spec.columns.items() if s.rules]
-    columns_with_validators = [(n, s) for n, s in spec.columns.items() if s.validators]
+    columns_with_rules = [(n, c) for n, c in spec.columns.items() if c.rules]
+    columns_with_validators = [(n, c) for n, c in spec.columns.items() if c.validators]
     if not (
         spec.checks
         or spec.unique_together
@@ -158,18 +158,18 @@ def _constraints_section(spec: TableSpec) -> list[str]:
 
     if columns_with_rules:
         lines.extend(["", "### Conditional Rules (`ColRule`)"])
-        for name, spec in columns_with_rules:
+        for name, column in columns_with_rules:
             lines.append(f"- **Column `{name}`**:")
             lines.extend(
                 f"  {index}. When `{rule.when}` -> Choices: `{list(rule.choices)}`"
-                for index, rule in enumerate(spec.rules, 1)
+                for index, rule in enumerate(column.rules, 1)
             )
 
     if columns_with_validators:
         lines.extend(["", "### Column Validators"])
-        for name, spec in columns_with_validators:
+        for name, column in columns_with_validators:
             lines.append(f"- **Column `{name}`**:")
-            for validator in spec.validators:
+            for validator in column.validators:
                 described = (
                     f" -- {validator.description}" if validator.description else ""
                 )

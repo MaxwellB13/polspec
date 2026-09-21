@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
+from polspec.constants import _FILLED_IN
 from polspec.errors import SpecError
 from polspec.expr import Pred
 
@@ -32,22 +34,38 @@ class Check:
     >>> check = Check(pl.col("total") >= pl.col("subtotal"), name="total_gte_subtotal")
     """
 
-    expr: pl.Expr | Pred
-    name: str | None = None
+    # Annotated with what a constructed Check holds -- an expression and a
+    # name -- while the constructor also accepts a predicate and no name; see
+    # the `__init__` below, which exists only for type checkers.
+    expr: pl.Expr
+    name: str = _FILLED_IN
     description: str | None = None
     ignore_nulls: bool = True
     pred: Pred | None = None
 
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            expr: pl.Expr | Pred,
+            name: str | None = None,
+            description: str | None = None,
+            ignore_nulls: bool = True,
+            pred: Pred | None = None,
+        ) -> None: ...
+
     def __post_init__(self) -> None:
-        if isinstance(self.expr, Pred):
-            object.__setattr__(self, "pred", self.expr)
-            object.__setattr__(self, "expr", self.expr.to_expr())
-        elif not isinstance(self.expr, pl.Expr):
+        given: Any = self.expr
+        if isinstance(given, Pred):
+            object.__setattr__(self, "pred", given)
+            object.__setattr__(self, "expr", given.to_expr())
+        elif not isinstance(given, pl.Expr):
             raise SpecError(
                 "Check expr must be a polars Expr or a polspec predicate "
-                f"(built with col()), got {type(self.expr).__name__}"
+                f"(built with col()), got {type(given).__name__}"
             )
-        if self.name is None:
+        name: Any = self.name
+        if name is None:
             default = repr(self.pred) if self.pred is not None else str(self.expr)
             object.__setattr__(self, "name", default)
 

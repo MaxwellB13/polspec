@@ -1,6 +1,15 @@
 from __future__ import annotations
 
+from typing import Any
+
 import polars as pl
+
+from polspec.dtypes import DtypeLike
+
+# The default of a dataclass field that `__post_init__` always fills in
+# (a foreign key's name, a check's name). Typed `Any` so the field itself
+# can be annotated with what it holds once constructed, not with `| None`.
+_FILLED_IN: Any = None
 
 _DEFAULT_WIDE_INT_BOUND = 1_000_000
 _DEFAULT_FLOAT_BOUND = 1_000_000.0
@@ -15,7 +24,7 @@ _MAX_CARTESIAN_ROWS = 50_000_000
 # Max distinct categories a pl.Categories() registry can hold, per physical
 # dtype (2**bits - 1). UInt32 (the default physical dtype) is omitted: at
 # ~4 billion categories it is never a practical constraint on generation.
-_CATEGORICAL_PHYSICAL_CAPACITY: dict[pl.DataType, int] = {
+_CATEGORICAL_PHYSICAL_CAPACITY: dict[DtypeLike, int] = {
     pl.UInt8: 255,
     pl.UInt16: 65_535,
 }

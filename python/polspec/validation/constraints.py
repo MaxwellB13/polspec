@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
@@ -20,7 +20,7 @@ import polars as pl
 from polspec.constraints import is_textual as _is_textual
 from polspec.dtypes import _typed_values
 from polspec.formats import lookup as _lookup_format
-from polspec.validation.report import Finding
+from polspec.validation.report import Finding, FindingCode
 
 if TYPE_CHECKING:
     from polspec.bound import Bound
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 MAX_SAMPLES = 5
 
 
-@dataclass
+@dataclass(kw_only=True)
 class _Constraint:
     """One checkable claim, measured by counting the rows that violate a mask.
 
@@ -47,7 +47,7 @@ class _Constraint:
     mask: pl.Expr
     sample_expr: pl.Expr | None = None
     unique_samples: bool = True
-    code: str = ""
+    code: FindingCode
 
     def _alias(self, suffix: str) -> str:
         return f"__val__{self.key}__{suffix}"
@@ -70,12 +70,12 @@ class _Constraint:
         samples = self._samples(stats)
         mask = self.mask
         return Finding(
-            code=self.code,  # type: ignore[arg-type]
+            code=self.code,
             key=self.key,
             message=self.message(count, samples, stats),
             columns=self.involved(),
             count=int(count),
-            samples=samples,
+            samples=tuple(samples),
             details=self.details(stats),
             _locate=lambda lf: lf.filter(mask),
         )
@@ -96,11 +96,11 @@ class _Constraint:
         raise NotImplementedError
 
 
-@dataclass
+@dataclass(kw_only=True)
 class _Nullability(_Constraint):
-    column: str = ""
+    column: str
     sample_expr: None = None
-    code: str = "nullability"
+    code: FindingCode = "nullability"
 
     def involved(self) -> tuple[str, ...]:
         return (self.column,)
@@ -112,11 +112,11 @@ class _Nullability(_Constraint):
         )
 
 
-@dataclass
+@dataclass(kw_only=True)
 class _AllowedValues(_Constraint):
-    column: str = ""
-    allowed: list[Any] = field(default_factory=list)
-    code: str = "choices"
+    column: str
+    allowed: list[Any]
+    code: FindingCode = "choices"
 
     def involved(self) -> tuple[str, ...]:
         return (self.column,)
@@ -131,12 +131,12 @@ class _AllowedValues(_Constraint):
         )
 
 
-@dataclass
+@dataclass(kw_only=True)
 class _Bounds(_Constraint):
-    column: str = ""
-    bounds: Bound | None = None
+    column: str
+    bounds: Bound[Any]
     unique_samples: bool = False
-    code: str = "bounds"
+    code: FindingCode = "bounds"
 
     def aggregations(self) -> list[pl.Expr]:
         # The observed extremes make an out-of-bounds report actionable, so
@@ -167,12 +167,12 @@ class _Bounds(_Constraint):
         )
 
 
-@dataclass
+@dataclass(kw_only=True)
 class _StringLength(_Constraint):
-    column: str = ""
-    length: Bound | None = None
+    column: str
+    length: Bound[int]
     unique_samples: bool = False
-    code: str = "string_length"
+    code: FindingCode = "string_length"
 
     def involved(self) -> tuple[str, ...]:
         return (self.column,)
@@ -190,11 +190,11 @@ class _StringLength(_Constraint):
         )
 
 
-@dataclass
+@dataclass(kw_only=True)
 class _Format(_Constraint):
-    column: str = ""
-    format: Format | None = None
-    code: str = "format"
+    column: str
+    format: Format
+    code: FindingCode = "format"
 
     def involved(self) -> tuple[str, ...]:
         return (self.column,)
@@ -209,11 +209,11 @@ class _Format(_Constraint):
         )
 
 
-@dataclass
+@dataclass(kw_only=True)
 class _Pattern(_Constraint):
-    column: str = ""
-    pattern: str = ""
-    code: str = "pattern"
+    column: str
+    pattern: str
+    code: FindingCode = "pattern"
 
     def involved(self) -> tuple[str, ...]:
         return (self.column,)
@@ -228,11 +228,11 @@ class _Pattern(_Constraint):
         )
 
 
-@dataclass
+@dataclass(kw_only=True)
 class _RuleHolds(_Constraint):
-    column: str = ""
-    rule: ColRule | None = None
-    code: str = "rule"
+    column: str
+    rule: ColRule
+    code: FindingCode = "rule"
 
     def involved(self) -> tuple[str, ...]:
         return (self.column,)
@@ -251,11 +251,11 @@ class _RuleHolds(_Constraint):
         )
 
 
-@dataclass
+@dataclass(kw_only=True)
 class _ColumnValidator(_Constraint):
-    column: str = ""
-    validator: Check | None = None
-    code: str = "validator"
+    column: str
+    validator: Check
+    code: FindingCode = "validator"
 
     def involved(self) -> tuple[str, ...]:
         return (self.column,)
@@ -273,10 +273,10 @@ class _ColumnValidator(_Constraint):
         )
 
 
-@dataclass
+@dataclass(kw_only=True)
 class _UniqueValues(_Constraint):
-    column: str = ""
-    code: str = "unique"
+    column: str
+    code: FindingCode = "unique"
 
     def involved(self) -> tuple[str, ...]:
         return (self.column,)
@@ -288,10 +288,10 @@ class _UniqueValues(_Constraint):
         )
 
 
-@dataclass
+@dataclass(kw_only=True)
 class _CompositeUnique(_Constraint):
     columns: tuple[str, ...] = ()
-    code: str = "unique_together"
+    code: FindingCode = "unique_together"
 
     def involved(self) -> tuple[str, ...]:
         return self.columns
@@ -303,10 +303,10 @@ class _CompositeUnique(_Constraint):
         )
 
 
-@dataclass
+@dataclass(kw_only=True)
 class _FrameCheck(_Constraint):
-    check: Check | None = None
-    code: str = "check"
+    check: Check
+    code: FindingCode = "check"
 
     def involved(self) -> tuple[str, ...]:
         return tuple(self.check.expr.meta.root_names())
@@ -740,7 +740,7 @@ def _foreign_key_findings(
                     ),
                     columns=tuple(local_cols),
                     count=int(count),
-                    samples=samples,
+                    samples=tuple(samples),
                     details={"target": target_label, "ref_columns": ref_cols},
                     _locate=orphans_of,
                 )
@@ -753,13 +753,13 @@ def _foreign_key_findings(
 # ---------------------------------------------------------------------------
 
 
-@dataclass
+@dataclass(kw_only=True)
 class _SingleParent(_Constraint):
     """Every reference points at one parent, which is what makes the walk
     terminate at a single ultimate parent."""
 
-    column: str = ""
-    code: str = "hierarchy_multi_parent"
+    column: str
+    code: FindingCode = "hierarchy_multi_parent"
 
     def involved(self) -> tuple[str, ...]:
         return (self.column,)
@@ -891,7 +891,7 @@ def _hierarchy_findings(
                 message=describe(schema_name, hierarchy, count, samples),
                 columns=(child, parent),
                 count=count,
-                samples=samples,
+                samples=tuple(samples),
                 details={
                     "child": child,
                     "parent": parent,
