@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import decimal
 import math
 import warnings
 from collections.abc import Sequence
@@ -29,6 +30,8 @@ def _column_kind(dtype: pl.DataType) -> str:
         return "int"
     if dtype.is_float():
         return "float"
+    if isinstance(dtype, pl.Decimal):
+        return "decimal"
     if dtype.is_temporal():
         return "temporal"
     if dtype == pl.Boolean:
@@ -287,7 +290,10 @@ class ColSpec:
 
     def _normalize_ranges(self) -> None:
         """Coerces `bounds` and `string_length` to `Bound`, rejecting open lengths."""
-        object.__setattr__(self, "bounds", Bound._coerce(self.bounds))
+        raw: Any = self.bounds
+        if raw is not None and isinstance(self.dtype, pl.Decimal):
+            raw = self._decimal_endpoints(raw, self.dtype)
+        object.__setattr__(self, "bounds", Bound._coerce(raw))
         object.__setattr__(self, "string_length", Bound._coerce(self.string_length))
         # One internal representation for "unconstrained", so every downstream
         # `if spec.bounds is not None` guard keeps meaning what it says.
@@ -299,6 +305,43 @@ class ColSpec:
                 f"{self.string_length!r}. An open end (None) is supported on "
                 "ColSpec.bounds only."
             )
+
+    @staticmethod
+    def _decimal_endpoints(raw: Any, dtype: pl.Decimal) -> tuple[Any, Any]:
+        """A Decimal column's endpoints as `decimal.Decimal` (an `int` stays
+        an `int`; a string, as a spec file writes one, is read exactly), refusing
+        one the column's scale cannot carry: Polars would round `1.005` to
+        `1.00` or `1.01` without saying which, and a bound that moves when it
+        is stored is not the bound declared.
+        """
+        given = (raw.min, raw.max) if isinstance(raw, Bound) else tuple(raw)
+        if len(given) != 2:
+            raise SpecError(f"ColSpec.bounds must be a (min, max) pair, got {raw!r}")
+        endpoints: list[Any] = []
+        for label, endpoint in zip(("min", "max"), given, strict=True):
+            if endpoint is None or isinstance(endpoint, int):
+                endpoints.append(endpoint)
+                continue
+            try:
+                value = decimal.Decimal(str(endpoint))
+            except decimal.InvalidOperation as exc:
+                raise SpecError(
+                    f"ColSpec.bounds {label} ({endpoint!r}) is not a number a "
+                    f"{dtype!r} column can hold"
+                ) from exc
+            if not value.is_finite():
+                raise SpecError(
+                    f"ColSpec.bounds {label} must be a finite value, got {endpoint!r}"
+                )
+            exponent = value.as_tuple().exponent
+            if isinstance(exponent, int) and -exponent > dtype.scale:
+                raise SpecError(
+                    f"ColSpec.bounds {label} ({endpoint!r}) has more decimal places "
+                    f"than {dtype!r} keeps (scale {dtype.scale}); it would be "
+                    "rounded when stored. Round it yourself, or widen the scale."
+                )
+            endpoints.append(value)
+        return endpoints[0], endpoints[1]
 
     def _normalize_tags(self) -> None:
         """Reduces `tags` to a tuple of distinct, non-empty strings.
@@ -360,6 +403,7 @@ class ColSpec:
             if not (
                 self.dtype.is_integer()
                 or self.dtype.is_float()
+                or self.dtype.is_decimal()
                 or self.dtype.is_temporal()
             ):
                 raise SpecError(
@@ -487,7 +531,10 @@ class ColSpec:
 
     def _validate_bounds_dtype_support(self) -> None:
         if self.bounds is not None and not (
-            self.dtype.is_integer() or self.dtype.is_float() or self.dtype.is_temporal()
+            self.dtype.is_integer()
+            or self.dtype.is_float()
+            or self.dtype.is_decimal()
+            or self.dtype.is_temporal()
         ):
             raise SpecError(
                 f"ColSpec.bounds is only supported for numeric or temporal "

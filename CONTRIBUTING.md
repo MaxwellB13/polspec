@@ -22,6 +22,12 @@ uv run maturin develop --release
 project's virtual environment as editable. Re-run it whenever `src/` changes;
 Python-only edits are picked up immediately.
 
+`uv run` syncs the environment first, and a sync that finds the project
+changed rebuilds it through uv's own backend -- a *debug* build, two to four
+times slower, which the benchmarks will report as a regression in every
+case at once. When that happens, re-run `maturin develop --release`, or use
+`uv run --no-sync` to leave the installed build alone.
+
 ## Generated files
 
 Two files under `docs/` are generated and committed, and a test fails if

@@ -10,6 +10,7 @@ neither module may import the other, so they live here.
 from __future__ import annotations
 
 import datetime as dt
+import decimal
 
 import polars as pl
 from polars.datatypes import DataTypeClass
@@ -101,6 +102,10 @@ def _dtype_value_limits(dtype: pl.DataType) -> tuple[float, float] | None:
         return _DATE_LIMITS
     if dtype == pl.Time:
         return _TIME_LIMITS
+    if isinstance(dtype, pl.Decimal):
+        # Physical units: a Decimal(p, s) stores an integer of at most p digits.
+        widest = 10**dtype.precision - 1
+        return -widest, widest
     if isinstance(dtype, pl.Datetime) or dtype == pl.Datetime:
         factor = _TIME_UNIT_FACTORS[getattr(dtype, "time_unit", None) or "us"]
         lo, hi = (_delta_to_unit(d, factor) for d in _DATETIME_LIMIT_DELTAS)
@@ -118,6 +123,12 @@ def _bound_endpoint_to_physical(value: object, dtype: pl.DataType) -> float | in
     can be used as bounds on temporal ColSpecs, matching what `validate()`
     already accepts.
     """
+    if isinstance(dtype, pl.Decimal):
+        # Exactly, in Python: the physical form is the value times the scale,
+        # and Polars would round or refuse an endpoint the column cannot hold
+        # before the caller gets to say so.
+        scaled = decimal.Decimal(str(value)).scaleb(dtype.scale)
+        return int(scaled.to_integral_value())
     if isinstance(value, (int, float)):
         return value
     return pl.Series([value], dtype=dtype).to_physical().item()

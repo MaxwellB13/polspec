@@ -11,27 +11,18 @@
 ## Dtype coverage is not complete yet
 
 polspec generates every scalar and temporal Polars dtype — integers, floats,
-booleans, strings, binary, `Date`/`Time`/`Datetime`/`Duration`, `Enum` and
-`Categorical`. A `Datetime` carrying a `time_zone` is included: the physical
-value is an offset from the naive epoch whatever the zone, so the zone rides
-along and `generate()` hands back a column of the dtype you declared.
+`Decimal`, booleans, strings, binary, `Date`/`Time`/`Datetime`/`Duration`,
+`Enum` and `Categorical`. A `Datetime` carrying a `time_zone` is included: the
+physical value is an offset from the naive epoch whatever the zone, so the
+zone rides along and `generate()` hands back a column of the dtype you
+declared. A `Decimal` is the same idea: an integer and a scale, drawn as the
+integer and scaled back.
 
 What is left out is the composite and nested dtypes:
 
 - `List`
 - `Struct`
 - `Array`
-
-and one that is none of those:
-
-- `Decimal`
-
-`Decimal` sits on this list for a different reason from the other three. It is
-not a container, so there is no question of what its elements look like — it is
-an integer and a scale, and the work is deciding what a *default* range and
-scale should be for a column that declares neither, which is the same question
-`bounds` already answers for the other numeric dtypes. It is the cheapest of
-the four to close and the only one that needs no design decision first.
 
 A `ColSpec` for any of these constructs without complaint and can be
 *validated* against — `FrameSpec.validate()` doesn't need to know how to

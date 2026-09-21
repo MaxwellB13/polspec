@@ -21,6 +21,7 @@ tests that pin that down.
 """
 
 import datetime as dt
+from decimal import Decimal
 
 import polars as pl
 import pytest
@@ -100,6 +101,14 @@ COLUMN_CASES: dict[str, ColSpec] = {
     "float32_bounded": ColSpec(pl.Float32, bounds=(-1.0, 1.0)),
     "float64_bounded": ColSpec(pl.Float64, bounds=(-2.5, 2.5)),
     "float64_lower_open": ColSpec(pl.Float64, bounds=(0.0, None)),
+    # decimals: drawn as the physical integer, scaled back to the declared type
+    "decimal": ColSpec(pl.Decimal(10, 2)),
+    "decimal_bounded": ColSpec(pl.Decimal(10, 2), bounds=(0, "99.99")),
+    "decimal_wide": ColSpec(pl.Decimal(38, 6), bounds=(-1, 1), nullable=True),
+    "decimal_no_scale": ColSpec(pl.Decimal(5, 0), bounds=(None, 100)),
+    "decimal_choices": ColSpec(
+        pl.Decimal(4, 1), choices=[Decimal("0.5"), Decimal("1.5")]
+    ),
     # boolean
     "bool": ColSpec(pl.Boolean),
     "bool_weighted": ColSpec(pl.Boolean, weights=[0.3, 0.7]),
@@ -885,16 +894,15 @@ def test_a_hand_built_cycle_still_validates():
 # Which dtypes the property covers
 #
 # The round-trip needs both halves, so a dtype validate() understands but
-# generate() cannot fill is outside it. Docs name those four; these pin the
-# list so the page cannot go stale, and pin the one people assume is missing
-# and is not.
+# generate() cannot fill is outside it. Docs name those three; these pin the
+# list so the page cannot go stale, and pin the ones people assume are
+# missing and are not.
 # ---------------------------------------------------------------------------
 
 UNGENERATABLE_DTYPES = [
     pl.List(pl.Int64),
     pl.Array(pl.Int64, 3),
     pl.Struct({"a": pl.Int64}),
-    pl.Decimal(10, 2),
 ]
 
 

@@ -468,15 +468,15 @@ for you, so `pl.Int64` and `pl.Int64()` mean the same thing.
 |:--|:--|
 | Integer | `Int8` `Int16` `Int32` `Int64` `UInt8` `UInt16` `UInt32` `UInt64` |
 | Float | `Float32` `Float64` |
+| Decimal | `Decimal(precision, scale)` |
 | Boolean | `Boolean` |
 | Text | `String` |
 | Bytes | `Binary` |
 | Temporal | `Date` `Time` `Datetime` `Duration` |
 | Categorical | `Enum` `Categorical` |
 
-Anything else — `List`, `Struct`, `Array` and `Decimal` — can be
-*validated* but not generated; `generate()` raises `SpecError` naming the
-dtype.
+Anything else — `List`, `Struct` and `Array` — can be *validated* but not
+generated; `generate()` raises `SpecError` naming the dtype.
 
 ## Nullability
 
@@ -516,6 +516,34 @@ ColSpec(pl.Date, bounds=(date(2020, 1, 1), date(2024, 12, 31)))
 
 Temporal bounds accept real `date`, `datetime`, `time` and `timedelta` objects,
 or the physical integer the dtype stores.
+
+### Decimal bounds
+
+A `Decimal(precision, scale)` column takes its bounds as an `int`, a
+`decimal.Decimal`, or a string read exactly -- the form a spec file writes.
+A float is read through its `repr`, so `0.1` is `0.1`. An endpoint with more
+decimal places than the scale keeps is refused rather than rounded, and one
+the precision cannot hold is refused like any other out-of-range bound:
+
+```python
+from decimal import Decimal
+
+ColSpec(pl.Decimal(10, 2), bounds=(0, "99.99"))
+ColSpec(pl.Decimal(10, 2), bounds=(Decimal("0.50"), None))
+```
+
+<!-- docs: raises -->
+```python
+ColSpec(pl.Decimal(10, 2), bounds=(0, "1.005"))
+# SpecError: ColSpec.bounds max ('1.005') has more decimal places than Decimal(precision=10, scale=2) keeps (scale 2); ...
+```
+
+Generation draws a Decimal as the integer it physically is and scales it
+back, so the default range with no bounds is the float default
+(`±1,000,000`) or the widest the precision allows, whichever is narrower.
+The draw is 64-bit: bounds needing more than eighteen significant digits
+are refused at `generate()`, and only there -- validation checks the full
+precision.
 
 ### Open-ended bounds
 
@@ -4684,10 +4712,12 @@ them. See [String formats](https://maxwellb13.github.io/polspec/how-to/formats/)
 ## Smaller sharp edges
 
 - **Unsupported dtypes are accepted at declaration.** `ColSpec(pl.List(...))`
-  constructs and validates; only `generate()` objects. The four are `List`,
-  `Struct`, `Array` and `Decimal` — `Decimal` is easy to miss, being the only
-  one that is not a nested type. See
+  constructs and validates; only `generate()` objects. The three are `List`,
+  `Struct` and `Array`. See
   [Dtype coverage](https://maxwellb13.github.io/polspec/explanation/roadmap/#dtype-coverage-is-not-complete-yet).
+- **A `Decimal` is drawn through 64 bits.** Generation fills a Decimal as
+  its physical integer, so bounds needing more than eighteen significant
+  digits are refused at `generate()`. Validation checks the full precision.
 - **`missing_cols="add"` can produce a frame that fails re-validation**, since
   columns are added after validation runs, including for non-nullable columns.
 - **Rules overwrite nulls**, so a nullable column with a rule ends up with
@@ -4942,27 +4972,18 @@ Source: https://maxwellb13.github.io/polspec/explanation/roadmap/
 ## Dtype coverage is not complete yet
 
 polspec generates every scalar and temporal Polars dtype — integers, floats,
-booleans, strings, binary, `Date`/`Time`/`Datetime`/`Duration`, `Enum` and
-`Categorical`. A `Datetime` carrying a `time_zone` is included: the physical
-value is an offset from the naive epoch whatever the zone, so the zone rides
-along and `generate()` hands back a column of the dtype you declared.
+`Decimal`, booleans, strings, binary, `Date`/`Time`/`Datetime`/`Duration`,
+`Enum` and `Categorical`. A `Datetime` carrying a `time_zone` is included: the
+physical value is an offset from the naive epoch whatever the zone, so the
+zone rides along and `generate()` hands back a column of the dtype you
+declared. A `Decimal` is the same idea: an integer and a scale, drawn as the
+integer and scaled back.
 
 What is left out is the composite and nested dtypes:
 
 - `List`
 - `Struct`
 - `Array`
-
-and one that is none of those:
-
-- `Decimal`
-
-`Decimal` sits on this list for a different reason from the other three. It is
-not a container, so there is no question of what its elements look like — it is
-an integer and a scale, and the work is deciding what a *default* range and
-scale should be for a column that declares neither, which is the same question
-`bounds` already answers for the other numeric dtypes. It is the cheapest of
-the four to close and the only one that needs no design decision first.
 
 A `ColSpec` for any of these constructs without complaint and can be
 *validated* against — `FrameSpec.validate()` doesn't need to know how to
@@ -5125,6 +5146,19 @@ seed produces; see
 
 ### Added
 
+- **`pl.Decimal` columns generate.** A `Decimal(precision, scale)` is an
+  integer and a scale, so it is drawn as the integer through the engine's
+  64-bit kind and scaled back to the declared type -- with `bounds`, a
+  `distribution`, `choices`, nullability and cartesian coverage like any
+  other numeric column, and a default range of the float default or the
+  widest the precision allows. Bounds are held exactly (`int`,
+  `decimal.Decimal`, or a string read exactly, which is how a spec file
+  writes one); an endpoint finer than the scale is refused rather than
+  rounded. Validation compares values whatever the frame holds them as
+  (a CSV hands a Decimal back as a float), drift measures the extent in
+  the column's own type, `from_dataframe` declares one with its extent,
+  and `{Decimal: {precision: P, scale: S}}` is its spec-file form. The
+  ungeneratable dtypes are now the three nested ones.
 - `ColSpec(seed_name=...)`: rename a column without changing the data it
   generates. Each column is seeded from the frame seed and its *name*, so a
   rename had always changed a column's values -- which matters when

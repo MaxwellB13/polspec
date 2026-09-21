@@ -11,6 +11,7 @@ how to render it as Python source, and when to leave it out of a file.
 
 from __future__ import annotations
 
+import decimal
 import difflib
 import warnings
 from collections.abc import Callable, Mapping, Sequence
@@ -162,7 +163,11 @@ def to_source(obj: Any, fields: Sequence[Field], ctor: str) -> str:
 
 
 def _bound_to_data(value: Bound) -> list[Any]:
-    return [value.min, value.max]
+    # A Decimal endpoint is written as the exact string it prints as; YAML
+    # has no decimal type, and a float would not be the bound declared.
+    return [
+        str(v) if isinstance(v, decimal.Decimal) else v for v in (value.min, value.max)
+    ]
 
 
 def _bound_from_data(value: Any, ctx: Ctx, path: str) -> tuple[Any, Any]:
@@ -508,10 +513,25 @@ def needs_datetime_import(value: Any) -> bool:
     """Whether any literal in an encoded value is a date, time or timedelta."""
     import datetime
 
-    if isinstance(value, (datetime.date, datetime.time, datetime.timedelta)):
+    return _any_literal(value, (datetime.date, datetime.time, datetime.timedelta))
+
+
+def needs_decimal_import(spec: TableSpec) -> bool:
+    """Whether any bound in the spec is a `decimal.Decimal`, whose source
+    form (`Decimal('0.5')`) needs the import."""
+    return any(
+        isinstance(v, decimal.Decimal)
+        for cs in spec.columns.values()
+        if cs.bounds is not None
+        for v in (cs.bounds.min, cs.bounds.max)
+    )
+
+
+def _any_literal(value: Any, types: tuple[type, ...]) -> bool:
+    if isinstance(value, types):
         return True
     if isinstance(value, Mapping):
-        return any(needs_datetime_import(v) for v in value.values())
+        return any(_any_literal(v, types) for v in value.values())
     if isinstance(value, (list, tuple)):
-        return any(needs_datetime_import(v) for v in value)
+        return any(_any_literal(v, types) for v in value)
     return False

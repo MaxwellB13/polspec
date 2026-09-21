@@ -12,6 +12,8 @@ from polspec.dtypes import DtypeLike
 _FILLED_IN: Any = None
 
 _DEFAULT_WIDE_INT_BOUND = 1_000_000
+# The engine draws every integer-backed column through an i64.
+_I64_MAX = 2**63 - 1
 _DEFAULT_FLOAT_BOUND = 1_000_000.0
 _DEFAULT_STRING_LEN = (5, 15)
 _DEFAULT_NULL_PROBABILITY = 0.1

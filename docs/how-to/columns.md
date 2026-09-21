@@ -34,15 +34,15 @@ for you, so `pl.Int64` and `pl.Int64()` mean the same thing.
 |:--|:--|
 | Integer | `Int8` `Int16` `Int32` `Int64` `UInt8` `UInt16` `UInt32` `UInt64` |
 | Float | `Float32` `Float64` |
+| Decimal | `Decimal(precision, scale)` |
 | Boolean | `Boolean` |
 | Text | `String` |
 | Bytes | `Binary` |
 | Temporal | `Date` `Time` `Datetime` `Duration` |
 | Categorical | `Enum` `Categorical` |
 
-Anything else — `List`, `Struct`, `Array` and `Decimal` — can be
-*validated* but not generated; `generate()` raises `SpecError` naming the
-dtype.
+Anything else — `List`, `Struct` and `Array` — can be *validated* but not
+generated; `generate()` raises `SpecError` naming the dtype.
 
 ## Nullability
 
@@ -82,6 +82,34 @@ ColSpec(pl.Date, bounds=(date(2020, 1, 1), date(2024, 12, 31)))
 
 Temporal bounds accept real `date`, `datetime`, `time` and `timedelta` objects,
 or the physical integer the dtype stores.
+
+### Decimal bounds
+
+A `Decimal(precision, scale)` column takes its bounds as an `int`, a
+`decimal.Decimal`, or a string read exactly -- the form a spec file writes.
+A float is read through its `repr`, so `0.1` is `0.1`. An endpoint with more
+decimal places than the scale keeps is refused rather than rounded, and one
+the precision cannot hold is refused like any other out-of-range bound:
+
+```python
+from decimal import Decimal
+
+ColSpec(pl.Decimal(10, 2), bounds=(0, "99.99"))
+ColSpec(pl.Decimal(10, 2), bounds=(Decimal("0.50"), None))
+```
+
+<!-- docs: raises -->
+```python
+ColSpec(pl.Decimal(10, 2), bounds=(0, "1.005"))
+# SpecError: ColSpec.bounds max ('1.005') has more decimal places than Decimal(precision=10, scale=2) keeps (scale 2); ...
+```
+
+Generation draws a Decimal as the integer it physically is and scales it
+back, so the default range with no bounds is the float default
+(`±1,000,000`) or the widest the precision allows, whichever is narrower.
+The draw is 64-bit: bounds needing more than eighteen significant digits
+are refused at `generate()`, and only there -- validation checks the full
+precision.
 
 ### Open-ended bounds
 
