@@ -29,7 +29,7 @@ owns only the inner loop that fills arrays with values.
 | `serialization` | Spec files: a field registry (`fields.py`) that YAML, generated Python and the `import datetime` decision all derive from; the dtype codec table (`dtypes.py`); format versions and migrations (`migrations.py`) |
 | `profiler` | Inferring a spec from an existing DataFrame |
 | `report` | Rendering a spec, or a registry of them, as Markdown or Mermaid |
-| `cli` | The `polspec` command: profiling data into a spec, blank specs, and generated tests |
+| `cli` | The `polspec` command, one module per verb: `_schema` (infer, new), `_data` (validate, generate), `_drift` (diff, drift), `_test`; `_io` holds the readers, writers and spec loaders they share |
 
 The dependency direction is one-way: `spec` and `tablespec` know nothing about `framespec`,
 and `report` is not reachable from either the generation or validation path.

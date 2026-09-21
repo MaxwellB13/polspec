@@ -247,12 +247,12 @@ def _run_passes(
             _apply_column_rules(frame, name, col, seed)
         )
 
-    if spec.hierarchy is not None:
+    if (hierarchy := spec.hierarchy) is not None:
         seed = rng.randrange(2**63)
         runners["hierarchy"] = lambda frame, seed=seed: _apply_hierarchy(
             frame,
             columns,
-            spec.hierarchy,
+            hierarchy,
             seed,
             cycles=cycles,
             self_references=self_references,

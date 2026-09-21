@@ -12,6 +12,13 @@ from __future__ import annotations
 import datetime as dt
 
 import polars as pl
+from polars.datatypes import DataTypeClass
+
+# A Polars dtype as either its class or an instance: `pl.Int64` and
+# `pl.Int64()` compare and hash as one, and the tables below are keyed by
+# the class because that is how they read. A constructed ColSpec always
+# holds an instance.
+type DtypeLike = pl.DataType | DataTypeClass
 
 # Factor to scale a day/second-denominated range into a Datetime's or
 # Duration's own physical time_unit.
@@ -24,7 +31,7 @@ _I64_MIN, _I64_MAX = -(2**63), 2**63 - 1
 # the same table for the range those dtypes generate within when a ColSpec
 # declares no bounds of its own -- the 64-bit types being the exception, where
 # the full range is not a useful default.
-_INT_DTYPE_LIMITS: dict[pl.DataType, tuple[int, int]] = {
+_INT_DTYPE_LIMITS: dict[DtypeLike, tuple[int, int]] = {
     pl.Int8: (-128, 127),
     pl.Int16: (-32_768, 32_767),
     pl.Int32: (-2_147_483_648, 2_147_483_647),
@@ -38,7 +45,7 @@ _INT_DTYPE_LIMITS: dict[pl.DataType, tuple[int, int]] = {
 # Largest finite magnitude each float dtype represents. Exceeding these turns
 # into an infinity on the way to Rust, which then panics building a
 # distribution over a non-finite range.
-_FLOAT_DTYPE_LIMITS: dict[pl.DataType, tuple[float, float]] = {
+_FLOAT_DTYPE_LIMITS: dict[DtypeLike, tuple[float, float]] = {
     pl.Float32: (-3.4028234663852886e38, 3.4028234663852886e38),
     pl.Float64: (-1.7976931348623157e308, 1.7976931348623157e308),
 }
@@ -96,10 +103,12 @@ def _dtype_value_limits(dtype: pl.DataType) -> tuple[float, float] | None:
         return _TIME_LIMITS
     if isinstance(dtype, pl.Datetime) or dtype == pl.Datetime:
         factor = _TIME_UNIT_FACTORS[getattr(dtype, "time_unit", None) or "us"]
-        return tuple(_delta_to_unit(d, factor) for d in _DATETIME_LIMIT_DELTAS)
+        lo, hi = (_delta_to_unit(d, factor) for d in _DATETIME_LIMIT_DELTAS)
+        return lo, hi
     if isinstance(dtype, pl.Duration) or dtype == pl.Duration:
         factor = _TIME_UNIT_FACTORS[getattr(dtype, "time_unit", None) or "us"]
-        return tuple(_delta_to_unit(d, factor) for d in _TIMEDELTA_LIMIT_DELTAS)
+        lo, hi = (_delta_to_unit(d, factor) for d in _TIMEDELTA_LIMIT_DELTAS)
+        return lo, hi
     return None
 
 

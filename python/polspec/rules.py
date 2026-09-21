@@ -27,7 +27,11 @@ def _reject_duplicate_choices(
     """
     if dtype is None:
         seen: set = set()
-        dupes = [c for c in choices if c in seen or seen.add(c)]
+        dupes = []
+        for c in choices:
+            if c in seen:
+                dupes.append(c)
+            seen.add(c)
         if dupes:
             raise SpecError(f"{label} contains duplicate values {dupes}")
         return

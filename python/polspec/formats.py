@@ -86,7 +86,9 @@ class Format:
         """True where a value of `column` has this format; null stays null."""
         if self.values is not None:
             return column.is_in(list(self.values))
-        matches = column.str.contains(self.pattern)  # type: ignore[arg-type]
+        if self.pattern is None:  # pragma: no cover - a format has values or a pattern
+            raise ValueError(f"format {self.name!r} has neither values nor a pattern")
+        matches = column.str.contains(self.pattern)
         if self.max_length is not None:
             matches = matches & (column.str.len_chars() <= self.max_length)
         return matches

@@ -5,7 +5,7 @@ import warnings
 from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
@@ -157,23 +157,58 @@ class ColSpec:
     >>> ColSpec(pl.String, choices=["NEW", "PAID"], weights=[3.0, 1.0])
     """
 
-    dtype: pl.DataType | type[pl.DataType]
+    # The fields are annotated with what a constructed ColSpec *holds*, after
+    # `__post_init__` has normalised each one: a dtype instance, a `Bound`, a
+    # tuple. What the constructor *accepts* is wider -- `pl.Int64` or
+    # `pl.Int64()`, a tuple or a `Bound`, one validator or several -- and is
+    # spelled out in the `__init__` below, which exists only for type
+    # checkers (the dataclass generates the real one). A test holds the two
+    # to the same parameters, so a field added to one is a red test in the
+    # other.
+    dtype: pl.DataType
     col_name: str | None = None
     seed_name: str | None = None
     nullable: bool = False
-    bounds: Bound | tuple[Any, Any] | list[Any] | None = None
-    tags: str | Sequence[str] = ()
+    bounds: Bound[Any] | None = None
+    tags: tuple[str, ...] = ()
     unique: bool = False
     null_probability: float = _DEFAULT_NULL_PROBABILITY
-    string_length: Bound | tuple[int, int] | list[int] | None = None
+    string_length: Bound[int] | None = None
     format: str | None = None
     pattern: str | None = None
     distribution: str | None = None
     distribution_params: dict[str, float] | None = None
-    choices: tuple | list | dict | None = None
-    weights: tuple[float, ...] | list[float] | None = None
+    choices: tuple[Any, ...] | None = None
+    weights: tuple[float, ...] | None = None
     rules: tuple[ColRule, ...] = ()
-    validators: Check | pl.Expr | Pred | Sequence[Check | pl.Expr | Pred] | None = ()
+    validators: tuple[Check, ...] = ()
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            dtype: pl.DataType | type[pl.DataType],
+            col_name: str | None = None,
+            seed_name: str | None = None,
+            nullable: bool = False,
+            bounds: Bound[Any] | tuple[Any, Any] | list[Any] | None = None,
+            tags: str | Sequence[str] | None = (),
+            unique: bool = False,
+            null_probability: float = _DEFAULT_NULL_PROBABILITY,
+            string_length: Bound[int] | tuple[int, int] | list[int] | None = None,
+            format: str | None = None,
+            pattern: str | None = None,
+            distribution: str | None = None,
+            distribution_params: dict[str, float] | None = None,
+            choices: Sequence[Any] | dict[Any, float] | None = None,
+            weights: Sequence[float] | None = None,
+            rules: Sequence[ColRule] = (),
+            validators: Check
+            | pl.Expr
+            | Pred
+            | Sequence[Check | pl.Expr | Pred]
+            | None = (),
+        ) -> None: ...
 
     def __post_init__(self) -> None:
         # Order matters: normalization first, so every check below sees the
@@ -245,9 +280,10 @@ class ColSpec:
 
     def _normalize_dtype(self) -> None:
         """Instantiates a dtype passed as a class, so `pl.Int64` means `pl.Int64()`."""
-        if isinstance(self.dtype, type) and issubclass(self.dtype, pl.DataType):
+        raw: Any = self.dtype
+        if isinstance(raw, type) and issubclass(raw, pl.DataType):
             with suppress(TypeError):
-                object.__setattr__(self, "dtype", self.dtype())
+                object.__setattr__(self, "dtype", raw())
 
     def _normalize_ranges(self) -> None:
         """Coerces `bounds` and `string_length` to `Bound`, rejecting open lengths."""
@@ -275,16 +311,13 @@ class ColSpec:
         identically-written specs compare unequal across processes. Sorting is
         the only stable reading of an unordered input.
         """
-        if self.tags is None:
+        tags: Any = self.tags
+        if tags is None:
             object.__setattr__(self, "tags", ())
-        elif isinstance(self.tags, str):
-            object.__setattr__(self, "tags", (self.tags,) if self.tags else ())
-        elif isinstance(self.tags, (list, tuple, set, Sequence)):
-            raw = (
-                sorted(self.tags)
-                if isinstance(self.tags, (set, frozenset))
-                else self.tags
-            )
+        elif isinstance(tags, str):
+            object.__setattr__(self, "tags", (tags,) if tags else ())
+        elif isinstance(tags, (list, tuple, set, Sequence)):
+            raw = sorted(tags) if isinstance(tags, (set, frozenset)) else tags
             distinct: dict[str, None] = {}
             for tag in raw:
                 text = str(tag)
@@ -293,20 +326,21 @@ class ColSpec:
             object.__setattr__(self, "tags", tuple(distinct))
         else:
             raise SpecError(
-                f"ColSpec.tags must be a string or sequence of strings, got {type(self.tags).__name__}"
+                f"ColSpec.tags must be a string or sequence of strings, got {type(tags).__name__}"
             )
 
     def _normalize_choices_and_weights(self) -> None:
         """Splits a `{choice: weight}` mapping into the two fields, and tuples both."""
-        if isinstance(self.choices, dict):
+        choices: Any = self.choices
+        if isinstance(choices, dict):
             if self.weights is not None:
                 raise SpecError(
                     "Cannot specify both a dict for choices and an explicit weights parameter"
                 )
             object.__setattr__(
-                self, "weights", tuple(float(w) for w in self.choices.values())
+                self, "weights", tuple(float(w) for w in choices.values())
             )
-            object.__setattr__(self, "choices", tuple(self.choices.keys()))
+            object.__setattr__(self, "choices", tuple(choices.keys()))
         else:
             if self.choices is not None:
                 object.__setattr__(self, "choices", tuple(self.choices))
@@ -559,15 +593,12 @@ class ColSpec:
                 )
 
     def _normalize_validators(self) -> None:
-        if self.validators is None:
+        given: Any = self.validators
+        if given is None:
             object.__setattr__(self, "validators", ())
             return
 
-        raw = (
-            [self.validators]
-            if isinstance(self.validators, (pl.Expr, Pred, Check))
-            else list(self.validators)
-        )
+        raw = [given] if isinstance(given, (pl.Expr, Pred, Check)) else list(given)
 
         normalized: list[Check] = []
         seen: dict[str, Check] = {}

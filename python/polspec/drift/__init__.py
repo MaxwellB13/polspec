@@ -19,14 +19,13 @@ still the verdict.
 
 from __future__ import annotations
 
-import dataclasses
-import difflib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 import polars as pl
 
+from polspec._options import options_from
 from polspec.drift.data import Observed
 from polspec.drift.fields import Pair, compare_column, compare_table
 from polspec.drift.report import DriftCode, DriftFinding, DriftReport, Severity
@@ -80,35 +79,10 @@ class DriftOptions:
             )
 
 
-_ACCEPTED_OPTIONS = sorted(f.name for f in dataclasses.fields(DriftOptions))
-
-
 def _options_from(
     options_obj: DriftOptions | None = None, /, **options: Any
 ) -> DriftOptions:
-    """The options for one call, from an object, keywords, or neither."""
-    if options_obj is not None:
-        if options:
-            raise TypeError(
-                "Pass options= or the individual keyword options, not both. "
-                f"Given options= alongside {', '.join(sorted(options))}."
-            )
-        if not isinstance(options_obj, DriftOptions):
-            raise TypeError(
-                f"options= must be a DriftOptions, got {type(options_obj).__name__}"
-            )
-        return options_obj
-    unknown = [k for k in options if k not in _ACCEPTED_OPTIONS]
-    if unknown:
-        hints = []
-        for name in unknown:
-            close = difflib.get_close_matches(name, _ACCEPTED_OPTIONS, n=1)
-            hints.append(f"{name!r}{f' (did you mean {close[0]!r}?)' if close else ''}")
-        raise TypeError(
-            f"Unknown drift option(s): {', '.join(hints)}. "
-            f"Accepted: {', '.join(_ACCEPTED_OPTIONS)}."
-        )
-    return DriftOptions(**options)
+    return options_from(DriftOptions, options_obj, options, what="drift")
 
 
 def _table_finding(

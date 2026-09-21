@@ -47,6 +47,7 @@ Run everything CI runs before opening a pull request:
 ```bash
 uv run pytest                                # Python test suite
 uv run ruff check . && uv run ruff format --check .
+uv run ty check                              # type checker; nothing is suppressed
 cargo test --release                         # Rust unit tests
 cargo clippy --release
 uv run python examples/related_specs.py      # worked example, doubles as a smoke test
@@ -90,6 +91,17 @@ uv run --group docs zensical build --strict  # what the docs workflow runs
 - **Two tables must match.** The distribution parameter aliases live in both
   `python/polspec/distributions.py` and `DistKind::from_spec` in
   `src/lib.rs`. Change them together.
+- **A new `ColSpec` field touches four registries**, each with a test that
+  fails when it is missing: the `TYPE_CHECKING` constructor beside the
+  fields (`tests/test_declaration.py`), the serialization `Field` list
+  (`tests/test_serialization_format.py`), the drift comparator table
+  (`tests/test_drift.py`), and -- if it is a validation switch -- the
+  `FrameSpec` facade signature (`tests/test_framespec.py`).
+- **What the constructor accepts is not what the instance holds.** `ColSpec`,
+  `Check` and `ForeignKey` annotate their fields with the normalised form
+  (`pl.DataType`, `Bound`, tuples) and declare the accepted forms in an
+  `__init__` under `if TYPE_CHECKING:`. Read a raw value through `Any` inside
+  `__post_init__`; do not widen the field to describe its input.
 - **Docs are part of the change.** A new field, option or CLI flag lands with
   its guide page and a `CHANGELOG.md` entry under *Unreleased*.
 - Commit messages follow the existing `type: summary` style

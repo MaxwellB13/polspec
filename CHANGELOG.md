@@ -27,6 +27,24 @@ seed produces; see
 - *Generating data* said each column derives its seed "from its position".
   It is from its name -- the reason `seed_name` is needed at all.
 
+### Internal
+
+- **`ty` replaces mypy, and nothing is suppressed.** The 23-module ignore
+  list was one pattern: `ColSpec`, `Check` and `ForeignKey` annotated their
+  fields with what the constructor *accepts* (`pl.Int64` or `pl.Int64()`, a
+  tuple or a `Bound`, one validator or several) while `__post_init__`
+  narrows every one to what the instance *holds*. The fields now say what
+  they hold, and each class declares the accepted signature in an
+  `__init__` that exists only for type checkers, held to the fields by a
+  test. Every `spec.dtype.is_integer()` in the library type-checks; the
+  `cast()` accessors drift needed are gone; the API reference and
+  `llms-full.txt` show the accepted signature. CI runs `uv run ty check`.
+- `polspec.cli` is a package, one module per verb, with the readers,
+  writers and spec loaders every verb shares in `_io`.
+- `validate()`/`inspect()` and `diff()`/`drift()` shared 25 lines of
+  options handling twice; it is one `polspec._options.options_from`.
+- `Bound.closed()`: both endpoints of a bound that has both.
+
 ## [0.6.0] - 2026-09-14
 
 The headline is drift: a report of what changed between two specs, or

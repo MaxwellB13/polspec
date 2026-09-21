@@ -20,6 +20,7 @@ structurally with `Pred.equals`.
 
 from __future__ import annotations
 
+import builtins
 import datetime as dt
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -74,7 +75,7 @@ class Pred:
         """This predicate as plain data, for writing to a spec file."""
         raise NotImplementedError
 
-    def to_source(self) -> str:
+    def to_source(self) -> builtins.str:
         """This predicate as the `col(...)` Python that would rebuild it."""
         raise NotImplementedError
 
@@ -93,7 +94,7 @@ class Pred:
         """
         raise NotImplementedError
 
-    def root_names(self) -> set[str]:
+    def root_names(self) -> set[builtins.str]:
         """Every column name this predicate reads."""
         return set().union(*(c.root_names() for c in self.children()))
 
@@ -104,7 +105,7 @@ class Pred:
         """
         return [v for c in self.children() for v in c.literals()]
 
-    def rename(self, mapping: Mapping[str, str]) -> Pred:
+    def rename(self, mapping: Mapping[builtins.str, builtins.str]) -> Pred:
         """The same predicate with its columns renamed by `mapping`.
 
         Derived, so a node cannot be added that silently fails to rename --
@@ -123,7 +124,7 @@ class Pred:
     def __hash__(self) -> int:
         return hash(repr(self.to_data()))
 
-    def __repr__(self) -> str:
+    def __repr__(self) -> builtins.str:
         return self.to_source()
 
     def __bool__(self) -> bool:
@@ -134,10 +135,10 @@ class Pred:
 
     # -- comparison ----------------------------------------------------------
 
-    def __eq__(self, other: object) -> Cmp:  # type: ignore[override]
+    def __eq__(self, other: object) -> Cmp:  # type: ignore[override]  # ty: ignore[invalid-method-override]
         return Cmp("eq", self, _wrap(other))
 
-    def __ne__(self, other: object) -> Cmp:  # type: ignore[override]
+    def __ne__(self, other: object) -> Cmp:  # type: ignore[override]  # ty: ignore[invalid-method-override]
         return Cmp("ne", self, _wrap(other))
 
     def __lt__(self, other: Any) -> Cmp:

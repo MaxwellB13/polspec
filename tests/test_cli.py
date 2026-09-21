@@ -362,7 +362,7 @@ def test_generate_writes_a_file_the_readers_read_back(tmp_path, suffix, capsys):
     # What generate wrote, the readers read -- through the same suffix map.
     # (A text format hands dates back as strings, so the shape is what a
     # round trip can promise; `validate` is asserted on the typed formats.)
-    from polspec.cli import _read_data_file
+    from polspec.cli._io import _read_data_file
 
     back = _read_data_file(out, None)
     assert back.height == 40
@@ -372,7 +372,7 @@ def test_generate_writes_a_file_the_readers_read_back(tmp_path, suffix, capsys):
 
 
 def test_every_reader_has_a_writer():
-    from polspec.cli import _DATA_READERS, _DATA_WRITERS
+    from polspec.cli._io import _DATA_READERS, _DATA_WRITERS
 
     assert set(_DATA_READERS) == set(_DATA_WRITERS)
 

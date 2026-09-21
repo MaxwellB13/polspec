@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
+from polspec.constants import _FILLED_IN
 from polspec.errors import GenerationError, SpecError
 from polspec.spec import ColSpec
 
@@ -65,24 +66,41 @@ class ForeignKey:
     ...     ]
     """
 
-    columns: str | Sequence[str]
-    references: type[FrameSpec] | TableSpec | str
-    ref_columns: str | Sequence[str] | None = None
-    name: str | None = None
+    # Annotated with what a constructed ForeignKey holds: tuples of names, and
+    # the referenced spec's *name* whatever the constructor was handed. The
+    # accepted forms are spelled out in the `__init__` below, which exists
+    # only for type checkers.
+    columns: tuple[str, ...]
+    references: str
+    ref_columns: tuple[str, ...] = _FILLED_IN
+    name: str = _FILLED_IN
     target: TableSpec | None = None
 
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            columns: str | Sequence[str],
+            references: type[FrameSpec] | TableSpec | str,
+            ref_columns: str | Sequence[str] | None = None,
+            name: str | None = None,
+            target: TableSpec | None = None,
+        ) -> None: ...
+
     def __post_init__(self) -> None:
-        cols = (self.columns,) if isinstance(self.columns, str) else tuple(self.columns)
+        given_cols: Any = self.columns
+        cols = (given_cols,) if isinstance(given_cols, str) else tuple(given_cols)
         if not cols:
             raise SpecError("ForeignKey.columns must not be empty")
         object.__setattr__(self, "columns", cols)
 
-        if self.ref_columns is None:
+        given_ref_cols: Any = self.ref_columns
+        if given_ref_cols is None:
             ref_cols = cols
-        elif isinstance(self.ref_columns, str):
-            ref_cols = (self.ref_columns,)
+        elif isinstance(given_ref_cols, str):
+            ref_cols = (given_ref_cols,)
         else:
-            ref_cols = tuple(self.ref_columns)
+            ref_cols = tuple(given_ref_cols)
         if len(ref_cols) != len(cols):
             raise SpecError(
                 f"ForeignKey.ref_columns ({ref_cols}) must have the same length as "
@@ -92,7 +110,7 @@ class ForeignKey:
 
         from polspec.tablespec import TableSpec  # local: tablespec imports this module
 
-        ref = self.references
+        ref: Any = self.references
         target: TableSpec | None = self.target
         if isinstance(ref, TableSpec):
             target, ref = ref, ref.name
@@ -110,7 +128,8 @@ class ForeignKey:
         object.__setattr__(self, "references", ref)
         object.__setattr__(self, "target", target)
 
-        if self.name is None:
+        name: Any = self.name
+        if name is None:
             object.__setattr__(self, "name", _default_fk_name(cols, ref))
 
     def __eq__(self, other: object) -> bool:

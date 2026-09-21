@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import polars as pl
 
+from polspec.constants import _FILLED_IN
 from polspec.errors import ValidationError
 
 if TYPE_CHECKING:
@@ -145,7 +146,7 @@ class ValidationReport:
     spec_name: str
     findings: tuple[Finding, ...]
     frame: pl.LazyFrame = field(repr=False, compare=False)
-    options: ValidationOptions = field(repr=False, compare=False, default=None)  # type: ignore[assignment]
+    options: ValidationOptions = field(repr=False, compare=False, default=_FILLED_IN)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "findings", tuple(self.findings))

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import Any, ClassVar, Literal, overload
+from typing import Any, ClassVar, Literal, cast, overload
 
 import polars as pl
 
@@ -306,7 +306,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     @classmethod
     def from_spec(cls, spec: TableSpec, *, name: str | None = None) -> type[FrameSpec]:
         """A `FrameSpec` subclass wrapping an existing `TableSpec`."""
-        return _FrameSpecMeta(name or spec.name, (FrameSpec,), {"__tablespec__": spec})
+        cls_ = _FrameSpecMeta(name or spec.name, (FrameSpec,), {"__tablespec__": spec})
+        return cast("type[FrameSpec]", cls_)
 
     @classmethod
     def from_yaml(
