@@ -14,8 +14,9 @@
 //! Each chunk is seeded from the column seed and its chunk index, so the
 //! output for a given seed is identical whatever the thread count, and the
 //! first rows of a column never change when more rows are asked for. The
-//! column seed itself is derived from the frame seed and the column *name*, so
-//! inserting a column never reshuffles its neighbours.
+//! column seed itself is derived from the frame seed and the column *name* --
+//! or the `seed_name` a spec declares in its place -- so inserting a column
+//! never reshuffles its neighbours, and renaming one need not change it.
 
 use polars::prelude::*;
 use polars_arrow::array::BooleanArray;

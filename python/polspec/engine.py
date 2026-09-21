@@ -204,6 +204,8 @@ def _plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None
         # needs the row count, which only the engine has, so it is not
         # duplicated here.
         "unique": spec.unique,
+        # A renamed column that must keep its data is seeded as its old name.
+        "seed_name": spec.seed_name,
     }
 
     domain = _domain(spec)

@@ -23,9 +23,10 @@ use plan::ColumnPlan;
 
 /// Fills every column of a frame in parallel.
 ///
-/// Each column's seed is derived from `seed` and the column's name, so adding
-/// or reordering columns never changes the values of the others. With no
-/// seed, the current time is used.
+/// Each column's seed is derived from `seed` and the column's seed name --
+/// its own name unless the spec gave it another -- so adding or reordering
+/// columns never changes the values of the others, and a renamed column can
+/// keep producing the data it did. With no seed, the current time is used.
 #[pyfunction]
 #[pyo3(signature = (columns, n_rows, seed=None))]
 fn generate_dataframe(
@@ -47,7 +48,7 @@ fn generate_dataframe(
             let series: Result<Vec<Series>, String> = columns
                 .par_iter()
                 .map(|plan| {
-                    let col_seed = sample::seed_for_column(base_seed, &plan.name);
+                    let col_seed = sample::seed_for_column(base_seed, plan.seed_key());
                     sample::generate_series(plan, n_rows, col_seed)
                 })
                 .collect();

@@ -158,6 +158,7 @@ class TableSpec:
             _dedupe(tuple(self.foreign_keys), ForeignKey, "foreign_keys"),
         )
 
+        self._validate_seed_names()
         self._validate_rules()
         self._validate_validators()
         self._validate_unique_together()
@@ -168,6 +169,23 @@ class TableSpec:
 
     # ------------------------------------------------------------------
     # Declaration-time validation
+
+    def _validate_seed_names(self) -> None:
+        """Two columns seeded alike draw identical values -- a surprise, not
+        a feature (a rule is how one column copies another) -- so the name
+        each column is seeded from must be its own.
+        """
+        seeded_as: dict[str, str] = {}
+        for col_name, spec in self.columns.items():
+            key = spec.seed_name if spec.seed_name is not None else col_name
+            if (other := seeded_as.get(key)) is not None:
+                raise SpecError(
+                    f"Columns {other!r} and {col_name!r} would both be seeded as "
+                    f"{key!r} and draw identical values. Give one a different "
+                    "seed_name."
+                )
+            seeded_as[key] = col_name
+
     # ------------------------------------------------------------------
 
     def _validate_rules(self) -> None:

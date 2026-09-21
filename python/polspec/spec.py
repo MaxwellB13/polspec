@@ -72,6 +72,16 @@ class ColSpec:
         (`"Unit Price"`). Everything else that refers to this column by name --
         `ColRule`, `unique_together`, tags lookups, `validate()` -- uses
         `col_name`, not the attribute name.
+    seed_name : str | None, optional
+        The name the column's seed is derived from, when it is not the
+        column's own. Generation seeds each column from the frame seed and
+        the column *name*, so renaming a column changes the values it
+        produces; a column declared with `seed_name="old"` keeps producing
+        the data it did as `"old"`. That is all it does: a column inserted
+        ahead of one carrying rules, a foreign key or a hierarchy still
+        reshuffles it, and nothing is promised across polspec versions.
+        Two columns of one spec cannot share a seed name, nor may one name
+        another column: they would draw identical values.
     nullable : bool, optional
         Whether the column allows null values.
     bounds : Bound | tuple | list | None, optional
@@ -149,6 +159,7 @@ class ColSpec:
 
     dtype: pl.DataType | type[pl.DataType]
     col_name: str | None = None
+    seed_name: str | None = None
     nullable: bool = False
     bounds: Bound | tuple[Any, Any] | list[Any] | None = None
     tags: str | Sequence[str] = ()
@@ -169,6 +180,7 @@ class ColSpec:
         # canonical form; then the checks that need only one field; then the
         # ones that compare fields against each other.
         self._validate_col_name()
+        self._validate_seed_name()
         self._normalize_dtype()
         self._normalize_ranges()
         self._normalize_tags()
@@ -222,6 +234,14 @@ class ColSpec:
     def _validate_col_name(self) -> None:
         if self.col_name is not None and not self.col_name:
             raise SpecError("ColSpec.col_name must not be an empty string")
+
+    def _validate_seed_name(self) -> None:
+        if self.seed_name is None:
+            return
+        if not isinstance(self.seed_name, str) or not self.seed_name:
+            raise SpecError(
+                f"ColSpec.seed_name must be a non-empty string, got {self.seed_name!r}"
+            )
 
     def _normalize_dtype(self) -> None:
         """Instantiates a dtype passed as a class, so `pl.Int64` means `pl.Int64()`."""

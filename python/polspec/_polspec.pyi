@@ -39,9 +39,12 @@ class ColumnPlan:
         params: Mapping[str, float] | None = None,
         unique: bool = False,
         template: Sequence[tuple[str, Sequence[str], int, int]] | None = None,
+        seed_name: str | None = None,
     ) -> None: ...
     @property
     def name(self) -> str: ...
+    @property
+    def seed_name(self) -> str | None: ...
     @property
     def kind(self) -> str: ...
     @property
@@ -70,7 +73,7 @@ class ColumnPlan:
 def generate_dataframe(
     columns: Sequence[ColumnPlan], n_rows: int, seed: int | None = None
 ) -> pl.DataFrame:
-    """Fills every planned column in parallel; each column's seed derives from `seed` and its name."""
+    """Fills every planned column in parallel; each column's seed derives from `seed` and its seed name (its name, unless the plan carries `seed_name`)."""
 
 def distribution_params(name: str) -> list[tuple[str, float, bool]]:
     """`(name, default, must_be_positive)` for each canonical parameter of a distribution."""
