@@ -60,6 +60,20 @@ seed produces; see
 - *Generating data* said each column derives its seed "from its position".
   It is from its name -- the reason `seed_name` is needed at all.
 
+### Changed
+
+- **Pass seeds are keyed by name, not drawn in order.** The passes that
+  run after the columns are filled -- rules, the hierarchy, foreign keys,
+  composite uniqueness, a bounded categorical's pool, cartesian coverage
+  representatives -- used to take their seeds from one `random.Random` in
+  declaration order, so inserting a rules column shifted every later pass
+  and `seed_name` could not hold a ruled column's data. Each now mixes the
+  frame seed with a key naming what it is for, by the same construction
+  the engine uses for columns. **A spec with any of those produces
+  different values for the same seed than 0.6 did**, once; a spec with
+  plain columns is unchanged, and so is every column's own draw. The
+  `limitations.md` bullet that described the old behaviour is gone.
+
 ### Internal
 
 - **`ty` replaces mypy, and nothing is suppressed.** The 23-module ignore

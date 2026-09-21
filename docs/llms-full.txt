@@ -1416,7 +1416,11 @@ A `seed` fixes the result across processes, machines and thread counts. Each
 column derives its own seed from the frame seed and its *name*, and each
 65,536-row chunk from its index, so the same seed gives the same frame
 regardless of how many threads did the work, and adding or reordering columns
-never changes the values of the others.
+never changes the values of the others. The passes that run after the columns
+are filled -- rules, the hierarchy, foreign keys, composite uniqueness -- are
+seeded the same way, from the frame seed and a key naming what the pass is
+for, so a column added beside a ruled or foreign-keyed one leaves it alone
+too.
 
 ```python
 Orders.generate(500, seed=7).equals(Orders.generate(500, seed=7))   # True
@@ -1452,12 +1456,10 @@ on the validation side. Two columns of one spec cannot share a seed name, and
 one cannot borrow another column's name -- they would draw identical values,
 which is what a [rule](https://maxwellb13.github.io/polspec/how-to/constraints/) is for.
 
-That is all `seed_name` holds. The passes a frame goes through after its
-columns are filled -- rules, hierarchy, foreign keys, composite uniqueness --
-draw their seeds in declaration order, so inserting a column that carries a
-rule ahead of another still changes what the second one draws, and nothing is
-promised across polspec versions. See
-[Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/).
+`seed_name` covers the column's passes as well as its values: a ruled
+column renamed with one keeps its rule's draw. What no seed name holds is
+the frame across polspec *versions* -- see
+[Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/#yaml-format-and-generated-values-may-change).
 
 ## Lazy output
 
@@ -3313,11 +3315,10 @@ seed_name : str | None, optional
     column's own. Generation seeds each column from the frame seed and
     the column *name*, so renaming a column changes the values it
     produces; a column declared with `seed_name="old"` keeps producing
-    the data it did as `"old"`. That is all it does: a column inserted
-    ahead of one carrying rules, a foreign key or a hierarchy still
-    reshuffles it, and nothing is promised across polspec versions.
-    Two columns of one spec cannot share a seed name, nor may one name
-    another column: they would draw identical values.
+    the data it did as `"old"`, its rules included. Nothing is promised
+    across polspec versions. Two columns of one spec cannot share a
+    seed name, nor may one name another column: they would draw
+    identical values.
 nullable : bool, optional
     Whether the column allows null values.
 bounds : Bound | tuple | list | None, optional
@@ -4791,13 +4792,6 @@ them. See [String formats](https://maxwellb13.github.io/polspec/how-to/formats/)
   domain has to fit inside the column's own — a contradiction is refused at
   declaration — but within it, values come from the parent, so a declared
   `distribution` or `weights` on a foreign-keyed column is not what you get.
-- **`seed_name` survives a rename, not an insertion.** A column's own seed
-  comes from its name, and `seed_name` holds it across a rename. The passes
-  that run afterwards -- rules, hierarchy, foreign keys, composite
-  uniqueness -- draw their seeds in declaration order, so a rules column
-  inserted ahead of another still changes what the second one draws. And
-  nothing is promised across versions: see
-  [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/#yaml-format-and-generated-values-may-change).
 - **Case-insensitive registry lookup** means a column named `status` binds to a
   registry entry named `STATUS`; entries differing only in case are ambiguous.
 - **`to_mermaid` marks every `unique=True` column `PK`**, so several unique
@@ -5129,7 +5123,10 @@ Two things this project has made no compatibility promise about yet:
   tests this project is built around. Determinism *across* versions is not
   guaranteed yet: a bug fix to a distribution, a change to how a chunk's seed
   is derived, or a fix to one of the [known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/) can
-  all legitimately change what a given seed produces.
+  all legitimately change what a given seed produces. 0.7.0 was such a
+  release: every spec with rules, a foreign key, a hierarchy or a composite
+  key produces different values for the same seed than 0.6 did, once, so
+  that inserting a column never changes its neighbours again.
 
 The first of those is easier to live with than it sounds, because a spec file
 now says which format wrote it. Every file `to_yaml()` writes carries
@@ -5252,6 +5249,20 @@ seed produces; see
 
 - *Generating data* said each column derives its seed "from its position".
   It is from its name -- the reason `seed_name` is needed at all.
+
+### Changed
+
+- **Pass seeds are keyed by name, not drawn in order.** The passes that
+  run after the columns are filled -- rules, the hierarchy, foreign keys,
+  composite uniqueness, a bounded categorical's pool, cartesian coverage
+  representatives -- used to take their seeds from one `random.Random` in
+  declaration order, so inserting a rules column shifted every later pass
+  and `seed_name` could not hold a ruled column's data. Each now mixes the
+  frame seed with a key naming what it is for, by the same construction
+  the engine uses for columns. **A spec with any of those produces
+  different values for the same seed than 0.6 did**, once; a spec with
+  plain columns is unchanged, and so is every column's own draw. The
+  `limitations.md` bullet that described the old behaviour is gone.
 
 ### Internal
 
