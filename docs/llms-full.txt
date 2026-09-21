@@ -448,6 +448,7 @@ ColSpec(
     unique=False,
     null_probability=0.1,
     string_length=None,
+    list_length=None,
     format=None,
     pattern=None,
     distribution=None,
@@ -474,9 +475,11 @@ for you, so `pl.Int64` and `pl.Int64()` mean the same thing.
 | Bytes | `Binary` |
 | Temporal | `Date` `Time` `Datetime` `Duration` |
 | Categorical | `Enum` `Categorical` |
+| Nested | `List(inner)` `Array(inner, width)` of any dtype above — see [Nested columns](#nested-columns) |
 
-Anything else — `List`, `Struct` and `Array` — can be *validated* but not
-generated; `generate()` raises `SpecError` naming the dtype.
+Anything else — `Struct`, and a `List` whose elements are themselves a
+`List` or `Struct` — can be *validated* but not generated; `generate()`
+raises `SpecError` naming the dtype.
 
 ## Nullability
 
@@ -628,6 +631,43 @@ ColSpec(pl.String, choices=[1, "1"])
 ColSpec(pl.String, string_length=(8, 8))    # fixed width
 ColSpec(pl.Binary, string_length=(16, 64))
 ```
+
+## Nested columns
+
+A `List` or `Array` column is described by the same fields as a scalar one,
+read as claims about **each element**: `bounds`, `choices`, `weights`,
+`format`, `pattern`, `string_length` and `distribution` all apply to the
+values inside the list. One field describes the list itself:
+
+```python
+ColSpec(pl.List(pl.Int64), bounds=(0, 10), list_length=(1, 5))    # 1 to 5 ints, each 0..10
+ColSpec(pl.List(pl.String), format="email")                       # 0 to 5 addresses
+ColSpec(pl.List(pl.Enum(["a", "b", "c"])), choices=["a", "b"])    # from a subset of the Enum
+ColSpec(pl.Array(pl.Float64, 3), bounds=(0.0, 1.0))               # exactly three, from the dtype
+```
+
+`list_length` is the inclusive range of elements a value holds, both ends
+required; without it generation makes 0 to 5. An `Array` takes its length
+from the dtype and refuses `list_length`.
+
+`nullable` and `null_probability` describe the list: a null cell, never a
+null element. Generation never puts a null inside a list, and validation
+reports one under `nullability` like a null in a non-nullable column.
+
+Validation runs every element claim inside the list, and a list fails where
+*any* element does — the finding's samples and `rows()` are the offending
+lists. `list_length` gets its own finding code.
+
+Generation draws the lengths and the elements as two columns of the inner
+dtype and wraps one by the other, so an element is made by the same code
+that would make a scalar of its dtype, and a `List` column keeps its data
+across a rename through `seed_name` like any other.
+
+What a nested column cannot carry: `unique` (a list is not drawn without
+replacement) and `rules` (a rule's choices are values, and a list value
+would be a list of lists). `validators` and `__checks__` work as on any
+column — they are expressions. A `List` of a `List` or a `Struct` declares
+and validates by dtype only.
 
 ## String formats
 
@@ -1694,6 +1734,7 @@ Orders.validate(Orders.generate(1_000, seed=1), validate_checks=False)
 | Value in domain | `choices`, `Enum` categories |
 | Value within range | `bounds` |
 | Length within range | `string_length` |
+| List has the declared number of elements | `list_length` |
 | Value has the declared shape | `format` |
 | Value matches the regex | `pattern` |
 | Conditional values hold | `rules` |
@@ -2150,7 +2191,7 @@ as its default is the worst outcome -- pass `strict=False` to
 | | Round-trips |
 |:--|:--:|
 | dtypes, including parametrized `Enum` / `Datetime` / `Duration` / named `Categorical` | yes |
-| `nullable`, `null_probability`, `bounds`, `string_length`, `format`, `pattern`, `seed_name`, `unique`, `tags` | yes |
+| `nullable`, `null_probability`, `bounds`, `string_length`, `list_length`, `format`, `pattern`, `seed_name`, `unique`, `tags` | yes |
 | `choices`, `weights`, `distribution`, `distribution_params` | yes |
 | `rules` (`ColRule`) | yes |
 | `__unique_together__` | yes |
@@ -3247,7 +3288,7 @@ What one column declares, and the pieces that make up a declaration.
 
 ## ColSpec
 
-### ColSpec(dtype: pl.DataType | type[pl.DataType], col_name: str | None=None, seed_name: str | None=None, nullable: bool=False, bounds: Bound[Any] | tuple[Any, Any] | list[Any] | None=None, tags: str | Sequence[str] | None=(), unique: bool=False, null_probability: float=_DEFAULT_NULL_PROBABILITY, string_length: Bound[int] | tuple[int, int] | list[int] | None=None, format: str | None=None, pattern: str | None=None, distribution: str | None=None, distribution_params: dict[str, float] | None=None, choices: Sequence[Any] | dict[Any, float] | None=None, weights: Sequence[float] | None=None, rules: Sequence[ColRule]=(), validators: Check | pl.Expr | Pred | Sequence[Check | pl.Expr | Pred] | None=())
+### ColSpec(dtype: pl.DataType | type[pl.DataType], col_name: str | None=None, seed_name: str | None=None, nullable: bool=False, bounds: Bound[Any] | tuple[Any, Any] | list[Any] | None=None, tags: str | Sequence[str] | None=(), unique: bool=False, null_probability: float=_DEFAULT_NULL_PROBABILITY, string_length: Bound[int] | tuple[int, int] | list[int] | None=None, list_length: Bound[int] | tuple[int, int] | list[int] | None=None, format: str | None=None, pattern: str | None=None, distribution: str | None=None, distribution_params: dict[str, float] | None=None, choices: Sequence[Any] | dict[Any, float] | None=None, weights: Sequence[float] | None=None, rules: Sequence[ColRule]=(), validators: Check | pl.Expr | Pred | Sequence[Check | pl.Expr | Pred] | None=())
 
 One column's declaration: its type, and every claim made about its values.
 
@@ -3308,6 +3349,14 @@ null_probability : float, optional
     asking for nulls rather than as a leftover.
 string_length : Bound | tuple[int, int] | list[int] | None, optional
     The inclusive range of string lengths, where that applies.
+list_length : Bound | tuple[int, int] | list[int] | None, optional
+    For a `List` column, the inclusive range of elements a value holds;
+    generation defaults to 0..5. On a `List` or `Array` column every
+    other field that describes a value -- `bounds`, `choices`, `weights`,
+    `format`, `pattern`, `string_length`, `distribution` -- describes
+    each *element*; `nullable` and `null_probability` describe the list
+    itself, and generation never puts a null inside one. An `Array`
+    takes its length from the dtype and refuses `list_length`.
 format : str | None, optional
     The shape a `String` column's values take, by name: `"uuid4"`,
     `"email"`, `"ipv4"`, `"ipv6"`, `"mac"`, `"hostname"`,
@@ -4298,6 +4347,7 @@ through `report.rows(finding)`; structural ones describe the frame's shape.
 | `choices` | row-level | a value is outside `choices` or the `Enum` categories |
 | `bounds` | row-level | a value is outside `bounds`; `details` carry the extremes found |
 | `string_length` | row-level | a string or binary value's length is outside `string_length` |
+| `list_length` | row-level | a list holds a number of elements outside `list_length` |
 | `format` | row-level | a string value does not have the declared `format`; `details` name the format |
 | `pattern` | row-level | a string value does not match the declared `pattern`; `details` carry it |
 | `rule` | row-level | a row matched a `ColRule` but holds a value outside its choices |
@@ -4324,7 +4374,7 @@ otherwise. See [Schema and data drift](https://maxwellb13.github.io/polspec/how-
 | `domain_widened` | `diff` | compatible | bounds, choices, format or string length accept more than before |
 | `domain_narrowed` | `diff` | breaking | they accept less |
 | `domain_changed` | `diff` | breaking | neither is inside the other |
-| `bounds_exceeded` | `drift` | breaking | values escape `bounds` or `string_length`; `details` say which and by how much |
+| `bounds_exceeded` | `drift` | breaking | values escape `bounds`, `string_length` or `list_length`; `details` say which and by how much |
 | `new_values` | `drift` | breaking | values outside `choices`, an `Enum` or a finite format |
 | `format_violated` | `drift` | breaking | values that do not match the declared `format` |
 | `null_rate_moved` | `drift` | compatible | the null rate sits further from `null_probability` than the tolerance |
@@ -4711,10 +4761,13 @@ them. See [String formats](https://maxwellb13.github.io/polspec/how-to/formats/)
 
 ## Smaller sharp edges
 
-- **Unsupported dtypes are accepted at declaration.** `ColSpec(pl.List(...))`
-  constructs and validates; only `generate()` objects. The three are `List`,
-  `Struct` and `Array`. See
+- **Unsupported dtypes are accepted at declaration.** `ColSpec(pl.Struct(...))`
+  constructs and validates; only `generate()` objects. That is `Struct`,
+  and a `List` or `Array` whose elements are a `List` or `Struct`. See
   [Dtype coverage](https://maxwellb13.github.io/polspec/explanation/roadmap/#dtype-coverage-is-not-complete-yet).
+- **A list's elements are never null.** Generation fills a `List` column's
+  cells with non-null elements, and no field can ask otherwise; validation
+  reports a null element as a `nullability` finding.
 - **A `Decimal` is drawn through 64 bits.** Generation fills a Decimal as
   its physical integer, so bounds needing more than eighteen significant
   digits are refused at `generate()`. Validation checks the full precision.
@@ -4979,24 +5032,28 @@ zone rides along and `generate()` hands back a column of the dtype you
 declared. A `Decimal` is the same idea: an integer and a scale, drawn as the
 integer and scaled back.
 
-What is left out is the composite and nested dtypes:
+A `List` or `Array` of any of those is generated too, its elements described
+by the same fields a scalar column takes
+([Nested columns](https://maxwellb13.github.io/polspec/how-to/columns/#nested-columns)). What is left out:
 
-- `List`
 - `Struct`
-- `Array`
+- a `List` or `Array` whose elements are themselves a `List` or `Struct`
 
-A `ColSpec` for any of these constructs without complaint and can be
-*validated* against — `FrameSpec.validate()` doesn't need to know how to
+A `ColSpec` for these constructs without complaint and can be *validated*
+against by dtype — `FrameSpec.validate()` doesn't need to know how to
 generate a dtype to check one. `generate()` is where it stops, with a
-`SpecError` naming the dtype. Expanding into nested types is the most
-requested kind of gap to close next; if you need one of these today, generate
-the column separately and attach it with `with_columns` after `generate()`
-returns.
+`SpecError` naming the dtype. If you need one today, generate the column
+separately and attach it with `with_columns` after `generate()` returns.
 
-`Struct` is the interesting one of the three. A struct column is a set of
-named, typed fields, which is what a `FrameSpec` already is — so the question
-is less "how is this generated" than whether it reuses that machinery or gets
-its own, and getting that wrong would be expensive to undo.
+`Struct` is the open question. A struct column is a set of named, typed
+fields, which is what a `FrameSpec` already is — so the question is less
+"how is this generated" than whether a struct's fields *are* a nested
+`TableSpec` (one declaration, reused by generation, validation, drift and
+the file format) or a second, smaller thing. The first is the polspec
+answer, and it needs the facade, the serialization format and the
+per-column registries to become recursive, which is why it is a release of
+its own rather than a field. A list of lists waits on the same decision:
+once a value can be described by a nested declaration, so can an element.
 
 ## Generation is getting more guardrails, not fewer
 
@@ -5146,6 +5203,26 @@ seed produces; see
 
 ### Added
 
+- **`pl.List` and `pl.Array` columns generate, validate, and round-trip.**
+  A nested column is described by the same fields as a scalar one, read as
+  claims about each element: `ColSpec(pl.List(pl.Int64), bounds=(0, 10),
+  list_length=(1, 5))`. `bounds`, `choices`, `weights`, `format`, `pattern`,
+  `string_length` and `distribution` describe the values inside the list;
+  the new `list_length` describes the list (an `Array` takes its length
+  from the dtype); `nullable` describes the cell, and an element is never
+  null. Generation draws the lengths and the elements as two columns of the
+  inner dtype and wraps one by the other, so an element is made by the same
+  code that makes a scalar of its dtype -- every generatable dtype, `Enum`,
+  `Decimal` and a `format` included -- and a `List` column keeps its data
+  across a rename through `seed_name`. Validation runs every element claim
+  inside the list and fails a list where any element does; `list_length`
+  is a new finding code and a null element a `nullability` one. `diff`
+  compares `list_length` like `string_length`; `drift` measures a List
+  column as its elements and its lengths; `from_dataframe` declares one by
+  its elements; `{List: <dtype>}` and `{Array: {inner: <dtype>, width: N}}`
+  are the spec-file forms. `unique` and `rules` are refused on a nested
+  column, and a `List` of a `List` or `Struct` declares and validates by
+  dtype only. What generation cannot fill is now `Struct` and those.
 - **`pl.Decimal` columns generate.** A `Decimal(precision, scale)` is an
   integer and a scale, so it is drawn as the integer through the engine's
   64-bit kind and scaled back to the declared type -- with `bounds`, a

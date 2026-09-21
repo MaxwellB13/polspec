@@ -90,10 +90,13 @@ them. See [String formats](../how-to/formats.md).
 
 ## Smaller sharp edges
 
-- **Unsupported dtypes are accepted at declaration.** `ColSpec(pl.List(...))`
-  constructs and validates; only `generate()` objects. The three are `List`,
-  `Struct` and `Array`. See
+- **Unsupported dtypes are accepted at declaration.** `ColSpec(pl.Struct(...))`
+  constructs and validates; only `generate()` objects. That is `Struct`,
+  and a `List` or `Array` whose elements are a `List` or `Struct`. See
   [Dtype coverage](roadmap.md#dtype-coverage-is-not-complete-yet).
+- **A list's elements are never null.** Generation fills a `List` column's
+  cells with non-null elements, and no field can ask otherwise; validation
+  reports a null element as a `nullability` finding.
 - **A `Decimal` is drawn through 64 bits.** Generation fills a Decimal as
   its physical integer, so bounds needing more than eighteen significant
   digits are refused at `generate()`. Validation checks the full precision.

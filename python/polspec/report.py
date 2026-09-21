@@ -61,6 +61,8 @@ def _describe_domain(cs) -> str:
         return f"format `{cs.format}`"
     if cs.pattern is not None:
         return f"pattern `{cs.pattern}`"
+    if cs.list_length is not None:
+        return f"{cs.list_length.min}..{cs.list_length.max} elements"
     return _describe_choices(cs.choices)
 
 

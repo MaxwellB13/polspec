@@ -79,8 +79,9 @@ class Domain:
         """The domain a `ColSpec` declares."""
         values: tuple[Any, ...] | None = None
         fmt: Format | None = None
-        if isinstance(spec.dtype, pl.Enum):
-            categories = spec.dtype.categories.to_list()
+        dtype = spec.value_dtype
+        if isinstance(dtype, pl.Enum):
+            categories = dtype.categories.to_list()
             values = (
                 tuple(c for c in spec.choices if c in categories)
                 if spec.choices is not None
@@ -96,7 +97,7 @@ class Domain:
         bounds = spec.bounds if spec.bounds is not None else None
         if bounds is not None and bounds.is_open_both:
             bounds = None
-        return cls(dtype=spec.dtype, values=values, bounds=bounds, format=fmt)
+        return cls(dtype=dtype, values=values, bounds=bounds, format=fmt)
 
     @property
     def is_open(self) -> bool:

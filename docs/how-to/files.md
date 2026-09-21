@@ -48,7 +48,7 @@ as its default is the worst outcome -- pass `strict=False` to
 | | Round-trips |
 |:--|:--:|
 | dtypes, including parametrized `Enum` / `Datetime` / `Duration` / named `Categorical` | yes |
-| `nullable`, `null_probability`, `bounds`, `string_length`, `format`, `pattern`, `seed_name`, `unique`, `tags` | yes |
+| `nullable`, `null_probability`, `bounds`, `string_length`, `list_length`, `format`, `pattern`, `seed_name`, `unique`, `tags` | yes |
 | `choices`, `weights`, `distribution`, `distribution_params` | yes |
 | `rules` (`ColRule`) | yes |
 | `__unique_together__` | yes |

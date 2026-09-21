@@ -16,6 +16,7 @@ _DEFAULT_WIDE_INT_BOUND = 1_000_000
 _I64_MAX = 2**63 - 1
 _DEFAULT_FLOAT_BOUND = 1_000_000.0
 _DEFAULT_STRING_LEN = (5, 15)
+_DEFAULT_LIST_LEN = (0, 5)
 _DEFAULT_NULL_PROBABILITY = 0.1
 
 # Safety cap on method="cartesian": the cross-joined coverage set grows as

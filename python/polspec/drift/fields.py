@@ -400,43 +400,49 @@ def _length_relation(old: Bound | None, new: Bound | None) -> Relation:
     return "widened" if widened else "narrowed"
 
 
-def _compare_string_length(pair: Pair) -> list[DriftFinding]:
-    if pair.mode == "diff":
-        old = pair.declared.string_length
-        new = pair.new.string_length
-        relation = _length_relation(old, new)
-        if relation not in _RELATION_FINDINGS:
+def _compare_length(field: str, observed_attr: str) -> Comparator:
+    """A comparator for a closed length range -- `string_length` over each
+    value's characters, `list_length` over each list's elements."""
+
+    def compare(pair: Pair) -> list[DriftFinding]:
+        if pair.mode == "diff":
+            old = getattr(pair.declared, field)
+            new = getattr(pair.new, field)
+            relation = _length_relation(old, new)
+            if relation not in _RELATION_FINDINGS:
+                return []
+            code, severity, consequence = _RELATION_FINDINGS[relation]
+            return [
+                pair.finding(
+                    code,
+                    severity,
+                    f"{field} {relation} from {old or 'unconstrained'} to "
+                    f"{new or 'unconstrained'}; {consequence}",
+                    suffix=field,
+                    field=field,
+                    old=[old.min, old.max] if old else None,
+                    new=[new.min, new.max] if new else None,
+                )
+            ]
+        declared = getattr(pair.declared, field)
+        found = getattr(pair.observed, observed_attr)
+        if declared is None or found is None:
             return []
-        code, severity, consequence = _RELATION_FINDINGS[relation]
+        facts = _exceeded(field, declared, found, pl.Int64())
+        if not facts:
+            return []
         return [
             pair.finding(
-                code,
-                severity,
-                f"string_length {relation} from {old or 'unconstrained'} to "
-                f"{new or 'unconstrained'}; {consequence}",
-                suffix="string_length",
-                field="string_length",
-                old=[old.min, old.max] if old else None,
-                new=[new.min, new.max] if new else None,
+                "bounds_exceeded",
+                "breaking",
+                f"lengths escape {field} {declared}: {_describe_excess(facts)}. "
+                "Widen the length, or fix the source",
+                suffix=field,
+                **facts,
             )
         ]
-    declared = pair.declared.string_length
-    found = pair.observed.length_extent
-    if declared is None or found is None:
-        return []
-    facts = _exceeded("string_length", declared, found, pl.Int64())
-    if not facts:
-        return []
-    return [
-        pair.finding(
-            "bounds_exceeded",
-            "breaking",
-            f"lengths escape string_length {declared}: {_describe_excess(facts)}. "
-            "Widen the length, or fix the source",
-            suffix="string_length",
-            **facts,
-        )
-    ]
+
+    return compare
 
 
 # ---------------------------------------------------------------------------
@@ -572,7 +578,8 @@ FIELD_COMPARATORS: dict[str, Comparator] = {
     "bounds": _compare_domain,
     "choices": _compare_domain,
     "format": _compare_domain,
-    "string_length": _compare_string_length,
+    "string_length": _compare_length("string_length", "length_extent"),
+    "list_length": _compare_length("list_length", "list_length_extent"),
     # A pattern is not part of `Domain`: whether one regex contains another
     # is not a decision worth guessing, so a change is reported as a change.
     "pattern": _compare_field("pattern"),

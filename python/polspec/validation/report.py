@@ -34,6 +34,7 @@ FindingCode = Literal[
     "choices",
     "bounds",
     "string_length",
+    "list_length",
     "format",
     "pattern",
     "rule",

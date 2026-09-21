@@ -18,7 +18,11 @@ from polspec.distributions import (
     normalize_distribution,
     validate_distribution_params,
 )
-from polspec.dtypes import _bound_endpoint_to_physical, _dtype_value_limits
+from polspec.dtypes import (
+    _bound_endpoint_to_physical,
+    _dtype_value_limits,
+    element_dtype,
+)
 from polspec.errors import SpecError
 from polspec.expr import Pred
 from polspec.formats import lookup as _lookup_format
@@ -44,7 +48,19 @@ def _column_kind(dtype: pl.DataType) -> str:
         return "enum"
     if _is_categorical_dtype(dtype):
         return "categorical"
+    if isinstance(dtype, (pl.List, pl.Array)) and not isinstance(
+        dtype.inner, (pl.List, pl.Array, pl.Struct)
+    ):
+        return "list"
     raise SpecError(f"polspec cannot generate data for dtype {dtype!r}")
+
+
+def _value_dtype(dtype: pl.DataType) -> pl.DataType:
+    """The dtype a column's *values* have: the element's, for a `List` or
+    `Array`; the column's own otherwise."""
+    if isinstance(dtype, (pl.List, pl.Array)):
+        return element_dtype(dtype)
+    return dtype
 
 
 def _is_categorical_dtype(dtype: pl.DataType) -> bool:
@@ -116,6 +132,14 @@ class ColSpec:
         asking for nulls rather than as a leftover.
     string_length : Bound | tuple[int, int] | list[int] | None, optional
         The inclusive range of string lengths, where that applies.
+    list_length : Bound | tuple[int, int] | list[int] | None, optional
+        For a `List` column, the inclusive range of elements a value holds;
+        generation defaults to 0..5. On a `List` or `Array` column every
+        other field that describes a value -- `bounds`, `choices`, `weights`,
+        `format`, `pattern`, `string_length`, `distribution` -- describes
+        each *element*; `nullable` and `null_probability` describe the list
+        itself, and generation never puts a null inside one. An `Array`
+        takes its length from the dtype and refuses `list_length`.
     format : str | None, optional
         The shape a `String` column's values take, by name: `"uuid4"`,
         `"email"`, `"ipv4"`, `"ipv6"`, `"mac"`, `"hostname"`,
@@ -177,6 +201,7 @@ class ColSpec:
     unique: bool = False
     null_probability: float = _DEFAULT_NULL_PROBABILITY
     string_length: Bound[int] | None = None
+    list_length: Bound[int] | None = None
     format: str | None = None
     pattern: str | None = None
     distribution: str | None = None
@@ -199,6 +224,7 @@ class ColSpec:
             unique: bool = False,
             null_probability: float = _DEFAULT_NULL_PROBABILITY,
             string_length: Bound[int] | tuple[int, int] | list[int] | None = None,
+            list_length: Bound[int] | tuple[int, int] | list[int] | None = None,
             format: str | None = None,
             pattern: str | None = None,
             distribution: str | None = None,
@@ -220,6 +246,7 @@ class ColSpec:
         self._validate_col_name()
         self._validate_seed_name()
         self._normalize_dtype()
+        self._validate_nesting()
         self._normalize_ranges()
         self._normalize_tags()
         object.__setattr__(self, "rules", tuple(self.rules))
@@ -235,6 +262,56 @@ class ColSpec:
         self._validate_weights()
         self._validate_choices_against_domain()
         self._validate_unique_is_generatable()
+        self._validate_list_fields()
+
+    @property
+    def value_dtype(self) -> pl.DataType:
+        """The dtype each *value* has: the element's for a `List` or `Array`
+        column, the column's own otherwise. Every field that describes a
+        value is checked against this."""
+        return _value_dtype(self.dtype)
+
+    def _validate_nesting(self) -> None:
+        """A `List` or `Array` needs an element dtype. One of a scalar is
+        generated and its elements described by the value fields; one of a
+        List or Struct declares and validates by dtype only, like a Struct."""
+        if not isinstance(self.dtype, (pl.List, pl.Array)):
+            return
+        inner = self.dtype.inner
+        if inner == pl.Null:
+            raise SpecError(
+                f"ColSpec cannot describe {self.dtype!r}: give the list an element "
+                "dtype, e.g. pl.List(pl.Int64)."
+            )
+
+    def _validate_list_fields(self) -> None:
+        """What a `List` column takes, and what only a scalar one can."""
+        if not isinstance(self.dtype, (pl.List, pl.Array)):
+            if self.list_length is not None:
+                raise SpecError(
+                    "ColSpec.list_length is only supported for pl.List, got "
+                    f"{self.dtype!r}"
+                )
+            return
+        if isinstance(self.dtype, pl.Array) and self.list_length is not None:
+            raise SpecError(
+                f"ColSpec.list_length has no meaning on {self.dtype!r}: an Array's "
+                "length is part of its dtype. Drop it, or declare a pl.List."
+            )
+        if self.list_length is not None and self.list_length.closed()[0] < 0:
+            raise SpecError(
+                f"ColSpec.list_length must be non-negative, got {self.list_length}"
+            )
+        if self.unique:
+            raise SpecError(
+                f"ColSpec cannot be unique=True on {self.dtype!r}: a list is not "
+                "drawn without replacement. Declare uniqueness on a scalar column."
+            )
+        if self.rules:
+            raise SpecError(
+                f"ColSpec cannot carry rules on {self.dtype!r}: a rule's choices "
+                "are values, and a list value would be a list of lists."
+            )
 
     def _validate_unique_is_generatable(self) -> None:
         """Rejects what `unique=True` cannot be combined with.
@@ -287,14 +364,28 @@ class ColSpec:
         if isinstance(raw, type) and issubclass(raw, pl.DataType):
             with suppress(TypeError):
                 object.__setattr__(self, "dtype", raw())
+        # `pl.List(pl.Categorical)` keeps its element as the class; the frame
+        # generated from it holds an instance, and polars compares the two as
+        # different dtypes. Instantiate the element too.
+        nested: Any = self.dtype
+        if isinstance(nested, (pl.List, pl.Array)) and isinstance(nested.inner, type):
+            with suppress(TypeError):
+                inner = nested.inner()
+                rebuilt = (
+                    pl.List(inner)
+                    if isinstance(nested, pl.List)
+                    else pl.Array(inner, nested.size)
+                )
+                object.__setattr__(self, "dtype", rebuilt)
 
     def _normalize_ranges(self) -> None:
         """Coerces `bounds` and `string_length` to `Bound`, rejecting open lengths."""
         raw: Any = self.bounds
-        if raw is not None and isinstance(self.dtype, pl.Decimal):
-            raw = self._decimal_endpoints(raw, self.dtype)
+        if raw is not None and isinstance(self.value_dtype, pl.Decimal):
+            raw = self._decimal_endpoints(raw, self.value_dtype)
         object.__setattr__(self, "bounds", Bound._coerce(raw))
         object.__setattr__(self, "string_length", Bound._coerce(self.string_length))
+        object.__setattr__(self, "list_length", Bound._coerce(self.list_length))
         # One internal representation for "unconstrained", so every downstream
         # `if spec.bounds is not None` guard keeps meaning what it says.
         if self.bounds is not None and self.bounds.is_open_both:
@@ -303,6 +394,12 @@ class ColSpec:
             raise SpecError(
                 "ColSpec.string_length requires both endpoints, got "
                 f"{self.string_length!r}. An open end (None) is supported on "
+                "ColSpec.bounds only."
+            )
+        if self.list_length is not None and self.list_length.is_open:
+            raise SpecError(
+                "ColSpec.list_length requires both endpoints, got "
+                f"{self.list_length!r}. An open end (None) is supported on "
                 "ColSpec.bounds only."
             )
 
@@ -395,20 +492,20 @@ class ColSpec:
         if self.choices is not None:
             if not self.choices:
                 raise SpecError("ColSpec.choices must not be empty")
-            _reject_duplicate_choices(self.choices, "ColSpec.choices", self.dtype)
+            _reject_duplicate_choices(self.choices, "ColSpec.choices", self.value_dtype)
 
     def _normalize_distribution(self) -> None:
         """Canonicalizes the distribution name and floats its parameters."""
         if self.distribution is not None:
             if not (
-                self.dtype.is_integer()
-                or self.dtype.is_float()
-                or self.dtype.is_decimal()
-                or self.dtype.is_temporal()
+                self.value_dtype.is_integer()
+                or self.value_dtype.is_float()
+                or self.value_dtype.is_decimal()
+                or self.value_dtype.is_temporal()
             ):
                 raise SpecError(
                     f"ColSpec.distribution is only supported for numeric or temporal "
-                    f"dtypes, got {self.dtype!r}"
+                    f"dtypes, got {self.value_dtype!r}"
                 )
             name = normalize_distribution(self.distribution)
             object.__setattr__(self, "distribution", name)
@@ -421,7 +518,7 @@ class ColSpec:
                 validate_distribution_params(name, params)
 
         # A Boolean column takes no distribution, but does accept `p`.
-        if self.dtype == pl.Boolean and self.distribution_params is not None:
+        if self.value_dtype == pl.Boolean and self.distribution_params is not None:
             params = {str(k): float(v) for k, v in self.distribution_params.items()}
             object.__setattr__(self, "distribution_params", params)
             if "p" in params and not 0.0 <= params["p"] <= 1.0:
@@ -476,10 +573,10 @@ class ColSpec:
             return
         fmt = _lookup_format(self.format)  # raises, naming the nearest format
         object.__setattr__(self, "format", fmt.name)
-        if self.dtype not in (pl.String, pl.Utf8):
+        if self.value_dtype not in (pl.String, pl.Utf8):
             raise SpecError(
                 f"ColSpec.format is only supported for pl.String, got "
-                f"{self.dtype!r}. A format describes the text a value is "
+                f"{self.value_dtype!r}. A format describes the text a value is "
                 "written as, which no other dtype holds."
             )
         if self.choices is not None:
@@ -509,10 +606,10 @@ class ColSpec:
             raise SpecError(
                 f"ColSpec.pattern must be a non-empty string, got {self.pattern!r}"
             )
-        if self.dtype not in (pl.String, pl.Utf8):
+        if self.value_dtype not in (pl.String, pl.Utf8):
             raise SpecError(
                 f"ColSpec.pattern is only supported for pl.String, got "
-                f"{self.dtype!r}. A pattern describes the text a value is "
+                f"{self.value_dtype!r}. A pattern describes the text a value is "
                 "written as, which no other dtype holds."
             )
         if self.format is not None:
@@ -531,14 +628,14 @@ class ColSpec:
 
     def _validate_bounds_dtype_support(self) -> None:
         if self.bounds is not None and not (
-            self.dtype.is_integer()
-            or self.dtype.is_float()
-            or self.dtype.is_decimal()
-            or self.dtype.is_temporal()
+            self.value_dtype.is_integer()
+            or self.value_dtype.is_float()
+            or self.value_dtype.is_decimal()
+            or self.value_dtype.is_temporal()
         ):
             raise SpecError(
                 f"ColSpec.bounds is only supported for numeric or temporal "
-                f"dtypes, got {self.dtype!r}"
+                f"dtypes, got {self.value_dtype!r}"
             )
 
     def _validate_weights(self) -> None:
@@ -551,12 +648,12 @@ class ColSpec:
                 raise SpecError(
                     f"Length of weights ({len(self.weights)}) must match length of choices ({len(self.choices)})"
                 )
-        elif isinstance(self.dtype, pl.Enum):
-            if len(self.weights) != len(self.dtype.categories):
+        elif isinstance(self.value_dtype, pl.Enum):
+            if len(self.weights) != len(self.value_dtype.categories):
                 raise SpecError(
-                    f"Length of weights ({len(self.weights)}) must match number of Enum categories ({len(self.dtype.categories)})"
+                    f"Length of weights ({len(self.weights)}) must match number of Enum categories ({len(self.value_dtype.categories)})"
                 )
-        elif self.dtype == pl.Boolean:
+        elif self.value_dtype == pl.Boolean:
             if len(self.weights) != 2:
                 raise SpecError(
                     "Boolean weights must be a 2-element sequence [p_false, p_true]"
@@ -564,7 +661,7 @@ class ColSpec:
         else:
             raise SpecError(
                 "ColSpec.weights requires 'choices', an Enum dtype, or a Boolean "
-                f"dtype to define the domain weights apply to; got dtype={self.dtype!r} "
+                f"dtype to define the domain weights apply to; got dtype={self.value_dtype!r} "
                 "with no choices"
             )
 
@@ -580,8 +677,8 @@ class ColSpec:
         the column could never hold is a contradiction worth catching at
         declaration time rather than at generation.
         """
-        if isinstance(self.dtype, pl.Enum):
-            categories = set(self.dtype.categories.to_list())
+        if isinstance(self.value_dtype, pl.Enum):
+            categories = set(self.value_dtype.categories.to_list())
             self._reject_choices(
                 lambda c: c not in categories,
                 f"are not among this column's Enum categories {sorted(categories)}",
@@ -621,14 +718,14 @@ class ColSpec:
         """
         if self.bounds is None:
             return
-        limits = _dtype_value_limits(self.dtype)
+        limits = _dtype_value_limits(self.value_dtype)
         if limits is None:
             return
         lo_limit, hi_limit = limits
         for label, endpoint in (("min", self.bounds.min), ("max", self.bounds.max)):
             if endpoint is None:
                 continue  # unconstrained on this side; nothing to fit
-            physical = _bound_endpoint_to_physical(endpoint, self.dtype)
+            physical = _bound_endpoint_to_physical(endpoint, self.value_dtype)
             if not math.isfinite(physical):
                 raise SpecError(
                     f"ColSpec.bounds {label} must be a finite value, got {endpoint!r}"
@@ -636,7 +733,7 @@ class ColSpec:
             if not lo_limit <= physical <= hi_limit:
                 raise SpecError(
                     f"ColSpec.bounds {label} ({endpoint!r}) is outside the range "
-                    f"{self.dtype!r} can represent [{lo_limit}, {hi_limit}]"
+                    f"{self.value_dtype!r} can represent [{lo_limit}, {hi_limit}]"
                 )
 
     def _normalize_validators(self) -> None:

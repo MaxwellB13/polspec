@@ -14,6 +14,7 @@ ColSpec(
     unique=False,
     null_probability=0.1,
     string_length=None,
+    list_length=None,
     format=None,
     pattern=None,
     distribution=None,
@@ -40,9 +41,11 @@ for you, so `pl.Int64` and `pl.Int64()` mean the same thing.
 | Bytes | `Binary` |
 | Temporal | `Date` `Time` `Datetime` `Duration` |
 | Categorical | `Enum` `Categorical` |
+| Nested | `List(inner)` `Array(inner, width)` of any dtype above — see [Nested columns](#nested-columns) |
 
-Anything else — `List`, `Struct` and `Array` — can be *validated* but not
-generated; `generate()` raises `SpecError` naming the dtype.
+Anything else — `Struct`, and a `List` whose elements are themselves a
+`List` or `Struct` — can be *validated* but not generated; `generate()`
+raises `SpecError` naming the dtype.
 
 ## Nullability
 
@@ -194,6 +197,43 @@ ColSpec(pl.String, choices=[1, "1"])
 ColSpec(pl.String, string_length=(8, 8))    # fixed width
 ColSpec(pl.Binary, string_length=(16, 64))
 ```
+
+## Nested columns
+
+A `List` or `Array` column is described by the same fields as a scalar one,
+read as claims about **each element**: `bounds`, `choices`, `weights`,
+`format`, `pattern`, `string_length` and `distribution` all apply to the
+values inside the list. One field describes the list itself:
+
+```python
+ColSpec(pl.List(pl.Int64), bounds=(0, 10), list_length=(1, 5))    # 1 to 5 ints, each 0..10
+ColSpec(pl.List(pl.String), format="email")                       # 0 to 5 addresses
+ColSpec(pl.List(pl.Enum(["a", "b", "c"])), choices=["a", "b"])    # from a subset of the Enum
+ColSpec(pl.Array(pl.Float64, 3), bounds=(0.0, 1.0))               # exactly three, from the dtype
+```
+
+`list_length` is the inclusive range of elements a value holds, both ends
+required; without it generation makes 0 to 5. An `Array` takes its length
+from the dtype and refuses `list_length`.
+
+`nullable` and `null_probability` describe the list: a null cell, never a
+null element. Generation never puts a null inside a list, and validation
+reports one under `nullability` like a null in a non-nullable column.
+
+Validation runs every element claim inside the list, and a list fails where
+*any* element does — the finding's samples and `rows()` are the offending
+lists. `list_length` gets its own finding code.
+
+Generation draws the lengths and the elements as two columns of the inner
+dtype and wraps one by the other, so an element is made by the same code
+that would make a scalar of its dtype, and a `List` column keeps its data
+across a rename through `seed_name` like any other.
+
+What a nested column cannot carry: `unique` (a list is not drawn without
+replacement) and `rules` (a rule's choices are values, and a list value
+would be a list of lists). `validators` and `__checks__` work as on any
+column — they are expressions. A `List` of a `List` or a `Struct` declares
+and validates by dtype only.
 
 ## String formats
 
