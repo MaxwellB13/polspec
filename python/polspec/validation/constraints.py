@@ -358,6 +358,11 @@ def _is_dtype_compatible(
         return actual.is_integer()
     if expected.is_float():
         return actual.is_float() or actual.is_integer()
+    if expected.is_decimal():
+        # A Decimal comes back from CSV and JSON as a float or an integer;
+        # another Decimal stands in whatever its precision, since the
+        # bounds are checked on the values either way.
+        return actual.is_decimal() or actual.is_float() or actual.is_integer()
     if expected.is_temporal():
         return actual.is_temporal()
     return actual == expected
@@ -422,6 +427,13 @@ def _column_constraints(
         if _is_textual(actual_dtype):
             in_domain = column.cast(pl.String).is_in(_as_strings(allowed, spec.dtype))
             sample_expr = column.cast(pl.String)
+        elif isinstance(spec.dtype, pl.Decimal):
+            # A Python list of Decimals reaches Polars at the widest precision,
+            # which it refuses to compare; a Series of the column's own type,
+            # imploded so Polars reads it as one set rather than row by row,
+            # is compared as values.
+            in_domain = column.is_in(_typed_values(allowed, spec.dtype).implode())
+            sample_expr = column
         else:
             in_domain = column.is_in(allowed)
             sample_expr = column

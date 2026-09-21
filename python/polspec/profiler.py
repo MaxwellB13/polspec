@@ -86,6 +86,11 @@ def _profile_column(
     if dtype.is_float():
         return spec(dtype=dtype, bounds=_extent(non_null, float, calculate_bounds))
 
+    if dtype.is_decimal():
+        return spec(
+            dtype=dtype, bounds=_extent(non_null, lambda v: v, calculate_bounds)
+        )
+
     if dtype.is_temporal():
         # Temporal bounds are recorded as the physical integer the dtype
         # stores, matching what the generation path expects back.

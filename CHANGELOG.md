@@ -10,6 +10,19 @@ seed produces; see
 
 ### Added
 
+- **`pl.Decimal` columns generate.** A `Decimal(precision, scale)` is an
+  integer and a scale, so it is drawn as the integer through the engine's
+  64-bit kind and scaled back to the declared type -- with `bounds`, a
+  `distribution`, `choices`, nullability and cartesian coverage like any
+  other numeric column, and a default range of the float default or the
+  widest the precision allows. Bounds are held exactly (`int`,
+  `decimal.Decimal`, or a string read exactly, which is how a spec file
+  writes one); an endpoint finer than the scale is refused rather than
+  rounded. Validation compares values whatever the frame holds them as
+  (a CSV hands a Decimal back as a float), drift measures the extent in
+  the column's own type, `from_dataframe` declares one with its extent,
+  and `{Decimal: {precision: P, scale: S}}` is its spec-file form. The
+  ungeneratable dtypes are now the three nested ones.
 - `ColSpec(seed_name=...)`: rename a column without changing the data it
   generates. Each column is seeded from the frame seed and its *name*, so a
   rename had always changed a column's values -- which matters when

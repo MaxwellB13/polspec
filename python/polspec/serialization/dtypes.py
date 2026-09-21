@@ -93,6 +93,8 @@ def dtype_to_data(dtype: pl.DataType) -> str | dict[str, Any]:
         return {"Datetime": info}
     if isinstance(dtype, pl.Duration):
         return {"Duration": {"time_unit": dtype.time_unit}}
+    if isinstance(dtype, pl.Decimal):
+        return {"Decimal": {"precision": dtype.precision, "scale": dtype.scale}}
     if _is_categorical_dtype(dtype):
         if isinstance(dtype, pl.Categorical) and dtype.categories.name():
             return {"Categorical": _categories_info(dtype.categories)}
@@ -113,6 +115,8 @@ def dtype_to_source(dtype: pl.DataType) -> str:
         return f"pl.Datetime({', '.join(parts)})"
     if isinstance(dtype, pl.Duration):
         return f"pl.Duration(time_unit={dtype.time_unit!r})"
+    if isinstance(dtype, pl.Decimal):
+        return f"pl.Decimal({dtype.precision}, {dtype.scale})"
     if _is_categorical_dtype(dtype):
         if isinstance(dtype, pl.Categorical) and dtype.categories.name():
             cats = dtype.categories
@@ -142,6 +146,19 @@ def _strip_registry_prefix(name: str) -> str:
 def _from_registry(name: str, categories: CatSpec | None) -> pl.DataType | None:
     """Resolves a name against a CatSpec, as an Enum or a Categorical."""
     return None if categories is None else categories.dtype_of(name)
+
+
+def _decimal_from_data(payload: Any, _: CatSpec | None) -> pl.DataType:
+    if (
+        not isinstance(payload, dict)
+        or not isinstance(payload.get("precision"), int)
+        or not isinstance(payload.get("scale"), int)
+    ):
+        raise SerializationError(
+            "A Decimal dtype is written as {Decimal: {precision: P, scale: S}}, "
+            f"got {payload!r}"
+        )
+    return pl.Decimal(payload["precision"], payload["scale"])
 
 
 def _enum_from_data(payload: Any, categories: CatSpec | None) -> pl.DataType:
@@ -193,6 +210,7 @@ _BUILDERS = {
     "Duration": lambda payload, _: pl.Duration(
         time_unit=payload.get("time_unit", "us")
     ),
+    "Decimal": _decimal_from_data,
 }
 
 

@@ -31,6 +31,7 @@ from polspec.serialization.fields import (
     fk_to_source,
     hierarchy_to_source,
     needs_datetime_import,
+    needs_decimal_import,
     tablespec_from_data,
     tablespec_to_data,
 )
@@ -241,6 +242,8 @@ def to_python(spec: TableSpec, source: str | Path) -> None:
     lines = [f'"""Declares the {spec.name} schema."""', "", "import polars as pl"]
     if needs_datetime_import(data):
         lines.append("import datetime")
+    if needs_decimal_import(spec):
+        lines.append("from decimal import Decimal")
     lines.append(f"from polspec import {', '.join(imports)}")
     lines.extend(["", "", f"class {spec.name}(FrameSpec):", "    __columns__ = {"])
     for name, cs in spec.columns.items():

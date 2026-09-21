@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import decimal
 import hashlib
 import random
 from typing import TYPE_CHECKING
@@ -15,6 +16,7 @@ from polspec.constants import (
     _DEFAULT_FLOAT_BOUND,
     _DEFAULT_STRING_LEN,
     _DEFAULT_WIDE_INT_BOUND,
+    _I64_MAX,
     _MAX_CARTESIAN_ROWS,
 )
 from polspec.dtypes import (
@@ -141,6 +143,16 @@ def _default_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
         return -_DEFAULT_WIDE_INT_BOUND, _DEFAULT_WIDE_INT_BOUND
     if kind == "float":
         return -_DEFAULT_FLOAT_BOUND, _DEFAULT_FLOAT_BOUND
+    if kind == "decimal":
+        # The float default, in physical units, unless the precision is
+        # narrower -- and never past what the engine's 64-bit draw can hold.
+        assert isinstance(spec.dtype, pl.Decimal)  # noqa: S101 - kind says so
+        widest = min(
+            10**spec.dtype.precision - 1,
+            int(_DEFAULT_FLOAT_BOUND) * 10**spec.dtype.scale,
+            _I64_MAX,
+        )
+        return -widest, widest
     if kind == "temporal":
         if spec.dtype == pl.Date:
             return 0, 36525
@@ -217,8 +229,12 @@ def _plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None
         )
         return plan, domain
 
-    if kind in ("int", "float", "temporal"):
+    if kind in ("int", "float", "temporal", "decimal"):
         engine_kind = _ENGINE_KINDS.get(spec.dtype, kind)
+        if kind == "decimal":
+            # A Decimal is filled as its physical integer and scaled back in
+            # `_finish`; the draw is 64-bit, whatever the declared precision.
+            engine_kind = "int64"
         if spec.dtype.is_temporal():
             # Temporal columns cross as their physical integer: Date is an
             # i32 day count, everything else an i64 in its own time unit.
@@ -229,6 +245,8 @@ def _plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None
             or spec.distribution == "uniform"
         ):
             options["min"], options["max"] = _resolve_numeric_bounds(spec)
+            if kind == "decimal":
+                _check_decimal_fits_the_draw(name, spec, options["min"], options["max"])
         elif spec.dtype.is_temporal():
             # A non-uniform distribution with no explicit bounds is left to
             # its own shape rather than squeezed into polspec's default
@@ -283,6 +301,30 @@ _ENGINE_NATIVE: frozenset = frozenset(
 )
 
 
+def _check_decimal_fits_the_draw(
+    name: str, spec: ColSpec, lo: float | int, hi: float | int
+) -> None:
+    if lo >= -_I64_MAX - 1 and hi <= _I64_MAX:
+        return
+    raise GenerationError(
+        f"Column {name!r}: bounds {spec.bounds} on {spec.dtype!r} need more "
+        "than 18 significant digits, which generation cannot draw. Validation "
+        "checks the full precision; narrow the bounds to generate."
+    )
+
+
+def _decimal_from_physical(raw: pl.Series, dtype: pl.Decimal) -> pl.Series:
+    """An integer column as the Decimal it is the physical form of.
+
+    Polars casts an integer to a Decimal *value*, not to its physical, so
+    the scale is applied as a division in the widest Decimal and the result
+    narrowed to the declared precision.
+    """
+    one = pl.lit(10**dtype.scale).cast(pl.Decimal(38, dtype.scale))
+    scaled = pl.select(pl.lit(raw).cast(pl.Decimal(38, 0)).truediv(one)).to_series()
+    return scaled.cast(dtype).alias(raw.name)
+
+
 def _finish(raw: pl.Series, spec: ColSpec, domain: pl.Series | None) -> pl.Series:
     """A raw engine column as the declared dtype: gathered from its domain,
     cast from its physical form, or as it came.
@@ -291,6 +333,8 @@ def _finish(raw: pl.Series, spec: ColSpec, domain: pl.Series | None) -> pl.Serie
         return domain.gather(raw).alias(raw.name)
     if spec.dtype in _ENGINE_NATIVE:
         return raw
+    if isinstance(spec.dtype, pl.Decimal):
+        return _decimal_from_physical(raw, spec.dtype)
     # Temporal from its physical integer; Binary from strings; a Categorical
     # cast to spec.dtype itself so a named pl.Categories() registry survives.
     return raw.cast(spec.dtype)
@@ -319,7 +363,7 @@ def _coverage_values(spec: ColSpec, rng: random.Random) -> list | None:
         values = list(spec.dtype.categories.to_list())
     elif kind == "bool":
         values = [True, False]
-    elif kind in ("int", "temporal"):
+    elif kind in ("int", "temporal", "decimal"):
         lo, hi = (int(v) for v in _resolve_numeric_bounds(spec))
         if lo < 0:
             values.append(rng.randint(lo, min(hi, -1)))
@@ -327,6 +371,10 @@ def _coverage_values(spec: ColSpec, rng: random.Random) -> list | None:
             values.append(0)
         if hi > 0:
             values.append(rng.randint(max(lo, 1), hi))
+        if isinstance(spec.dtype, pl.Decimal):
+            # Drawn in physical units; a coverage value is the Decimal itself.
+            scale = spec.dtype.scale
+            values = [decimal.Decimal(v).scaleb(-scale) for v in values]
     elif kind == "float":
         lo, hi = (float(v) for v in _resolve_numeric_bounds(spec))
         if lo < 0:

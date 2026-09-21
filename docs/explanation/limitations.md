@@ -91,10 +91,12 @@ them. See [String formats](../how-to/formats.md).
 ## Smaller sharp edges
 
 - **Unsupported dtypes are accepted at declaration.** `ColSpec(pl.List(...))`
-  constructs and validates; only `generate()` objects. The four are `List`,
-  `Struct`, `Array` and `Decimal` — `Decimal` is easy to miss, being the only
-  one that is not a nested type. See
+  constructs and validates; only `generate()` objects. The three are `List`,
+  `Struct` and `Array`. See
   [Dtype coverage](roadmap.md#dtype-coverage-is-not-complete-yet).
+- **A `Decimal` is drawn through 64 bits.** Generation fills a Decimal as
+  its physical integer, so bounds needing more than eighteen significant
+  digits are refused at `generate()`. Validation checks the full precision.
 - **`missing_cols="add"` can produce a frame that fails re-validation**, since
   columns are added after validation runs, including for non-nullable columns.
 - **Rules overwrite nulls**, so a nullable column with a rule ends up with
