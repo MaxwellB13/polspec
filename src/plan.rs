@@ -124,6 +124,7 @@ impl Limit {
 #[derive(Default)]
 pub struct PlanArgs<'a> {
     pub name: String,
+    pub seed_name: Option<String>,
     pub kind: &'a str,
     pub nullable: bool,
     pub null_probability: f64,
@@ -149,6 +150,10 @@ pub struct PlanArgs<'a> {
 pub struct ColumnPlan {
     #[pyo3(get)]
     pub name: String,
+    /// The name the column's seed is derived from, when it is not `name`:
+    /// a renamed column that must keep producing the data it did.
+    #[pyo3(get)]
+    pub seed_name: Option<String>,
     pub kind: Kind,
     #[pyo3(get)]
     pub nullable: bool,
@@ -183,10 +188,17 @@ pub const DEFAULT_STR_MIN_LEN: usize = 5;
 pub const DEFAULT_STR_MAX_LEN: usize = 15;
 
 impl ColumnPlan {
+    /// The name the column's seed is derived from: `seed_name` when the spec
+    /// gave one, else the column's own name.
+    pub fn seed_key(&self) -> &str {
+        self.seed_name.as_deref().unwrap_or(&self.name)
+    }
+
     /// Builds and validates a plan. Every error names the column.
     pub fn build(args: PlanArgs<'_>) -> Result<Self, String> {
         let PlanArgs {
             name,
+            seed_name,
             kind,
             nullable,
             null_probability,
@@ -306,6 +318,7 @@ impl ColumnPlan {
 
         Ok(ColumnPlan {
             name,
+            seed_name,
             kind,
             nullable,
             null_probability: if nullable { null_probability } else { 0.0 },
@@ -329,7 +342,7 @@ impl ColumnPlan {
     #[pyo3(signature = (
         name, kind, *, nullable=false, null_probability=0.0, min=None, max=None,
         n_categories=None, weights=None, str_min_len=None, str_max_len=None,
-        distribution=None, params=None, unique=false, template=None,
+        distribution=None, params=None, unique=false, template=None, seed_name=None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -347,9 +360,11 @@ impl ColumnPlan {
         params: Option<HashMap<String, f64>>,
         unique: bool,
         template: Option<Vec<RawPart>>,
+        seed_name: Option<String>,
     ) -> PyResult<Self> {
         ColumnPlan::build(PlanArgs {
             name,
+            seed_name,
             kind,
             nullable,
             null_probability,
@@ -416,6 +431,20 @@ mod tests {
             Kind::parse("Int64").is_none(),
             "kinds are exact and lowercase"
         );
+    }
+
+    #[test]
+    fn a_seed_name_rides_along_and_defaults_to_nothing() {
+        assert_eq!(plan("int64").unwrap().seed_name, None);
+        let renamed = ColumnPlan::build(PlanArgs {
+            name: "new".into(),
+            seed_name: Some("old".into()),
+            kind: "int64",
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(renamed.seed_name.as_deref(), Some("old"));
+        assert_eq!(renamed.seed_key(), "old");
     }
 
     #[test]

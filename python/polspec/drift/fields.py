@@ -599,6 +599,8 @@ FIELD_COMPARATORS: dict[str, Comparator] = {
     # A pattern is not part of `Domain`: whether one regex contains another
     # is not a decision worth guessing, so a change is reported as a change.
     "pattern": _compare_field("pattern"),
+    # Which name a column is seeded from cannot affect what validation accepts.
+    "seed_name": _compare_field("seed_name"),
     "null_probability": _compare_null_rate,
     "unique": _compare_unique,
     "rules": _compare_rules,

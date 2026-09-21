@@ -82,4 +82,4 @@ otherwise. See [Schema and data drift](../how-to/drift.md).
 | `cardinality_moved` | `drift` | compatible | declared values the data never holds |
 | `constraint_added` | `diff` | breaking | `unique`, a validator, rule, check, composite key, foreign key or hierarchy present only in the new spec |
 | `constraint_removed` | `diff` | compatible | the reverse |
-| `field_changed` | `diff` | compatible | `tags`, `weights`, `distribution`, `distribution_params`, `null_probability` or `pattern` differ |
+| `field_changed` | `diff` | compatible | `tags`, `weights`, `distribution`, `distribution_params`, `null_probability`, `pattern` or `seed_name` differ |

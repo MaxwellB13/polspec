@@ -440,6 +440,8 @@ A `ColSpec` describes one column. Only `dtype` is required.
 ```python
 ColSpec(
     dtype,
+    col_name=None,
+    seed_name=None,
     nullable=False,
     bounds=None,
     tags=(),
@@ -738,6 +740,11 @@ on a subclass removes the column it named, whatever `col_name` it carried.
 
 `to_yaml()` and `to_python()` write the real column name as the key, so a
 spec that came from a file never needs `col_name`.
+
+A third name, `seed_name`, is not about what the column is called but about
+what it *generates*: a renamed column declared with `seed_name="old"` keeps
+producing the data it did under the old name. See
+[Renaming a column without changing its data](https://maxwellb13.github.io/polspec/how-to/generating/#renaming-a-column-without-changing-its-data).
 
 ### `__columns__`: the name is an identifier but cannot be an attribute
 
@@ -1338,15 +1345,51 @@ cast to their declared dtypes in one Polars pass.
 ## Reproducibility
 
 A `seed` fixes the result across processes, machines and thread counts. Each
-column derives its own seed from its position, and each 65,536-row chunk from
-its index, so the same seed gives the same frame regardless of how many threads
-did the work.
+column derives its own seed from the frame seed and its *name*, and each
+65,536-row chunk from its index, so the same seed gives the same frame
+regardless of how many threads did the work, and adding or reordering columns
+never changes the values of the others.
 
 ```python
 Orders.generate(500, seed=7).equals(Orders.generate(500, seed=7))   # True
 ```
 
 Omit `seed` and generation is seeded from the clock.
+
+### Renaming a column without changing its data
+
+Because a column's seed comes from its name, renaming a column changes the
+values it produces -- which matters when generated frames are snapshots that
+other things are compared against. `seed_name` is the name the seed is
+derived from when it is not the column's own, so a renamed column keeps
+producing the data it did:
+
+```python
+class Before(FrameSpec):
+    id     = ColSpec(pl.Int64, unique=True)
+    status = ColSpec(pl.String, nullable=True)
+
+class After(FrameSpec):
+    id    = ColSpec(pl.Int64, unique=True)
+    state = ColSpec(pl.String, nullable=True, seed_name="status")   # renamed
+
+before = Before.generate(100, seed=1)
+after = After.generate(100, seed=1)
+after["state"].equals(before["status"])   # True
+```
+
+A rename is declared, never guessed: `TableSpec.rename()` does not set
+`seed_name`, and [`diff(renames=)`](https://maxwellb13.github.io/polspec/how-to/drift/) is told about the same rename
+on the validation side. Two columns of one spec cannot share a seed name, and
+one cannot borrow another column's name -- they would draw identical values,
+which is what a [rule](https://maxwellb13.github.io/polspec/how-to/constraints/) is for.
+
+That is all `seed_name` holds. The passes a frame goes through after its
+columns are filled -- rules, hierarchy, foreign keys, composite uniqueness --
+draw their seeds in declaration order, so inserting a column that carries a
+rule ahead of another still changes what the second one draws, and nothing is
+promised across polspec versions. See
+[Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/).
 
 ## Lazy output
 
@@ -2079,7 +2122,7 @@ as its default is the worst outcome -- pass `strict=False` to
 | | Round-trips |
 |:--|:--:|
 | dtypes, including parametrized `Enum` / `Datetime` / `Duration` / named `Categorical` | yes |
-| `nullable`, `null_probability`, `bounds`, `string_length`, `format`, `pattern`, `unique`, `tags` | yes |
+| `nullable`, `null_probability`, `bounds`, `string_length`, `format`, `pattern`, `seed_name`, `unique`, `tags` | yes |
 | `choices`, `weights`, `distribution`, `distribution_params` | yes |
 | `rules` (`ColRule`) | yes |
 | `__unique_together__` | yes |
@@ -3176,7 +3219,7 @@ What one column declares, and the pieces that make up a declaration.
 
 ## ColSpec
 
-### ColSpec(dtype: 'pl.DataType | type[pl.DataType]', col_name: 'str | None' = None, nullable: 'bool' = False, bounds: 'Bound | tuple[Any, Any] | list[Any] | None' = None, tags: 'str | Sequence[str]' = (), unique: 'bool' = False, null_probability: 'float' = 0.1, string_length: 'Bound | tuple[int, int] | list[int] | None' = None, format: 'str | None' = None, pattern: 'str | None' = None, distribution: 'str | None' = None, distribution_params: 'dict[str, float] | None' = None, choices: 'tuple | list | dict | None' = None, weights: 'tuple[float, ...] | list[float] | None' = None, rules: 'tuple[ColRule, ...]' = (), validators: 'Check | pl.Expr | Pred | Sequence[Check | pl.Expr | Pred] | None' = ()) -> None
+### ColSpec(dtype: 'pl.DataType | type[pl.DataType]', col_name: 'str | None' = None, seed_name: 'str | None' = None, nullable: 'bool' = False, bounds: 'Bound | tuple[Any, Any] | list[Any] | None' = None, tags: 'str | Sequence[str]' = (), unique: 'bool' = False, null_probability: 'float' = 0.1, string_length: 'Bound | tuple[int, int] | list[int] | None' = None, format: 'str | None' = None, pattern: 'str | None' = None, distribution: 'str | None' = None, distribution_params: 'dict[str, float] | None' = None, choices: 'tuple | list | dict | None' = None, weights: 'tuple[float, ...] | list[float] | None' = None, rules: 'tuple[ColRule, ...]' = (), validators: 'Check | pl.Expr | Pred | Sequence[Check | pl.Expr | Pred] | None' = ()) -> None
 
 One column's declaration: its type, and every claim made about its values.
 
@@ -3196,6 +3239,16 @@ col_name : str | None, optional
     (`"Unit Price"`). Everything else that refers to this column by name --
     `ColRule`, `unique_together`, tags lookups, `validate()` -- uses
     `col_name`, not the attribute name.
+seed_name : str | None, optional
+    The name the column's seed is derived from, when it is not the
+    column's own. Generation seeds each column from the frame seed and
+    the column *name*, so renaming a column changes the values it
+    produces; a column declared with `seed_name="old"` keeps producing
+    the data it did as `"old"`. That is all it does: a column inserted
+    ahead of one carrying rules, a foreign key or a hierarchy still
+    reshuffles it, and nothing is promised across polspec versions.
+    Two columns of one spec cannot share a seed name, nor may one name
+    another column: they would draw identical values.
 nullable : bool, optional
     Whether the column allows null values.
 bounds : Bound | tuple | list | None, optional
@@ -4248,7 +4301,7 @@ otherwise. See [Schema and data drift](https://maxwellb13.github.io/polspec/how-
 | `cardinality_moved` | `drift` | compatible | declared values the data never holds |
 | `constraint_added` | `diff` | breaking | `unique`, a validator, rule, check, composite key, foreign key or hierarchy present only in the new spec |
 | `constraint_removed` | `diff` | compatible | the reverse |
-| `field_changed` | `diff` | compatible | `tags`, `weights`, `distribution`, `distribution_params`, `null_probability` or `pattern` differ |
+| `field_changed` | `diff` | compatible | `tags`, `weights`, `distribution`, `distribution_params`, `null_probability`, `pattern` or `seed_name` differ |
 
 ---
 
@@ -4653,6 +4706,13 @@ them. See [String formats](https://maxwellb13.github.io/polspec/how-to/formats/)
   domain has to fit inside the column's own — a contradiction is refused at
   declaration — but within it, values come from the parent, so a declared
   `distribution` or `weights` on a foreign-keyed column is not what you get.
+- **`seed_name` survives a rename, not an insertion.** A column's own seed
+  comes from its name, and `seed_name` holds it across a rename. The passes
+  that run afterwards -- rules, hierarchy, foreign keys, composite
+  uniqueness -- draw their seeds in declaration order, so a rules column
+  inserted ahead of another still changes what the second one draws. And
+  nothing is promised across versions: see
+  [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/#yaml-format-and-generated-values-may-change).
 - **Case-insensitive registry lookup** means a column named `status` binds to a
   registry entry named `STATUS`; entries differing only in case are ambiguous.
 - **`to_mermaid` marks every `unique=True` column `PK`**, so several unique
@@ -5060,6 +5120,25 @@ seed produces; see
 [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/).
 
 ## [Unreleased]
+
+### Added
+
+- `ColSpec(seed_name=...)`: rename a column without changing the data it
+  generates. Each column is seeded from the frame seed and its *name*, so a
+  rename had always changed a column's values -- which matters when
+  generated frames are snapshots other things are compared against. A
+  column declared with `seed_name="old"` is seeded as `"old"` and keeps
+  producing what it did. Declared, not guessed: `rename()` does not set it,
+  and two columns of one spec cannot share one (they would draw identical
+  values). It holds across a rename and nothing else: the passes that run
+  after the columns are filled draw their seeds in declaration order, so an
+  inserted rules column still reshuffles the ones after it, and that
+  boundary is pinned and stated in *Known limitations*.
+
+### Documentation
+
+- *Generating data* said each column derives its seed "from its position".
+  It is from its name -- the reason `seed_name` is needed at all.
 
 ## [0.6.0] - 2026-09-14
 

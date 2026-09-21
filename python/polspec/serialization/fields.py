@@ -308,6 +308,7 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
     ),
     Field("format", since=3),
     Field("pattern", since=3),
+    Field("seed_name", since=3),
     Field("distribution"),
     Field(
         "distribution_params",

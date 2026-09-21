@@ -6,6 +6,8 @@ A `ColSpec` describes one column. Only `dtype` is required.
 ```python
 ColSpec(
     dtype,
+    col_name=None,
+    seed_name=None,
     nullable=False,
     bounds=None,
     tags=(),
@@ -304,6 +306,11 @@ on a subclass removes the column it named, whatever `col_name` it carried.
 
 `to_yaml()` and `to_python()` write the real column name as the key, so a
 spec that came from a file never needs `col_name`.
+
+A third name, `seed_name`, is not about what the column is called but about
+what it *generates*: a renamed column declared with `seed_name="old"` keeps
+producing the data it did under the old name. See
+[Renaming a column without changing its data](generating.md#renaming-a-column-without-changing-its-data).
 
 ### `__columns__`: the name is an identifier but cannot be an attribute
 

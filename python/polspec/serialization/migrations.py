@@ -20,8 +20,8 @@ Version history
 
 An *added optional key* is not a new version: a file without it reads as
 before, and one with it reads on any polspec that knows the key. `format:`
-(0.5.0) and `pattern:` (0.6.0) were added to version 3 on that rule; what
-bumps the version is a key that changes meaning or shape.
+(0.5.0), `pattern:` (0.6.0) and `seed_name:` (0.7.0) were added to version 3
+on that rule; what bumps the version is a key that changes meaning or shape.
 """
 
 from __future__ import annotations

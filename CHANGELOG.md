@@ -8,6 +8,25 @@ seed produces; see
 
 ## [Unreleased]
 
+### Added
+
+- `ColSpec(seed_name=...)`: rename a column without changing the data it
+  generates. Each column is seeded from the frame seed and its *name*, so a
+  rename had always changed a column's values -- which matters when
+  generated frames are snapshots other things are compared against. A
+  column declared with `seed_name="old"` is seeded as `"old"` and keeps
+  producing what it did. Declared, not guessed: `rename()` does not set it,
+  and two columns of one spec cannot share one (they would draw identical
+  values). It holds across a rename and nothing else: the passes that run
+  after the columns are filled draw their seeds in declaration order, so an
+  inserted rules column still reshuffles the ones after it, and that
+  boundary is pinned and stated in *Known limitations*.
+
+### Documentation
+
+- *Generating data* said each column derives its seed "from its position".
+  It is from its name -- the reason `seed_name` is needed at all.
+
 ## [0.6.0] - 2026-09-14
 
 The headline is drift: a report of what changed between two specs, or
