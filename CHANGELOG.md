@@ -10,6 +10,26 @@ seed produces; see
 
 ### Added
 
+- **`pl.List` and `pl.Array` columns generate, validate, and round-trip.**
+  A nested column is described by the same fields as a scalar one, read as
+  claims about each element: `ColSpec(pl.List(pl.Int64), bounds=(0, 10),
+  list_length=(1, 5))`. `bounds`, `choices`, `weights`, `format`, `pattern`,
+  `string_length` and `distribution` describe the values inside the list;
+  the new `list_length` describes the list (an `Array` takes its length
+  from the dtype); `nullable` describes the cell, and an element is never
+  null. Generation draws the lengths and the elements as two columns of the
+  inner dtype and wraps one by the other, so an element is made by the same
+  code that makes a scalar of its dtype -- every generatable dtype, `Enum`,
+  `Decimal` and a `format` included -- and a `List` column keeps its data
+  across a rename through `seed_name`. Validation runs every element claim
+  inside the list and fails a list where any element does; `list_length`
+  is a new finding code and a null element a `nullability` one. `diff`
+  compares `list_length` like `string_length`; `drift` measures a List
+  column as its elements and its lengths; `from_dataframe` declares one by
+  its elements; `{List: <dtype>}` and `{Array: {inner: <dtype>, width: N}}`
+  are the spec-file forms. `unique` and `rules` are refused on a nested
+  column, and a `List` of a `List` or `Struct` declares and validates by
+  dtype only. What generation cannot fill is now `Struct` and those.
 - **`pl.Decimal` columns generate.** A `Decimal(precision, scale)` is an
   integer and a scale, so it is drawn as the integer through the engine's
   64-bit kind and scaled back to the declared type -- with `bounds`, a

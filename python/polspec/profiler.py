@@ -6,6 +6,8 @@ that `FrameSpec.generate` could produce something like it again.
 
 from __future__ import annotations
 
+import dataclasses
+
 import polars as pl
 
 from polspec.bound import Bound
@@ -61,6 +63,33 @@ def _profile_column(
             weights=_empirical_weights(non_null, name, categories)
             if with_weights
             else None,
+        )
+
+    if isinstance(dtype, (pl.List, pl.Array)) and not isinstance(
+        dtype.inner, (pl.List, pl.Array, pl.Struct)
+    ):
+        # Described as its elements: profile the exploded values as a column
+        # of the inner dtype, then put the list's own nullability and length
+        # back on top.
+        elements = _profile_column(
+            non_null.explode(empty_as_null=False).drop_nulls(),
+            name,
+            total_rows=0,
+            with_weights=with_weights,
+            max_unique_enum=max_unique_enum,
+            calculate_bounds=calculate_bounds,
+        )
+        list_length = None
+        if isinstance(dtype, pl.List):
+            list_length = _extent(non_null.list.len(), int, calculate_bounds)
+        return dataclasses.replace(
+            elements,
+            dtype=pl.List(elements.dtype)
+            if isinstance(dtype, pl.List)
+            else pl.Array(elements.dtype, dtype.size),
+            nullable=nullable,
+            null_probability=null_probability,
+            list_length=list_length,
         )
 
     if dtype in (pl.String, pl.Utf8) or _is_categorical_dtype(dtype):

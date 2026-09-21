@@ -14,6 +14,7 @@ from polspec.bound import Bound
 from polspec.constants import (
     _CATEGORICAL_PHYSICAL_CAPACITY,
     _DEFAULT_FLOAT_BOUND,
+    _DEFAULT_LIST_LEN,
     _DEFAULT_STRING_LEN,
     _DEFAULT_WIDE_INT_BOUND,
     _I64_MAX,
@@ -193,14 +194,15 @@ def _domain(spec: ColSpec) -> pl.Series | None:
     on the Python side, so a choice keeps its type -- a `datetime`, a
     `bytes`, a `True` -- with no string round-trip.
     """
+    dtype = spec.value_dtype
     if spec.choices is not None:
-        return _typed_values(spec.choices, spec.dtype)
-    if isinstance(spec.dtype, pl.Enum):
-        return pl.Series(spec.dtype.categories, dtype=spec.dtype)
+        return _typed_values(spec.choices, dtype)
+    if isinstance(dtype, pl.Enum):
+        return pl.Series(dtype.categories, dtype=dtype)
     if spec.format is not None:
         fmt = _lookup_format(spec.format)
         if fmt.is_finite:
-            return _typed_values(fmt.values, spec.dtype)
+            return _typed_values(fmt.values, dtype)
     return None
 
 
@@ -403,16 +405,97 @@ def _generate_random(
         name: _resolve_bounded_categorical(spec, rng.randrange(2**63))
         for name, spec in columns.items()
     }
+    # `_column_kind` refuses what the engine cannot fill, so every column is
+    # classified before any is generated.
+    scalars = {n_: s for n_, s in columns.items() if _column_kind(s.dtype) != "list"}
     plans: list[ColumnPlan] = []
     domains: dict[str, pl.Series | None] = {}
-    for name, spec in columns.items():
+    for name, spec in scalars.items():
         plan, domain = _plan_column(name, spec)
         plans.append(plan)
         domains[name] = domain
-    raw = _generate_dataframe(plans, n, seed)
-    return pl.DataFrame(
-        [_finish(raw[name], spec, domains[name]) for name, spec in columns.items()]
+    raw = _generate_dataframe(plans, n, seed) if plans else None
+    finished: dict[str, pl.Series] = {}
+    for name, spec in columns.items():
+        if raw is not None and name in scalars:
+            finished[name] = _finish(raw[name], spec, domains[name])
+        else:
+            finished[name] = _generate_list_column(name, spec, n, seed)
+    return pl.DataFrame([finished[name] for name in columns])
+
+
+def _generate_list_column(
+    name: str, spec: ColSpec, n: int, seed: int | None
+) -> pl.Series:
+    """A `List` or `Array` column: the lengths as one engine column, the
+    elements as another of the inner dtype, wrapped by the lengths.
+
+    Both are seeded from the column's own seed key -- the elements *as* it,
+    the lengths as a name no user column can carry -- so a List column keeps
+    its data across a rename like any other, and its elements are drawn by
+    the same code as a scalar column of the inner dtype would be.
+    """
+    assert isinstance(spec.dtype, (pl.List, pl.Array))  # noqa: S101 - the caller checked
+    seed_key = spec.seed_name or name
+
+    if isinstance(spec.dtype, pl.Array):
+        width = spec.dtype.size
+        length_bounds: tuple[int, int] = (width, width)
+    else:
+        length_bounds = (
+            spec.list_length.closed() if spec.list_length else _DEFAULT_LIST_LEN
+        )
+
+    # The lengths carry the list's own nullability: a null length is a null cell.
+    lengths_plan = column_plan(
+        name,
+        "int64",
+        min=length_bounds[0],
+        max=length_bounds[1],
+        nullable=spec.nullable,
+        null_probability=spec.null_probability if spec.nullable else 0.0,
+        seed_name=f"{seed_key}\x00len",
     )
+    lengths = _generate_dataframe([lengths_plan], n, seed)[name]
+    counts = lengths.fill_null(0)
+    total = int(counts.sum())
+
+    element_spec = dataclasses.replace(
+        spec,
+        dtype=spec.value_dtype,
+        list_length=None,
+        nullable=False,
+        null_probability=0.0,
+        seed_name=seed_key,
+    )
+    plan, domain = _plan_column(name, element_spec)
+    elements = _finish(
+        _generate_dataframe([plan], total, seed)[name], element_spec, domain
+    )
+
+    row_of_element = (
+        pl.int_range(0, n, eager=True).repeat_by(counts).explode(empty_as_null=False)
+    )
+    grouped = (
+        pl.DataFrame({"__row": row_of_element, name: elements})
+        .group_by("__row", maintain_order=True)
+        .agg(pl.col(name))
+    )
+    cells = (
+        pl.DataFrame({"__row": pl.int_range(0, n, eager=True)})
+        .join(grouped, on="__row", how="left", maintain_order="left")
+        .with_columns(
+            pl.when(pl.lit(lengths).is_null())
+            .then(None)
+            .otherwise(
+                pl.col(name).fill_null(pl.lit([], dtype=pl.List(spec.value_dtype)))
+            )
+            .alias(name)
+        )[name]
+    )
+    if isinstance(spec.dtype, pl.Array):
+        return cells.list.to_array(spec.dtype.size)
+    return cells
 
 
 def _generate_cartesian(

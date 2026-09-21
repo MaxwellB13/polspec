@@ -311,6 +311,13 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
         from_data=_bound_from_data,
         to_source=_bound_to_source,
     ),
+    Field(
+        "list_length",
+        since=3,
+        to_data=_bound_to_data,
+        from_data=_bound_from_data,
+        to_source=_bound_to_source,
+    ),
     Field("format", since=3),
     Field("pattern", since=3),
     Field("seed_name", since=3),

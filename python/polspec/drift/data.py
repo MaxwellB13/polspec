@@ -47,6 +47,10 @@ class Observed:
     length_extent : Bound | None
         The observed `[min, max]` length, for a String or Binary column
         whose declaration carries `string_length`.
+    list_length_extent : Bound | None
+        The observed `[min, max]` number of elements, for a List column
+        whose declaration carries `list_length`. Every other measurement
+        of a List column is over its elements.
     outside : tuple[int, tuple]
         Rows holding a value outside the declared finite domain, and up to
         `max_samples` of those values.
@@ -61,6 +65,7 @@ class Observed:
     null_count: int
     extent: Bound | None = None
     length_extent: Bound | None = None
+    list_length_extent: Bound | None = None
     outside: tuple[int, tuple[Any, ...]] = (0, ())
     unseen: tuple[Any, ...] = ()
     format_failures: tuple[int, tuple[Any, ...]] = (0, ())
@@ -87,7 +92,19 @@ class Observed:
         if len(values) == 0:
             return cls(**measured)
 
-        if declared.bounds is not None and _extent_measurable(series.dtype):
+        if isinstance(values.dtype, (pl.List, pl.Array)):
+            # A List column is measured as its elements; only the length is
+            # a property of the list itself.
+            if declared.list_length is not None and isinstance(values.dtype, pl.List):
+                lengths = values.list.len()
+                measured["list_length_extent"] = Bound(
+                    int(cast("int", lengths.min())), int(cast("int", lengths.max()))
+                )
+            values = values.explode(empty_as_null=False).drop_nulls()
+            if len(values) == 0:
+                return cls(**measured)
+
+        if declared.bounds is not None and _extent_measurable(values.dtype):
             measured["extent"] = Bound(values.min(), values.max())
 
         if declared.string_length is not None:
@@ -98,14 +115,14 @@ class Observed:
                 )
 
         domain = Domain.of(declared)
-        if domain.values is not None and is_textual(series.dtype) == is_textual(
-            declared.dtype
+        if domain.values is not None and is_textual(values.dtype) == is_textual(
+            declared.value_dtype
         ):
             measured["outside"], measured["unseen"] = _against_domain(
                 values, domain, options.max_samples
             )
 
-        if declared.format is not None and series.dtype in (pl.String, pl.Utf8):
+        if declared.format is not None and values.dtype in (pl.String, pl.Utf8):
             fmt = _lookup_format(declared.format)
             if not fmt.is_finite:  # a finite format is a domain, measured above
                 failing = values.filter(

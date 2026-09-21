@@ -186,6 +186,7 @@ Orders.validate(Orders.generate(1_000, seed=1), validate_checks=False)
 | Value in domain | `choices`, `Enum` categories |
 | Value within range | `bounds` |
 | Length within range | `string_length` |
+| List has the declared number of elements | `list_length` |
 | Value has the declared shape | `format` |
 | Value matches the regex | `pattern` |
 | Conditional values hold | `rules` |

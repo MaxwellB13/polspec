@@ -109,6 +109,30 @@ COLUMN_CASES: dict[str, ColSpec] = {
     "decimal_choices": ColSpec(
         pl.Decimal(4, 1), choices=[Decimal("0.5"), Decimal("1.5")]
     ),
+    # lists and arrays: the value fields describe each element
+    "list_int": ColSpec(pl.List(pl.Int64)),
+    "list_int_bounded": ColSpec(pl.List(pl.Int64), bounds=(-5, 5), list_length=(1, 4)),
+    "list_empty_only": ColSpec(pl.List(pl.Int64), list_length=(0, 0)),
+    "list_nullable": ColSpec(pl.List(pl.Float64), nullable=True, null_probability=0.4),
+    "list_enum": ColSpec(pl.List(pl.Enum(["x", "y"]))),
+    "list_choices_weighted": ColSpec(pl.List(pl.String), choices={"a": 1.0, "b": 3.0}),
+    "list_format": ColSpec(pl.List(pl.String), format="uuid4", list_length=(2, 2)),
+    "list_string_len": ColSpec(pl.List(pl.String), string_length=(1, 3)),
+    "list_date": ColSpec(
+        pl.List(pl.Date), bounds=(dt.date(2020, 1, 1), dt.date(2020, 12, 31))
+    ),
+    "list_decimal": ColSpec(pl.List(pl.Decimal(6, 2)), bounds=(0, 10)),
+    "list_bool": ColSpec(pl.List(pl.Boolean), weights=[0.2, 0.8]),
+    "list_binary": ColSpec(pl.List(pl.Binary), string_length=(2, 2)),
+    "list_categorical": ColSpec(pl.List(pl.Categorical), choices=["p", "q"]),
+    "list_distribution": ColSpec(
+        pl.List(pl.Float64), distribution="normal", bounds=(0.0, 1.0)
+    ),
+    "array_float": ColSpec(pl.Array(pl.Float64, 3), bounds=(0.0, 1.0)),
+    "array_nullable": ColSpec(
+        pl.Array(pl.Int64, 2), nullable=True, null_probability=0.3
+    ),
+    "array_enum": ColSpec(pl.Array(pl.Enum(["a", "b"]), 4)),
     # boolean
     "bool": ColSpec(pl.Boolean),
     "bool_weighted": ColSpec(pl.Boolean, weights=[0.3, 0.7]),
@@ -894,15 +918,15 @@ def test_a_hand_built_cycle_still_validates():
 # Which dtypes the property covers
 #
 # The round-trip needs both halves, so a dtype validate() understands but
-# generate() cannot fill is outside it. Docs name those three; these pin the
-# list so the page cannot go stale, and pin the ones people assume are
-# missing and are not.
+# generate() cannot fill is outside it. Docs name the one left; this pins it
+# so the page cannot go stale, and pins the ones people assume are missing
+# and are not.
 # ---------------------------------------------------------------------------
 
 UNGENERATABLE_DTYPES = [
-    pl.List(pl.Int64),
-    pl.Array(pl.Int64, 3),
     pl.Struct({"a": pl.Int64}),
+    pl.List(pl.List(pl.Int64)),
+    pl.List(pl.Struct({"a": pl.Int64})),
 ]
 
 

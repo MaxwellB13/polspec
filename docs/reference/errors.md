@@ -49,6 +49,7 @@ through `report.rows(finding)`; structural ones describe the frame's shape.
 | `choices` | row-level | a value is outside `choices` or the `Enum` categories |
 | `bounds` | row-level | a value is outside `bounds`; `details` carry the extremes found |
 | `string_length` | row-level | a string or binary value's length is outside `string_length` |
+| `list_length` | row-level | a list holds a number of elements outside `list_length` |
 | `format` | row-level | a string value does not have the declared `format`; `details` name the format |
 | `pattern` | row-level | a string value does not match the declared `pattern`; `details` carry it |
 | `rule` | row-level | a row matched a `ColRule` but holds a value outside its choices |
@@ -75,7 +76,7 @@ otherwise. See [Schema and data drift](../how-to/drift.md).
 | `domain_widened` | `diff` | compatible | bounds, choices, format or string length accept more than before |
 | `domain_narrowed` | `diff` | breaking | they accept less |
 | `domain_changed` | `diff` | breaking | neither is inside the other |
-| `bounds_exceeded` | `drift` | breaking | values escape `bounds` or `string_length`; `details` say which and by how much |
+| `bounds_exceeded` | `drift` | breaking | values escape `bounds`, `string_length` or `list_length`; `details` say which and by how much |
 | `new_values` | `drift` | breaking | values outside `choices`, an `Enum` or a finite format |
 | `format_violated` | `drift` | breaking | values that do not match the declared `format` |
 | `null_rate_moved` | `drift` | compatible | the null rate sits further from `null_probability` than the tolerance |

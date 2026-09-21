@@ -21,6 +21,14 @@ from polars.datatypes import DataTypeClass
 # holds an instance.
 type DtypeLike = pl.DataType | DataTypeClass
 
+
+def element_dtype(dtype: pl.List | pl.Array) -> pl.DataType:
+    """The element dtype of a nested dtype, as an instance: polars types
+    `inner` as class-or-instance, and a ColSpec instantiates it."""
+    inner = dtype.inner
+    return inner() if isinstance(inner, type) else inner
+
+
 # Factor to scale a day/second-denominated range into a Datetime's or
 # Duration's own physical time_unit.
 _TIME_UNIT_FACTORS = {"ms": 1_000, "us": 1_000_000, "ns": 1_000_000_000}

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from polspec.dtypes import DtypeLike
+from polspec.dtypes import DtypeLike, element_dtype
 from polspec.errors import SerializationError
 from polspec.spec import _is_categorical_dtype
 
@@ -95,6 +95,12 @@ def dtype_to_data(dtype: pl.DataType) -> str | dict[str, Any]:
         return {"Duration": {"time_unit": dtype.time_unit}}
     if isinstance(dtype, pl.Decimal):
         return {"Decimal": {"precision": dtype.precision, "scale": dtype.scale}}
+    if isinstance(dtype, pl.List):
+        return {"List": dtype_to_data(element_dtype(dtype))}
+    if isinstance(dtype, pl.Array):
+        return {
+            "Array": {"inner": dtype_to_data(element_dtype(dtype)), "width": dtype.size}
+        }
     if _is_categorical_dtype(dtype):
         if isinstance(dtype, pl.Categorical) and dtype.categories.name():
             return {"Categorical": _categories_info(dtype.categories)}
@@ -117,6 +123,10 @@ def dtype_to_source(dtype: pl.DataType) -> str:
         return f"pl.Duration(time_unit={dtype.time_unit!r})"
     if isinstance(dtype, pl.Decimal):
         return f"pl.Decimal({dtype.precision}, {dtype.scale})"
+    if isinstance(dtype, pl.List):
+        return f"pl.List({dtype_to_source(element_dtype(dtype))})"
+    if isinstance(dtype, pl.Array):
+        return f"pl.Array({dtype_to_source(element_dtype(dtype))}, {dtype.size})"
     if _is_categorical_dtype(dtype):
         if isinstance(dtype, pl.Categorical) and dtype.categories.name():
             cats = dtype.categories
@@ -159,6 +169,19 @@ def _decimal_from_data(payload: Any, _: CatSpec | None) -> pl.DataType:
             f"got {payload!r}"
         )
     return pl.Decimal(payload["precision"], payload["scale"])
+
+
+def _array_from_data(payload: Any, categories: CatSpec | None) -> pl.DataType:
+    if (
+        not isinstance(payload, dict)
+        or "inner" not in payload
+        or not isinstance(payload.get("width"), int)
+    ):
+        raise SerializationError(
+            "An Array dtype is written as {Array: {inner: <dtype>, width: N}}, "
+            f"got {payload!r}"
+        )
+    return pl.Array(dtype_from_data(payload["inner"], categories), payload["width"])
 
 
 def _enum_from_data(payload: Any, categories: CatSpec | None) -> pl.DataType:
@@ -211,6 +234,8 @@ _BUILDERS = {
         time_unit=payload.get("time_unit", "us")
     ),
     "Decimal": _decimal_from_data,
+    "List": lambda payload, cats: pl.List(dtype_from_data(payload, cats)),
+    "Array": _array_from_data,
 }
 
 

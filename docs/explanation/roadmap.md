@@ -18,24 +18,28 @@ zone rides along and `generate()` hands back a column of the dtype you
 declared. A `Decimal` is the same idea: an integer and a scale, drawn as the
 integer and scaled back.
 
-What is left out is the composite and nested dtypes:
+A `List` or `Array` of any of those is generated too, its elements described
+by the same fields a scalar column takes
+([Nested columns](../how-to/columns.md#nested-columns)). What is left out:
 
-- `List`
 - `Struct`
-- `Array`
+- a `List` or `Array` whose elements are themselves a `List` or `Struct`
 
-A `ColSpec` for any of these constructs without complaint and can be
-*validated* against — `FrameSpec.validate()` doesn't need to know how to
+A `ColSpec` for these constructs without complaint and can be *validated*
+against by dtype — `FrameSpec.validate()` doesn't need to know how to
 generate a dtype to check one. `generate()` is where it stops, with a
-`SpecError` naming the dtype. Expanding into nested types is the most
-requested kind of gap to close next; if you need one of these today, generate
-the column separately and attach it with `with_columns` after `generate()`
-returns.
+`SpecError` naming the dtype. If you need one today, generate the column
+separately and attach it with `with_columns` after `generate()` returns.
 
-`Struct` is the interesting one of the three. A struct column is a set of
-named, typed fields, which is what a `FrameSpec` already is — so the question
-is less "how is this generated" than whether it reuses that machinery or gets
-its own, and getting that wrong would be expensive to undo.
+`Struct` is the open question. A struct column is a set of named, typed
+fields, which is what a `FrameSpec` already is — so the question is less
+"how is this generated" than whether a struct's fields *are* a nested
+`TableSpec` (one declaration, reused by generation, validation, drift and
+the file format) or a second, smaller thing. The first is the polspec
+answer, and it needs the facade, the serialization format and the
+per-column registries to become recursive, which is why it is a release of
+its own rather than a field. A list of lists waits on the same decision:
+once a value can be described by a nested declaration, so can an element.
 
 ## Generation is getting more guardrails, not fewer
 
