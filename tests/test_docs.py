@@ -24,6 +24,11 @@ API = DOCS / "reference" / "api"
 DOC_PAGES = sorted(DOCS.rglob("*.md"))
 DIRECTIVE = re.compile(r"^::: +polspec\.(\w+)\s*$", re.M)
 RELATIVE_LINK = re.compile(r"\]\((?!https?:|/|#)([^)#]+\.md)(#[^)]*)?\)")
+# A link to a heading, on this page (`](#anchor)`) or another
+# (`](page.md#anchor)`). The second group of RELATIVE_LINK catches the
+# cross-page form; this one catches both.
+ANCHOR_LINK = re.compile(r"\]\((?!https?:)([^)#]*\.md)?#([^)]+)\)")
+HEADING = re.compile(r"^#{1,6} +(.+?)\s*$", re.M)
 # A `version:` line in a yaml fence, or `version: N` quoted in prose.
 YAML_VERSION = re.compile(r"(?:^|`)version: (\d+)(?:$|`)", re.M)
 
@@ -81,6 +86,44 @@ def test_every_relative_link_resolves():
             if not (page.parent / target).resolve().exists():
                 broken.append(f"{page.relative_to(DOCS)} -> {target}")
     assert not broken, f"broken links: {broken}"
+
+
+def _slug(heading: str) -> str:
+    """The anchor the site generator gives a heading.
+
+    Lowercased, with everything but words, spaces and hyphens dropped, and
+    runs of whitespace collapsed to one hyphen -- so `## Lazy output --
+    `scan()`` is `#lazy-output-scan`, the dash and the backticks leaving
+    nothing behind. Mirrors what `zensical build --strict` checks, so a
+    broken anchor fails here rather than in CI.
+    """
+    text = re.sub(r"[^\w\s-]", "", heading.replace("—", " ").replace("--", " "))
+    return re.sub(r"[\s_]+", "-", text.strip().lower())
+
+
+def _anchors_of(page: Path) -> set[str]:
+    """Every heading on `page`, as the anchor a link would use."""
+    return {_slug(h) for h in HEADING.findall(page.read_text(encoding="utf-8"))}
+
+
+def test_every_anchor_link_points_at_a_heading():
+    """A link to a heading that does not exist builds, renders, and goes
+    nowhere -- and `zensical build --strict` fails on it, which is a slow
+    way to find out.
+    """
+    known: dict[Path, set[str]] = {}
+    broken = []
+    for page in DOC_PAGES:
+        if page.name.startswith("llms"):
+            continue  # generated from the pages below
+        for target, anchor in ANCHOR_LINK.findall(page.read_text(encoding="utf-8")):
+            destination = (page.parent / target).resolve() if target else page
+            if not destination.exists():
+                continue  # the link test above reports this one
+            anchors = known.setdefault(destination, _anchors_of(destination))
+            if anchor not in anchors:
+                broken.append(f"{page.relative_to(DOCS)} -> {target}#{anchor}")
+    assert not broken, f"links to headings that do not exist: {broken}"
 
 
 def test_every_yaml_example_carries_the_current_format_version():

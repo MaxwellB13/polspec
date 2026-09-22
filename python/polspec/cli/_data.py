@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from polspec.cli._io import (
@@ -18,7 +19,10 @@ from polspec.cli._io import (
     _write_data_file,
     frames_named_after_specs,
 )
+from polspec.constants import _LARGE_FRAME_BYTES
 from polspec.errors import CliError
+from polspec.generation import _describe_bytes
+from polspec.tablespec import TableSpec
 
 
 def _cmd_validate(args: argparse.Namespace) -> int:
@@ -70,12 +74,30 @@ def _cmd_generate(args: argparse.Namespace) -> int:
             f"don't know how to write {output.suffix!r} files ({output}). "
             f"Supported: {', '.join(sorted(_DATA_WRITERS))}"
         )
+    _say_if_large(spec_cls.spec, args.rows)
     df = spec_cls.generate(
-        args.rows, method=args.method, seed=args.seed, references=references
+        args.rows,
+        method=args.method,
+        seed=args.seed,
+        references=references,
+        max_bytes=0,  # said above already; one warning is enough
     )
     _write_data_file(df, output)
     print(f"Wrote {df.height} row(s) of {spec_cls.__name__} to {output}")
     return 0
+
+
+def _say_if_large(spec: TableSpec, rows: int) -> None:
+    """Says how big the frame will be before it is built, when that is worth
+    saying. `generate` builds the whole frame, so a shell caller who did not
+    expect gigabytes should hear it before the machine starts swapping."""
+    estimate = spec.estimated_size(rows)
+    if estimate > _LARGE_FRAME_BYTES:
+        print(
+            f"note: {spec.name} at {rows:,} rows is an estimated "
+            f"{_describe_bytes(estimate)}, held in memory before it is written",
+            file=sys.stderr,
+        )
 
 
 # ---------------------------------------------------------------------------

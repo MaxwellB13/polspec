@@ -1562,7 +1562,7 @@ Orders.sink_ipc("orders.arrow", 1_000_000, compression="zstd")
 Orders.sink_ndjson("orders.ndjson", 1_000_000)
 ```
 
-Each is [`scan()`](#lazy-output--scan) handed to the matching
+Each is [`scan()`](#lazy-output-scan) handed to the matching
 `LazyFrame.sink_*`, so what a sink writes is what collecting the scan gives.
 All four take `batch_size`, `method`, `seed` and `references`, create the
 parent directory if needed, and pass extra keyword arguments through to
@@ -1573,6 +1573,50 @@ With `n=0`, Parquet, IPC and CSV still write a valid schema-bearing file.
 A sink is the shorthand; `Orders.scan(n, seed=1).sink_parquet(path)` is the
 same write with the rest of a lazy plan available — a `filter`, a `select`,
 a `sort` — before it reaches the file.
+
+## Memory
+
+`generate()` allocates the whole frame before it returns, so it is worth
+knowing what that is before asking for it:
+
+```python
+Orders.estimated_size(50_000_000) / 1024**3     # gibibytes
+```
+
+Read off the declaration — the width of each dtype, the lengths the spec
+declares — so it costs nothing and needs no data. Past four gibibytes
+`generate()` says so in a warning naming the estimate; `max_bytes=` makes
+it a refusal instead, for a CI job that should fail rather than swap, and
+`max_bytes=0` silences both.
+
+What each column costs per row:
+
+| Declared | Bytes per row |
+|:--|--:|
+| `Int8`/`UInt8` … `Int64`/`Float64` | 1 … 8 |
+| `Boolean` | ⅛ |
+| `Date` | 4; `Time`, `Datetime`, `Duration` | 8 |
+| `Decimal` | 16 |
+| `Enum` | 1, 2 or 4 — the narrowest that holds the categories |
+| `Categorical` | its registry's physical width, 4 by default |
+| `String`, `Binary` | **16**, plus the length of any value past 12 bytes |
+| `List(inner)` | 8, plus the mean `list_length` × the element's cost |
+| `Array(inner, w)` | `w` × the element's cost |
+| `nullable=True` | + ⅛ |
+
+The sixteen bytes a text value costs before any content is the lever worth
+knowing: a low-cardinality string column declared as `pl.Enum([...])` costs
+**one** byte per row instead of twenty, and one drawn from `choices` costs
+the sixteen but not the content, because the values are gathered from one
+shared buffer.
+
+The estimate is the frame, not the process. Generation holds working
+buffers on top — most visibly for `Decimal` and `List`, assembled in Polars
+rather than filled by the engine — so a peak is higher. For a frame of
+scalar columns the two agree within a percent.
+
+[`scan()`](#lazy-output-scan) and [batching](#batching) are the way out of
+the question entirely: both hold a batch at a time rather than the frame.
 
 ## Foreign keys
 
@@ -3639,6 +3683,8 @@ here, so a `TableSpec` that constructs is one that can be used.
 
 - `TableSpec.drop(self, *names: 'str') -> 'TableSpec'` -- Removes columns, and any composite or foreign key that used them.
 
+- `TableSpec.estimated_size(self, n: 'int') -> 'int'` -- Bytes a frame of `n` generated rows is expected to hold.
+
 - `TableSpec.rename(self, mapping: 'Mapping[str, str]') -> 'TableSpec'` -- Renames columns, rewriting every constraint that names them.
 
 - `TableSpec.resolve_target(self, fk: 'ForeignKey') -> 'TableSpec | None'` -- The spec a foreign key points at.
@@ -3698,6 +3744,8 @@ data -- go through `__columns__`:
 
 - `FrameSpec.drift(cls, df: 'pl.DataFrame | pl.LazyFrame', *, options: 'DriftOptions | None' = None, null_rate_tolerance: 'float | None' = None, unseen_values: 'bool | None' = None, strict_dtypes: 'bool | None' = None, max_samples: 'int | None' = None) -> 'DriftReport'` -- How `df` has moved relative to this spec, as a `DriftReport`.
 
+- `FrameSpec.estimated_size(cls, n: 'int') -> 'int'` -- Bytes a frame of `n` generated rows is expected to hold.
+
 - `FrameSpec.foreign_keys(cls) -> 'tuple[ForeignKey, ...]'` -- The ForeignKey constraints defined on this FrameSpec.
 
 - `FrameSpec.from_dataframe(cls, df: 'pl.DataFrame', *, name: 'str' = 'ProfiledFrameSpec', weights: 'bool' = False, max_unique_enum: 'int' = 50, calculate_bounds: 'bool' = True) -> 'type[FrameSpec]'` -- Infers a spec by profiling an existing DataFrame.
@@ -3706,7 +3754,7 @@ data -- go through `__columns__`:
 
 - `FrameSpec.from_yaml(cls, source: 'str | Path', *, categories: 'CatSpec | type[CatSpec] | str | Path | None' = None, strict: 'bool' = True) -> 'type[FrameSpec]'` -- Builds a new FrameSpec subclass from a YAML file written by `to_yaml`.
 
-- `FrameSpec.generate(cls, n: 'int', *, method: "Literal['random', 'cartesian']" = 'random', seed: 'int | None' = None, references: 'References' = None, cycles: 'int' = 0, self_references: 'int' = 0, lazy: 'bool' = False) -> 'pl.DataFrame | pl.LazyFrame'` -- Generates a DataFrame (or LazyFrame) matching this spec.
+- `FrameSpec.generate(cls, n: 'int', *, method: "Literal['random', 'cartesian']" = 'random', seed: 'int | None' = None, references: 'References' = None, cycles: 'int' = 0, self_references: 'int' = 0, max_bytes: 'int | None' = None, lazy: 'bool' = False) -> 'pl.DataFrame | pl.LazyFrame'` -- Generates a DataFrame (or LazyFrame) matching this spec.
 
 - `FrameSpec.generate_batches(cls, n: 'int', *, batch_size: 'int' = 100000, method: "Literal['random', 'cartesian']" = 'random', seed: 'int | None' = None, references: 'References' = None) -> 'Iterator[pl.DataFrame]'` -- Yields chunks of generated rows without holding all `n` in memory.
 
@@ -3970,7 +4018,7 @@ has a `FrameSpec` classmethod that forwards to it with `cls.spec` -- see
 
 ## generate
 
-### generate(spec: 'TableSpec', n: 'int', *, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, cycles: 'int' = 0, self_references: 'int' = 0, lazy: 'bool' = False) -> 'pl.DataFrame | pl.LazyFrame'
+### generate(spec: 'TableSpec', n: 'int', *, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, cycles: 'int' = 0, self_references: 'int' = 0, max_bytes: 'int | None' = None, lazy: 'bool' = False) -> 'pl.DataFrame | pl.LazyFrame'
 
 Generates a DataFrame (or LazyFrame) matching `spec`.
 
@@ -4013,6 +4061,10 @@ rows at themselves -- which is how a graph walk gets something to fail
 against. Both default to zero, and `validate()` reports whatever they
 injected.
 
+Before anything is allocated the frame's size is estimated from the
+declaration. Past four gibibytes that is a warning naming the estimate;
+`max_bytes=` makes it a refusal instead, and `max_bytes=0` silences both.
+
 lazy=True returns a `pl.LazyFrame` around the generated DataFrame --
 the whole frame, already built. **Deprecated since 0.8.0** and removed
 in 0.9: call `scan()` for a frame that generates as it is collected, or
@@ -4041,6 +4093,13 @@ A `LazyFrame` of `n` generated rows, produced as they are collected.
 `batch_size` left unset lets polars ask for the size it would like, so a
 sink gets the batches it writes best; setting it pins the size whatever
 polars asks.
+## estimated_size
+
+### estimated_size(spec: 'TableSpec', n: 'int') -> 'int'
+
+Bytes `generate(spec, n)` is expected to hold, as whole bytes.
+
+See the module docstring for what this does and does not count.
 ## sink_parquet
 
 ### sink_parquet(spec: 'TableSpec', path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, compression: 'ParquetCompression' = 'zstd', method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'
@@ -5308,6 +5367,18 @@ seed produces; see
 
 ### Added
 
+- **`estimated_size(n)`, and a word before a large frame is allocated.**
+  `Orders.estimated_size(50_000_000)` reads the answer off the declaration
+  -- the width of each dtype, the lengths the spec declares -- so it costs
+  nothing and needs no data. `generate()` now estimates before it
+  allocates: past four gibibytes it warns, naming the figure and pointing
+  at `scan()` and `generate_batches()`; `max_bytes=` makes it a refusal
+  instead, for a CI job that should fail rather than swap, and
+  `max_bytes=0` silences both. `polspec generate` prints the same note.
+  The estimate is the frame, not the process peak -- generation holds
+  working buffers on top, most visibly for `Decimal` and `List` -- and for
+  a frame of scalar columns it is within a percent of measured.
+
 - **`scan()`: a `LazyFrame` that generates rows as they are collected.**
   `Orders.scan(50_000_000, seed=1)` builds nothing; the plan decides what
   is drawn. `.sink_parquet(...)` streams in bounded memory,
@@ -5364,6 +5435,10 @@ seed produces; see
 
 ### Internal
 
+- **A link to a heading that does not exist fails the test suite**, not
+  just `zensical build --strict`. `tests/test_docs.py` checked that a
+  linked *page* existed but never its anchor, so a wrong slug reached CI
+  before anyone saw it.
 - `polspec.validation.constraints` is a package, one module per kind of
   claim: `_values` (what one value must be, lifted over a List's elements),
   `_rules`, `_table` (composite keys, checks) and `_relations` (foreign

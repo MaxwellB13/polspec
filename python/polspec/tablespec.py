@@ -410,6 +410,21 @@ class TableSpec:
         """The Polars schema this spec declares: column name to dtype."""
         return pl.Schema({name: spec.dtype for name, spec in self.columns.items()})
 
+    def estimated_size(self, n: int) -> int:
+        """Bytes a frame of `n` generated rows is expected to hold.
+
+        Read off the declaration -- the width of each dtype, the lengths the
+        spec declares -- so it costs nothing and needs no data. It measures
+        the *frame*: generation holds working buffers on top, most visibly
+        for `Decimal` and `List`, so a process peak is higher.
+
+        >>> Orders.spec.estimated_size(1_000_000) / 1024**2   # doctest: +SKIP
+        27.5
+        """
+        from polspec.sizing import estimated_size
+
+        return estimated_size(self, n)
+
     def tag(
         self,
         *tags: str | Sequence[str],

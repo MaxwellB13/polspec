@@ -10,6 +10,18 @@ seed produces; see
 
 ### Added
 
+- **`estimated_size(n)`, and a word before a large frame is allocated.**
+  `Orders.estimated_size(50_000_000)` reads the answer off the declaration
+  -- the width of each dtype, the lengths the spec declares -- so it costs
+  nothing and needs no data. `generate()` now estimates before it
+  allocates: past four gibibytes it warns, naming the figure and pointing
+  at `scan()` and `generate_batches()`; `max_bytes=` makes it a refusal
+  instead, for a CI job that should fail rather than swap, and
+  `max_bytes=0` silences both. `polspec generate` prints the same note.
+  The estimate is the frame, not the process peak -- generation holds
+  working buffers on top, most visibly for `Decimal` and `List` -- and for
+  a frame of scalar columns it is within a percent of measured.
+
 - **`scan()`: a `LazyFrame` that generates rows as they are collected.**
   `Orders.scan(50_000_000, seed=1)` builds nothing; the plan decides what
   is drawn. `.sink_parquet(...)` streams in bounded memory,
@@ -66,6 +78,10 @@ seed produces; see
 
 ### Internal
 
+- **A link to a heading that does not exist fails the test suite**, not
+  just `zensical build --strict`. `tests/test_docs.py` checked that a
+  linked *page* existed but never its anchor, so a wrong slug reached CI
+  before anyone saw it.
 - `polspec.validation.constraints` is a package, one module per kind of
   claim: `_values` (what one value must be, lifted over a List's elements),
   `_rules`, `_table` (composite keys, checks) and `_relations` (foreign

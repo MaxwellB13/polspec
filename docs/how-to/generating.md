@@ -160,7 +160,7 @@ Orders.sink_ipc("orders.arrow", 1_000_000, compression="zstd")
 Orders.sink_ndjson("orders.ndjson", 1_000_000)
 ```
 
-Each is [`scan()`](#lazy-output--scan) handed to the matching
+Each is [`scan()`](#lazy-output-scan) handed to the matching
 `LazyFrame.sink_*`, so what a sink writes is what collecting the scan gives.
 All four take `batch_size`, `method`, `seed` and `references`, create the
 parent directory if needed, and pass extra keyword arguments through to
@@ -171,6 +171,50 @@ With `n=0`, Parquet, IPC and CSV still write a valid schema-bearing file.
 A sink is the shorthand; `Orders.scan(n, seed=1).sink_parquet(path)` is the
 same write with the rest of a lazy plan available — a `filter`, a `select`,
 a `sort` — before it reaches the file.
+
+## Memory
+
+`generate()` allocates the whole frame before it returns, so it is worth
+knowing what that is before asking for it:
+
+```python
+Orders.estimated_size(50_000_000) / 1024**3     # gibibytes
+```
+
+Read off the declaration — the width of each dtype, the lengths the spec
+declares — so it costs nothing and needs no data. Past four gibibytes
+`generate()` says so in a warning naming the estimate; `max_bytes=` makes
+it a refusal instead, for a CI job that should fail rather than swap, and
+`max_bytes=0` silences both.
+
+What each column costs per row:
+
+| Declared | Bytes per row |
+|:--|--:|
+| `Int8`/`UInt8` … `Int64`/`Float64` | 1 … 8 |
+| `Boolean` | ⅛ |
+| `Date` | 4; `Time`, `Datetime`, `Duration` | 8 |
+| `Decimal` | 16 |
+| `Enum` | 1, 2 or 4 — the narrowest that holds the categories |
+| `Categorical` | its registry's physical width, 4 by default |
+| `String`, `Binary` | **16**, plus the length of any value past 12 bytes |
+| `List(inner)` | 8, plus the mean `list_length` × the element's cost |
+| `Array(inner, w)` | `w` × the element's cost |
+| `nullable=True` | + ⅛ |
+
+The sixteen bytes a text value costs before any content is the lever worth
+knowing: a low-cardinality string column declared as `pl.Enum([...])` costs
+**one** byte per row instead of twenty, and one drawn from `choices` costs
+the sixteen but not the content, because the values are gathered from one
+shared buffer.
+
+The estimate is the frame, not the process. Generation holds working
+buffers on top — most visibly for `Decimal` and `List`, assembled in Polars
+rather than filled by the engine — so a peak is higher. For a frame of
+scalar columns the two agree within a percent.
+
+[`scan()`](#lazy-output-scan) and [batching](#batching) are the way out of
+the question entirely: both hold a batch at a time rather than the frame.
 
 ## Foreign keys
 

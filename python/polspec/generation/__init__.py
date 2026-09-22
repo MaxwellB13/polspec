@@ -17,9 +17,10 @@ from typing import Any, Literal, overload
 
 import polars as pl
 
+from polspec.constants import _LARGE_FRAME_BYTES
 from polspec.constraints import ordered_passes, rewritable_members
 from polspec.engine import _generate_cartesian, _generate_random
-from polspec.errors import SpecError
+from polspec.errors import GenerationError, SpecError
 from polspec.foreign_key import _apply_foreign_key
 from polspec.frames import Method, References, to_eager
 from polspec.generation.composite import apply_unique_together
@@ -123,6 +124,7 @@ def generate(
     references: References = None,
     cycles: int = 0,
     self_references: int = 0,
+    max_bytes: int | None = None,
     lazy: Literal[False] = False,
 ) -> pl.DataFrame: ...
 
@@ -137,6 +139,7 @@ def generate(
     references: References = None,
     cycles: int = 0,
     self_references: int = 0,
+    max_bytes: int | None = None,
     lazy: Literal[True],
 ) -> pl.LazyFrame: ...
 
@@ -150,6 +153,7 @@ def generate(
     references: References = None,
     cycles: int = 0,
     self_references: int = 0,
+    max_bytes: int | None = None,
     lazy: bool = False,
 ) -> pl.DataFrame | pl.LazyFrame:
     """Generates a DataFrame (or LazyFrame) matching `spec`.
@@ -193,6 +197,10 @@ def generate(
     against. Both default to zero, and `validate()` reports whatever they
     injected.
 
+    Before anything is allocated the frame's size is estimated from the
+    declaration. Past four gibibytes that is a warning naming the estimate;
+    `max_bytes=` makes it a refusal instead, and `max_bytes=0` silences both.
+
     lazy=True returns a `pl.LazyFrame` around the generated DataFrame --
     the whole frame, already built. **Deprecated since 0.8.0** and removed
     in 0.9: call `scan()` for a frame that generates as it is collected, or
@@ -210,6 +218,7 @@ def generate(
     require_columns(spec)
     _check_counts(n)
     _check_faults(spec, cycles, self_references)
+    _check_size(spec, n, max_bytes)
     if method not in ("random", "cartesian"):
         raise ValueError(f"Unknown method {method!r}; expected 'random' or 'cartesian'")
 
@@ -223,6 +232,52 @@ def generate(
         self_references=self_references,
     )
     return res.lazy() if lazy else res
+
+
+def _describe_bytes(size: int) -> str:
+    """A byte count as the unit a reader thinks in."""
+    if size < 1024:
+        return f"{size:,} bytes"
+    scaled = float(size)
+    for unit in ("KiB", "MiB", "GiB"):
+        scaled /= 1024
+        if scaled < 1024 or unit == "GiB":
+            return f"{scaled:,.1f} {unit}"
+    raise AssertionError  # pragma: no cover - the loop returns at GiB
+
+
+def _check_size(spec: TableSpec, n: int, max_bytes: int | None) -> None:
+    """Says how large the frame will be before it is allocated.
+
+    The first sign that a spec is too big for the machine is usually the
+    machine swapping, and the estimate costs nothing -- it is read off the
+    declaration. A warning rather than a refusal by default, because a ten
+    gigabyte frame on a machine with sixty-four is a reasonable thing to
+    ask for; `max_bytes` is for a caller who wants it refused, and
+    `max_bytes=0` for one who wants neither.
+    """
+    if max_bytes == 0:
+        return
+    estimate = spec.estimated_size(n)
+    limit = _LARGE_FRAME_BYTES if max_bytes is None else max_bytes
+    if estimate <= limit:
+        return
+    advice = (
+        "scan() generates it as it is collected, and generate_batches() "
+        "in batches; either holds a fraction of that at once."
+    )
+    if max_bytes is not None:
+        raise GenerationError(
+            f"{spec.name} at {n:,} rows is an estimated "
+            f"{_describe_bytes(estimate)}, over the max_bytes of "
+            f"{_describe_bytes(max_bytes)}. {advice}"
+        )
+    warnings.warn(
+        f"{spec.name} at {n:,} rows is an estimated {_describe_bytes(estimate)}, "
+        f"which generate() allocates before it returns. {advice} Pass "
+        "max_bytes=0 to silence this.",
+        stacklevel=3,
+    )
 
 
 def _frame_seed(seed: int | None) -> int:

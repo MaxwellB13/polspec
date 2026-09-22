@@ -445,6 +445,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         references: References = None,
         cycles: int = 0,
         self_references: int = 0,
+        max_bytes: int | None = None,
         lazy: Literal[False] = False,
     ) -> pl.DataFrame: ...
 
@@ -459,6 +460,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         references: References = None,
         cycles: int = 0,
         self_references: int = 0,
+        max_bytes: int | None = None,
         lazy: Literal[True],
     ) -> pl.LazyFrame: ...
 
@@ -472,6 +474,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         references: References = None,
         cycles: int = 0,
         self_references: int = 0,
+        max_bytes: int | None = None,
         lazy: bool = False,
     ) -> pl.DataFrame | pl.LazyFrame:
         """Generates a DataFrame (or LazyFrame) matching this spec.
@@ -492,8 +495,18 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             references=references,
             cycles=cycles,
             self_references=self_references,
+            max_bytes=max_bytes,
             lazy=lazy,
         )
+
+    @classmethod
+    def estimated_size(cls, n: int) -> int:
+        """Bytes a frame of `n` generated rows is expected to hold.
+
+        See `TableSpec.estimated_size`. `generate()` warns when the estimate
+        passes four gibibytes, and takes `max_bytes=` to refuse instead.
+        """
+        return cls.spec.estimated_size(n)
 
     @classmethod
     def scan(
