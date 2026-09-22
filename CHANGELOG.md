@@ -8,6 +8,18 @@ seed produces; see
 
 ## [Unreleased]
 
+### Removed
+
+- **`generate(lazy=True)`**, deprecated in 0.8.0. It built the whole frame
+  and called `.lazy()` on it, so it looked like the lazy verb while being
+  the eager one. `scan()` is the frame that has not been built; `.lazy()`
+  on a generated frame is a handle on one that has. Passing `lazy=` is now
+  a `TypeError`.
+- **The `polspec[arrow]` extra**, redundant since 0.8.0 made the sinks
+  Polars' own. Nothing in polspec needs PyArrow, so `polspec[arrow]` no
+  longer resolves -- install `polspec` and, if you want PyArrow for your
+  own code, PyArrow.
+
 ## [0.8.0] - 2026-09-22
 
 The headline is `scan()`: a `LazyFrame` that generates rows as they are

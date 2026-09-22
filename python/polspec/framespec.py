@@ -434,7 +434,6 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     # Generation
     # ------------------------------------------------------------------
 
-    @overload
     @classmethod
     def generate(
         cls,
@@ -446,46 +445,13 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         cycles: int = 0,
         self_references: int = 0,
         max_bytes: int | None = None,
-        lazy: Literal[False] = False,
-    ) -> pl.DataFrame: ...
-
-    @overload
-    @classmethod
-    def generate(
-        cls,
-        n: int,
-        *,
-        method: Literal["random", "cartesian"] = "random",
-        seed: int | None = None,
-        references: References = None,
-        cycles: int = 0,
-        self_references: int = 0,
-        max_bytes: int | None = None,
-        lazy: Literal[True],
-    ) -> pl.LazyFrame: ...
-
-    @classmethod
-    def generate(
-        cls,
-        n: int,
-        *,
-        method: Literal["random", "cartesian"] = "random",
-        seed: int | None = None,
-        references: References = None,
-        cycles: int = 0,
-        self_references: int = 0,
-        max_bytes: int | None = None,
-        lazy: bool = False,
-    ) -> pl.DataFrame | pl.LazyFrame:
-        """Generates a DataFrame (or LazyFrame) matching this spec.
+    ) -> pl.DataFrame:
+        """Generates a DataFrame matching this spec.
 
         `cycles` and `self_references` apply only to a spec declaring a
         `__hierarchy__`, and deliberately violate it. See
-        `polspec.generation.generate` for the full contract.
-
-        `lazy=True` is **deprecated since 0.8.0** and removed in 0.9: it
-        builds the whole frame and calls `.lazy()` on it. Use `scan()` for
-        a frame that generates as it is collected.
+        `polspec.generation.generate` for the full contract. `scan()` is
+        the lazy verb.
         """
         return generation.generate(
             cls.spec,
@@ -496,7 +462,6 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             cycles=cycles,
             self_references=self_references,
             max_bytes=max_bytes,
-            lazy=lazy,
         )
 
     @classmethod
@@ -520,8 +485,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     ) -> pl.LazyFrame:
         """A `LazyFrame` of `n` rows, generated as they are collected.
 
-        Unlike `generate(lazy=True)`, which builds the frame and hands back a
-        handle on it, nothing is generated until the plan is collected -- and
+        Unlike `generate()`, which builds the whole frame before it
+        returns, nothing is generated until the plan is collected -- and
         then only the columns and rows the plan asks for:
 
             Orders.scan(50_000_000, seed=1).sink_parquet("orders.parquet")
@@ -593,7 +558,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     ) -> None:
         """Generates `n` rows and streams them to a Parquet file in batches.
 
-        Extra keyword arguments go to `pyarrow.parquet.ParquetWriter`.
+        Extra keyword arguments go to `pl.LazyFrame.sink_parquet`.
         """
         generation.sink_parquet(
             cls.spec,
@@ -651,7 +616,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     ) -> None:
         """Generates `n` rows and streams them to an Arrow IPC file in batches.
 
-        Extra keyword arguments go to `pyarrow.ipc.new_file`.
+        Extra keyword arguments go to `pl.LazyFrame.sink_ipc`.
         """
         generation.sink_ipc(
             cls.spec,

@@ -1,8 +1,8 @@
 """A `LazyFrame` that generates rows on demand.
 
-`generate(lazy=True)` builds the whole frame and hands back a handle on it.
-`scan()` hands back a frame that has not been built: polars asks for the
-columns and the rows it actually needs, and only those are generated. So
+`generate()` builds the whole frame before it returns. `scan()` hands back
+a frame that has not been built: polars asks for the columns and the rows
+it actually needs, and only those are generated. So
 
     Orders.scan(50_000_000, seed=1).sink_parquet("orders.parquet")
 

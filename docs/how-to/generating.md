@@ -96,9 +96,10 @@ the children are lazy.
 
 !!! note
 
-    `generate(lazy=True)` is a different thing: it builds the whole frame
-    and calls `.lazy()` on it, so the memory is already spent. Reach for
-    `scan()` for a frame that has not been built.
+    `generate()` builds the whole frame before it returns, so `.lazy()` on
+    its result is a handle on memory already spent. `scan()` is the frame
+    that has not been built. (`generate(lazy=True)` did the former while
+    looking like the latter, and was removed in 0.9.0.)
 
 ## Coverage — `method="cartesian"`
 

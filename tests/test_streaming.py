@@ -26,9 +26,8 @@ class StreamDataSource(FrameSpec):
     active = ColSpec(dtype=pl.Boolean, nullable=False)
 
 
-def test_generate_lazy():
-    with pytest.deprecated_call(match="Use scan"):
-        lf = StreamDataSource.generate(200, lazy=True, seed=42)
+def test_scan_is_the_lazy_verb():
+    lf = StreamDataSource.scan(200, seed=42)
     assert isinstance(lf, pl.LazyFrame)
     assert lf.collect_schema() == StreamDataSource.schema()
 
@@ -312,12 +311,12 @@ def test_a_batch_seed_no_longer_depends_on_how_many_came_before():
     assert batches[2].select("i", "f", "s").equals(third.select("i", "f", "s"))
 
 
-def test_lazy_is_deprecated_in_favour_of_scan():
-    """`generate(lazy=True)` builds the whole frame and calls `.lazy()` on it,
-    so the memory is already spent -- a keyword that has to be explained as
-    not what it says. Removed in 0.9."""
-    with pytest.deprecated_call(match=r"scan\(\) for a LazyFrame"):
-        StreamDataSource.generate(10, lazy=True, seed=1)
+def test_lazy_is_gone_and_generate_says_nothing():
+    """`generate(lazy=True)` was a keyword that had to be explained as not
+    what it said: it built the whole frame and called `.lazy()` on it.
+    Deprecated in 0.8.0, removed here; `scan()` is the lazy verb."""
+    with pytest.raises(TypeError, match="lazy"):
+        StreamDataSource.generate(10, lazy=True, seed=1)  # type: ignore[call-arg]
     with warnings.catch_warnings():
         warnings.simplefilter("error", DeprecationWarning)
         StreamDataSource.generate(10, seed=1)

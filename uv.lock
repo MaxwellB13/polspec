@@ -406,11 +406,6 @@ dependencies = [
     { name = "pyyaml" },
 ]
 
-[package.optional-dependencies]
-arrow = [
-    { name = "pyarrow" },
-]
-
 [package.dev-dependencies]
 bench = [
     { name = "numpy" },
@@ -432,10 +427,8 @@ docs = [
 [package.metadata]
 requires-dist = [
     { name = "polars", specifier = ">=1.44.1,<2" },
-    { name = "pyarrow", marker = "extra == 'arrow'", specifier = ">=14.0.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
 ]
-provides-extras = ["arrow"]
 
 [package.metadata.requires-dev]
 bench = [{ name = "numpy", specifier = ">=2.5.2" }]

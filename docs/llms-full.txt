@@ -1499,9 +1499,10 @@ the children are lazy.
 
 !!! note
 
-    `generate(lazy=True)` is a different thing: it builds the whole frame
-    and calls `.lazy()` on it, so the memory is already spent. Reach for
-    `scan()` for a frame that has not been built.
+    `generate()` builds the whole frame before it returns, so `.lazy()` on
+    its result is a handle on memory already spent. `scan()` is the frame
+    that has not been built. (`generate(lazy=True)` did the former while
+    looking like the latter, and was removed in 0.9.0.)
 
 ## Coverage — `method="cartesian"`
 
@@ -3755,7 +3756,7 @@ data -- go through `__columns__`:
 
 - `FrameSpec.from_yaml(cls, source: 'str | Path', *, categories: 'CatSpec | type[CatSpec] | str | Path | None' = None, strict: 'bool' = True) -> 'type[FrameSpec]'` -- Builds a new FrameSpec subclass from a YAML file written by `to_yaml`.
 
-- `FrameSpec.generate(cls, n: 'int', *, method: "Literal['random', 'cartesian']" = 'random', seed: 'int | None' = None, references: 'References' = None, cycles: 'int' = 0, self_references: 'int' = 0, max_bytes: 'int | None' = None, lazy: 'bool' = False) -> 'pl.DataFrame | pl.LazyFrame'` -- Generates a DataFrame (or LazyFrame) matching this spec.
+- `FrameSpec.generate(cls, n: 'int', *, method: "Literal['random', 'cartesian']" = 'random', seed: 'int | None' = None, references: 'References' = None, cycles: 'int' = 0, self_references: 'int' = 0, max_bytes: 'int | None' = None) -> 'pl.DataFrame'` -- Generates a DataFrame matching this spec.
 
 - `FrameSpec.generate_batches(cls, n: 'int', *, batch_size: 'int' = 100000, method: "Literal['random', 'cartesian']" = 'random', seed: 'int | None' = None, references: 'References' = None) -> 'Iterator[pl.DataFrame]'` -- Yields chunks of generated rows without holding all `n` in memory.
 
@@ -4019,9 +4020,9 @@ has a `FrameSpec` classmethod that forwards to it with `cls.spec` -- see
 
 ## generate
 
-### generate(spec: 'TableSpec', n: 'int', *, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, cycles: 'int' = 0, self_references: 'int' = 0, max_bytes: 'int | None' = None, lazy: 'bool' = False) -> 'pl.DataFrame | pl.LazyFrame'
+### generate(spec: 'TableSpec', n: 'int', *, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, cycles: 'int' = 0, self_references: 'int' = 0, max_bytes: 'int | None' = None) -> 'pl.DataFrame'
 
-Generates a DataFrame (or LazyFrame) matching `spec`.
+Generates a DataFrame matching `spec`.
 
 method="random" (default): `n` rows, each column drawn independently.
 
@@ -4066,10 +4067,9 @@ Before anything is allocated the frame's size is estimated from the
 declaration. Past four gibibytes that is a warning naming the estimate;
 `max_bytes=` makes it a refusal instead, and `max_bytes=0` silences both.
 
-lazy=True returns a `pl.LazyFrame` around the generated DataFrame --
-the whole frame, already built. **Deprecated since 0.8.0** and removed
-in 0.9: call `scan()` for a frame that generates as it is collected, or
-`.lazy()` on the result for a handle on an eager one.
+The whole frame is built before this returns. `scan()` is the lazy
+verb: it generates as the plan is collected, so only the columns and
+rows a plan asks for are made.
 ## generate_batches
 
 ### generate_batches(spec: 'TableSpec', n: 'int', *, batch_size: 'int' = 100000, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None) -> 'Iterator[pl.DataFrame]'
@@ -5340,20 +5340,6 @@ strategy built from a spec, are the natural adjacent surfaces for a library
 whose whole pitch is that fixtures and contracts stay in step. Adjacent,
 though — not core.
 
-## Going in 0.9
-
-Two things are already announced, and will happen on schedule rather than
-being reconsidered:
-
-- **`generate(lazy=True)` is removed.** It builds the whole frame and calls
-  `.lazy()` on it, so it promises something it does not do;
-  [`scan()`](https://maxwellb13.github.io/polspec/how-to/generating/#lazy-output-scan) is the lazy one, and
-  `.lazy()` on the result is the handle on an eager one. Deprecated in
-  0.8.0, warning since.
-- **The `polspec[arrow]` extra is removed.** The sinks went through PyArrow
-  until 0.8.0 and use Polars' own writers now, so nothing in polspec needs
-  it. The extra still resolves so that an install pinning it keeps working.
-
 ## Deferred on purpose
 
 **`ColSpec` holding a `Domain` instead of `bounds`/`choices`/`format`.**
@@ -5380,6 +5366,18 @@ seed produces; see
 [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/).
 
 ## [Unreleased]
+
+### Removed
+
+- **`generate(lazy=True)`**, deprecated in 0.8.0. It built the whole frame
+  and called `.lazy()` on it, so it looked like the lazy verb while being
+  the eager one. `scan()` is the frame that has not been built; `.lazy()`
+  on a generated frame is a handle on one that has. Passing `lazy=` is now
+  a `TypeError`.
+- **The `polspec[arrow]` extra**, redundant since 0.8.0 made the sinks
+  Polars' own. Nothing in polspec needs PyArrow, so `polspec[arrow]` no
+  longer resolves -- install `polspec` and, if you want PyArrow for your
+  own code, PyArrow.
 
 ## [0.8.0] - 2026-09-22
 
