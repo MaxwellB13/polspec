@@ -1502,8 +1502,19 @@ for batch in Orders.generate_batches(10_000_000, batch_size=250_000, seed=1):
     process(batch)
 ```
 
-Each batch is generated independently, so a `unique=True` foreign key column is
-sampled without replacement only *within* a batch.
+Each batch is a **window onto the one frame the seed describes**: a column
+no pass rewrites holds, batch by batch, exactly the rows
+`Orders.generate(n, seed=1)` would, whatever `batch_size` is -- so a stream
+written at one batch size and re-read at another is the same data, and the
+third batch can be checked against `generate(n).slice(...)`. What is drawn
+per batch instead, deterministic but not row for row the whole frame's, is
+a column with rules, a foreign key, a composite key, and a `List` column's
+elements (its lengths are a window). Uniqueness holds only *within* a batch.
+
+A batch smaller than 65,536 rows -- the engine's chunk -- costs up to one
+chunk of extra draws per batch, because a window that starts mid-chunk fills
+the chunk from its start and slices the head off. Batches of a chunk or
+more cost nothing extra.
 
 ## Writing straight to a file
 
@@ -3951,10 +3962,15 @@ lazy=True returns a `pl.LazyFrame` around the generated DataFrame.
 
 Yields chunks of generated rows without holding all `n` in memory.
 
-Each batch samples independently, so uniqueness only holds *within* a
-batch, not across the whole `n`: that applies to a `unique=True` column,
-a `__unique_together__` group, and a foreign-key column sampled without
-replacement alike.
+Each batch is a window onto the one frame `seed` describes: a column no
+pass rewrites holds, batch by batch, exactly the rows `generate(n, seed=seed)`
+would, whatever `batch_size` is. What is drawn per batch instead --
+deterministic, but not row for row the whole frame's -- is a column with
+rules, a foreign key, a composite key, and a List column's elements.
+
+Uniqueness only holds *within* a batch, not across the whole `n`: that
+applies to a `unique=True` column, a `__unique_together__` group, and a
+foreign-key column sampled without replacement alike.
 ## sink_parquet
 
 ### sink_parquet(spec: 'TableSpec', path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, compression: 'str' = 'zstd', method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'
@@ -4803,9 +4819,11 @@ them. See [String formats](https://maxwellb13.github.io/polspec/how-to/formats/)
 - **A `Hierarchy` owns both its columns.** A `null_probability`,
   `distribution` or `weights` declared on either is not what you get: the
   references have to come from one pool for the two columns to join at all.
-- **Uniqueness holds within a batch, not across one.** `generate_batches` and
-  the `sink_*` functions sample each batch independently, so a `unique=True`
-  column or a `__unique_together__` group is only distinct inside each batch.
+- **Uniqueness holds within a batch, not across one.** A batch of
+  `generate_batches` or a `sink_*` is a window onto one frame for a column
+  no pass rewrites, but a `unique=True` column, a `__unique_together__`
+  group, a rule and a foreign key are drawn per batch, so distinctness is
+  only within each batch.
 - **A `unique` column ignores `weights` and a non-uniform `distribution`** --
   both are refused at declaration rather than silently dropped, since neither
   has anything to say about a draw without replacement.
@@ -5143,7 +5161,10 @@ Two things this project has made no compatibility promise about yet:
   all legitimately change what a given seed produces. 0.7.0 was such a
   release: every spec with rules, a foreign key, a hierarchy or a composite
   key produces different values for the same seed than 0.6 did, once, so
-  that inserting a column never changes its neighbours again.
+  that inserting a column never changes its neighbours again. 0.8.0 was
+  another, for batched output only: `generate_batches` and the sinks now
+  produce windows onto the frame `generate` would, whatever the batch size,
+  so every seeded batched or sunk output changed, once.
 
 The first of those is easier to live with than it sounds, because a spec file
 now says which format wrote it. Every file `to_yaml()` writes carries
@@ -5214,6 +5235,22 @@ seed produces; see
 [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/).
 
 ## [Unreleased]
+
+### Changed
+
+- **A batch is a window onto one frame.** `generate_batches` and the
+  `sink_*` functions used to seed batch *k* from the *k*-th draw of the
+  caller's seed, so the same seed with a different `batch_size` was a
+  different frame and no batch could be made without the ones before it.
+  The engine now takes a row offset and numbers its chunks from it, so for
+  a column no pass rewrites `pl.concat(generate_batches(n, batch_size=b,
+  seed=s))` equals `generate(n, seed=s)` for every `b`; a `List` column's
+  lengths are a window too. Rules, foreign keys, composite keys and List
+  elements are still drawn per batch -- deterministic, keyed by the
+  batch's offset, but not row for row the whole frame's -- and uniqueness
+  still holds within a batch. **Every seeded batched or sunk output
+  changes**, once; `generate()` is unchanged. A batch smaller than the
+  engine's 65,536-row chunk costs up to one chunk of extra draws.
 
 ### Internal
 

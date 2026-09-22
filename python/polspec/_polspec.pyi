@@ -71,9 +71,12 @@ class ColumnPlan:
     def unique(self) -> bool: ...
 
 def generate_dataframe(
-    columns: Sequence[ColumnPlan], n_rows: int, seed: int | None = None
+    columns: Sequence[ColumnPlan],
+    n_rows: int,
+    seed: int | None = None,
+    row_offset: int = 0,
 ) -> pl.DataFrame:
-    """Fills every planned column in parallel; each column's seed derives from `seed` and its seed name (its name, unless the plan carries `seed_name`)."""
+    """Fills every planned column in parallel; each column's seed derives from `seed` and its seed name (its name, unless the plan carries `seed_name`). `row_offset` asks for rows `[row_offset, row_offset + n_rows)` of the frame `seed` describes, so a batch is a window onto one frame."""
 
 def distribution_params(name: str) -> list[tuple[str, float, bool]]:
     """`(name, default, must_be_positive)` for each canonical parameter of a distribution."""

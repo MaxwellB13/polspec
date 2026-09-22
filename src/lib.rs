@@ -27,13 +27,17 @@ use plan::ColumnPlan;
 /// its own name unless the spec gave it another -- so adding or reordering
 /// columns never changes the values of the others, and a renamed column can
 /// keep producing the data it did. With no seed, the current time is used.
+///
+/// `row_offset` asks for rows `[row_offset, row_offset + n_rows)` of the frame
+/// `seed` describes, so a batch is a window onto one frame whatever its size.
 #[pyfunction]
-#[pyo3(signature = (columns, n_rows, seed=None))]
+#[pyo3(signature = (columns, n_rows, seed=None, row_offset=0))]
 fn generate_dataframe(
     py: Python<'_>,
     columns: Vec<ColumnPlan>,
     n_rows: usize,
     seed: Option<u64>,
+    row_offset: usize,
 ) -> PyResult<PyDataFrame> {
     let base_seed = seed.unwrap_or_else(|| {
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -49,7 +53,7 @@ fn generate_dataframe(
                 .par_iter()
                 .map(|plan| {
                     let col_seed = sample::seed_for_column(base_seed, plan.seed_key());
-                    sample::generate_series(plan, n_rows, col_seed)
+                    sample::generate_series(plan, n_rows, col_seed, row_offset)
                 })
                 .collect();
             let cols: Vec<Column> = series?.into_iter().map(Column::from).collect();

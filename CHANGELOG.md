@@ -8,6 +8,22 @@ seed produces; see
 
 ## [Unreleased]
 
+### Changed
+
+- **A batch is a window onto one frame.** `generate_batches` and the
+  `sink_*` functions used to seed batch *k* from the *k*-th draw of the
+  caller's seed, so the same seed with a different `batch_size` was a
+  different frame and no batch could be made without the ones before it.
+  The engine now takes a row offset and numbers its chunks from it, so for
+  a column no pass rewrites `pl.concat(generate_batches(n, batch_size=b,
+  seed=s))` equals `generate(n, seed=s)` for every `b`; a `List` column's
+  lengths are a window too. Rules, foreign keys, composite keys and List
+  elements are still drawn per batch -- deterministic, keyed by the
+  batch's offset, but not row for row the whole frame's -- and uniqueness
+  still holds within a batch. **Every seeded batched or sunk output
+  changes**, once; `generate()` is unchanged. A batch smaller than the
+  engine's 65,536-row chunk costs up to one chunk of extra draws.
+
 ### Internal
 
 - `polspec.validation.constraints` is a package, one module per kind of

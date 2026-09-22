@@ -51,11 +51,13 @@ def column_plan(name: str, kind: str, **options: Any) -> ColumnPlan:
 
 
 def generate_dataframe(
-    plans: Sequence[ColumnPlan], n: int, seed: int | None
+    plans: Sequence[ColumnPlan], n: int, seed: int | None, row_offset: int = 0
 ) -> pl.DataFrame:
-    """Fills every planned column, re-raising the engine's errors as `GenerationError`."""
+    """Fills every planned column, re-raising the engine's errors as
+    `GenerationError`. `row_offset` asks for rows `[row_offset, row_offset + n)`
+    of the frame `seed` describes."""
     try:
-        return _extension().generate_dataframe(list(plans), n, seed)
+        return _extension().generate_dataframe(list(plans), n, seed, row_offset)
     except ValueError as exc:
         raise GenerationError(str(exc)) from exc
 

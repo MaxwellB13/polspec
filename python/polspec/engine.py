@@ -400,8 +400,11 @@ def _coverage_values(spec: ColSpec, seed: int) -> list | None:
 
 
 def _generate_random(
-    columns: dict[str, ColSpec], n: int, seed: int | None
+    columns: dict[str, ColSpec], n: int, seed: int | None, row_offset: int = 0
 ) -> pl.DataFrame:
+    """`n` rows drawn per column -- rows `[row_offset, row_offset + n)` of the
+    frame `seed` describes, so a batch is a window onto one frame. A List
+    column's lengths are a window too; its elements are drawn per call."""
     if not columns:
         return pl.DataFrame()
     frame_seed = seed if seed is not None else random.randrange(2**63)
@@ -420,18 +423,18 @@ def _generate_random(
         domains[name] = domain
     # Each raw column is dropped as it is finished, so a column the finish
     # copies (a temporal cast, a gathered domain) never exists twice.
-    raw = _generate_dataframe(plans, n, seed).to_dict() if plans else {}
+    raw = _generate_dataframe(plans, n, seed, row_offset).to_dict() if plans else {}
     finished: dict[str, pl.Series] = {}
     for name, spec in columns.items():
         if name in scalars:
             finished[name] = _finish(raw.pop(name), spec, domains[name])
         else:
-            finished[name] = _generate_list_column(name, spec, n, seed)
+            finished[name] = _generate_list_column(name, spec, n, seed, row_offset)
     return pl.DataFrame([finished[name] for name in columns])
 
 
 def _generate_list_column(
-    name: str, spec: ColSpec, n: int, seed: int | None
+    name: str, spec: ColSpec, n: int, seed: int | None, row_offset: int = 0
 ) -> pl.Series:
     """A `List` or `Array` column: the lengths as one engine column, the
     elements as another of the inner dtype, wrapped by the lengths.
@@ -462,7 +465,7 @@ def _generate_list_column(
         null_probability=spec.null_probability if spec.nullable else 0.0,
         seed_name=f"{seed_key}\x00len",
     )
-    lengths = _generate_dataframe([lengths_plan], n, seed)[name]
+    lengths = _generate_dataframe([lengths_plan], n, seed, row_offset)[name]
     counts = lengths.fill_null(0)
     total = int(counts.sum())
 

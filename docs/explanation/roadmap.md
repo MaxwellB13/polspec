@@ -118,7 +118,10 @@ Two things this project has made no compatibility promise about yet:
   all legitimately change what a given seed produces. 0.7.0 was such a
   release: every spec with rules, a foreign key, a hierarchy or a composite
   key produces different values for the same seed than 0.6 did, once, so
-  that inserting a column never changes its neighbours again.
+  that inserting a column never changes its neighbours again. 0.8.0 was
+  another, for batched output only: `generate_batches` and the sinks now
+  produce windows onto the frame `generate` would, whatever the batch size,
+  so every seeded batched or sunk output changed, once.
 
 The first of those is easier to live with than it sounds, because a spec file
 now says which format wrote it. Every file `to_yaml()` writes carries
