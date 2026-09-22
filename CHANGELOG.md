@@ -8,6 +8,19 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-22
+
+The headline is nested and decimal dtypes: `List`, `Array` and `Decimal`
+columns generate, validate and round-trip, described by the same fields a
+scalar column takes. Around it, one change to what a seed produces -- the
+passes that run after the columns are filled are now keyed by name, so
+inserting a column never changes its neighbours -- and, alongside it, the
+type checker moves to `ty` with nothing suppressed, the CLI gains
+`--all`, and four long-standing limitations close, the last strict `xfail`
+among them. Specs with rules, foreign keys, a hierarchy or a composite key
+produce different values for the same seed than 0.6 did, once; see
+*Changed*. No spec file needs migrating.
+
 ### Added
 
 - **`pl.List` and `pl.Array` columns generate, validate, and round-trip.**
@@ -969,7 +982,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/MaxwellB13/polspec/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/MaxwellB13/polspec/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/MaxwellB13/polspec/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/MaxwellB13/polspec/compare/v0.4.0...v0.4.1

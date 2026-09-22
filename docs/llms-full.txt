@@ -50,8 +50,9 @@ production will reject.
 
 - **Types and shape**
 
-    Every dtype polspec can generate — integers, floats, booleans, strings,
-    binary, all four temporal types, `Enum` and `Categorical` — plus
+    Every dtype polspec can generate — integers, floats, `Decimal`,
+    booleans, strings, binary, all four temporal types, `Enum`,
+    `Categorical`, and a `List` or `Array` of any of them — plus
     nullability, bounds, string lengths, value domains and named string
     formats such as `uuid4` and `email`.
 
@@ -4441,7 +4442,7 @@ owns only the inner loop that fills arrays with values.
 | `validation` | `inspect` and `validate` over a `TableSpec`: every claim becomes a `_Constraint` (`constraints.py`) that produces a `Finding`; `report.py` holds `Finding` and `ValidationReport` |
 | `tablespec` | `TableSpec` — a spec as an immutable value, with its declaration-time checks and structural operations |
 | `framespec` | `FrameSpec` — the metaclass that builds a `TableSpec` from a class body, and the facade forwarding every verb to it |
-| `generation` | `generate`, `generate_batches` and the file sinks, as functions over a `TableSpec`; `composite.py` separates a `__unique_together__` group |
+| `generation` | `generate`, `generate_batches` and the file sinks, as functions over a `TableSpec`; `composite.py` separates a `__unique_together__` group; `seeds.py` keys every pass's seed by name, as the engine keys columns |
 | `catspec` | `CatSpec` — a shared registry of enums and categoricals, as a value, plus the metaclass that builds one from a class body (the same split as `tablespec`/`framespec`) |
 | `registry` | `Registry` — a declared set of specs: resolving cross-spec keys, ordering parents before children, `generate_all`/`validate_all`, one file and one diagram for the set |
 | `serialization` | Spec files: a field registry (`fields.py`) that YAML, generated Python and the `import datetime` decision all derive from; the dtype codec table (`dtypes.py`); format versions and migrations (`migrations.py`) |
@@ -5005,8 +5006,8 @@ Worth being direct about, in the same spirit as the
 - **Not a property-based shrinking engine.** No search, no shrinking —
   `method="cartesian"` is a fixed set of known-important cases, not an
   open-ended exploration.
-- **Not feature-complete yet.** Nested dtypes (`List`/`Struct`/`Array`) aren't
-  generatable, and `__checks__`/`ColSpec.validators` are validated but not
+- **Not feature-complete yet.** `Struct` columns aren't generatable, and
+  `__checks__`/`ColSpec.validators`/`ColSpec.pattern` are validated but not
   generated, by design — see [Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/).
 
 ## Where it fits
@@ -5213,6 +5214,19 @@ seed produces; see
 [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/).
 
 ## [Unreleased]
+
+## [0.7.0] - 2026-09-22
+
+The headline is nested and decimal dtypes: `List`, `Array` and `Decimal`
+columns generate, validate and round-trip, described by the same fields a
+scalar column takes. Around it, one change to what a seed produces -- the
+passes that run after the columns are filled are now keyed by name, so
+inserting a column never changes its neighbours -- and, alongside it, the
+type checker moves to `ty` with nothing suppressed, the CLI gains
+`--all`, and four long-standing limitations close, the last strict `xfail`
+among them. Specs with rules, foreign keys, a hierarchy or a composite key
+produce different values for the same seed than 0.6 did, once; see
+*Changed*. No spec file needs migrating.
 
 ### Added
 
@@ -6175,7 +6189,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/MaxwellB13/polspec/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/MaxwellB13/polspec/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/MaxwellB13/polspec/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/MaxwellB13/polspec/compare/v0.4.0...v0.4.1

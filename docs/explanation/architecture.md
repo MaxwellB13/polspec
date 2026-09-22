@@ -23,7 +23,7 @@ owns only the inner loop that fills arrays with values.
 | `validation` | `inspect` and `validate` over a `TableSpec`: every claim becomes a `_Constraint` (`constraints.py`) that produces a `Finding`; `report.py` holds `Finding` and `ValidationReport` |
 | `tablespec` | `TableSpec` — a spec as an immutable value, with its declaration-time checks and structural operations |
 | `framespec` | `FrameSpec` — the metaclass that builds a `TableSpec` from a class body, and the facade forwarding every verb to it |
-| `generation` | `generate`, `generate_batches` and the file sinks, as functions over a `TableSpec`; `composite.py` separates a `__unique_together__` group |
+| `generation` | `generate`, `generate_batches` and the file sinks, as functions over a `TableSpec`; `composite.py` separates a `__unique_together__` group; `seeds.py` keys every pass's seed by name, as the engine keys columns |
 | `catspec` | `CatSpec` — a shared registry of enums and categoricals, as a value, plus the metaclass that builds one from a class body (the same split as `tablespec`/`framespec`) |
 | `registry` | `Registry` — a declared set of specs: resolving cross-spec keys, ordering parents before children, `generate_all`/`validate_all`, one file and one diagram for the set |
 | `serialization` | Spec files: a field registry (`fields.py`) that YAML, generated Python and the `import datetime` decision all derive from; the dtype codec table (`dtypes.py`); format versions and migrations (`migrations.py`) |
