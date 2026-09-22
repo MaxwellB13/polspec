@@ -1462,11 +1462,47 @@ column renamed with one keeps its rule's draw. What no seed name holds is
 the frame across polspec *versions* -- see
 [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/#yaml-format-and-generated-values-may-change).
 
-## Lazy output
+## Lazy output — `scan()`
 
+`scan()` returns a `pl.LazyFrame` that has not been generated. Nothing is
+drawn until the plan is collected, and then only the columns and rows the
+plan asks for:
+
+<!-- docs: skip -->
 ```python
-lf = Orders.generate(1_000, seed=1, lazy=True)   # pl.LazyFrame
+lf = Orders.scan(50_000_000, seed=1)
+
+lf.sink_parquet("orders.parquet")               # streams; bounded memory
+lf.select("total").head(5).collect()            # five rows of one column
+lf.filter(pl.col("status") == "PAID").collect() # every row drawn, matching kept
 ```
+
+**Projecting cannot change what a column holds.** Every column is seeded by
+its name and every pass by what it is for, so dropping a column's
+neighbours leaves it alone — `lf.select(cols).collect()` is always
+`lf.collect().select(cols)`. Where a column depends on others (a rule reads
+the columns its `when` names, a composite key is repaired as a group), those
+are generated too and dropped again on the way out.
+
+A predicate filters rows that were drawn; it never narrows the draw. `n`
+rows are generated and the matching ones kept, because drawing only matching
+rows would quietly change what a `null_probability` or a `unique=True`
+column means.
+
+Rows arrive in batches, so a scan carries the terms
+[batching](#batching) does: a spec declaring a `__hierarchy__` is refused,
+and uniqueness holds within a batch. Leaving `batch_size` unset lets polars
+ask for the size it wants; setting it pins the size.
+
+`Registry.scan_all()` is the same for a set of specs: parents are generated
+eagerly — a foreign key needs the whole parent column to sample from — and
+the children are lazy.
+
+!!! note
+
+    `generate(lazy=True)` is a different thing: it builds the whole frame
+    and calls `.lazy()` on it, so the memory is already spent. Reach for
+    `scan()` for a frame that has not been built.
 
 ## Coverage — `method="cartesian"`
 
@@ -3293,6 +3329,7 @@ cannot describe a signature the code does not have.
 | [`CatSpec`][polspec.CatSpec] | [Registry](https://maxwellb13.github.io/polspec/reference/api/registry/) |
 | [`generate`][polspec.generate] | [Generation](https://maxwellb13.github.io/polspec/reference/api/generation/) |
 | [`generate_batches`][polspec.generate_batches] | [Generation](https://maxwellb13.github.io/polspec/reference/api/generation/) |
+| [`scan`][polspec.scan] | [Generation](https://maxwellb13.github.io/polspec/reference/api/generation/) |
 | [`sink_parquet`][polspec.sink_parquet] | [Generation](https://maxwellb13.github.io/polspec/reference/api/generation/) |
 | [`sink_ipc`][polspec.sink_ipc] | [Generation](https://maxwellb13.github.io/polspec/reference/api/generation/) |
 | [`sink_csv`][polspec.sink_csv] | [Generation](https://maxwellb13.github.io/polspec/reference/api/generation/) |
@@ -3658,6 +3695,8 @@ data -- go through `__columns__`:
 
 - `FrameSpec.inspect(cls, df: 'pl.DataFrame | pl.LazyFrame', *, options: 'ValidationOptions | None' = None, references: 'References' = None, extra_cols: "Literal['drop', 'allow', 'raise'] | None" = None, missing_cols: "Literal['add', 'allow', 'raise'] | None" = None, strict_dtypes: 'bool | None' = None, validate_rules: 'bool | None' = None, validate_validators: 'bool | None' = None, validate_unique: 'bool | None' = None, validate_checks: 'bool | None' = None, validate_foreign_keys: 'bool | None' = None, validate_hierarchy: 'bool | None' = None, validate_pattern: 'bool | None' = None, cast: 'bool | None' = None, streaming: 'bool | None' = None) -> 'validation.ValidationReport'` -- Everything this spec has to say about `df`, as a `ValidationReport`.
 
+- `FrameSpec.scan(cls, n: 'int', *, seed: 'int | None' = None, batch_size: 'int | None' = None, method: "Literal['random', 'cartesian']" = 'random', references: 'References' = None) -> 'pl.LazyFrame'` -- A `LazyFrame` of `n` rows, generated as they are collected.
+
 - `FrameSpec.schema(cls) -> 'pl.Schema'` -- The Polars schema this spec declares: column name to dtype.
 
 - `FrameSpec.sink_csv(cls, path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, include_header: 'bool' = True, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'` -- Generates `n` rows and streams them to a CSV file in batches.
@@ -3823,6 +3862,8 @@ categories : CatSpec | None
 
 - `Registry.resolve(self) -> 'Registry'` -- A registry whose every cross-spec key is bound to its target.
 
+- `Registry.scan_all(self, n: 'int | Mapping[Any, int]', *, seed: 'int | None' = None, batch_size: 'int | None' = None, references: 'Frames | None' = None) -> 'dict[str, pl.LazyFrame]'` -- One `LazyFrame` per spec, each generating as it is collected.
+
 - `Registry.to_dict(self) -> 'dict[str, Any]'` -- This registry as plain data: every spec, plus shared categories.
 
 - `Registry.to_mermaid(self, path: 'str | Path | None' = None) -> 'str'` -- One entity-relationship diagram with every spec and every key.
@@ -3971,6 +4012,15 @@ rules, a foreign key, a composite key, and a List column's elements.
 Uniqueness only holds *within* a batch, not across the whole `n`: that
 applies to a `unique=True` column, a `__unique_together__` group, and a
 foreign-key column sampled without replacement alike.
+## scan
+
+### scan(spec: 'TableSpec', n: 'int', *, seed: 'int | None' = None, batch_size: 'int | None' = None, method: 'Method' = 'random', references: 'References' = None) -> 'pl.LazyFrame'
+
+A `LazyFrame` of `n` generated rows, produced as they are collected.
+
+`batch_size` left unset lets polars ask for the size it would like, so a
+sink gets the batches it writes best; setting it pins the size whatever
+polars asks.
 ## sink_parquet
 
 ### sink_parquet(spec: 'TableSpec', path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, compression: 'str' = 'zstd', method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'
@@ -5235,6 +5285,25 @@ seed produces; see
 [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/).
 
 ## [Unreleased]
+
+### Added
+
+- **`scan()`: a `LazyFrame` that generates rows as they are collected.**
+  `Orders.scan(50_000_000, seed=1)` builds nothing; the plan decides what
+  is drawn. `.sink_parquet(...)` streams in bounded memory,
+  `.select("total").head(5).collect()` generates five rows of one column,
+  and a predicate filters rows that were drawn rather than narrowing the
+  draw. Projection is exact: every column is seeded by its name and every
+  pass by what it is for, so `lf.select(cols).collect()` is always
+  `lf.collect().select(cols)` -- where a column depends on others (a rule's
+  `when` columns, a composite key's members) the closure is generated and
+  dropped again on the way out. A scan is batched, so it carries
+  `generate_batches`' terms: a `__hierarchy__` is refused, and uniqueness
+  holds within a batch. `Registry.scan_all()` does the same for a set of
+  specs, generating parents eagerly -- a foreign key needs the whole parent
+  column -- and the children lazily. Built on polars' `register_io_source`,
+  which polars marks unstable; the tests pin behaviour rather than the
+  API surface.
 
 ### Changed
 

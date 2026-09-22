@@ -58,11 +58,47 @@ column renamed with one keeps its rule's draw. What no seed name holds is
 the frame across polspec *versions* -- see
 [Roadmap and stability](../explanation/roadmap.md#yaml-format-and-generated-values-may-change).
 
-## Lazy output
+## Lazy output — `scan()`
 
+`scan()` returns a `pl.LazyFrame` that has not been generated. Nothing is
+drawn until the plan is collected, and then only the columns and rows the
+plan asks for:
+
+<!-- docs: skip -->
 ```python
-lf = Orders.generate(1_000, seed=1, lazy=True)   # pl.LazyFrame
+lf = Orders.scan(50_000_000, seed=1)
+
+lf.sink_parquet("orders.parquet")               # streams; bounded memory
+lf.select("total").head(5).collect()            # five rows of one column
+lf.filter(pl.col("status") == "PAID").collect() # every row drawn, matching kept
 ```
+
+**Projecting cannot change what a column holds.** Every column is seeded by
+its name and every pass by what it is for, so dropping a column's
+neighbours leaves it alone — `lf.select(cols).collect()` is always
+`lf.collect().select(cols)`. Where a column depends on others (a rule reads
+the columns its `when` names, a composite key is repaired as a group), those
+are generated too and dropped again on the way out.
+
+A predicate filters rows that were drawn; it never narrows the draw. `n`
+rows are generated and the matching ones kept, because drawing only matching
+rows would quietly change what a `null_probability` or a `unique=True`
+column means.
+
+Rows arrive in batches, so a scan carries the terms
+[batching](#batching) does: a spec declaring a `__hierarchy__` is refused,
+and uniqueness holds within a batch. Leaving `batch_size` unset lets polars
+ask for the size it wants; setting it pins the size.
+
+`Registry.scan_all()` is the same for a set of specs: parents are generated
+eagerly — a foreign key needs the whole parent column to sample from — and
+the children are lazy.
+
+!!! note
+
+    `generate(lazy=True)` is a different thing: it builds the whole frame
+    and calls `.lazy()` on it, so the memory is already spent. Reach for
+    `scan()` for a frame that has not been built.
 
 ## Coverage — `method="cartesian"`
 

@@ -13,6 +13,10 @@ has a `FrameSpec` classmethod that forwards to it with `cls.spec` -- see
 
 ::: polspec.generate_batches
 
+## scan
+
+::: polspec.scan
+
 ## sink_parquet
 
 ::: polspec.sink_parquet
