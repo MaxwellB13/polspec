@@ -241,3 +241,69 @@ def test_a_lazy_parent_is_collected_once_not_once_per_batch(monkeypatch):
         Child.generate_batches(500, batch_size=50, seed=2, references={Parent: parent})
     )
     assert all(a.equals(b) for a, b in zip(batches, eager, strict=True))
+
+
+# ---------------------------------------------------------------------------
+# A batch is a window onto one frame
+# ---------------------------------------------------------------------------
+
+
+class PlainSource(FrameSpec):
+    """Columns no pass rewrites, one per engine kind, so the whole frame and
+    its batches can be compared row for row."""
+
+    i = ColSpec(pl.Int64, bounds=(0, 1000), nullable=True, null_probability=0.2)
+    f = ColSpec(pl.Float64)
+    s = ColSpec(pl.String, string_length=(3, 12))
+    e = ColSpec(pl.Enum(["a", "b", "c"]))
+    d = ColSpec(pl.Date)
+    m = ColSpec(pl.String, format="email")
+    b = ColSpec(pl.Boolean)
+    tags = ColSpec(pl.List(pl.Int64), list_length=(0, 3))
+
+
+@pytest.mark.parametrize("batch_size", [997, 10_000, 65_536, 100_000, 131_072, 300_000])
+def test_batches_are_windows_onto_the_whole_frame(batch_size):
+    """`pl.concat(generate_batches(n, batch_size=b, seed=s))` equals
+    `generate(n, seed=s)` for every `b`, for a column no pass rewrites:
+    the engine numbers its chunks from the batch's offset. A List column's
+    lengths are a window too; its elements are drawn per batch.
+    """
+    n = 300_000
+    whole = PlainSource.generate(n, seed=5)
+    parts = pl.concat(
+        list(PlainSource.generate_batches(n, batch_size=batch_size, seed=5))
+    )
+    scalar = [c for c in whole.columns if c != "tags"]
+    assert parts.select(scalar).equals(whole.select(scalar))
+    assert parts["tags"].list.len().equals(whole["tags"].list.len())
+
+
+def test_what_is_drawn_per_batch_is_deterministic_but_not_the_whole_frames():
+    """Rules, foreign keys and composite keys are passes over a batch, so a
+    batch's draws for them are its own -- the same every run, and distinct
+    from the next batch's."""
+    n = 2_000
+    runs = [
+        pl.concat(list(StreamDataSource.generate_batches(n, batch_size=500, seed=3)))
+        for _ in range(2)
+    ]
+    assert runs[0].equals(runs[1])
+    whole = StreamDataSource.generate(n, seed=3)
+    assert (
+        runs[0]
+        .select("id", "category", "active")
+        .equals(whole.select("id", "category", "active"))
+    )
+    ruled = pl.concat(
+        list(StreamDataSource.generate_batches(n, batch_size=500, seed=3))
+    )
+    first, second = ruled.slice(0, 500), ruled.slice(500, 500)
+    assert not first["score"].equals(second["score"])
+
+
+def test_a_batch_seed_no_longer_depends_on_how_many_came_before():
+    n, b = 200_000, 65_536
+    batches = list(PlainSource.generate_batches(n, batch_size=b, seed=8))
+    third = PlainSource.generate(n, seed=8).slice(2 * b, b)
+    assert batches[2].select("i", "f", "s").equals(third.select("i", "f", "s"))

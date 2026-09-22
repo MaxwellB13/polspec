@@ -196,30 +196,65 @@ def generate(
     require_columns(spec)
     _check_counts(n)
     _check_faults(spec, cycles, self_references)
-
-    # The frame seed: the first draw of the caller's seed, as it always was,
-    # so every column's values are what they were. Every pass below derives
-    # its own seed from this one and a stable key.
-    gen_seed = random.Random(seed).randrange(2**63)
-    columns = dict(spec.columns)
-    if method == "random":
-        df = _generate_random(columns, n, gen_seed)
-    elif method == "cartesian":
-        df = _generate_cartesian(columns, n, gen_seed)
-    else:
+    if method not in ("random", "cartesian"):
         raise ValueError(f"Unknown method {method!r}; expected 'random' or 'cartesian'")
 
-    res = _run_passes(
+    res = _window(
+        spec,
+        n,
+        _frame_seed(seed),
+        method=method,
+        references=references,
+        cycles=cycles,
+        self_references=self_references,
+    )
+    return res.lazy() if lazy else res
+
+
+def _frame_seed(seed: int | None) -> int:
+    """The frame seed: the first draw of the caller's seed, as it always was,
+    so every column's values are what they were. Everything else -- each
+    column, each pass, each batch -- derives its own seed from this one and
+    a stable key."""
+    return random.Random(seed).randrange(2**63)
+
+
+def _window(
+    spec: TableSpec,
+    n: int,
+    frame_seed: int,
+    *,
+    method: Method,
+    references: References,
+    row_offset: int = 0,
+    cycles: int = 0,
+    self_references: int = 0,
+) -> pl.DataFrame:
+    """Rows `[row_offset, row_offset + n)` of the frame `frame_seed` describes,
+    with the passes run over them.
+
+    The columns are a window onto one frame: the engine numbers its chunks
+    from the offset, so the same rows come back whatever `n` the call asks
+    for. The passes are drawn per window, keyed by the offset, so two
+    windows never repeat each other's draws.
+    """
+    columns = dict(spec.columns)
+    if method == "cartesian":
+        df = _generate_cartesian(columns, n, frame_seed)
+    else:
+        df = _generate_random(columns, n, frame_seed, row_offset)
+    pass_seed_ = (
+        frame_seed if row_offset == 0 else pass_seed(frame_seed, f"window:{row_offset}")
+    )
+    return _run_passes(
         spec,
         columns,
         df,
         references,
-        gen_seed,
+        pass_seed_,
         cycles=cycles,
         self_references=self_references,
     )
-
-    return res.lazy() if lazy else res
 
 
 def _run_passes(
@@ -305,10 +340,15 @@ def generate_batches(
 ) -> Iterator[pl.DataFrame]:
     """Yields chunks of generated rows without holding all `n` in memory.
 
-    Each batch samples independently, so uniqueness only holds *within* a
-    batch, not across the whole `n`: that applies to a `unique=True` column,
-    a `__unique_together__` group, and a foreign-key column sampled without
-    replacement alike.
+    Each batch is a window onto the one frame `seed` describes: a column no
+    pass rewrites holds, batch by batch, exactly the rows `generate(n, seed=seed)`
+    would, whatever `batch_size` is. What is drawn per batch instead --
+    deterministic, but not row for row the whole frame's -- is a column with
+    rules, a foreign key, a composite key, and a List column's elements.
+
+    Uniqueness only holds *within* a batch, not across the whole `n`: that
+    applies to a `unique=True` column, a `__unique_together__` group, and a
+    foreign-key column sampled without replacement alike.
     """
     require_columns(spec)
     _requires_whole_frame(spec, "generate_batches")
@@ -332,30 +372,33 @@ def generate_batches(
         resolved = {k: v for k, v in resolved.items() if k in targets}
     references = resolved or None
 
-    rng = random.Random(seed)
-    rows_remaining = n
+    frame_seed = _frame_seed(seed)
+    produced = 0
 
     if method == "cartesian":
-        first = generate(
+        # The coverage set is a property of the spec, not of a window: it is
+        # built once, as `generate` builds it, and sliced to the batch size
+        # (it is a cross-product, not a row count cap). The padding after it
+        # is windowed like a random batch stream.
+        first = _window(
             spec,
             min(n, batch_size),
+            frame_seed,
             method="cartesian",
-            seed=rng.randrange(2**63),
             references=references,
         )
-        # The coverage set can be far larger than batch_size (it is a
-        # cross-product, not a row count cap), so slice it before yielding.
         for offset in range(0, first.height, batch_size):
             yield first.slice(offset, batch_size)
-        rows_remaining = max(0, n - first.height)
+        produced = first.height
 
-    while rows_remaining > 0:
-        current = min(rows_remaining, batch_size)
-        yield generate(
+    while produced < n:
+        current = min(n - produced, batch_size)
+        yield _window(
             spec,
             current,
+            frame_seed,
             method="random",
-            seed=rng.randrange(2**63),
             references=references,
+            row_offset=produced,
         )
-        rows_remaining -= current
+        produced += current

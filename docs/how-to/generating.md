@@ -98,8 +98,19 @@ for batch in Orders.generate_batches(10_000_000, batch_size=250_000, seed=1):
     process(batch)
 ```
 
-Each batch is generated independently, so a `unique=True` foreign key column is
-sampled without replacement only *within* a batch.
+Each batch is a **window onto the one frame the seed describes**: a column
+no pass rewrites holds, batch by batch, exactly the rows
+`Orders.generate(n, seed=1)` would, whatever `batch_size` is -- so a stream
+written at one batch size and re-read at another is the same data, and the
+third batch can be checked against `generate(n).slice(...)`. What is drawn
+per batch instead, deterministic but not row for row the whole frame's, is
+a column with rules, a foreign key, a composite key, and a `List` column's
+elements (its lengths are a window). Uniqueness holds only *within* a batch.
+
+A batch smaller than 65,536 rows -- the engine's chunk -- costs up to one
+chunk of extra draws per batch, because a window that starts mid-chunk fills
+the chunk from its start and slices the head off. Batches of a chunk or
+more cost nothing extra.
 
 ## Writing straight to a file
 

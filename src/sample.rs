@@ -70,10 +70,21 @@ pub fn seed_for_column(base_seed: u64, name: &str) -> u64 {
     z ^ (z >> 31)
 }
 
+/// What a column's chunks are seeded from: the column seed, and the index
+/// of the first chunk this call fills. A call that generates rows
+/// `[offset, offset + n)` of a frame numbers its chunks from
+/// `offset / CHUNK_SIZE`, so it draws exactly the values the whole frame
+/// holds there -- a batch is a window onto one frame, whatever its size.
+#[derive(Clone, Copy, Debug)]
+pub struct ColumnSeed {
+    pub base: u64,
+    pub first_chunk: usize,
+}
+
 /// The RNG one chunk draws from.
 #[inline]
-fn chunk_rng(seed: u64, chunk_index: usize) -> Xoshiro256PlusPlus {
-    Xoshiro256PlusPlus::seed_from_u64(seed_for_chunk(seed, chunk_index))
+fn chunk_rng(seed: ColumnSeed, chunk_index: usize) -> Xoshiro256PlusPlus {
+    Xoshiro256PlusPlus::seed_from_u64(seed_for_chunk(seed.base, seed.first_chunk + chunk_index))
 }
 
 /// Whether this column actually produces nulls.
@@ -111,7 +122,7 @@ fn null_bernoulli(plan: &ColumnPlan) -> Result<Bernoulli, String> {
 fn fill_buffer<N, F>(
     plan: &ColumnPlan,
     n: usize,
-    seed: u64,
+    seed: ColumnSeed,
     sample: F,
 ) -> Result<(Vec<N>, Option<Bitmap>), String>
 where
@@ -156,7 +167,7 @@ where
 fn numeric_column<T, F>(
     plan: &ColumnPlan,
     n: usize,
-    seed: u64,
+    seed: ColumnSeed,
     sample: F,
 ) -> Result<ChunkedArray<T>, String>
 where
@@ -189,7 +200,7 @@ macro_rules! impl_gen_int_column {
         fn $fn_name(
             plan: &ColumnPlan,
             n: usize,
-            seed: u64,
+            seed: ColumnSeed,
         ) -> Result<ChunkedArray<$polars_type>, String> {
             // A limit is clamped into the native range rather than rejected:
             // Python has already checked declared bounds against the dtype.
@@ -243,7 +254,7 @@ macro_rules! impl_gen_float_column {
         fn $fn_name(
             plan: &ColumnPlan,
             n: usize,
-            seed: u64,
+            seed: ColumnSeed,
         ) -> Result<ChunkedArray<$polars_type>, String> {
             let lo = plan
                 .min
@@ -275,7 +286,11 @@ impl_gen_float_column!(gen_float64_column, Float64Type, f64, DEFAULT_FLOAT_BOUND
 ///
 /// The same byte-per-chunk division as `fill_buffer`, except that the values
 /// are a bitmap too, so a chunk owns one byte range in each of the two.
-fn gen_bool_column(plan: &ColumnPlan, n: usize, seed: u64) -> Result<BooleanChunked, String> {
+fn gen_bool_column(
+    plan: &ColumnPlan,
+    n: usize,
+    seed: ColumnSeed,
+) -> Result<BooleanChunked, String> {
     let name = PlSmallStr::from(plan.name.as_str());
     let n_bytes = n.div_ceil(8);
     let mut values: Vec<u8> = vec![0u8; n_bytes];
@@ -365,7 +380,11 @@ impl IndexSampler {
 }
 
 /// Indices into a finite domain; Python gathers the typed values.
-fn gen_index_column(plan: &ColumnPlan, n: usize, seed: u64) -> Result<UInt32Chunked, String> {
+fn gen_index_column(
+    plan: &ColumnPlan,
+    n: usize,
+    seed: ColumnSeed,
+) -> Result<UInt32Chunked, String> {
     let sampler = IndexSampler::new(plan)?;
     numeric_column::<UInt32Type, _>(plan, n, seed, move |rng| sampler.sample(rng))
 }
@@ -435,7 +454,11 @@ pub fn random_ascii(rng: &mut Xoshiro256PlusPlus, scratch: &mut [u8], len: usize
 /// bytes -- view arrays concatenate by merging their buffer lists -- but it
 /// does copy the views, sixteen bytes a row, and at twenty million rows that
 /// costs appreciably more than leaving the column split ever did.
-fn gen_string_column(plan: &ColumnPlan, n: usize, seed: u64) -> Result<StringChunked, String> {
+fn gen_string_column(
+    plan: &ColumnPlan,
+    n: usize,
+    seed: ColumnSeed,
+) -> Result<StringChunked, String> {
     let name = PlSmallStr::from(plan.name.as_str());
     if n == 0 {
         return Ok(StringChunkedBuilder::new(name, 0).finish());
@@ -488,7 +511,11 @@ fn gen_string_column(plan: &ColumnPlan, n: usize, seed: u64) -> Result<StringChu
 ///
 /// Chunked and collected the same way as `gen_string_column`, and for the
 /// same reasons; the only difference is where the bytes come from.
-fn gen_template_column(plan: &ColumnPlan, n: usize, seed: u64) -> Result<StringChunked, String> {
+fn gen_template_column(
+    plan: &ColumnPlan,
+    n: usize,
+    seed: ColumnSeed,
+) -> Result<StringChunked, String> {
     let name = PlSmallStr::from(plan.name.as_str());
     if n == 0 {
         return Ok(StringChunkedBuilder::new(name, 0).finish());
@@ -537,12 +564,39 @@ fn gen_template_column(plan: &ColumnPlan, n: usize, seed: u64) -> Result<StringC
 }
 
 /// Fills one column according to its plan.
-pub fn generate_series(plan: &ColumnPlan, n: usize, seed: u64) -> Result<Series, String> {
+/// Rows `[row_offset, row_offset + n)` of the column `plan` describes.
+///
+/// Chunks are numbered from `row_offset / CHUNK_SIZE`, so the values are the
+/// ones the whole column holds at those rows whatever `n` and `row_offset`
+/// are; a call starting mid-chunk fills that chunk from its start and slices
+/// the head off, at most one partial chunk of extra work. A unique column is
+/// the exception: distinctness is a property of one call, so it ignores the
+/// offset and is drawn afresh.
+pub fn generate_series(
+    plan: &ColumnPlan,
+    n: usize,
+    seed: u64,
+    row_offset: usize,
+) -> Result<Series, String> {
     if plan.unique {
         // Distinctness is a property of the whole column, so a unique column
         // is filled in one pass rather than in independent chunks.
         return crate::unique::generate_unique_series(plan, n, seed);
     }
+    let head = row_offset % CHUNK_SIZE;
+    let seed = ColumnSeed {
+        base: seed,
+        first_chunk: row_offset / CHUNK_SIZE,
+    };
+    let series = generate_chunked(plan, n + head, seed)?;
+    Ok(if head == 0 {
+        series
+    } else {
+        series.slice(head as i64, n)
+    })
+}
+
+fn generate_chunked(plan: &ColumnPlan, n: usize, seed: ColumnSeed) -> Result<Series, String> {
     Ok(match plan.kind {
         Kind::Int64 => gen_int64_column(plan, n, seed)?.into_series(),
         Kind::Int32 => gen_int32_column(plan, n, seed)?.into_series(),
@@ -591,11 +645,11 @@ mod tests {
     fn same_seed_same_values_across_chunk_boundaries() {
         let p = simple("int64");
         let n = CHUNK_SIZE * 2 + 17;
-        let a = generate_series(&p, n, 42).unwrap();
-        let b = generate_series(&p, n, 42).unwrap();
+        let a = generate_series(&p, n, 42, 0).unwrap();
+        let b = generate_series(&p, n, 42, 0).unwrap();
         assert!(a.equals(&b));
         assert_eq!(a.len(), n);
-        let c = generate_series(&p, n, 43).unwrap();
+        let c = generate_series(&p, n, 43, 0).unwrap();
         assert!(!a.equals(&c));
     }
 
@@ -604,9 +658,55 @@ mod tests {
         // Chunk seeds depend on the chunk index alone, so the first rows of a
         // column never change when more rows are asked for.
         let p = simple("float64");
-        let short = generate_series(&p, 1000, 7).unwrap();
-        let long = generate_series(&p, CHUNK_SIZE + 1000, 7).unwrap();
+        let short = generate_series(&p, 1000, 7, 0).unwrap();
+        let long = generate_series(&p, CHUNK_SIZE + 1000, 7, 0).unwrap();
         assert!(short.equals(&long.slice(0, 1000)));
+    }
+
+    #[test]
+    fn an_offset_call_is_a_window_onto_the_whole_column() {
+        // Every kind, every offset: rows [offset, offset + n) of a call with
+        // that offset are the rows the whole column holds there -- on a chunk
+        // boundary, mid-chunk, spanning several chunks, and nullable.
+        let whole_n = CHUNK_SIZE * 3 + 500;
+        let template = [("chars".to_string(), vec!["ab".to_string()], 2, 4)];
+        for kind in ["int64", "float64", "bool", "string", "template", "index"] {
+            let plan = ColumnPlan::build(PlanArgs {
+                name: "c".into(),
+                kind,
+                template: (kind == "template").then_some(&template[..]),
+                n_categories: (kind == "index").then_some(7),
+                ..Default::default()
+            })
+            .unwrap();
+            let whole = generate_series(&plan, whole_n, 9, 0).unwrap();
+            for (offset, n) in [
+                (0, 10),
+                (CHUNK_SIZE, 10),
+                (17, 100),
+                (CHUNK_SIZE - 3, 10),
+                (CHUNK_SIZE + 1234, CHUNK_SIZE * 2 - 2000),
+                (whole_n - 5, 5),
+            ] {
+                let window = generate_series(&plan, n, 9, offset).unwrap();
+                assert!(
+                    window.equals_missing(&whole.slice(offset as i64, n)),
+                    "{kind} at offset {offset} for {n} rows"
+                );
+            }
+        }
+        let nullable = ColumnPlan::build(PlanArgs {
+            name: "c".into(),
+            kind: "int64",
+            nullable: true,
+            null_probability: 0.3,
+            ..Default::default()
+        })
+        .unwrap();
+        let whole = generate_series(&nullable, whole_n, 9, 0).unwrap();
+        let window = generate_series(&nullable, 1000, 9, CHUNK_SIZE - 400).unwrap();
+        assert!(window.equals_missing(&whole.slice((CHUNK_SIZE - 400) as i64, 1000)));
+        assert_eq!(window.len(), 1000);
     }
 
     #[test]
@@ -615,7 +715,7 @@ mod tests {
         // a gather, a cast, a write -- pays for a column split 40 ways.
         let n = CHUNK_SIZE * 40 + 3;
         for kind in ["int64", "float32", "bool"] {
-            let s = generate_series(&simple(kind), n, 3).unwrap();
+            let s = generate_series(&simple(kind), n, 3, 0).unwrap();
             assert_eq!(s.n_chunks(), 1, "{kind} came back split");
             assert_eq!(s.len(), n, "{kind}");
         }
@@ -627,7 +727,7 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
-        assert_eq!(generate_series(&nullable, n, 3).unwrap().n_chunks(), 1);
+        assert_eq!(generate_series(&nullable, n, 3, 0).unwrap().n_chunks(), 1);
     }
 
     #[test]
@@ -636,7 +736,7 @@ mod tests {
         // array copies sixteen bytes of view per row, which costs more than
         // the split it removes. Pinned so the merge is not quietly re-added.
         let n = CHUNK_SIZE * 40 + 3;
-        let s = generate_series(&simple("string"), n, 3).unwrap();
+        let s = generate_series(&simple("string"), n, 3, 0).unwrap();
         assert_eq!(s.len(), n);
         assert!(s.n_chunks() > 1, "a long string column is left split");
     }
@@ -646,14 +746,14 @@ mod tests {
         let lo = 9_007_199_254_740_990i64; // 2**53 - 2
         let hi = 9_007_199_254_740_999i64;
         let p = bounded("int64", Limit::Int(lo), Limit::Int(hi));
-        let s = generate_series(&p, 5000, 1).unwrap();
+        let s = generate_series(&p, 5000, 1, 0).unwrap();
         let ca = s.i64().unwrap();
         assert_eq!(ca.min().unwrap(), lo);
         assert_eq!(ca.max().unwrap(), hi);
 
         let lo = u64::MAX - 15;
         let p = bounded("uint64", Limit::UInt(lo), Limit::UInt(u64::MAX));
-        let s = generate_series(&p, 5000, 1).unwrap();
+        let s = generate_series(&p, 5000, 1, 0).unwrap();
         let ca = s.u64().unwrap();
         assert!(ca.min().unwrap() >= lo);
         assert!(
@@ -665,7 +765,7 @@ mod tests {
     #[test]
     fn a_float_limit_on_an_integer_column_truncates() {
         let p = bounded("int32", Limit::Float(2.9), Limit::Float(2.9));
-        let s = generate_series(&p, 10, 1).unwrap();
+        let s = generate_series(&p, 10, 1, 0).unwrap();
         assert_eq!(s.i32().unwrap().max().unwrap(), 2);
     }
 
@@ -678,7 +778,7 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
-        let s = generate_series(&p, 10_000, 3).unwrap();
+        let s = generate_series(&p, 10_000, 3, 0).unwrap();
         let ca = s.u32().unwrap();
         assert_eq!(ca.min().unwrap(), 0);
         assert_eq!(ca.max().unwrap(), 3);
@@ -691,7 +791,7 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
-        let s = generate_series(&p, 1000, 3).unwrap();
+        let s = generate_series(&p, 1000, 3, 0).unwrap();
         assert_eq!(s.u32().unwrap().min().unwrap(), 2);
     }
 
@@ -705,7 +805,7 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
-        let s = generate_series(&p, 20_000, 9).unwrap();
+        let s = generate_series(&p, 20_000, 9, 0).unwrap();
         let share = s.null_count() as f64 / 20_000.0;
         assert!((share - 0.5).abs() < 0.03, "null share {share}");
     }
@@ -722,7 +822,7 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
-        let s = generate_series(&p, 5_000, 4).unwrap();
+        let s = generate_series(&p, 5_000, 4, 0).unwrap();
         assert_eq!(s.null_count(), 0);
         assert_eq!(s.len(), 5_000);
     }
@@ -737,7 +837,7 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
-        let s = generate_series(&p, 2000, 5).unwrap();
+        let s = generate_series(&p, 2000, 5, 0).unwrap();
         let ca = s.str().unwrap();
         for v in (0..ca.len()).filter_map(|i| ca.get(i)) {
             assert!((3..=6).contains(&v.len()), "{v}");
@@ -757,7 +857,7 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
-        let s = generate_series(&p, 5_000, 11).unwrap();
+        let s = generate_series(&p, 5_000, 11, 0).unwrap();
         let ca = s.str().unwrap();
         let mut counts = [0usize; 62];
         for v in (0..ca.len()).filter_map(|i| ca.get(i)) {
@@ -789,7 +889,7 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
-        let s = generate_series(&p, 100, 1).unwrap();
+        let s = generate_series(&p, 100, 1, 0).unwrap();
         assert_eq!(s.i64().unwrap().max().unwrap(), 10);
     }
 
@@ -809,7 +909,7 @@ mod tests {
     #[test]
     fn zero_rows_gives_an_empty_typed_series() {
         for kind in ["int8", "uint64", "float32", "bool", "string"] {
-            let s = generate_series(&simple(kind), 0, 1).unwrap();
+            let s = generate_series(&simple(kind), 0, 1, 0).unwrap();
             assert_eq!(s.len(), 0, "{kind}");
         }
         let p = ColumnPlan::build(PlanArgs {
@@ -820,7 +920,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!(
-            generate_series(&p, 0, 1).unwrap().dtype(),
+            generate_series(&p, 0, 1, 0).unwrap().dtype(),
             &DataType::UInt32
         );
     }

@@ -103,9 +103,11 @@ them. See [String formats](../how-to/formats.md).
 - **A `Hierarchy` owns both its columns.** A `null_probability`,
   `distribution` or `weights` declared on either is not what you get: the
   references have to come from one pool for the two columns to join at all.
-- **Uniqueness holds within a batch, not across one.** `generate_batches` and
-  the `sink_*` functions sample each batch independently, so a `unique=True`
-  column or a `__unique_together__` group is only distinct inside each batch.
+- **Uniqueness holds within a batch, not across one.** A batch of
+  `generate_batches` or a `sink_*` is a window onto one frame for a column
+  no pass rewrites, but a `unique=True` column, a `__unique_together__`
+  group, a rule and a foreign key are drawn per batch, so distinctness is
+  only within each batch.
 - **A `unique` column ignores `weights` and a non-uniform `distribution`** --
   both are refused at declaration rather than silently dropped, since neither
   has anything to say about a draw without replacement.
