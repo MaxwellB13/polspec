@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import Any, ClassVar, Literal, cast, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, overload
 
 import polars as pl
 
@@ -38,6 +38,9 @@ from polspec.report import framespec_to_markdown, framespec_to_mermaid
 from polspec.spec import ColSpec
 from polspec.tablespec import TableSpec, _parse_unique_together
 from polspec.validation import ValidationOptions
+
+if TYPE_CHECKING:
+    from polars._typing import IpcCompression, ParquetCompression
 
 
 def _is_declaration_value(value: Any) -> bool:
@@ -476,6 +479,10 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         `cycles` and `self_references` apply only to a spec declaring a
         `__hierarchy__`, and deliberately violate it. See
         `polspec.generation.generate` for the full contract.
+
+        `lazy=True` is **deprecated since 0.8.0** and removed in 0.9: it
+        builds the whole frame and calls `.lazy()` on it. Use `scan()` for
+        a frame that generates as it is collected.
         """
         return generation.generate(
             cls.spec,
@@ -565,7 +572,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         n: int,
         *,
         batch_size: int = 100_000,
-        compression: str = "zstd",
+        compression: ParquetCompression = "zstd",
         method: Method = "random",
         seed: int | None = None,
         references: References = None,
@@ -602,7 +609,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     ) -> None:
         """Generates `n` rows and streams them to a CSV file in batches.
 
-        Extra keyword arguments go to `pl.DataFrame.write_csv`.
+        Extra keyword arguments go to `pl.LazyFrame.sink_csv`.
         """
         generation.sink_csv(
             cls.spec,
@@ -623,7 +630,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         n: int,
         *,
         batch_size: int = 100_000,
-        compression: str | None = "zstd",
+        compression: IpcCompression | None = "zstd",
         method: Method = "random",
         seed: int | None = None,
         references: References = None,
@@ -659,7 +666,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     ) -> None:
         """Generates `n` rows and streams them to an NDJSON file in batches.
 
-        Extra keyword arguments go to `pl.DataFrame.write_ndjson`.
+        Extra keyword arguments go to `pl.LazyFrame.sink_ndjson`.
         """
         generation.sink_ndjson(
             cls.spec,

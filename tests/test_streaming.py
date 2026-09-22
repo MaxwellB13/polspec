@@ -1,3 +1,5 @@
+import warnings
+
 import polars as pl
 import pytest
 from polspec import Bound, ColRule, ColSpec, ForeignKey, FrameSpec, col
@@ -25,7 +27,8 @@ class StreamDataSource(FrameSpec):
 
 
 def test_generate_lazy():
-    lf = StreamDataSource.generate(200, lazy=True, seed=42)
+    with pytest.deprecated_call(match="Use scan"):
+        lf = StreamDataSource.generate(200, lazy=True, seed=42)
     assert isinstance(lf, pl.LazyFrame)
     assert lf.collect_schema() == StreamDataSource.schema()
 
@@ -307,3 +310,26 @@ def test_a_batch_seed_no_longer_depends_on_how_many_came_before():
     batches = list(PlainSource.generate_batches(n, batch_size=b, seed=8))
     third = PlainSource.generate(n, seed=8).slice(2 * b, b)
     assert batches[2].select("i", "f", "s").equals(third.select("i", "f", "s"))
+
+
+def test_lazy_is_deprecated_in_favour_of_scan():
+    """`generate(lazy=True)` builds the whole frame and calls `.lazy()` on it,
+    so the memory is already spent -- a keyword that has to be explained as
+    not what it says. Removed in 0.9."""
+    with pytest.deprecated_call(match=r"scan\(\) for a LazyFrame"):
+        StreamDataSource.generate(10, lazy=True, seed=1)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        StreamDataSource.generate(10, seed=1)
+        StreamDataSource.generate(10, seed=1).lazy()
+        StreamDataSource.scan(10, seed=1)
+
+
+def test_a_sink_is_a_scan_written_out(tmp_path):
+    """The sinks are `scan(...)` handed to the matching polars sink, so what
+    a sink writes is what collecting the scan gives."""
+    path = tmp_path / "rows.parquet"
+    StreamDataSource.sink_parquet(path, 5_000, seed=9, batch_size=1_000)
+    assert pl.read_parquet(path).equals(
+        StreamDataSource.scan(5_000, seed=9, batch_size=1_000).collect()
+    )

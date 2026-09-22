@@ -41,7 +41,6 @@ comparisons to NumPy and hand-written fixtures, are in
 ```bash
 uv add polspec           # preferred
 pip install polspec      # alternative
-uv add "polspec[arrow]"  # extra: PyArrow for the Parquet/IPC sinks
 ```
 
 Wheels are published for Linux (x86_64, aarch64), macOS (Intel and Apple

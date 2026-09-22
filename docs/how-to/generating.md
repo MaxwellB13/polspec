@@ -160,11 +160,17 @@ Orders.sink_ipc("orders.arrow", 1_000_000, compression="zstd")
 Orders.sink_ndjson("orders.ndjson", 1_000_000)
 ```
 
+Each is [`scan()`](#lazy-output--scan) handed to the matching
+`LazyFrame.sink_*`, so what a sink writes is what collecting the scan gives.
 All four take `batch_size`, `method`, `seed` and `references`, create the
-parent directory if needed, and pass extra keyword arguments through to the
-underlying writer. Parquet and IPC need PyArrow — `pip install "polspec[arrow]"`.
+parent directory if needed, and pass extra keyword arguments through to
+polars' own sink. Nothing beyond Polars is needed for any of them.
 
 With `n=0`, Parquet, IPC and CSV still write a valid schema-bearing file.
+
+A sink is the shorthand; `Orders.scan(n, seed=1).sink_parquet(path)` is the
+same write with the rest of a lazy plan available — a `filter`, a `select`,
+a `sort` — before it reaches the file.
 
 ## Foreign keys
 

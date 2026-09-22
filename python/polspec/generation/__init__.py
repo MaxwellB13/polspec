@@ -193,8 +193,20 @@ def generate(
     against. Both default to zero, and `validate()` reports whatever they
     injected.
 
-    lazy=True returns a `pl.LazyFrame` around the generated DataFrame.
+    lazy=True returns a `pl.LazyFrame` around the generated DataFrame --
+    the whole frame, already built. **Deprecated since 0.8.0** and removed
+    in 0.9: call `scan()` for a frame that generates as it is collected, or
+    `.lazy()` on the result for a handle on an eager one.
     """
+    if lazy:
+        warnings.warn(
+            "generate(lazy=True) builds the whole frame and calls .lazy() on "
+            "it, so the memory is already spent. Use scan() for a LazyFrame "
+            "that generates as it is collected, or .lazy() on the result for "
+            "a handle on an eager one. Removed in 0.9.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     require_columns(spec)
     _check_counts(n)
     _check_faults(spec, cycles, self_references)

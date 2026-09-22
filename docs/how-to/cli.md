@@ -271,6 +271,19 @@ polspec diff main/orders.yaml pr/orders.yaml --markdown --fail-on breaking
 `--max-samples` and `--sample N` — see
 [`DriftOptions`](drift.md#options).
 
+### `drift --all` — every spec against the file named after it
+
+```bash
+polspec drift --all specs/ nightly/
+polspec drift --all specs/ nightly/ --json > drift.json
+```
+
+As for `validate --all`: `SPEC` is a directory of specs and `DATA` a
+directory of files named after them. Every spec with a file is measured,
+specs without one are listed and skipped, and `--fail-on` decides the exit
+status across all of them. `diff` compares two declarations rather than a
+declaration and data, so it has no `--all`.
+
 ## Exit codes and errors
 
 Every subcommand returns `0` on success and `1` on a reported error, printed
