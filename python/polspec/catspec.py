@@ -60,6 +60,21 @@ DEFAULT_EXCLUDE_PATTERNS: tuple[str, ...] = (
 )
 
 
+def _refuse_case_clash(names: Sequence[str]) -> None:
+    """Lookup is case-insensitive -- a column `status` finds an entry
+    `STATUS` -- so two entries differing only in case would be one name with
+    two answers. Refused where they are declared, naming both."""
+    by_fold: dict[str, str] = {}
+    for name in names:
+        other = by_fold.setdefault(name.casefold(), name)
+        if other != name:
+            raise SpecError(
+                f"CatSpec entries {other!r} and {name!r} differ only in case, and "
+                "lookup is case-insensitive: a column would bind to either. "
+                "Rename one."
+            )
+
+
 def _matches_patterns(name: str, patterns: Sequence[str]) -> bool:
     return any(re.search(pat, name, re.IGNORECASE) for pat in patterns)
 
@@ -289,6 +304,7 @@ class CatSpec(metaclass=_CatSpecMeta):
         self._enums = {str(k): [str(x) for x in v] for k, v in merged_enums.items()}
         self._categoricals: dict[str, pl.Categories] = {}
         self._choices: dict[str, list[Any]] = {}
+        _refuse_case_clash([*self._enums, *(str(k) for k in merged_cats)])
 
         for key, value in merged_cats.items():
             name = str(key)

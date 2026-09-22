@@ -2714,11 +2714,9 @@ member of a composite key) or `FK`.
 Mermaid renders in GitHub, GitLab and most documentation sites, including this
 one, so the diagram stays live rather than becoming a stale screenshot.
 
-!!! note
-
-    Every `unique=True` column is currently marked `PK`, so a spec with several
-    unique columns renders several primary keys. `UK` would be the correct
-    token for the non-primary ones.
+A lone `unique=True` column is the entity's `PK`; when several columns are
+unique each is marked `UK`, as is every member of a `__unique_together__`
+group, and a foreign-keyed column `FK`.
 
 ## Several specs in one diagram
 
@@ -3166,6 +3164,21 @@ The frame is built in memory and written once. For a file too large to hold,
 the streaming [`sink_*`](https://maxwellb13.github.io/polspec/how-to/generating/#writing-straight-to-a-file) functions
 are a Python surface.
 
+### `--all` — every spec in a directory
+
+```bash
+polspec generate --all specs/ -n 1000 -o data/ --seed 1
+polspec generate --all specs/ -n 1000 -o data/ --format csv
+```
+
+With `--all`, `SPEC` is a directory (or any file `Registry.discover`
+accepts) and `-o` is a directory: every spec found is generated, **parents
+first with their keys threaded into their children** as
+[`Registry.generate_all`](https://maxwellb13.github.io/polspec/how-to/registry/#generating-a-related-set) does, and
+written as `<name>.<format>` (Parquet by default). No `--references` are
+needed for keys between the discovered specs; supply them for a parent
+outside the directory.
+
 ## `validate` — check data against a schema
 
 ```bash
@@ -3185,6 +3198,20 @@ Python at all.
 spec, by that spec's name; repeat it for several. `--allow-extra` and
 `--allow-missing` relax the structural checks; `--strict-dtypes` tightens the
 dtype check.
+
+### `--all` — every spec against the file named after it
+
+```bash
+polspec validate --all specs/ data/
+polspec validate --all specs/ data/ --json > reports.json
+```
+
+With `--all`, `SPEC` is a directory of specs and `DATA` a directory of data
+files named after them (`Orders.parquet` for `Orders`, in any format the
+CLI reads). Every spec with a file is checked, **each seeing the others'
+files as its parents**, as [`Registry.inspect_all`](https://maxwellb13.github.io/polspec/how-to/registry/#validating-a-related-set)
+does; specs with no file are listed and skipped. The exit status is 1 when
+any report fails; `--json` prints one report per spec, keyed by name.
 
 ## `diff` and `drift` — what moved
 
@@ -4746,11 +4773,6 @@ Under `method="cartesian"`, if the coverage set is larger than `n` all of it is
 kept. `generate_batches` and every `sink_*` inherit this, so asking for 5 rows
 from two ten-category enums yields 100.
 
-### `generate(0, method="cartesian")` is not empty
-
-It emits the whole coverage set, unlike `generate(0)` and the sinks, which all
-produce nothing.
-
 ## A `format` promises syntax, not existence
 
 `format="email"` generates a well-formed address, not a deliverable one, and
@@ -4774,8 +4796,6 @@ them. See [String formats](https://maxwellb13.github.io/polspec/how-to/formats/)
   digits are refused at `generate()`. Validation checks the full precision.
 - **`missing_cols="add"` can produce a frame that fails re-validation**, since
   columns are added after validation runs, including for non-nullable columns.
-- **Rules overwrite nulls**, so a nullable column with a rule ends up with
-  fewer nulls than `null_probability` suggests.
 - **A `Hierarchy` cannot be batched or streamed.** `generate_batches` and
   every `sink_*` refuse a spec that declares one, because each batch is
   generated independently and a forest is a property of the whole frame.
@@ -4792,10 +4812,6 @@ them. See [String formats](https://maxwellb13.github.io/polspec/how-to/formats/)
   domain has to fit inside the column's own — a contradiction is refused at
   declaration — but within it, values come from the parent, so a declared
   `distribution` or `weights` on a foreign-keyed column is not what you get.
-- **Case-insensitive registry lookup** means a column named `status` binds to a
-  registry entry named `STATUS`; entries differing only in case are ambiguous.
-- **`to_mermaid` marks every `unique=True` column `PK`**, so several unique
-  columns render as several primary keys.
 
 ---
 
@@ -5095,9 +5111,9 @@ which specs exist unless they are put in a
 [`Registry`](https://maxwellb13.github.io/polspec/how-to/registry/). That is deliberate — two test modules may
 each define an `Orders` — but it leaves edges:
 
-- **The command line has no registry verbs.** `polspec validate`, `generate`
-  and `drift` each take one spec and its parents as `--references NAME=PATH`;
-  generating or validating a whole registry from the shell is not there yet.
+- **`drift` takes one spec.** `polspec generate --all` and `validate --all`
+  run over every spec in a directory with the keys between them bound;
+  `drift` still takes one spec and its parents as `--references NAME=PATH`.
 - **Discovery imports code.** `Registry.discover("specs/")` runs every `.py`
   file it finds. A declared `Registry(...)` in a module of your own is the
   safer shape, and `discover` is a convenience over it.
@@ -5250,8 +5266,27 @@ seed produces; see
 - *Generating data* said each column derives its seed "from its position".
   It is from its name -- the reason `seed_name` is needed at all.
 
+- **`polspec generate --all` and `polspec validate --all`.** With `--all`,
+  `SPEC` is a directory of specs: `generate` writes one `<name>.<format>`
+  per spec into `-o DIR`, parents first with their keys threaded into
+  their children, as `Registry.generate_all` does; `validate` checks each
+  spec against `DATA/<name>.<suffix>`, every spec seeing the others' files
+  as parents, as `Registry.inspect_all` does, exiting 1 when any fails and
+  printing one report per spec with `--json`.
+
 ### Changed
 
+- **A rule leaves a null a null.** A nullable column with rules used to
+  lose nulls on the rows a rule matched, ending up below its declared
+  `null_probability`. The column's nullability is decided when it is drawn;
+  a rule says what a *value* on a matched row is, which is also all
+  validation checks it against.
+- **`to_mermaid` marks one primary key.** A lone `unique=True` column is
+  the entity's `PK`; when several columns are unique each is a `UK`, as a
+  `__unique_together__` member already was.
+- **A `CatSpec` refuses two entries differing only in case** (`STATUS` and
+  `status`), naming both: lookup is case-insensitive, so they were one
+  name with two answers.
 - **Pass seeds are keyed by name, not drawn in order.** The passes that
   run after the columns are filled -- rules, the hierarchy, foreign keys,
   composite uniqueness, a bounded categorical's pool, cartesian coverage
@@ -5263,6 +5298,12 @@ seed produces; see
   different values for the same seed than 0.6 did**, once; a spec with
   plain columns is unchanged, and so is every column's own draw. The
   `limitations.md` bullet that described the old behaviour is gone.
+
+### Fixed
+
+- `generate(0, method="cartesian")` returns the empty typed frame
+  `generate(0)` and the sinks do, rather than the whole coverage set. The
+  last strict `xfail` in `tests/test_roundtrip.py` is gone with it.
 
 ### Internal
 

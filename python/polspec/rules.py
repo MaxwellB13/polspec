@@ -179,12 +179,16 @@ def _apply_column_rules(
     another pass rewrites reads the rewritten values -- the same values
     validation will check the rule against. `polspec.constraints.order`
     decides which pass runs first.
+
+    A null stays a null. The column's nullability was decided when it was
+    drawn, at the declared rate; a rule says what a *value* on a matched
+    row is, which is also all validation checks it against.
     """
     if df.height == 0 or not spec.rules:
         return df
     rng = random.Random(seed)
     column = df[name]
-    claimed = pl.repeat(False, df.height, dtype=pl.Boolean, eager=True)
+    claimed = column.is_null()
     for rule in spec.rules:
         mask = df.select(rule._expr().fill_null(False)).to_series() & ~claimed
         rows = mask.arg_true()

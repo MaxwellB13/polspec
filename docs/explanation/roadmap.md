@@ -87,9 +87,9 @@ which specs exist unless they are put in a
 [`Registry`](../how-to/registry.md). That is deliberate — two test modules may
 each define an `Orders` — but it leaves edges:
 
-- **The command line has no registry verbs.** `polspec validate`, `generate`
-  and `drift` each take one spec and its parents as `--references NAME=PATH`;
-  generating or validating a whole registry from the shell is not there yet.
+- **`drift` takes one spec.** `polspec generate --all` and `validate --all`
+  run over every spec in a directory with the keys between them bound;
+  `drift` still takes one spec and its parents as `--references NAME=PATH`.
 - **Discovery imports code.** `Registry.discover("specs/")` runs every `.py`
   file it finds. A declared `Registry(...)` in a module of your own is the
   safer shape, and `discover` is a convenience over it.

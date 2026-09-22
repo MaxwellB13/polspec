@@ -229,3 +229,30 @@ def test_colrule_weighted_choices():
         premium_df.filter(pl.col("reward") == "vip_pass").height / premium_df.height
     )
     assert 0.67 <= vip_ratio <= 0.73
+
+
+# ---------------------------------------------------------------------------
+# nulls
+# ---------------------------------------------------------------------------
+
+
+def test_a_rule_leaves_a_null_a_null():
+    """The column's nullability was decided when it was drawn, at the declared
+    rate; a rule says what a value on a matched row is, which is all
+    validation checks it against. So a nullable ruled column keeps its rate."""
+
+    class S(FrameSpec):
+        flag = ColSpec(pl.Boolean)
+        ruled = ColSpec(
+            pl.Int64,
+            bounds=(0, 100),
+            nullable=True,
+            null_probability=0.5,
+            rules=[ColRule(when=col("flag"), choices=tuple(range(50, 100)))],
+        )
+
+    df = S.generate(2_000, seed=1)
+    assert 850 < df["ruled"].null_count() < 1_150
+    matched = df.filter(pl.col("flag") & pl.col("ruled").is_not_null())["ruled"]
+    assert matched.min() >= 50, "the rule still holds on every matched value"
+    S.validate(df)

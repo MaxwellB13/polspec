@@ -122,8 +122,25 @@ def _build_parser() -> argparse.ArgumentParser:
     validate = subparsers.add_parser(
         "validate", help="Check a data file against a schema"
     )
-    validate.add_argument("spec", help="A .yaml/.yml spec, or a .py file defining one")
-    validate.add_argument("data", help="Path to a CSV, Parquet, NDJSON or IPC file")
+    validate.add_argument(
+        "spec",
+        help="A .yaml/.yml spec, or a .py file defining one; with --all, a directory",
+    )
+    validate.add_argument(
+        "data",
+        help=(
+            "Path to a CSV, Parquet, NDJSON or IPC file; with --all, a directory "
+            "of files named after the specs"
+        ),
+    )
+    validate.add_argument(
+        "--all",
+        action="store_true",
+        help=(
+            "Every spec found under SPEC against DATA/<name>.<suffix>, each "
+            "seeing the others as parents"
+        ),
+    )
     validate.add_argument(
         "--references",
         action="append",
@@ -164,7 +181,24 @@ def _build_parser() -> argparse.ArgumentParser:
     generate = subparsers.add_parser(
         "generate", help="Generate rows from a schema into a data file"
     )
-    generate.add_argument("spec", help="A .yaml/.yml spec, or a .py file defining one")
+    generate.add_argument(
+        "spec",
+        help="A .yaml/.yml spec, or a .py file defining one; with --all, a directory",
+    )
+    generate.add_argument(
+        "--all",
+        action="store_true",
+        help=(
+            "Every spec found under SPEC, parents first, to -o/--output as a "
+            "directory of <name> files in --format"
+        ),
+    )
+    generate.add_argument(
+        "--format",
+        default="parquet",
+        metavar="EXT",
+        help="With --all, the file format to write (default: parquet)",
+    )
     generate.add_argument(
         "-n", "--rows", type=int, required=True, metavar="N", help="Rows to generate"
     )
