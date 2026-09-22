@@ -556,6 +556,51 @@ def _field_changed(pair: Pair, name: str, old: Any, new: Any) -> DriftFinding:
     )
 
 
+def _compare_struct_fields(pair: Pair) -> list[DriftFinding]:
+    """A struct's fields, compared as the columns they describe.
+
+    A field added is a column added inside the value and a field removed a
+    column removed, under the same codes and the same severity rule the
+    frame's own columns use -- `old.field` is the key, so one field's
+    history reads the same whether it sits in a struct or beside one. A
+    field that both sides declare is compared by every comparator that
+    applies to a column.
+    """
+    if pair.mode == "drift":
+        return []  # the data side measures fields in `drift/data.py`
+    old = pair.declared.fields or {}
+    new = pair.new.fields or {}
+    findings: list[DriftFinding] = []
+    for name in old.keys() - new.keys():
+        findings.append(
+            pair.finding(
+                "column_removed",
+                "compatible",
+                f"field {name!r} is no longer described; its values are "
+                "generated from the dtype alone",
+                suffix=f"fields.{name}",
+                field=f"fields.{name}",
+            )
+        )
+    for name in new.keys() - old.keys():
+        findings.append(
+            pair.finding(
+                "column_added",
+                "breaking",
+                f"field {name!r} is now described, so a value that passed "
+                "before may fail",
+                suffix=f"fields.{name}",
+                field=f"fields.{name}",
+            )
+        )
+    for name in sorted(old.keys() & new.keys()):
+        if old[name] != new[name]:
+            findings.append(
+                _field_changed(pair, f"fields.{name}", old[name], new[name])
+            )
+    return findings
+
+
 def _compare_field(name: str) -> Comparator:
     """A comparator for a field that shapes generation but not validation."""
 
@@ -585,6 +630,7 @@ FIELD_COMPARATORS: dict[str, Comparator] = {
     "pattern": _compare_field("pattern"),
     # Which name a column is seeded from cannot affect what validation accepts.
     "seed_name": _compare_field("seed_name"),
+    "fields": _compare_struct_fields,
     "null_probability": _compare_null_rate,
     "unique": _compare_unique,
     "rules": _compare_rules,

@@ -15,6 +15,7 @@ ColSpec(
     null_probability=0.1,
     string_length=None,
     list_length=None,
+    fields=None,
     format=None,
     pattern=None,
     distribution=None,
@@ -232,8 +233,38 @@ across a rename through `seed_name` like any other.
 What a nested column cannot carry: `unique` (a list is not drawn without
 replacement) and `rules` (a rule's choices are values, and a list value
 would be a list of lists). `validators` and `__checks__` work as on any
-column — they are expressions. A `List` of a `List` or a `Struct` declares
-and validates by dtype only.
+column — they are expressions.
+
+### `fields`: what a struct's values are
+
+A `Struct` column's dtype is its schema — every field's name and type comes
+from it — and `fields` says what is *claimed* about the values in it:
+
+```python
+ColSpec(
+    pl.Struct({"lat": pl.Float64, "lon": pl.Float64, "label": pl.String}),
+    fields={
+        "lat": ColSpec(pl.Float64, bounds=(-90, 90)),
+        "lon": ColSpec(pl.Float64, bounds=(-180, 180)),
+    },
+    nullable=True,
+)
+```
+
+Each value is a `ColSpec`, so a field is described exactly as a column of
+the same dtype would be. `fields` is **partial**: a struct of twenty fields
+where one needs bounds spells one field, and the rest are generated from
+their dtypes alone. A name the dtype does not declare, or a field spec
+whose dtype disagrees with the struct's, is refused where it is written.
+
+A field is a value, not a column, so `unique`, `rules`, `seed_name` and
+`col_name` are refused on one — each is a claim about a column among
+columns. As with a list, `nullable` describes the *cell*: a null struct,
+not a null field.
+
+A `List` of a `Struct` takes `fields` too, describing its element, and a
+field may itself be a struct, so a declaration nests as deeply as the
+dtype does.
 
 ## String formats
 

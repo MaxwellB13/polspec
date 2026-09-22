@@ -449,6 +449,7 @@ ColSpec(
     null_probability=0.1,
     string_length=None,
     list_length=None,
+    fields=None,
     format=None,
     pattern=None,
     distribution=None,
@@ -666,8 +667,38 @@ across a rename through `seed_name` like any other.
 What a nested column cannot carry: `unique` (a list is not drawn without
 replacement) and `rules` (a rule's choices are values, and a list value
 would be a list of lists). `validators` and `__checks__` work as on any
-column — they are expressions. A `List` of a `List` or a `Struct` declares
-and validates by dtype only.
+column — they are expressions.
+
+### `fields`: what a struct's values are
+
+A `Struct` column's dtype is its schema — every field's name and type comes
+from it — and `fields` says what is *claimed* about the values in it:
+
+```python
+ColSpec(
+    pl.Struct({"lat": pl.Float64, "lon": pl.Float64, "label": pl.String}),
+    fields={
+        "lat": ColSpec(pl.Float64, bounds=(-90, 90)),
+        "lon": ColSpec(pl.Float64, bounds=(-180, 180)),
+    },
+    nullable=True,
+)
+```
+
+Each value is a `ColSpec`, so a field is described exactly as a column of
+the same dtype would be. `fields` is **partial**: a struct of twenty fields
+where one needs bounds spells one field, and the rest are generated from
+their dtypes alone. A name the dtype does not declare, or a field spec
+whose dtype disagrees with the struct's, is refused where it is written.
+
+A field is a value, not a column, so `unique`, `rules`, `seed_name` and
+`col_name` are refused on one — each is a claim about a column among
+columns. As with a list, `nullable` describes the *cell*: a null struct,
+not a null field.
+
+A `List` of a `Struct` takes `fields` too, describing its element, and a
+field may itself be a struct, so a declaration nests as deeply as the
+dtype does.
 
 ## String formats
 
@@ -2291,7 +2322,7 @@ as its default is the worst outcome -- pass `strict=False` to
 | | Round-trips |
 |:--|:--:|
 | dtypes, including parametrized `Enum` / `Datetime` / `Duration` / named `Categorical` | yes |
-| `nullable`, `null_probability`, `bounds`, `string_length`, `list_length`, `format`, `pattern`, `seed_name`, `unique`, `tags` | yes |
+| `nullable`, `null_probability`, `bounds`, `string_length`, `list_length`, `fields`, `format`, `pattern`, `seed_name`, `unique`, `tags` | yes |
 | `choices`, `weights`, `distribution`, `distribution_params` | yes |
 | `rules` (`ColRule`) | yes |
 | `__unique_together__` | yes |
@@ -3429,7 +3460,7 @@ What one column declares, and the pieces that make up a declaration.
 
 ## ColSpec
 
-### ColSpec(dtype: pl.DataType | type[pl.DataType], col_name: str | None=None, seed_name: str | None=None, nullable: bool=False, bounds: Bound[Any] | tuple[Any, Any] | list[Any] | None=None, tags: str | Sequence[str] | None=(), unique: bool=False, null_probability: float=_DEFAULT_NULL_PROBABILITY, string_length: Bound[int] | tuple[int, int] | list[int] | None=None, list_length: Bound[int] | tuple[int, int] | list[int] | None=None, format: str | None=None, pattern: str | None=None, distribution: str | None=None, distribution_params: dict[str, float] | None=None, choices: Sequence[Any] | dict[Any, float] | None=None, weights: Sequence[float] | None=None, rules: Sequence[ColRule]=(), validators: Check | pl.Expr | Pred | Sequence[Check | pl.Expr | Pred] | None=())
+### ColSpec(dtype: pl.DataType | type[pl.DataType], col_name: str | None=None, seed_name: str | None=None, nullable: bool=False, bounds: Bound[Any] | tuple[Any, Any] | list[Any] | None=None, tags: str | Sequence[str] | None=(), unique: bool=False, null_probability: float=_DEFAULT_NULL_PROBABILITY, string_length: Bound[int] | tuple[int, int] | list[int] | None=None, list_length: Bound[int] | tuple[int, int] | list[int] | None=None, fields: Mapping[str, ColSpec] | None=None, format: str | None=None, pattern: str | None=None, distribution: str | None=None, distribution_params: dict[str, float] | None=None, choices: Sequence[Any] | dict[Any, float] | None=None, weights: Sequence[float] | None=None, rules: Sequence[ColRule]=(), validators: Check | pl.Expr | Pred | Sequence[Check | pl.Expr | Pred] | None=())
 
 One column's declaration: its type, and every claim made about its values.
 
@@ -3497,6 +3528,21 @@ list_length : Bound | tuple[int, int] | list[int] | None, optional
     each *element*; `nullable` and `null_probability` describe the list
     itself, and generation never puts a null inside one. An `Array`
     takes its length from the dtype and refuses `list_length`.
+fields : Mapping[str, ColSpec] | None, optional
+    For a `Struct` column, what is claimed about each field's values:
+    a `ColSpec` per field, keyed by name. The dtype is the schema --
+    every field's name and type comes from it -- and `fields` is what
+    is claimed about the values within it, so a struct of twenty
+    fields where one needs bounds spells one field. A field the
+    mapping omits is generated from its dtype alone.
+
+    A field is a value, not a column: `unique`, `rules`, `seed_name`
+    and `col_name` are refused on one, since each is a statement about
+    a column among columns. Everything that describes a value is
+    allowed, `fields` included, so a struct may nest to any depth.
+
+    A `List` or `Array` of a `Struct` takes `fields` too: it describes
+    the element, as `bounds` and `format` already do.
 format : str | None, optional
     The shape a `String` column's values take, by name: `"uuid4"`,
     `"email"`, `"ipv4"`, `"ipv6"`, `"mac"`, `"hostname"`,
@@ -4556,7 +4602,7 @@ otherwise. See [Schema and data drift](https://maxwellb13.github.io/polspec/how-
 | `cardinality_moved` | `drift` | compatible | declared values the data never holds |
 | `constraint_added` | `diff` | breaking | `unique`, a validator, rule, check, composite key, foreign key or hierarchy present only in the new spec |
 | `constraint_removed` | `diff` | compatible | the reverse |
-| `field_changed` | `diff` | compatible | `tags`, `weights`, `distribution`, `distribution_params`, `null_probability`, `pattern` or `seed_name` differ |
+| `field_changed` | `diff` | compatible | `tags`, `weights`, `distribution`, `distribution_params`, `null_probability`, `pattern`, `seed_name` or a struct field's declaration differ |
 
 ---
 
@@ -5366,6 +5412,39 @@ seed produces; see
 [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/).
 
 ## [Unreleased]
+
+### Added
+
+- **`ColSpec(fields=…)`: what is claimed about a struct's field values.**
+  A `Struct` column's dtype is its schema -- every field's name and type
+  comes from it -- and `fields` is a `ColSpec` per field saying what its
+  values are, so a field is described exactly as a column of the same
+  dtype would be:
+
+  ```python
+  ColSpec(
+      pl.Struct({"lat": pl.Float64, "lon": pl.Float64}),
+      fields={"lat": ColSpec(pl.Float64, bounds=(-90, 90))},
+      nullable=True,
+  )
+  ```
+
+  It is **partial**: a struct of twenty fields where one needs bounds
+  spells one field. A name the dtype does not declare, or a field spec
+  whose dtype disagrees with the struct's, is refused where it is written,
+  as are `unique`, `rules`, `seed_name` and `col_name` -- each a claim
+  about a column among columns, which a value inside a struct is not. A
+  `List` of a `Struct` takes `fields` too, and a field may itself be a
+  struct, so a declaration nests as deeply as the dtype does.
+
+  A `Struct` dtype now has a spec-file form (`{Struct: {name: <dtype>}}`),
+  so a struct column round-trips through YAML and `to_python` -- and so do
+  `List(Struct)` and `List(List)`, which had no written form before. The
+  format version stays at 3: `fields:` is an added optional key. `diff`
+  reports a field described, no longer described, or changed.
+
+  Generating a struct arrives in the next release; `generate()` still
+  refuses one by name.
 
 ### Removed
 

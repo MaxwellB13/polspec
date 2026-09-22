@@ -29,6 +29,19 @@ def element_dtype(dtype: pl.List | pl.Array) -> pl.DataType:
     return inner() if isinstance(inner, type) else inner
 
 
+def field_dtypes(dtype: pl.Struct) -> dict[str, pl.DataType]:
+    """A struct's fields, name to dtype, each as an instance.
+
+    `element_dtype`'s sibling: polars types a field's dtype as
+    class-or-instance, and everything downstream compares against the
+    instance a `ColSpec` holds.
+    """
+    return {
+        field.name: (field.dtype() if isinstance(field.dtype, type) else field.dtype)
+        for field in dtype.fields
+    }
+
+
 # Factor to scale a day/second-denominated range into a Datetime's or
 # Duration's own physical time_unit.
 _TIME_UNIT_FACTORS = {"ms": 1_000, "us": 1_000_000, "ns": 1_000_000_000}
