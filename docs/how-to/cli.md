@@ -193,6 +193,21 @@ The frame is built in memory and written once. For a file too large to hold,
 the streaming [`sink_*`](generating.md#writing-straight-to-a-file) functions
 are a Python surface.
 
+### `--all` — every spec in a directory
+
+```bash
+polspec generate --all specs/ -n 1000 -o data/ --seed 1
+polspec generate --all specs/ -n 1000 -o data/ --format csv
+```
+
+With `--all`, `SPEC` is a directory (or any file `Registry.discover`
+accepts) and `-o` is a directory: every spec found is generated, **parents
+first with their keys threaded into their children** as
+[`Registry.generate_all`](registry.md#generating-a-related-set) does, and
+written as `<name>.<format>` (Parquet by default). No `--references` are
+needed for keys between the discovered specs; supply them for a parent
+outside the directory.
+
 ## `validate` — check data against a schema
 
 ```bash
@@ -212,6 +227,20 @@ Python at all.
 spec, by that spec's name; repeat it for several. `--allow-extra` and
 `--allow-missing` relax the structural checks; `--strict-dtypes` tightens the
 dtype check.
+
+### `--all` — every spec against the file named after it
+
+```bash
+polspec validate --all specs/ data/
+polspec validate --all specs/ data/ --json > reports.json
+```
+
+With `--all`, `SPEC` is a directory of specs and `DATA` a directory of data
+files named after them (`Orders.parquet` for `Orders`, in any format the
+CLI reads). Every spec with a file is checked, **each seeing the others'
+files as its parents**, as [`Registry.inspect_all`](registry.md#validating-a-related-set)
+does; specs with no file are listed and skipped. The exit status is 1 when
+any report fails; `--json` prints one report per spec, keyed by name.
 
 ## `diff` and `drift` — what moved
 

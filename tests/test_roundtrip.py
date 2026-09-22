@@ -632,13 +632,11 @@ def test_zero_rows_roundtrips():
     assert_roundtrip(MixedSpec, n=0)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="C12: generate(0, method='cartesian') emits the whole coverage set "
-    "instead of an empty frame, unlike generate(0) and the sink_* methods",
-)
 def test_zero_rows_cartesian_is_empty():
-    assert MixedSpec.generate(0, method="cartesian", seed=SEED).height == 0
+    """C12, closed in 0.7.0: nothing asked for is nothing covered, the same
+    empty typed frame `generate(0)` and the sinks produce."""
+    df = MixedSpec.generate(0, method="cartesian", seed=SEED)
+    assert df.height == 0 and df.schema == MixedSpec.schema()
 
 
 # ---------------------------------------------------------------------------

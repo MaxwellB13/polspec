@@ -745,3 +745,21 @@ def test_infer_dispatches_on_what_it_is_given():
     assert CatSpec.infer(df).get_enum("status") == ["A", "B"]
     assert CatSpec.infer(Spec).get_enum("status") == ["A", "B"]
     assert CatSpec.infer(Spec.spec).get_enum("status") == ["A", "B"]
+
+
+def test_entries_differing_only_in_case_are_refused():
+    """Lookup is case-insensitive -- `status` finds `STATUS` -- so two entries
+    that differ only in case would be one name with two answers."""
+    from polspec import SpecError
+
+    with pytest.raises(SpecError, match="'STATUS' and 'status' differ only in case"):
+        CatSpec(enums={"STATUS": ["A"], "status": ["B"]})
+    with pytest.raises(SpecError, match="differ only in case"):
+        CatSpec(enums={"Status": ["A"]}, categoricals={"STATUS": pl.Categories("x")})
+    with pytest.raises(SpecError, match="differ only in case"):
+
+        class Clashing(CatSpec):
+            REGION = pl.Enum(["UK"])
+            region = pl.Enum(["US"])
+
+        Clashing.spec  # noqa: B018 - the class body is read on first access

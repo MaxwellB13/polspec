@@ -272,6 +272,7 @@ def _mermaid_name(name: str) -> str:
 
 def _entity_lines(spec: TableSpec, entity_name: str) -> list[str]:
     """One `Name { ... }` block: a line per column with its key and notes."""
+    unique_count = sum(1 for cs in spec.columns.values() if cs.unique)
     fk_columns: dict[str, ForeignKey] = {}
     for fk in spec.foreign_keys:
         for col in fk.columns:
@@ -297,9 +298,11 @@ def _entity_lines(spec: TableSpec, entity_name: str) -> list[str]:
         else:
             type_name = type(dtype).__name__
 
+        # One primary key per entity: a lone unique column is it, several
+        # are each a unique key.
         key_label = ""
         if cs.unique:
-            key_label = "PK"
+            key_label = "PK" if unique_count == 1 else "UK"
         elif any(col_name in group for group in spec.unique_together):
             key_label = "UK"
         elif col_name in fk_columns:

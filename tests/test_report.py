@@ -129,3 +129,26 @@ def test_framespec_to_markdown_lists_column_validators():
     assert "Column `price`" in md
     assert "price_positive" in md
     assert "Price must be positive" in md
+
+
+def test_mermaid_marks_one_primary_key_and_otherwise_unique_keys():
+    """A lone `unique=True` column is the entity's PK; several unique columns
+    are each a UK, since an entity has one primary key."""
+
+    class One(FrameSpec):
+        id = ColSpec(pl.Int64, unique=True)
+        name = ColSpec(pl.String)
+
+    class Two(FrameSpec):
+        id = ColSpec(pl.Int64, unique=True)
+        code = ColSpec(pl.String, unique=True)
+        pair_a = ColSpec(pl.Int64)
+        pair_b = ColSpec(pl.Int64)
+        __unique_together__ = [("pair_a", "pair_b")]
+
+    one = One.to_mermaid()
+    assert "Int64 id PK" in one and "UK" not in one
+    two = Two.to_mermaid()
+    assert "PK" not in two
+    assert "Int64 id UK" in two and "String code UK" in two
+    assert "Int64 pair_a UK" in two

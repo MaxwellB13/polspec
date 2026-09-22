@@ -74,11 +74,6 @@ Under `method="cartesian"`, if the coverage set is larger than `n` all of it is
 kept. `generate_batches` and every `sink_*` inherit this, so asking for 5 rows
 from two ten-category enums yields 100.
 
-### `generate(0, method="cartesian")` is not empty
-
-It emits the whole coverage set, unlike `generate(0)` and the sinks, which all
-produce nothing.
-
 ## A `format` promises syntax, not existence
 
 `format="email"` generates a well-formed address, not a deliverable one, and
@@ -102,8 +97,6 @@ them. See [String formats](../how-to/formats.md).
   digits are refused at `generate()`. Validation checks the full precision.
 - **`missing_cols="add"` can produce a frame that fails re-validation**, since
   columns are added after validation runs, including for non-nullable columns.
-- **Rules overwrite nulls**, so a nullable column with a rule ends up with
-  fewer nulls than `null_probability` suggests.
 - **A `Hierarchy` cannot be batched or streamed.** `generate_batches` and
   every `sink_*` refuse a spec that declares one, because each batch is
   generated independently and a forest is a property of the whole frame.
@@ -120,7 +113,3 @@ them. See [String formats](../how-to/formats.md).
   domain has to fit inside the column's own — a contradiction is refused at
   declaration — but within it, values come from the parent, so a declared
   `distribution` or `weights` on a foreign-keyed column is not what you get.
-- **Case-insensitive registry lookup** means a column named `status` binds to a
-  registry entry named `STATUS`; entries differing only in case are ambiguous.
-- **`to_mermaid` marks every `unique=True` column `PK`**, so several unique
-  columns render as several primary keys.

@@ -61,11 +61,9 @@ member of a composite key) or `FK`.
 Mermaid renders in GitHub, GitLab and most documentation sites, including this
 one, so the diagram stays live rather than becoming a stale screenshot.
 
-!!! note
-
-    Every `unique=True` column is currently marked `PK`, so a spec with several
-    unique columns renders several primary keys. `UK` would be the correct
-    token for the non-primary ones.
+A lone `unique=True` column is the entity's `PK`; when several columns are
+unique each is marked `UK`, as is every member of a `__unique_together__`
+group, and a foreign-keyed column `FK`.
 
 ## Several specs in one diagram
 

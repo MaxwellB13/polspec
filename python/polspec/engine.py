@@ -515,6 +515,11 @@ def _generate_cartesian(
     again, so unique columns are held back and drawn once over the finished
     frame -- where "once" is what makes them distinct.
     """
+    if n == 0:
+        # Nothing was asked for, so nothing is covered: the same empty, typed
+        # frame `generate(0)` and the sinks produce.
+        return _generate_random(columns, 0, seed)
+
     frame_seed = seed if seed is not None else random.randrange(2**63)
     rng = random.Random(frame_seed)
 

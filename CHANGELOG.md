@@ -60,8 +60,27 @@ seed produces; see
 - *Generating data* said each column derives its seed "from its position".
   It is from its name -- the reason `seed_name` is needed at all.
 
+- **`polspec generate --all` and `polspec validate --all`.** With `--all`,
+  `SPEC` is a directory of specs: `generate` writes one `<name>.<format>`
+  per spec into `-o DIR`, parents first with their keys threaded into
+  their children, as `Registry.generate_all` does; `validate` checks each
+  spec against `DATA/<name>.<suffix>`, every spec seeing the others' files
+  as parents, as `Registry.inspect_all` does, exiting 1 when any fails and
+  printing one report per spec with `--json`.
+
 ### Changed
 
+- **A rule leaves a null a null.** A nullable column with rules used to
+  lose nulls on the rows a rule matched, ending up below its declared
+  `null_probability`. The column's nullability is decided when it is drawn;
+  a rule says what a *value* on a matched row is, which is also all
+  validation checks it against.
+- **`to_mermaid` marks one primary key.** A lone `unique=True` column is
+  the entity's `PK`; when several columns are unique each is a `UK`, as a
+  `__unique_together__` member already was.
+- **A `CatSpec` refuses two entries differing only in case** (`STATUS` and
+  `status`), naming both: lookup is case-insensitive, so they were one
+  name with two answers.
 - **Pass seeds are keyed by name, not drawn in order.** The passes that
   run after the columns are filled -- rules, the hierarchy, foreign keys,
   composite uniqueness, a bounded categorical's pool, cartesian coverage
@@ -73,6 +92,12 @@ seed produces; see
   different values for the same seed than 0.6 did**, once; a spec with
   plain columns is unchanged, and so is every column's own draw. The
   `limitations.md` bullet that described the old behaviour is gone.
+
+### Fixed
+
+- `generate(0, method="cartesian")` returns the empty typed frame
+  `generate(0)` and the sinks do, rather than the whole coverage set. The
+  last strict `xfail` in `tests/test_roundtrip.py` is gone with it.
 
 ### Internal
 
