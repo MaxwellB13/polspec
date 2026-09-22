@@ -19,6 +19,21 @@ _DEFAULT_STRING_LEN = (5, 15)
 _DEFAULT_LIST_LEN = (0, 5)
 _DEFAULT_NULL_PROBABILITY = 0.1
 
+# A frame this size is worth a word before it is allocated. Not a refusal:
+# ten gigabytes on a machine with sixty-four is a reasonable thing to ask
+# for, and `max_bytes=` is there for a caller who wants it refused.
+_LARGE_FRAME_BYTES = 4 * 1024**3
+
+# A frame this size is worth a word before it is allocated. Not a refusal:
+# ten gigabytes on a machine with sixty-four is a reasonable thing to ask
+# for, and `max_bytes=` is there for a caller who wants it refused.
+_LARGE_FRAME_BYTES = 4 * 1024**3
+
+# A frame this size is worth a word before it is allocated. Not a refusal:
+# ten gigabytes on a machine with sixty-four is a reasonable thing to ask
+# for, and `max_bytes=` is there for a caller who wants it refused.
+_LARGE_FRAME_BYTES = 4 * 1024**3
+
 # Safety cap on method="cartesian": the cross-joined coverage set grows as
 # the product of every dimension's cardinality, so a handful of wide enums
 # can explode into an unreasonable row count by accident.

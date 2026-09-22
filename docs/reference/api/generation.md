@@ -17,6 +17,10 @@ has a `FrameSpec` classmethod that forwards to it with `cls.spec` -- see
 
 ::: polspec.scan
 
+## estimated_size
+
+::: polspec.sizing.estimated_size
+
 ## sink_parquet
 
 ::: polspec.sink_parquet
