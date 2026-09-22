@@ -8,6 +8,16 @@ seed produces; see
 
 ## [Unreleased]
 
+### Internal
+
+- `polspec.validation.constraints` is a package, one module per kind of
+  claim: `_values` (what one value must be, lifted over a List's elements),
+  `_rules`, `_table` (composite keys, checks) and `_relations` (foreign
+  keys, the hierarchy), with the `_Constraint` base and the dtype rule in
+  `_base`. No import outside the package changed.
+- A generated column is dropped as it is finished, so a temporal, Binary
+  or gathered column never exists twice while the frame is assembled.
+
 ## [0.7.0] - 2026-09-22
 
 The headline is nested and decimal dtypes: `List`, `Array` and `Decimal`

@@ -418,11 +418,13 @@ def _generate_random(
         plan, domain = _plan_column(name, spec)
         plans.append(plan)
         domains[name] = domain
-    raw = _generate_dataframe(plans, n, seed) if plans else None
+    # Each raw column is dropped as it is finished, so a column the finish
+    # copies (a temporal cast, a gathered domain) never exists twice.
+    raw = _generate_dataframe(plans, n, seed).to_dict() if plans else {}
     finished: dict[str, pl.Series] = {}
     for name, spec in columns.items():
-        if raw is not None and name in scalars:
-            finished[name] = _finish(raw[name], spec, domains[name])
+        if name in scalars:
+            finished[name] = _finish(raw.pop(name), spec, domains[name])
         else:
             finished[name] = _generate_list_column(name, spec, n, seed)
     return pl.DataFrame([finished[name] for name in columns])
