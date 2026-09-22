@@ -48,12 +48,13 @@ apart:
 
 **Safety limits that already exist and will grow.** `method="cartesian"`
 refuses to build a coverage set past 50 million rows, naming the dimension
-that caused it, rather than silently trying to allocate one. That's the shape
-future guardrails will take elsewhere in generation — an explicit, named
-refusal before a runaway allocation, not a mysterious hang. Expect more of
-these as generation is asked to handle larger and stranger specs: sanity
-limits on distribution parameters, on cartesian dimensionality, on batch
-sizing.
+that caused it, rather than silently trying to allocate one, and
+`generate()` says how large a frame will be before it allocates it — a
+warning by default, a refusal with `max_bytes=`. That's the shape future
+guardrails will take elsewhere in generation — an explicit, named refusal
+before a runaway allocation, not a mysterious hang. Expect more of these as
+generation is asked to handle larger and stranger specs: sanity limits on
+distribution parameters, on cartesian dimensionality, on batch sizing.
 
 **Constraints `generate()` doesn't enforce**, which is a different, more
 interesting problem. What is left is `__checks__`, `ColSpec.validators` and
@@ -165,6 +166,20 @@ been the drift that mattered.
 strategy built from a spec, are the natural adjacent surfaces for a library
 whose whole pitch is that fixtures and contracts stay in step. Adjacent,
 though — not core.
+
+## Going in 0.9
+
+Two things are already announced, and will happen on schedule rather than
+being reconsidered:
+
+- **`generate(lazy=True)` is removed.** It builds the whole frame and calls
+  `.lazy()` on it, so it promises something it does not do;
+  [`scan()`](../how-to/generating.md#lazy-output-scan) is the lazy one, and
+  `.lazy()` on the result is the handle on an eager one. Deprecated in
+  0.8.0, warning since.
+- **The `polspec[arrow]` extra is removed.** The sinks went through PyArrow
+  until 0.8.0 and use Polars' own writers now, so nothing in polspec needs
+  it. The extra still resolves so that an install pinning it keeps working.
 
 ## Deferred on purpose
 

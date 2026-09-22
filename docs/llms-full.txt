@@ -68,7 +68,8 @@ production will reject.
 
 - **Data on demand**
 
-    Random or coverage-guaranteeing generation, reproducible seeds, batched
+    Random or coverage-guaranteeing generation, reproducible seeds, and a
+    `LazyFrame` that generates only the columns and rows a plan asks for —
     streaming straight to Parquet, CSV, Arrow IPC or NDJSON.
 
     [Generating data](https://maxwellb13.github.io/polspec/how-to/generating/)
@@ -5220,12 +5221,13 @@ apart:
 
 **Safety limits that already exist and will grow.** `method="cartesian"`
 refuses to build a coverage set past 50 million rows, naming the dimension
-that caused it, rather than silently trying to allocate one. That's the shape
-future guardrails will take elsewhere in generation — an explicit, named
-refusal before a runaway allocation, not a mysterious hang. Expect more of
-these as generation is asked to handle larger and stranger specs: sanity
-limits on distribution parameters, on cartesian dimensionality, on batch
-sizing.
+that caused it, rather than silently trying to allocate one, and
+`generate()` says how large a frame will be before it allocates it — a
+warning by default, a refusal with `max_bytes=`. That's the shape future
+guardrails will take elsewhere in generation — an explicit, named refusal
+before a runaway allocation, not a mysterious hang. Expect more of these as
+generation is asked to handle larger and stranger specs: sanity limits on
+distribution parameters, on cartesian dimensionality, on batch sizing.
 
 **Constraints `generate()` doesn't enforce**, which is a different, more
 interesting problem. What is left is `__checks__`, `ColSpec.validators` and
@@ -5338,6 +5340,20 @@ strategy built from a spec, are the natural adjacent surfaces for a library
 whose whole pitch is that fixtures and contracts stay in step. Adjacent,
 though — not core.
 
+## Going in 0.9
+
+Two things are already announced, and will happen on schedule rather than
+being reconsidered:
+
+- **`generate(lazy=True)` is removed.** It builds the whole frame and calls
+  `.lazy()` on it, so it promises something it does not do;
+  [`scan()`](https://maxwellb13.github.io/polspec/how-to/generating/#lazy-output-scan) is the lazy one, and
+  `.lazy()` on the result is the handle on an eager one. Deprecated in
+  0.8.0, warning since.
+- **The `polspec[arrow]` extra is removed.** The sinks went through PyArrow
+  until 0.8.0 and use Polars' own writers now, so nothing in polspec needs
+  it. The extra still resolves so that an install pinning it keeps working.
+
 ## Deferred on purpose
 
 **`ColSpec` holding a `Domain` instead of `bounds`/`choices`/`format`.**
@@ -5364,6 +5380,19 @@ seed produces; see
 [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/).
 
 ## [Unreleased]
+
+## [0.8.0] - 2026-09-22
+
+The headline is `scan()`: a `LazyFrame` that generates rows as they are
+collected, so a plan that wants five rows of one column out of fifty
+million generates five rows of one column. Projection is exact rather than
+approximate, because 0.7.0 keyed every column and every pass by name.
+Around it, a batch becomes a window onto one frame -- the same rows
+whatever the batch size -- the sinks become `scan()` written out and stop
+needing PyArrow, `estimated_size()` says how large a frame will be before
+it is allocated, and `generate(lazy=True)` is deprecated in favour of the
+verb that means it. Every seeded *batched* or *sunk* output changes, once;
+`generate()` is unchanged, and no spec file needs migrating.
 
 ### Added
 
@@ -6421,7 +6450,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/MaxwellB13/polspec/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/MaxwellB13/polspec/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/MaxwellB13/polspec/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/MaxwellB13/polspec/compare/v0.4.1...v0.5.0

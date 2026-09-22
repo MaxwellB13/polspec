@@ -8,6 +8,19 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-22
+
+The headline is `scan()`: a `LazyFrame` that generates rows as they are
+collected, so a plan that wants five rows of one column out of fifty
+million generates five rows of one column. Projection is exact rather than
+approximate, because 0.7.0 keyed every column and every pass by name.
+Around it, a batch becomes a window onto one frame -- the same rows
+whatever the batch size -- the sinks become `scan()` written out and stop
+needing PyArrow, `estimated_size()` says how large a frame will be before
+it is allocated, and `generate(lazy=True)` is deprecated in favour of the
+verb that means it. Every seeded *batched* or *sunk* output changes, once;
+`generate()` is unchanged, and no spec file needs migrating.
+
 ### Added
 
 - **`estimated_size(n)`, and a word before a large frame is allocated.**
@@ -1064,7 +1077,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/MaxwellB13/polspec/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/MaxwellB13/polspec/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/MaxwellB13/polspec/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/MaxwellB13/polspec/compare/v0.4.1...v0.5.0
