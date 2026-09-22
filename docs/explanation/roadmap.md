@@ -167,20 +167,6 @@ strategy built from a spec, are the natural adjacent surfaces for a library
 whose whole pitch is that fixtures and contracts stay in step. Adjacent,
 though — not core.
 
-## Going in 0.9
-
-Two things are already announced, and will happen on schedule rather than
-being reconsidered:
-
-- **`generate(lazy=True)` is removed.** It builds the whole frame and calls
-  `.lazy()` on it, so it promises something it does not do;
-  [`scan()`](../how-to/generating.md#lazy-output-scan) is the lazy one, and
-  `.lazy()` on the result is the handle on an eager one. Deprecated in
-  0.8.0, warning since.
-- **The `polspec[arrow]` extra is removed.** The sinks went through PyArrow
-  until 0.8.0 and use Polars' own writers now, so nothing in polspec needs
-  it. The extra still resolves so that an install pinning it keeps working.
-
 ## Deferred on purpose
 
 **`ColSpec` holding a `Domain` instead of `bounds`/`choices`/`format`.**

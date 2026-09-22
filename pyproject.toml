@@ -40,12 +40,6 @@ Changelog = "https://github.com/MaxwellB13/polspec/blob/main/CHANGELOG.md"
 [project.scripts]
 polspec = "polspec.cli:main"
 
-[project.optional-dependencies]
-# Kept so `polspec[arrow]` keeps resolving: the sinks went through PyArrow
-# until 0.8.0 and now use Polars' own, so nothing here needs it. Removed in
-# 0.9 with the rest of that release's deprecations.
-arrow = ["pyarrow>=14.0.0"]
-
 [dependency-groups]
 bench = [
     "numpy>=2.5.2",

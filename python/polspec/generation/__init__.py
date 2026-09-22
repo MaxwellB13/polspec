@@ -13,7 +13,7 @@ import difflib
 import random
 import warnings
 from collections.abc import Callable, Iterator
-from typing import Any, Literal, overload
+from typing import Any
 
 import polars as pl
 
@@ -114,7 +114,6 @@ def _warn_unused_references(spec: TableSpec, parents: dict[str, Any]) -> None:
     )
 
 
-@overload
 def generate(
     spec: TableSpec,
     n: int,
@@ -125,38 +124,8 @@ def generate(
     cycles: int = 0,
     self_references: int = 0,
     max_bytes: int | None = None,
-    lazy: Literal[False] = False,
-) -> pl.DataFrame: ...
-
-
-@overload
-def generate(
-    spec: TableSpec,
-    n: int,
-    *,
-    method: Method = "random",
-    seed: int | None = None,
-    references: References = None,
-    cycles: int = 0,
-    self_references: int = 0,
-    max_bytes: int | None = None,
-    lazy: Literal[True],
-) -> pl.LazyFrame: ...
-
-
-def generate(
-    spec: TableSpec,
-    n: int,
-    *,
-    method: Method = "random",
-    seed: int | None = None,
-    references: References = None,
-    cycles: int = 0,
-    self_references: int = 0,
-    max_bytes: int | None = None,
-    lazy: bool = False,
-) -> pl.DataFrame | pl.LazyFrame:
-    """Generates a DataFrame (or LazyFrame) matching `spec`.
+) -> pl.DataFrame:
+    """Generates a DataFrame matching `spec`.
 
     method="random" (default): `n` rows, each column drawn independently.
 
@@ -201,20 +170,10 @@ def generate(
     declaration. Past four gibibytes that is a warning naming the estimate;
     `max_bytes=` makes it a refusal instead, and `max_bytes=0` silences both.
 
-    lazy=True returns a `pl.LazyFrame` around the generated DataFrame --
-    the whole frame, already built. **Deprecated since 0.8.0** and removed
-    in 0.9: call `scan()` for a frame that generates as it is collected, or
-    `.lazy()` on the result for a handle on an eager one.
+    The whole frame is built before this returns. `scan()` is the lazy
+    verb: it generates as the plan is collected, so only the columns and
+    rows a plan asks for are made.
     """
-    if lazy:
-        warnings.warn(
-            "generate(lazy=True) builds the whole frame and calls .lazy() on "
-            "it, so the memory is already spent. Use scan() for a LazyFrame "
-            "that generates as it is collected, or .lazy() on the result for "
-            "a handle on an eager one. Removed in 0.9.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
     require_columns(spec)
     _check_counts(n)
     _check_faults(spec, cycles, self_references)
@@ -222,7 +181,7 @@ def generate(
     if method not in ("random", "cartesian"):
         raise ValueError(f"Unknown method {method!r}; expected 'random' or 'cartesian'")
 
-    res = _window(
+    return _window(
         spec,
         n,
         _frame_seed(seed),
@@ -231,7 +190,6 @@ def generate(
         cycles=cycles,
         self_references=self_references,
     )
-    return res.lazy() if lazy else res
 
 
 def _describe_bytes(size: int) -> str:

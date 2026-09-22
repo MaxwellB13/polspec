@@ -66,9 +66,6 @@ def _read_data_file(path: Path, sample: int | None) -> pl.DataFrame:
         )
     try:
         df = reader(path)
-    except ImportError as exc:
-        hint = ' Try: pip install "polspec[arrow]"' if "pyarrow" in str(exc) else ""
-        raise CliError(f"could not read {path}: {exc}.{hint}") from exc
     except Exception as exc:
         raise CliError(f"could not read {path}: {exc}") from exc
     return df.head(sample) if sample is not None else df
@@ -84,9 +81,8 @@ def _write_data_file(df: pl.DataFrame, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         writer(df, path)
-    except ImportError as exc:
-        hint = ' Try: pip install "polspec[arrow]"' if "pyarrow" in str(exc) else ""
-        raise CliError(f"could not write {path}: {exc}.{hint}") from exc
+    except Exception as exc:
+        raise CliError(f"could not write {path}: {exc}") from exc
 
 
 def _registry_from(source: Path) -> Registry:

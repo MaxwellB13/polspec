@@ -615,9 +615,12 @@ def test_cartesian_roundtrips():
     assert_roundtrip(MixedSpec, n=200, method="cartesian")
 
 
-def test_lazy_roundtrips():
-    lf = MixedSpec.generate(ROWS, seed=SEED, lazy=True)
-    assert MixedSpec.validate(lf).collect().height == ROWS
+def test_a_lazy_frame_roundtrips():
+    """`validate` takes a LazyFrame and hands one back -- from `scan()`, or
+    from `.lazy()` on a generated frame."""
+    assert MixedSpec.validate(MixedSpec.scan(ROWS, seed=SEED)).collect().height == ROWS
+    eager = MixedSpec.generate(ROWS, seed=SEED)
+    assert MixedSpec.validate(eager.lazy()).collect().height == ROWS
 
 
 def test_every_batch_roundtrips():
