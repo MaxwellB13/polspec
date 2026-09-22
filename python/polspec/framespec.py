@@ -489,6 +489,45 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         )
 
     @classmethod
+    def scan(
+        cls,
+        n: int,
+        *,
+        seed: int | None = None,
+        batch_size: int | None = None,
+        method: Literal["random", "cartesian"] = "random",
+        references: References = None,
+    ) -> pl.LazyFrame:
+        """A `LazyFrame` of `n` rows, generated as they are collected.
+
+        Unlike `generate(lazy=True)`, which builds the frame and hands back a
+        handle on it, nothing is generated until the plan is collected -- and
+        then only the columns and rows the plan asks for:
+
+            Orders.scan(50_000_000, seed=1).sink_parquet("orders.parquet")
+            Orders.scan(50_000_000, seed=1).select("total").head(5).collect()
+
+        The first streams in bounded memory; the second generates five rows
+        of one column. A projected column holds the values the whole frame
+        would: every column is seeded by its name, so dropping its
+        neighbours cannot move it.
+
+        Rows come in batches, so a scan carries `generate_batches`' terms:
+        a spec declaring a `__hierarchy__` is refused, and a `unique=True`
+        column or a `__unique_together__` group is distinct within a batch
+        rather than across `n`. Leaving `batch_size` unset lets polars ask
+        for the size it wants; setting it pins the size.
+        """
+        return generation.scan(
+            cls.spec,
+            n,
+            seed=seed,
+            batch_size=batch_size,
+            method=method,
+            references=references,
+        )
+
+    @classmethod
     def generate_batches(
         cls,
         n: int,
@@ -498,7 +537,12 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         seed: int | None = None,
         references: References = None,
     ) -> Iterator[pl.DataFrame]:
-        """Yields chunks of generated rows without holding all `n` in memory."""
+        """Yields chunks of generated rows without holding all `n` in memory.
+
+        Each batch is a window onto the one frame `seed` describes: a column
+        no pass rewrites holds, batch by batch, exactly the rows
+        `generate(n, seed=seed)` would, whatever `batch_size` is.
+        """
         return generation.generate_batches(
             cls.spec,
             n,

@@ -23,6 +23,7 @@ from polspec.errors import SpecError
 from polspec.foreign_key import _apply_foreign_key
 from polspec.frames import Method, References, to_eager
 from polspec.generation.composite import apply_unique_together
+from polspec.generation.scan import scan
 from polspec.generation.seeds import pass_seed
 from polspec.generation.sinks import sink_csv, sink_ipc, sink_ndjson, sink_parquet
 from polspec.hierarchy import _apply_hierarchy
@@ -33,6 +34,7 @@ from polspec.tablespec import TableSpec, require_columns, resolve_references
 __all__ = [
     "generate",
     "generate_batches",
+    "scan",
     "sink_csv",
     "sink_ipc",
     "sink_ndjson",

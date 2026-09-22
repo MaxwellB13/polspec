@@ -432,6 +432,55 @@ class Registry:
             )
         return frames
 
+    def scan_all(
+        self,
+        n: int | Mapping[Any, int],
+        *,
+        seed: int | None = None,
+        batch_size: int | None = None,
+        references: Frames | None = None,
+    ) -> dict[str, pl.LazyFrame]:
+        """One `LazyFrame` per spec, each generating as it is collected.
+
+        Parents are generated eagerly and threaded into their children, as
+        `generate_all` does -- a foreign key needs the whole parent column to
+        sample from, so only the children are lazy. A spec with no children
+        is lazy either way.
+
+        Each spec's seed is derived from `seed` and its name, as in
+        `generate_all`, so the frames agree with the eager ones. A scan
+        carries `generate_batches`' terms: see `FrameSpec.scan`.
+        """
+        names = self.names
+        counts = self._counts(n, names)
+        specs = self._bind(require_known=False)
+        parents = {
+            name for child in names for name in self.parents(child) if name != child
+        }
+        eager = (
+            self._generate(
+                tuple(p for p in names if p in parents),
+                {p: counts[p] for p in names if p in parents},
+                seed=seed,
+                method="random",
+                references=references,
+            )
+            if parents
+            else {}
+        )
+        supplied = {**resolve_references(references, to_eager), **eager}
+        return {
+            name: generation.scan(
+                specs[name],
+                counts[name],
+                seed=None if seed is None else _stable_seed(str(seed), name),
+                batch_size=batch_size,
+                references={k: v for k, v in supplied.items() if k != name} or None,
+            )
+            for name in self.order()
+            if name in names
+        }
+
     def generate_all(
         self,
         n: int | Mapping[Any, int],

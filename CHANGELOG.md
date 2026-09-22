@@ -8,6 +8,25 @@ seed produces; see
 
 ## [Unreleased]
 
+### Added
+
+- **`scan()`: a `LazyFrame` that generates rows as they are collected.**
+  `Orders.scan(50_000_000, seed=1)` builds nothing; the plan decides what
+  is drawn. `.sink_parquet(...)` streams in bounded memory,
+  `.select("total").head(5).collect()` generates five rows of one column,
+  and a predicate filters rows that were drawn rather than narrowing the
+  draw. Projection is exact: every column is seeded by its name and every
+  pass by what it is for, so `lf.select(cols).collect()` is always
+  `lf.collect().select(cols)` -- where a column depends on others (a rule's
+  `when` columns, a composite key's members) the closure is generated and
+  dropped again on the way out. A scan is batched, so it carries
+  `generate_batches`' terms: a `__hierarchy__` is refused, and uniqueness
+  holds within a batch. `Registry.scan_all()` does the same for a set of
+  specs, generating parents eagerly -- a foreign key needs the whole parent
+  column -- and the children lazily. Built on polars' `register_io_source`,
+  which polars marks unstable; the tests pin behaviour rather than the
+  API surface.
+
 ### Changed
 
 - **A batch is a window onto one frame.** `generate_batches` and the

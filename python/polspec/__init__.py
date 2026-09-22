@@ -20,6 +20,7 @@ from polspec.framespec import FrameSpec
 from polspec.generation import (
     generate,
     generate_batches,
+    scan,
     sink_csv,
     sink_ipc,
     sink_ndjson,
@@ -70,6 +71,7 @@ __all__ = [
     "generate_batches",
     "inspect",
     "profile_dataframe",
+    "scan",
     "sink_csv",
     "sink_ipc",
     "sink_ndjson",

@@ -19,6 +19,7 @@ cannot describe a signature the code does not have.
 | [`CatSpec`][polspec.CatSpec] | [Registry](registry.md) |
 | [`generate`][polspec.generate] | [Generation](generation.md) |
 | [`generate_batches`][polspec.generate_batches] | [Generation](generation.md) |
+| [`scan`][polspec.scan] | [Generation](generation.md) |
 | [`sink_parquet`][polspec.sink_parquet] | [Generation](generation.md) |
 | [`sink_ipc`][polspec.sink_ipc] | [Generation](generation.md) |
 | [`sink_csv`][polspec.sink_csv] | [Generation](generation.md) |
