@@ -57,7 +57,8 @@ production will reject.
 
 - **Data on demand**
 
-    Random or coverage-guaranteeing generation, reproducible seeds, batched
+    Random or coverage-guaranteeing generation, reproducible seeds, and a
+    `LazyFrame` that generates only the columns and rows a plan asks for —
     streaming straight to Parquet, CSV, Arrow IPC or NDJSON.
 
     [Generating data](how-to/generating.md)
