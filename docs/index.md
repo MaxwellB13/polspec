@@ -39,8 +39,9 @@ production will reject.
 
 - **Types and shape**
 
-    Every dtype polspec can generate — integers, floats, booleans, strings,
-    binary, all four temporal types, `Enum` and `Categorical` — plus
+    Every dtype polspec can generate — integers, floats, `Decimal`,
+    booleans, strings, binary, all four temporal types, `Enum`,
+    `Categorical`, and a `List` or `Array` of any of them — plus
     nullability, bounds, string lengths, value domains and named string
     formats such as `uuid4` and `email`.
 
