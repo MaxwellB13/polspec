@@ -8,6 +8,39 @@ seed produces; see
 
 ## [Unreleased]
 
+### Added
+
+- **`ColSpec(fields=…)`: what is claimed about a struct's field values.**
+  A `Struct` column's dtype is its schema -- every field's name and type
+  comes from it -- and `fields` is a `ColSpec` per field saying what its
+  values are, so a field is described exactly as a column of the same
+  dtype would be:
+
+  ```python
+  ColSpec(
+      pl.Struct({"lat": pl.Float64, "lon": pl.Float64}),
+      fields={"lat": ColSpec(pl.Float64, bounds=(-90, 90))},
+      nullable=True,
+  )
+  ```
+
+  It is **partial**: a struct of twenty fields where one needs bounds
+  spells one field. A name the dtype does not declare, or a field spec
+  whose dtype disagrees with the struct's, is refused where it is written,
+  as are `unique`, `rules`, `seed_name` and `col_name` -- each a claim
+  about a column among columns, which a value inside a struct is not. A
+  `List` of a `Struct` takes `fields` too, and a field may itself be a
+  struct, so a declaration nests as deeply as the dtype does.
+
+  A `Struct` dtype now has a spec-file form (`{Struct: {name: <dtype>}}`),
+  so a struct column round-trips through YAML and `to_python` -- and so do
+  `List(Struct)` and `List(List)`, which had no written form before. The
+  format version stays at 3: `fields:` is an added optional key. `diff`
+  reports a field described, no longer described, or changed.
+
+  Generating a struct arrives in the next release; `generate()` still
+  refuses one by name.
+
 ### Removed
 
 - **`generate(lazy=True)`**, deprecated in 0.8.0. It built the whole frame

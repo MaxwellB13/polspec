@@ -3,9 +3,10 @@ from __future__ import annotations
 import decimal
 import math
 import warnings
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
@@ -22,6 +23,7 @@ from polspec.dtypes import (
     _bound_endpoint_to_physical,
     _dtype_value_limits,
     element_dtype,
+    field_dtypes,
 )
 from polspec.errors import SpecError
 from polspec.expr import Pred
@@ -139,6 +141,21 @@ class ColSpec:
         each *element*; `nullable` and `null_probability` describe the list
         itself, and generation never puts a null inside one. An `Array`
         takes its length from the dtype and refuses `list_length`.
+    fields : Mapping[str, ColSpec] | None, optional
+        For a `Struct` column, what is claimed about each field's values:
+        a `ColSpec` per field, keyed by name. The dtype is the schema --
+        every field's name and type comes from it -- and `fields` is what
+        is claimed about the values within it, so a struct of twenty
+        fields where one needs bounds spells one field. A field the
+        mapping omits is generated from its dtype alone.
+
+        A field is a value, not a column: `unique`, `rules`, `seed_name`
+        and `col_name` are refused on one, since each is a statement about
+        a column among columns. Everything that describes a value is
+        allowed, `fields` included, so a struct may nest to any depth.
+
+        A `List` or `Array` of a `Struct` takes `fields` too: it describes
+        the element, as `bounds` and `format` already do.
     format : str | None, optional
         The shape a `String` column's values take, by name: `"uuid4"`,
         `"email"`, `"ipv4"`, `"ipv6"`, `"mac"`, `"hostname"`,
@@ -201,6 +218,7 @@ class ColSpec:
     null_probability: float = _DEFAULT_NULL_PROBABILITY
     string_length: Bound[int] | None = None
     list_length: Bound[int] | None = None
+    fields: Mapping[str, ColSpec] | None = None
     format: str | None = None
     pattern: str | None = None
     distribution: str | None = None
@@ -224,6 +242,7 @@ class ColSpec:
             null_probability: float = _DEFAULT_NULL_PROBABILITY,
             string_length: Bound[int] | tuple[int, int] | list[int] | None = None,
             list_length: Bound[int] | tuple[int, int] | list[int] | None = None,
+            fields: Mapping[str, ColSpec] | None = None,
             format: str | None = None,
             pattern: str | None = None,
             distribution: str | None = None,
@@ -262,6 +281,7 @@ class ColSpec:
         self._validate_choices_against_domain()
         self._validate_unique_is_generatable()
         self._validate_list_fields()
+        self._validate_struct_fields()
 
     @property
     def value_dtype(self) -> pl.DataType:
@@ -271,17 +291,57 @@ class ColSpec:
         return _value_dtype(self.dtype)
 
     def _validate_nesting(self) -> None:
-        """A `List` or `Array` needs an element dtype. One of a scalar is
-        generated and its elements described by the value fields; one of a
-        List or Struct declares and validates by dtype only, like a Struct."""
+        """A `List` or `Array` needs an element dtype to describe."""
         if not isinstance(self.dtype, (pl.List, pl.Array)):
             return
-        inner = self.dtype.inner
-        if inner == pl.Null:
+        if self.dtype.inner == pl.Null:
             raise SpecError(
                 f"ColSpec cannot describe {self.dtype!r}: give the list an element "
                 "dtype, e.g. pl.List(pl.Int64)."
             )
+
+    def _validate_struct_fields(self) -> None:
+        """What `fields` may say, and where it may be said.
+
+        The dtype is the schema; `fields` is what is claimed about the
+        values in it. So a name the dtype does not declare is a typo worth
+        refusing, a field spec whose dtype disagrees with the struct's is
+        two answers to one question, and a claim that only makes sense
+        about a column among columns has no meaning inside a value.
+        """
+        value_dtype = self.value_dtype
+        if self.fields is None:
+            return
+        if not isinstance(value_dtype, pl.Struct):
+            raise SpecError(
+                f"ColSpec.fields is only supported for pl.Struct, got "
+                f"{self.dtype!r}. It describes the fields of a struct value."
+            )
+        declared = field_dtypes(value_dtype)
+        for name, spec in self.fields.items():
+            if not isinstance(spec, ColSpec):
+                raise SpecError(
+                    f"ColSpec.fields[{name!r}] must be a ColSpec, got "
+                    f"{type(spec).__name__}"
+                )
+            if name not in declared:
+                raise SpecError(
+                    f"ColSpec.fields names {name!r}, which {value_dtype!r} does "
+                    f"not declare. Its fields are {', '.join(declared) or 'none'}."
+                )
+            if spec.dtype != declared[name]:
+                raise SpecError(
+                    f"ColSpec.fields[{name!r}] declares {spec.dtype!r}, but the "
+                    f"struct declares {declared[name]!r}. The dtype is the "
+                    "schema; fields describes the values in it."
+                )
+            for claim in ("unique", "rules", "seed_name", "col_name"):
+                if getattr(spec, claim):
+                    raise SpecError(
+                        f"ColSpec.fields[{name!r}] sets {claim}, which has no "
+                        "meaning on a struct field: it is a value, not a column "
+                        "among columns."
+                    )
 
     def _validate_list_fields(self) -> None:
         """What a `List` column takes, and what only a scalar one can."""
@@ -385,6 +445,8 @@ class ColSpec:
         object.__setattr__(self, "bounds", Bound._coerce(raw))
         object.__setattr__(self, "string_length", Bound._coerce(self.string_length))
         object.__setattr__(self, "list_length", Bound._coerce(self.list_length))
+        if self.fields is not None:
+            object.__setattr__(self, "fields", MappingProxyType(dict(self.fields)))
         # One internal representation for "unconstrained", so every downstream
         # `if spec.bounds is not None` guard keeps meaning what it says.
         if self.bounds is not None and self.bounds.is_open_both:

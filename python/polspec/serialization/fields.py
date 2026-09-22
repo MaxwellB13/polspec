@@ -281,6 +281,19 @@ def _rule_from_data(value: Any, ctx: Ctx, path: str) -> ColRule:
 # ColSpec
 # ---------------------------------------------------------------------------
 
+
+def _fields_from_data(value: Any, ctx: Ctx, path: str) -> dict[str, ColSpec]:
+    """A struct's `fields:` mapping, each value a column in its own right."""
+    if not isinstance(value, Mapping):
+        raise SerializationError(
+            f"{path}: fields must be a mapping of name to column, got {value!r}"
+        )
+    return {
+        str(name): colspec_from_data(field, ctx, f"{path}.{name}")
+        for name, field in value.items()
+    }
+
+
 COLSPEC_FIELDS: tuple[Field, ...] = (
     Field(
         "dtype",
@@ -317,6 +330,17 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
         to_data=_bound_to_data,
         from_data=_bound_from_data,
         to_source=_bound_to_source,
+    ),
+    Field(
+        "fields",
+        since=3,
+        to_data=lambda v: {name: colspec_to_data(cs) for name, cs in v.items()},
+        from_data=_fields_from_data,
+        to_source=lambda v: (
+            "{"
+            + ", ".join(f"{name!r}: {colspec_to_source(cs)}" for name, cs in v.items())
+            + "}"
+        ),
     ),
     Field("format", since=3),
     Field("pattern", since=3),

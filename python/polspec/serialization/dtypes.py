@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from polspec.dtypes import DtypeLike, element_dtype
+from polspec.dtypes import DtypeLike, element_dtype, field_dtypes
 from polspec.errors import SerializationError
 from polspec.spec import _is_categorical_dtype
 
@@ -101,6 +101,13 @@ def dtype_to_data(dtype: pl.DataType) -> str | dict[str, Any]:
         return {
             "Array": {"inner": dtype_to_data(element_dtype(dtype)), "width": dtype.size}
         }
+    if isinstance(dtype, pl.Struct):
+        return {
+            "Struct": {
+                name: dtype_to_data(field)
+                for name, field in field_dtypes(dtype).items()
+            }
+        }
     if _is_categorical_dtype(dtype):
         if isinstance(dtype, pl.Categorical) and dtype.categories.name():
             return {"Categorical": _categories_info(dtype.categories)}
@@ -127,6 +134,12 @@ def dtype_to_source(dtype: pl.DataType) -> str:
         return f"pl.List({dtype_to_source(element_dtype(dtype))})"
     if isinstance(dtype, pl.Array):
         return f"pl.Array({dtype_to_source(element_dtype(dtype))}, {dtype.size})"
+    if isinstance(dtype, pl.Struct):
+        inner = ", ".join(
+            f"{name!r}: {dtype_to_source(field)}"
+            for name, field in field_dtypes(dtype).items()
+        )
+        return f"pl.Struct({{{inner}}})"
     if _is_categorical_dtype(dtype):
         if isinstance(dtype, pl.Categorical) and dtype.categories.name():
             cats = dtype.categories
@@ -169,6 +182,20 @@ def _decimal_from_data(payload: Any, _: CatSpec | None) -> pl.DataType:
             f"got {payload!r}"
         )
     return pl.Decimal(payload["precision"], payload["scale"])
+
+
+def _struct_from_data(payload: Any, categories: CatSpec | None) -> pl.DataType:
+    if not isinstance(payload, dict):
+        raise SerializationError(
+            "A Struct dtype is written as {Struct: {name: <dtype>, ...}}, "
+            f"got {payload!r}"
+        )
+    return pl.Struct(
+        {
+            str(name): dtype_from_data(field, categories)
+            for name, field in payload.items()
+        }
+    )
 
 
 def _array_from_data(payload: Any, categories: CatSpec | None) -> pl.DataType:
@@ -236,6 +263,7 @@ _BUILDERS = {
     "Decimal": _decimal_from_data,
     "List": lambda payload, cats: pl.List(dtype_from_data(payload, cats)),
     "Array": _array_from_data,
+    "Struct": _struct_from_data,
 }
 
 
