@@ -102,14 +102,12 @@ production will reject.
 ```bash
 uv add polspec           # preferred
 pip install polspec      # alternative
-uv add "polspec[arrow]"  # extra: PyArrow for the Parquet/IPC sinks
 ```
 
 The generator is a compiled Rust extension, but wheels are published for Linux
 (x86_64, aarch64), macOS (Intel and Apple silicon) and Windows (x86_64), so
 installing needs no Rust toolchain.
-Writing Parquet or Arrow IPC is the one thing that needs more than Polars: the
-`arrow` extra pulls in PyArrow for those two sinks.
+Nothing beyond Polars is needed at runtime.
 
 Building from a checkout — which does need Rust and
 [maturin](https://www.maturin.rs) — is covered in
@@ -1564,11 +1562,17 @@ Orders.sink_ipc("orders.arrow", 1_000_000, compression="zstd")
 Orders.sink_ndjson("orders.ndjson", 1_000_000)
 ```
 
+Each is [`scan()`](#lazy-output--scan) handed to the matching
+`LazyFrame.sink_*`, so what a sink writes is what collecting the scan gives.
 All four take `batch_size`, `method`, `seed` and `references`, create the
-parent directory if needed, and pass extra keyword arguments through to the
-underlying writer. Parquet and IPC need PyArrow — `pip install "polspec[arrow]"`.
+parent directory if needed, and pass extra keyword arguments through to
+polars' own sink. Nothing beyond Polars is needed for any of them.
 
 With `n=0`, Parquet, IPC and CSV still write a valid schema-bearing file.
+
+A sink is the shorthand; `Orders.scan(n, seed=1).sink_parquet(path)` is the
+same write with the rest of a lazy plan available — a `filter`, a `select`,
+a `sort` — before it reaches the file.
 
 ## Foreign keys
 
@@ -3290,6 +3294,19 @@ polspec diff main/orders.yaml pr/orders.yaml --markdown --fail-on breaking
 `--max-samples` and `--sample N` — see
 [`DriftOptions`](https://maxwellb13.github.io/polspec/how-to/drift/#options).
 
+### `drift --all` — every spec against the file named after it
+
+```bash
+polspec drift --all specs/ nightly/
+polspec drift --all specs/ nightly/ --json > drift.json
+```
+
+As for `validate --all`: `SPEC` is a directory of specs and `DATA` a
+directory of files named after them. Every spec with a file is measured,
+specs without one are listed and skipped, and `--fail-on` decides the exit
+status across all of them. `diff` compares two declarations rather than a
+declaration and data, so it has no `--all`.
+
 ## Exit codes and errors
 
 Every subcommand returns `0` on success and `1` on a reported error, printed
@@ -3701,11 +3718,11 @@ data -- go through `__columns__`:
 
 - `FrameSpec.sink_csv(cls, path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, include_header: 'bool' = True, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'` -- Generates `n` rows and streams them to a CSV file in batches.
 
-- `FrameSpec.sink_ipc(cls, path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, compression: 'str | None' = 'zstd', method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'` -- Generates `n` rows and streams them to an Arrow IPC file in batches.
+- `FrameSpec.sink_ipc(cls, path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, compression: 'IpcCompression | None' = 'zstd', method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'` -- Generates `n` rows and streams them to an Arrow IPC file in batches.
 
 - `FrameSpec.sink_ndjson(cls, path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'` -- Generates `n` rows and streams them to an NDJSON file in batches.
 
-- `FrameSpec.sink_parquet(cls, path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, compression: 'str' = 'zstd', method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'` -- Generates `n` rows and streams them to a Parquet file in batches.
+- `FrameSpec.sink_parquet(cls, path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, compression: 'ParquetCompression' = 'zstd', method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'` -- Generates `n` rows and streams them to a Parquet file in batches.
 
 - `FrameSpec.tag(cls, *tags: 'str | Sequence[str]', match: "Literal['any', 'all']" = 'any') -> 'list[str]'` -- Column names carrying any (or all) of the tags, in declaration order.
 
@@ -3996,7 +4013,10 @@ rows at themselves -- which is how a graph walk gets something to fail
 against. Both default to zero, and `validate()` reports whatever they
 injected.
 
-lazy=True returns a `pl.LazyFrame` around the generated DataFrame.
+lazy=True returns a `pl.LazyFrame` around the generated DataFrame --
+the whole frame, already built. **Deprecated since 0.8.0** and removed
+in 0.9: call `scan()` for a frame that generates as it is collected, or
+`.lazy()` on the result for a handle on an eager one.
 ## generate_batches
 
 ### generate_batches(spec: 'TableSpec', n: 'int', *, batch_size: 'int' = 100000, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None) -> 'Iterator[pl.DataFrame]'
@@ -4023,32 +4043,32 @@ sink gets the batches it writes best; setting it pins the size whatever
 polars asks.
 ## sink_parquet
 
-### sink_parquet(spec: 'TableSpec', path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, compression: 'str' = 'zstd', method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'
+### sink_parquet(spec: 'TableSpec', path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, compression: 'ParquetCompression' = 'zstd', method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'
 
 Generates `n` rows and streams them to a Parquet file in batches.
 
-Extra keyword arguments go to `pyarrow.parquet.ParquetWriter`.
+Extra keyword arguments go to `pl.LazyFrame.sink_parquet`.
 ## sink_ipc
 
-### sink_ipc(spec: 'TableSpec', path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, compression: 'str | None' = 'zstd', method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'
+### sink_ipc(spec: 'TableSpec', path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, compression: 'IpcCompression | None' = 'zstd', method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'
 
 Generates `n` rows and streams them to an Arrow IPC / Feather file in batches.
 
-Extra keyword arguments go to `pyarrow.ipc.new_file`.
+Extra keyword arguments go to `pl.LazyFrame.sink_ipc`.
 ## sink_csv
 
 ### sink_csv(spec: 'TableSpec', path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, include_header: 'bool' = True, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'
 
 Generates `n` rows and streams them to a CSV file in batches.
 
-Extra keyword arguments go to `pl.DataFrame.write_csv`.
+Extra keyword arguments go to `pl.LazyFrame.sink_csv`.
 ## sink_ndjson
 
 ### sink_ndjson(spec: 'TableSpec', path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'
 
 Generates `n` rows and streams them to a newline-delimited JSON file in batches.
 
-Extra keyword arguments go to `pl.DataFrame.write_ndjson`.
+Extra keyword arguments go to `pl.LazyFrame.sink_ndjson`.
 
 ---
 
@@ -5305,8 +5325,29 @@ seed produces; see
   which polars marks unstable; the tests pin behaviour rather than the
   API surface.
 
+- **`polspec drift --all specs/ data/`**, completing the `--all` trio:
+  every spec under a directory measured against the data file named after
+  it, specs without one listed and skipped, `--fail-on` deciding the exit
+  status across all of them, and `--json` printing one report per spec.
+  `diff` compares two declarations rather than a declaration and data, so
+  it takes no `--all`.
+
 ### Changed
 
+- **The four `sink_*` functions are `scan()` written out.** Each is now
+  `scan(...)` handed to the matching `LazyFrame.sink_*`, so **PyArrow is no
+  longer needed for the Parquet and IPC sinks** -- nothing beyond Polars is
+  needed at runtime, and the `arrow` extra is redundant. Signatures,
+  defaults and the `n=0` behaviour are unchanged; what a sink's `**kwargs`
+  reach is now polars' own sink rather than `pyarrow.parquet.ParquetWriter`
+  or `pyarrow.ipc.new_file`, so a call passing a PyArrow-only writer option
+  needs the polars spelling instead. `compression=` is typed as the literal
+  polars accepts rather than `str`, so a misspelling is caught where it is
+  written. The `polspec[arrow]` extra still resolves and is removed in 0.9.
+- **`generate(lazy=True)` is deprecated**, and removed in 0.9. It builds
+  the whole frame and calls `.lazy()` on it, so the memory is already
+  spent: use `scan()` for a frame that generates as it is collected, or
+  `.lazy()` on the result for a handle on an eager one.
 - **A batch is a window onto one frame.** `generate_batches` and the
   `sink_*` functions used to seed batch *k* from the *k*-th draw of the
   caller's seed, so the same seed with a different `batch_size` was a

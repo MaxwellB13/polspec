@@ -629,6 +629,41 @@ def test_validate_all_says_which_specs_have_no_file(tmp_path, capsys):
     assert "several data files" in capsys.readouterr().err
 
 
+def test_drift_all_measures_every_spec_against_the_file_named_after_it(
+    tmp_path, capsys
+):
+    source, _ = _write_orders_specs(tmp_path)
+    out = tmp_path / "data"
+    run_cli("generate", "--all", source, "-n", 200, "-o", out, "--seed", 1)
+    assert run_cli("drift", "--all", source, out) == 0
+    text = capsys.readouterr().out
+    assert "== Customers" in text and "== Orders" in text
+
+    moved = pl.read_parquet(out / "Orders.parquet")
+    moved.with_columns(total=pl.col("total") + 1_000).write_parquet(
+        out / "Orders.parquet"
+    )
+    assert run_cli("drift", "--all", source, out) == 1
+    assert "values escape bounds" in capsys.readouterr().out
+    assert run_cli("drift", "--all", source, out, "--fail-on", "none") == 0
+    capsys.readouterr()
+    run_cli("drift", "--all", source, out, "--json")
+    reports = json.loads(capsys.readouterr().out)
+    assert set(reports) == {"Customers", "Orders"}
+    assert reports["Customers"]["unchanged"] and not reports["Orders"]["unchanged"]
+
+
+def test_drift_all_says_which_specs_have_no_file(tmp_path, capsys):
+    source, _ = _write_orders_specs(tmp_path)
+    out = tmp_path / "data"
+    out.mkdir()
+    assert run_cli("drift", "--all", source, out) == 1
+    assert "no data file under" in capsys.readouterr().err
+    pl.DataFrame({"id": [1, 2]}).write_parquet(out / "Customers.parquet")
+    assert run_cli("drift", "--all", source, out) == 0
+    assert "(no data file for: Orders)" in capsys.readouterr().out
+
+
 # ---------------------------------------------------------------------------
 # top level
 # ---------------------------------------------------------------------------

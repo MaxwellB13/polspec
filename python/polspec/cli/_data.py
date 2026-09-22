@@ -8,19 +8,17 @@ import argparse
 import json
 from pathlib import Path
 
-import polars as pl
-
 from polspec.cli._io import (
-    _DATA_READERS,
     _DATA_WRITERS,
     _existing,
     _read_data_file,
     _references_from,
+    _registry_from,
     _single_spec,
     _write_data_file,
+    frames_named_after_specs,
 )
 from polspec.errors import CliError
-from polspec.registry import Registry
 
 
 def _cmd_validate(args: argparse.Namespace) -> int:
@@ -85,30 +83,6 @@ def _cmd_generate(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _registry_from(source: Path) -> Registry:
-    """Every spec under `source`, with its foreign keys bound to each other."""
-    registry = Registry.discover(source)
-    if not registry.names:
-        raise CliError(f"no specs found under {source}")
-    return registry
-
-
-def _data_file_for(directory: Path, name: str) -> Path | None:
-    """`directory/<name>.<suffix>` for the one suffix the readers know, or
-    None when the spec has no file there."""
-    found = [
-        candidate
-        for suffix in _DATA_READERS
-        if (candidate := directory / f"{name}{suffix}").exists()
-    ]
-    if len(found) > 1:
-        raise CliError(
-            f"{name} has several data files under {directory}: "
-            f"{', '.join(p.name for p in found)}; keep one"
-        )
-    return found[0] if found else None
-
-
 def _generate_all(args: argparse.Namespace) -> int:
     """Every spec under a directory, parents first, one file each."""
     source = _existing(args.spec, what="file or directory")
@@ -148,16 +122,7 @@ def _validate_all(args: argparse.Namespace) -> int:
     if not data_dir.is_dir():
         raise CliError(f"with --all, DATA is a directory of data files, got {data_dir}")
     registry = _registry_from(source)
-    frames: dict[str, pl.DataFrame] = {}
-    for name in registry.names:
-        path = _data_file_for(data_dir, name)
-        if path is not None:
-            frames[name] = _read_data_file(path, None)
-    if not frames:
-        raise CliError(
-            f"no data file under {data_dir} is named after a spec in {source} "
-            f"(looked for {', '.join(registry.names)} with a known suffix)"
-        )
+    frames = frames_named_after_specs(registry, data_dir, source)
     references = _references_from(args.references)
     reports = registry.inspect_all(
         frames,

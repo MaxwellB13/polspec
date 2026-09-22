@@ -20,6 +20,7 @@ import polars as pl
 
 from polspec import FrameSpec
 from polspec.errors import CliError
+from polspec.registry import Registry
 
 _DATA_READERS = {
     ".csv": pl.read_csv,
@@ -86,6 +87,52 @@ def _write_data_file(df: pl.DataFrame, path: Path) -> None:
     except ImportError as exc:
         hint = ' Try: pip install "polspec[arrow]"' if "pyarrow" in str(exc) else ""
         raise CliError(f"could not write {path}: {exc}.{hint}") from exc
+
+
+def _registry_from(source: Path) -> Registry:
+    """Every spec under `source`, with its foreign keys bound to each other."""
+    registry = Registry.discover(source)
+    if not registry.names:
+        raise CliError(f"no specs found under {source}")
+    return registry
+
+
+def _data_file_for(directory: Path, name: str) -> Path | None:
+    """`directory/<name>.<suffix>` for the one suffix the readers know, or
+    None when the spec has no file there."""
+    found = [
+        candidate
+        for suffix in _DATA_READERS
+        if (candidate := directory / f"{name}{suffix}").exists()
+    ]
+    if len(found) > 1:
+        raise CliError(
+            f"{name} has several data files under {directory}: "
+            f"{', '.join(p.name for p in found)}; keep one"
+        )
+    return found[0] if found else None
+
+
+def frames_named_after_specs(
+    registry: Registry, data_dir: Path, source: Path
+) -> dict[str, pl.DataFrame]:
+    """The data file named after each spec, for every spec that has one.
+
+    Shared by the `--all` verbs: a directory of specs is matched to a
+    directory of data by name, and a run with nothing to read at all is an
+    error rather than a silent pass.
+    """
+    frames = {
+        name: _read_data_file(path, None)
+        for name in registry.names
+        if (path := _data_file_for(data_dir, name)) is not None
+    }
+    if not frames:
+        raise CliError(
+            f"no data file under {data_dir} is named after a spec in {source} "
+            f"(looked for {', '.join(registry.names)} with a known suffix)"
+        )
+    return frames
 
 
 def _single_spec(source: Path, class_name: str | None) -> type[FrameSpec]:

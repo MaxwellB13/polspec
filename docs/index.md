@@ -91,14 +91,12 @@ production will reject.
 ```bash
 uv add polspec           # preferred
 pip install polspec      # alternative
-uv add "polspec[arrow]"  # extra: PyArrow for the Parquet/IPC sinks
 ```
 
 The generator is a compiled Rust extension, but wheels are published for Linux
 (x86_64, aarch64), macOS (Intel and Apple silicon) and Windows (x86_64), so
 installing needs no Rust toolchain.
-Writing Parquet or Arrow IPC is the one thing that needs more than Polars: the
-`arrow` extra pulls in PyArrow for those two sinks.
+Nothing beyond Polars is needed at runtime.
 
 Building from a checkout — which does need Rust and
 [maturin](https://www.maturin.rs) — is covered in

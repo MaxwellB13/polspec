@@ -41,8 +41,9 @@ Changelog = "https://github.com/MaxwellB13/polspec/blob/main/CHANGELOG.md"
 polspec = "polspec.cli:main"
 
 [project.optional-dependencies]
-# PyArrow backs the incremental Parquet and Arrow IPC sinks; everything else
-# runs on Polars alone.
+# Kept so `polspec[arrow]` keeps resolving: the sinks went through PyArrow
+# until 0.8.0 and now use Polars' own, so nothing here needs it. Removed in
+# 0.9 with the rest of that release's deprecations.
 arrow = ["pyarrow>=14.0.0"]
 
 [dependency-groups]

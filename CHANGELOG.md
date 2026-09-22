@@ -27,8 +27,29 @@ seed produces; see
   which polars marks unstable; the tests pin behaviour rather than the
   API surface.
 
+- **`polspec drift --all specs/ data/`**, completing the `--all` trio:
+  every spec under a directory measured against the data file named after
+  it, specs without one listed and skipped, `--fail-on` deciding the exit
+  status across all of them, and `--json` printing one report per spec.
+  `diff` compares two declarations rather than a declaration and data, so
+  it takes no `--all`.
+
 ### Changed
 
+- **The four `sink_*` functions are `scan()` written out.** Each is now
+  `scan(...)` handed to the matching `LazyFrame.sink_*`, so **PyArrow is no
+  longer needed for the Parquet and IPC sinks** -- nothing beyond Polars is
+  needed at runtime, and the `arrow` extra is redundant. Signatures,
+  defaults and the `n=0` behaviour are unchanged; what a sink's `**kwargs`
+  reach is now polars' own sink rather than `pyarrow.parquet.ParquetWriter`
+  or `pyarrow.ipc.new_file`, so a call passing a PyArrow-only writer option
+  needs the polars spelling instead. `compression=` is typed as the literal
+  polars accepts rather than `str`, so a misspelling is caught where it is
+  written. The `polspec[arrow]` extra still resolves and is removed in 0.9.
+- **`generate(lazy=True)` is deprecated**, and removed in 0.9. It builds
+  the whole frame and calls `.lazy()` on it, so the memory is already
+  spent: use `scan()` for a frame that generates as it is collected, or
+  `.lazy()` on the result for a handle on an eager one.
 - **A batch is a window onto one frame.** `generate_batches` and the
   `sink_*` functions used to seed batch *k* from the *k*-th draw of the
   caller's seed, so the same seed with a different `batch_size` was a

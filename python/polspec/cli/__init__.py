@@ -278,9 +278,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "drift", help="How a data file has moved relative to its schema"
     )
     drift_parser.add_argument(
-        "spec", help="A .yaml/.yml spec, or a .py file defining one"
+        "spec",
+        help="A .yaml/.yml spec, or a .py file defining one; with --all, a directory",
     )
-    drift_parser.add_argument("data", help="Path to a CSV, Parquet, NDJSON or IPC file")
+    drift_parser.add_argument(
+        "data",
+        help=(
+            "Path to a CSV, Parquet, NDJSON or IPC file; with --all, a directory "
+            "of files named after the specs"
+        ),
+    )
+    drift_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Every spec found under SPEC against DATA/<name>.<suffix>",
+    )
     drift_parser.add_argument(
         "--sample", type=int, metavar="N", help="Measure only the first N rows"
     )
