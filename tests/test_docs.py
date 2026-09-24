@@ -240,3 +240,19 @@ def test_the_package_says_which_version_it_is():
     `pyproject.toml` sets -- a stale build fails here, not in a bug report."""
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     assert polspec.__version__ == pyproject["project"]["version"]
+
+
+def test_every_module_is_on_the_architecture_page():
+    """The module table is the map of the package; a module added without a
+    row is how it fell six modules behind before."""
+    page = (DOCS / "explanation" / "architecture.md").read_text(encoding="utf-8")
+    listed = set(re.findall(r"^\| `([A-Za-z_]+)` \|", page, re.M))
+    package = ROOT / "python" / "polspec"
+    modules = {
+        p.stem
+        for p in package.iterdir()
+        if (p.suffix == ".py" and p.stem not in ("__init__", "__main__"))
+        or (p.is_dir() and (p / "__init__.py").exists())
+    }
+    assert modules - listed == set(), "add a row to architecture.md"
+    assert listed - modules == set(), "architecture.md names a module that is gone"

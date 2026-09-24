@@ -10,15 +10,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import polars as pl
 
 from polspec.dtypes import _typed_values, element_dtype, field_dtypes
 from polspec.validation.report import Finding, FindingCode
-
-if TYPE_CHECKING:
-    pass
 
 MAX_SAMPLES = 5
 

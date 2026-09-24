@@ -16,14 +16,21 @@ owns only the inner loop that fills arrays with values.
 | `spec` | `ColSpec` — one column's declaration, and everything it validates about itself |
 | `rules` | `ColRule` — conditional values, and the pass that applies them |
 | `foreign_key` | `ForeignKey` — declaration, and the pass that makes generated keys consistent |
-| `engine` | Turning a spec into the `ColumnPlan` the Rust extension takes, and finishing the result: gathering typed choices, casting temporal columns back |
+| `engine` | Turning a spec into the `ColumnPlan` the Rust extension takes, and finishing the result: gathering typed choices, casting temporal columns back. A `List` wraps the column its elements make and a `Struct` gathers the columns its fields make, each by calling back into one-column generation |
 | `_ffi` | The only module that imports the Rust extension (lazily), building plans and re-raising its errors as `GenerationError` |
 | `errors` | The `PolspecError` hierarchy |
 | `constraints` | What both sides read: `Domain` (the values a column may hold) and `Pass`/`order` (which rewrite of a generated frame runs first) |
-| `validation` | `inspect` and `validate` over a `TableSpec`: every claim becomes a `_Constraint` that produces a `Finding`. The `constraints/` package holds them by kind: `_values` (one value's domain, bounds, length, format, pattern, lifted over a List's elements), `_rules`, `_table` (composite keys, checks), `_relations` (foreign keys, hierarchy); `report.py` holds `Finding` and `ValidationReport` |
+| `validation` | `inspect` and `validate` over a `TableSpec`: every claim becomes a `_Constraint` that produces a `Finding`. The `constraints/` package holds them by kind: `_values` (one value's domain, bounds, length, format, pattern, recursing into a struct's fields and lifted over a list's elements), `_rules`, `_table` (composite keys, checks), `_relations` (foreign keys, hierarchy); `report.py` holds `Finding` and `ValidationReport` |
 | `tablespec` | `TableSpec` — a spec as an immutable value, with its declaration-time checks and structural operations |
 | `framespec` | `FrameSpec` — the metaclass that builds a `TableSpec` from a class body, and the facade forwarding every verb to it |
-| `generation` | `generate`, `generate_batches` and the file sinks, as functions over a `TableSpec`; `composite.py` separates a `__unique_together__` group; `seeds.py` keys every pass's seed by name, as the engine keys columns |
+| `generation` | `generate`, `generate_batches`, `scan` and the file sinks, as functions over a `TableSpec`; `composite.py` separates a `__unique_together__` group; `seeds.py` keys every pass's seed by name, as the engine keys columns; `scan.py` is the lazy source every sink writes out |
+| `frames` | The frame plumbing every verb shares: accepting a `DataFrame` or `LazyFrame`, and resolving `references=` to parent frames |
+| `_options` | One way to take options -- an options object, keywords, or neither -- shared by `validate`, `inspect` and `drift` |
+| `expr` | `col()`: a small predicate language that evaluates like Polars and survives a trip through a file |
+| `formats` | Named string formats -- what each looks like, said once for generation and validation |
+| `hierarchy` | `Hierarchy` -- a self-referencing link table, and the pass that builds one |
+| `drift` | `diff` and `drift`: what changed between two specs, or between a spec and data. `fields.py` holds one comparator per `ColSpec` field, `data.py` measures a frame in the declaration's terms |
+| `sizing` | `estimated_size`: a frame's memory, read off the declaration |
 | `catspec` | `CatSpec` — a shared registry of enums and categoricals, as a value, plus the metaclass that builds one from a class body (the same split as `tablespec`/`framespec`) |
 | `registry` | `Registry` — a declared set of specs: resolving cross-spec keys, ordering parents before children, `generate_all`/`validate_all`, one file and one diagram for the set |
 | `serialization` | Spec files: a field registry (`fields.py`) that YAML, generated Python and the `import datetime` decision all derive from; the dtype codec table (`dtypes.py`); format versions and migrations (`migrations.py`) |
@@ -140,32 +147,11 @@ match the module.
 
 ## Tests
 
-| File | Covers |
-|:--|:--|
-| `test_roundtrip.py` | The property tying the two directions together: anything `generate()` produces, `validate()` accepts |
-| `test_declaration.py` | Declaration-time contracts that never reach generated data |
-| `test_generation.py` | Random and cartesian generation, dtype coverage, distributions, weights |
-| `test_rules.py` | `ColRule`: what a rule may declare and which rows it touches |
-| `test_serialization.py` | `to_yaml`/`from_yaml` and `to_python`, and what they warn about and drop |
-| `test_profiler.py` | `from_dataframe` inference |
-| `test_framespec.py` | The class body: inheritance, tags, `__checks__`, `__unique_together__`, validators |
-| `test_report.py` | Markdown data dictionaries and Mermaid diagrams |
-| `test_foreign_key.py` | `ForeignKey` declaration, persistence and generation |
-| `test_validation.py` | Validation behaviour and error reporting |
-| `test_inspect.py` | `inspect()`: findings as data, lazy failing rows, JSON |
-| `test_tablespec.py` | `TableSpec` as a value: construction, structural operations, the metaclass |
-| `test_expr.py` | The `col()` predicate language and its data form |
-| `test_serialization_format.py` | The field registry, format versions, migrations, unknown keys |
-| `test_registry.py` | `Registry`: resolution, ordering, `generate_all`/`validate_all`, files, discovery |
-| `test_errors.py` | The exception hierarchy |
-| `test_catspec.py` | Shared category registries: both declaration forms, and that they agree |
-| `test_streaming.py` | Batching and the file sinks |
-| `test_cli.py` | The command line, including running a generated test file under pytest |
-| `test_engine.py` | The Python / Rust boundary: typed plans, exact bounds, typed choices, per-column seeds, the stub |
-| `test_constraints.py` | What both sides share: `Domain`, and the pass ordering that lets rules and keys see each other's work |
-| `test_docs.py` | That the documentation points at things that exist: every exported name, link and nav entry, and the generated `llms.txt` |
-| `test_doc_examples.py` | That the documentation's Python examples run |
-
-The round-trip file carries `xfail(strict=True)` markers for known gaps, so a
-fix turns the marker into a failure rather than passing unnoticed. See
-[Known limitations](limitations.md).
+Each test file opens with a docstring saying what it covers, which is the
+map this page used to keep and let fall behind. Two kinds of test hold the
+design together rather than any one feature: `test_roundtrip.py`, the
+property that anything `generate()` produces `validate()` accepts, across
+every dtype; and the registry parity tests, which fail when a `ColSpec`
+field is added without its serialization entry, its drift comparator or its
+place in the facade's signatures. Warnings are errors in the suite, so a
+warning is asserted where it is expected and a failure everywhere else.

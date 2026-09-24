@@ -697,3 +697,11 @@ def test_every_breaking_field_finding_is_a_validation_failure_on_that_field():
     failed = {f.key.split("__")[0] for f in inspect(spec, df).findings}
     for finding in breaking:
         assert finding.key.split("__")[0] in failed, finding.key
+
+
+def test_a_struct_with_no_fields_is_still_a_struct():
+    spec_cls = _spec_for(ColSpec(pl.Struct({}), nullable=True, null_probability=0.5))
+    df = spec_cls.generate(200, seed=1)
+    assert df.schema["c"] == pl.Struct({})
+    assert 0 < df["c"].null_count() < 200
+    spec_cls.validate(df)

@@ -494,9 +494,10 @@ def _generate_struct_column(
         )
         for field_name in field_dtypes(dtype)
     ]
-    cells = (
-        pl.DataFrame(fields).to_struct(name) if fields else pl.Series(name, [None] * n)
-    )
+    # A struct with no fields is still a struct: a frame of `n` rows and no
+    # columns gathers into one, where a list of no series cannot say how
+    # many rows it has.
+    cells = (pl.DataFrame(fields) if fields else pl.DataFrame(height=n)).to_struct(name)
     if not spec.nullable:
         return cells
     return cells.zip_with(_present(name, spec, n, seed, row_offset), pl.Series([None]))

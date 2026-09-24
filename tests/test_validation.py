@@ -1040,3 +1040,23 @@ def test_validate_bounds_is_an_option_like_the_others():
     assert Ranged.validate(in_range, validate_bounds=False).height == 1
     assert inspect(Ranged.spec, in_range, validate_bounds=False).passed
     assert Ranged.inspect(in_range, options=ValidationOptions(bounds=False)).passed
+
+
+def test_a_finding_on_a_zoned_datetime_carries_its_samples():
+    """A finding's samples are Python values, and a zoned one needs the IANA
+    database -- which Windows does not ship, so polspec depends on `tzdata`
+    there. Without it Polars panics, past any `except Exception`."""
+    import datetime
+
+    class Zoned(FrameSpec):
+        at = ColSpec(
+            pl.Datetime("us", "Europe/London"),
+            bounds=(datetime.datetime(2024, 1, 1), datetime.datetime(2025, 1, 1)),
+        )
+
+    df = pl.DataFrame({"at": [datetime.datetime(2030, 6, 1)]}).with_columns(
+        pl.col("at").dt.replace_time_zone("Europe/London")
+    )
+    (finding,) = Zoned.inspect(df).findings
+    assert finding.key == "at__bounds"
+    assert finding.samples[0].year == 2030
