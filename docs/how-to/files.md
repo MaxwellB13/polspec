@@ -132,8 +132,9 @@ The same spec can be written as an importable Python module. It is the right
 choice when the spec will be edited by hand from now on, or when it needs the
 parts YAML cannot hold:
 
+<!-- docs: warns -->
 ```python
-Orders.to_python("orders_spec.py")
+Orders.to_python("orders_spec.py")   # warns: its raw-expression check is dropped
 ```
 
 ```python

@@ -80,6 +80,18 @@ def _check_counts(n: int, batch_size: int | None = None) -> None:
         raise ValueError("batch_size must be > 0")
 
 
+def _warn_unique_repeats(spec: TableSpec, columns: list[str], batch_size: int) -> None:
+    """A `unique=True` column spans more than one batch, where its draw
+    starts over: every batch holds the same values."""
+    warnings.warn(
+        f"{spec.name}: unique column(s) {', '.join(map(repr, columns))} repeat "
+        f"their values in every batch of {batch_size:,} rows -- uniqueness holds "
+        "within a batch, not across batches. Use generate() for a frame that "
+        "is unique throughout.",
+        stacklevel=3,
+    )
+
+
 def _warn_unused_references(spec: TableSpec, parents: dict[str, Any]) -> None:
     """Warns when a supplied parent went unused *and* a key went unfilled.
 
@@ -373,9 +385,12 @@ def generate_batches(
     deterministic, but not row for row the whole frame's -- is a column with
     rules, a foreign key, a composite key, and a List column's elements.
 
-    Uniqueness only holds *within* a batch, not across the whole `n`: that
-    applies to a `unique=True` column, a `__unique_together__` group, and a
-    foreign-key column sampled without replacement alike.
+    Uniqueness only holds *within* a batch, not across the whole `n`. A
+    `unique=True` column is drawn the same way in every batch, so its values
+    *repeat* batch after batch, and a `UserWarning` says so as the second
+    batch is drawn. A `__unique_together__` group and a foreign-key column
+    sampled without replacement are drawn afresh per batch, so they collide
+    across batches only by chance.
     """
     require_columns(spec)
     _requires_whole_frame(spec, "generate_batches")
@@ -401,6 +416,7 @@ def generate_batches(
 
     frame_seed = _frame_seed(seed)
     produced = 0
+    repeating = [name for name, column in spec.columns.items() if column.unique]
 
     if method == "cartesian":
         # The coverage set is a property of the spec, not of a window: it is
@@ -420,6 +436,11 @@ def generate_batches(
 
     while produced < n:
         current = min(n - produced, batch_size)
+        if produced and repeating:
+            # Said once, as the first batch that repeats is drawn: a run that
+            # fits in one batch has nothing to repeat.
+            _warn_unique_repeats(spec, repeating, batch_size)
+            repeating = []
         yield _window(
             spec,
             current,

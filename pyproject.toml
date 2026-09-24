@@ -104,6 +104,10 @@ ignore = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# A warning is either expected -- and asserted with pytest.warns or a
+# `docs: warns` marker -- or a bug; none is printed and forgotten.
+filterwarnings = ["error"]
+xfail_strict = true
 
 [tool.ty.src]
 include = ["python/polspec"]

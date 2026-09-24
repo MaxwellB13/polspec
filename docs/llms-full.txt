@@ -499,6 +499,7 @@ Writing a rate of your own *without* `nullable=True` warns, though, because
 that is the other way round — it reads as asking for nulls, and the column
 generates none:
 
+<!-- docs: warns -->
 ```python
 ColSpec(pl.Int64, null_probability=0.25)                   # warns: no nulls
 ColSpec(pl.Int64, nullable=True, null_probability=0.25)    # about a quarter null
@@ -1544,7 +1545,9 @@ column means.
 
 Rows arrive in batches, so a scan carries the terms
 [batching](#batching) does: a spec declaring a `__hierarchy__` is refused,
-and uniqueness holds within a batch. Leaving `batch_size` unset lets polars
+and a `unique=True` column repeats its values in every batch -- polspec
+warns when it does; see [Known
+limitations](https://maxwellb13.github.io/polspec/explanation/limitations/#smaller-sharp-edges). Leaving `batch_size` unset lets polars
 ask for the size it wants; setting it pins the size.
 
 `Registry.scan_all()` is the same for a set of specs: parents are generated
@@ -1599,7 +1602,11 @@ written at one batch size and re-read at another is the same data, and the
 third batch can be checked against `generate(n).slice(...)`. What is drawn
 per batch instead, deterministic but not row for row the whole frame's, is
 a column with rules, a foreign key, a composite key, and a `List` column's
-elements (its lengths are a window). Uniqueness holds only *within* a batch.
+elements (its lengths are a window). A `unique=True` column is neither: its
+draw starts over in every batch, the same way each time, so every batch
+holds the same values -- unique within a batch, repeated across them.
+polspec warns when a second batch is drawn; for a key that must be unique
+throughout, use `generate()`.
 
 A batch smaller than 65,536 rows -- the engine's chunk -- costs up to one
 chunk of extra draws per batch, because a window that starts mid-chunk fills
@@ -2564,8 +2571,9 @@ The same spec can be written as an importable Python module. It is the right
 choice when the spec will be edited by hand from now on, or when it needs the
 parts YAML cannot hold:
 
+<!-- docs: warns -->
 ```python
-Orders.to_python("orders_spec.py")
+Orders.to_python("orders_spec.py")   # warns: its raw-expression check is dropped
 ```
 
 ```python
@@ -4302,9 +4310,12 @@ would, whatever `batch_size` is. What is drawn per batch instead --
 deterministic, but not row for row the whole frame's -- is a column with
 rules, a foreign key, a composite key, and a List column's elements.
 
-Uniqueness only holds *within* a batch, not across the whole `n`: that
-applies to a `unique=True` column, a `__unique_together__` group, and a
-foreign-key column sampled without replacement alike.
+Uniqueness only holds *within* a batch, not across the whole `n`. A
+`unique=True` column is drawn the same way in every batch, so its values
+*repeat* batch after batch, and a `UserWarning` says so as the second
+batch is drawn. A `__unique_together__` group and a foreign-key column
+sampled without replacement are drawn afresh per batch, so they collide
+across batches only by chance.
 ## scan
 
 ### scan(spec: 'TableSpec', n: 'int', *, seed: 'int | None' = None, batch_size: 'int | None' = None, method: 'Method' = 'random', references: 'References' = None) -> 'pl.LazyFrame'
@@ -4314,6 +4325,10 @@ A `LazyFrame` of `n` generated rows, produced as they are collected.
 `batch_size` left unset lets polars ask for the size it would like, so a
 sink gets the batches it writes best; setting it pins the size whatever
 polars asks.
+
+A scan is batched, so it has `generate_batches`' terms: a `unique=True`
+column repeats its values in every batch, and says so with a warning
+when a collected scan draws a second batch that holds it.
 ## estimated_size
 
 ### estimated_size(spec: 'TableSpec', n: 'int') -> 'int'
@@ -5172,11 +5187,15 @@ them. See [String formats](https://maxwellb13.github.io/polspec/how-to/formats/)
 - **A `Hierarchy` owns both its columns.** A `null_probability`,
   `distribution` or `weights` declared on either is not what you get: the
   references have to come from one pool for the two columns to join at all.
-- **Uniqueness holds within a batch, not across one.** A batch of
-  `generate_batches` or a `sink_*` is a window onto one frame for a column
-  no pass rewrites, but a `unique=True` column, a `__unique_together__`
-  group, a rule and a foreign key are drawn per batch, so distinctness is
-  only within each batch.
+- **A `unique=True` column repeats its values in every batch.** A batch
+  of `generate_batches`, a `scan()` or a `sink_*` is a window onto one
+  frame for most columns, but a unique column's draw without replacement
+  starts over in each batch -- and starts the same way, so every batch
+  holds *the same* values: distinct within a batch, repeated across them.
+  polspec warns as the second batch is drawn. For a key that must be
+  unique throughout, generate the frame whole with `generate()`. A
+  `__unique_together__` group, a rule and a foreign key are drawn afresh per
+  batch, so a composite key collides across batches only by chance.
 - **A `unique` column ignores `weights` and a non-uniform `distribution`** --
   both are refused at declaration rather than silently dropped, since neither
   has anything to say about a draw without replacement.

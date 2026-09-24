@@ -392,11 +392,13 @@ def test_generate_batches_and_sink_thread_foreign_key_references(tmp_path):
     customers = GenCustomerSpec.generate(5, seed=1)
     customer_ids = set(customers["id"].to_list())
 
-    batches = list(
-        GenOrderSpec.generate_batches(
-            50, batch_size=10, seed=6, references={GenCustomerSpec: customers}
+    # GenOrderSpec's unique key repeats across batches, and says so.
+    with pytest.warns(UserWarning, match="repeat their values in every batch"):
+        batches = list(
+            GenOrderSpec.generate_batches(
+                50, batch_size=10, seed=6, references={GenCustomerSpec: customers}
+            )
         )
-    )
     all_vals = [v for b in batches for v in b["customer_id"].to_list() if v is not None]
     assert all_vals
     assert all(v in customer_ids for v in all_vals)

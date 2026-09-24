@@ -99,11 +99,15 @@ them. See [String formats](../how-to/formats.md).
 - **A `Hierarchy` owns both its columns.** A `null_probability`,
   `distribution` or `weights` declared on either is not what you get: the
   references have to come from one pool for the two columns to join at all.
-- **Uniqueness holds within a batch, not across one.** A batch of
-  `generate_batches` or a `sink_*` is a window onto one frame for a column
-  no pass rewrites, but a `unique=True` column, a `__unique_together__`
-  group, a rule and a foreign key are drawn per batch, so distinctness is
-  only within each batch.
+- **A `unique=True` column repeats its values in every batch.** A batch
+  of `generate_batches`, a `scan()` or a `sink_*` is a window onto one
+  frame for most columns, but a unique column's draw without replacement
+  starts over in each batch -- and starts the same way, so every batch
+  holds *the same* values: distinct within a batch, repeated across them.
+  polspec warns as the second batch is drawn. For a key that must be
+  unique throughout, generate the frame whole with `generate()`. A
+  `__unique_together__` group, a rule and a foreign key are drawn afresh per
+  batch, so a composite key collides across batches only by chance.
 - **A `unique` column ignores `weights` and a non-uniform `distribution`** --
   both are refused at declaration rather than silently dropped, since neither
   has anything to say about a draw without replacement.

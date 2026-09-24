@@ -63,6 +63,7 @@ Writing a rate of your own *without* `nullable=True` warns, though, because
 that is the other way round — it reads as asking for nulls, and the column
 generates none:
 
+<!-- docs: warns -->
 ```python
 ColSpec(pl.Int64, null_probability=0.25)                   # warns: no nulls
 ColSpec(pl.Int64, nullable=True, null_probability=0.25)    # about a quarter null
