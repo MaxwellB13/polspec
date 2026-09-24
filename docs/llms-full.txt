@@ -1805,6 +1805,7 @@ Orders.validate(
     validate_foreign_keys=True,
     validate_hierarchy=True,
     validate_pattern=True,
+    validate_bounds=True,
 )
 ```
 
@@ -1818,7 +1819,7 @@ report.options.checks        # False
 report.options.extra_cols    # "raise"
 ```
 
-The six `validate_*` switches are named for what they switch, so
+The `validate_*` switches are named for what they switch, so
 `validate_checks` is `options.checks`. An option name polspec does not accept
 is a `TypeError` naming the closest one it does.
 
@@ -1871,11 +1872,35 @@ than memory.
 
 ### Turning checks off
 
-The five `validate_*` flags disable whole categories. Useful when generation
-cannot satisfy something yet:
+Each `validate_*` switch disables a whole category of check. Most exist for
+what generation cannot satisfy yet -- `__checks__`, validators and `pattern`
+are validated but not generated:
 
 ```python
 Orders.validate(Orders.generate(1_000, seed=1), validate_checks=False)
+```
+
+`validate_bounds=False` is the other way round: generation always stays in
+bounds, so it is for real data -- a file whose ranges you want to look at
+before holding it to them, while every other claim is still checked. It
+covers every `bounds`, including a `List`'s elements and a struct's fields;
+`string_length` and `list_length` have codes of their own and stay on.
+
+```python
+Orders.validate(df, validate_bounds=False)
+```
+
+To loosen one column rather than all of them, validate against a spec with
+that column's bounds removed:
+
+```python
+import dataclasses
+from polspec import validate
+
+loose = Orders.spec.with_columns(
+    total=dataclasses.replace(Orders.col("total"), bounds=None)
+)
+validate(loose, df)
 ```
 
 ## What gets checked
@@ -3841,7 +3866,7 @@ data -- go through `__columns__`:
 
 - `FrameSpec.generate_batches(cls, n: 'int', *, batch_size: 'int' = 100000, method: "Literal['random', 'cartesian']" = 'random', seed: 'int | None' = None, references: 'References' = None) -> 'Iterator[pl.DataFrame]'` -- Yields chunks of generated rows without holding all `n` in memory.
 
-- `FrameSpec.inspect(cls, df: 'pl.DataFrame | pl.LazyFrame', *, options: 'ValidationOptions | None' = None, references: 'References' = None, extra_cols: "Literal['drop', 'allow', 'raise'] | None" = None, missing_cols: "Literal['add', 'allow', 'raise'] | None" = None, strict_dtypes: 'bool | None' = None, validate_rules: 'bool | None' = None, validate_validators: 'bool | None' = None, validate_unique: 'bool | None' = None, validate_checks: 'bool | None' = None, validate_foreign_keys: 'bool | None' = None, validate_hierarchy: 'bool | None' = None, validate_pattern: 'bool | None' = None, cast: 'bool | None' = None, streaming: 'bool | None' = None) -> 'validation.ValidationReport'` -- Everything this spec has to say about `df`, as a `ValidationReport`.
+- `FrameSpec.inspect(cls, df: 'pl.DataFrame | pl.LazyFrame', *, options: 'ValidationOptions | None' = None, references: 'References' = None, extra_cols: "Literal['drop', 'allow', 'raise'] | None" = None, missing_cols: "Literal['add', 'allow', 'raise'] | None" = None, strict_dtypes: 'bool | None' = None, validate_rules: 'bool | None' = None, validate_validators: 'bool | None' = None, validate_unique: 'bool | None' = None, validate_checks: 'bool | None' = None, validate_foreign_keys: 'bool | None' = None, validate_hierarchy: 'bool | None' = None, validate_pattern: 'bool | None' = None, validate_bounds: 'bool | None' = None, cast: 'bool | None' = None, streaming: 'bool | None' = None) -> 'validation.ValidationReport'` -- Everything this spec has to say about `df`, as a `ValidationReport`.
 
 - `FrameSpec.scan(cls, n: 'int', *, seed: 'int | None' = None, batch_size: 'int | None' = None, method: "Literal['random', 'cartesian']" = 'random', references: 'References' = None) -> 'pl.LazyFrame'` -- A `LazyFrame` of `n` rows, generated as they are collected.
 
@@ -3867,7 +3892,7 @@ data -- go through `__columns__`:
 
 - `FrameSpec.unique_together(cls) -> 'tuple[tuple[str, ...], ...]'` -- The composite unique column groups defined on this FrameSpec.
 
-- `FrameSpec.validate(cls, df: 'pl.DataFrame | pl.LazyFrame', *, options: 'ValidationOptions | None' = None, references: 'References' = None, extra_cols: "Literal['drop', 'allow', 'raise'] | None" = None, missing_cols: "Literal['add', 'allow', 'raise'] | None" = None, strict_dtypes: 'bool | None' = None, validate_rules: 'bool | None' = None, validate_validators: 'bool | None' = None, validate_unique: 'bool | None' = None, validate_checks: 'bool | None' = None, validate_foreign_keys: 'bool | None' = None, validate_hierarchy: 'bool | None' = None, validate_pattern: 'bool | None' = None, cast: 'bool | None' = None, streaming: 'bool | None' = None) -> 'pl.DataFrame | pl.LazyFrame'` -- Validates a DataFrame or LazyFrame against this spec.
+- `FrameSpec.validate(cls, df: 'pl.DataFrame | pl.LazyFrame', *, options: 'ValidationOptions | None' = None, references: 'References' = None, extra_cols: "Literal['drop', 'allow', 'raise'] | None" = None, missing_cols: "Literal['add', 'allow', 'raise'] | None" = None, strict_dtypes: 'bool | None' = None, validate_rules: 'bool | None' = None, validate_validators: 'bool | None' = None, validate_unique: 'bool | None' = None, validate_checks: 'bool | None' = None, validate_foreign_keys: 'bool | None' = None, validate_hierarchy: 'bool | None' = None, validate_pattern: 'bool | None' = None, validate_bounds: 'bool | None' = None, cast: 'bool | None' = None, streaming: 'bool | None' = None) -> 'pl.DataFrame | pl.LazyFrame'` -- Validates a DataFrame or LazyFrame against this spec.
 
 - `FrameSpec.with_catspec(cls, catspec: 'CatSpec | type[CatSpec]', *, name: 'str | None' = None) -> 'type[FrameSpec]'` -- A new FrameSpec subclass with columns re-typed against `catspec`.
 ## ForeignKey
@@ -4248,13 +4273,12 @@ references : mapping
     that spec, its FrameSpec class, or its name. A key with no entry is
     reported as a `foreign_key_unresolved` finding.
 **option_kwargs
-    The fields of `ValidationOptions`, one at a time, with the six check
+    The fields of `ValidationOptions`, one at a time, with the check
     switches spelled `validate_rules`, `validate_validators`,
     `validate_unique`, `validate_checks`, `validate_foreign_keys`,
-    `validate_hierarchy` and `validate_pattern`. See `ValidationOptions`
-    for what each means and
-    what it defaults to; an unknown name raises `TypeError` naming the
-    closest match.
+    `validate_hierarchy`, `validate_pattern` and `validate_bounds`. See
+    `ValidationOptions` for what each means and what it defaults to; an
+    unknown name raises `TypeError` naming the closest match.
 
 Returns
 -------
@@ -4270,7 +4294,7 @@ ValueError
     For an accepted option given a value outside its choices.
 ## ValidationOptions
 
-### ValidationOptions(extra_cols: "Literal['drop', 'allow', 'raise']" = 'raise', missing_cols: "Literal['add', 'allow', 'raise']" = 'raise', strict_dtypes: 'bool' = False, rules: 'bool' = True, validators: 'bool' = True, unique: 'bool' = True, checks: 'bool' = True, foreign_keys: 'bool' = True, hierarchy: 'bool' = True, pattern: 'bool' = True, cast: 'bool' = False, streaming: 'bool' = False) -> None
+### ValidationOptions(extra_cols: "Literal['drop', 'allow', 'raise']" = 'raise', missing_cols: "Literal['add', 'allow', 'raise']" = 'raise', strict_dtypes: 'bool' = False, rules: 'bool' = True, validators: 'bool' = True, unique: 'bool' = True, checks: 'bool' = True, foreign_keys: 'bool' = True, hierarchy: 'bool' = True, pattern: 'bool' = True, bounds: 'bool' = True, cast: 'bool' = False, streaming: 'bool' = False) -> None
 
 Which checks to run and what to do about structural mismatches.
 
@@ -5436,6 +5460,16 @@ seed produces; see
 [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/).
 
 ## [Unreleased]
+
+### Added
+
+- **`validate_bounds=False`** turns off the bounds checks, beside the
+  other `validate_*` switches and as `ValidationOptions(bounds=False)`. The
+  other switches cover what generation cannot yet satisfy; this one is for
+  real data, whose ranges you may want to look at before holding it to
+  them while every other claim is still checked. It covers every `bounds`,
+  a `List`'s elements and a struct's fields included; `string_length` and
+  `list_length` stay on.
 
 ## [0.9.0] - 2026-09-24
 

@@ -67,6 +67,7 @@ class ValidationOptions:
     foreign_keys: bool = True
     hierarchy: bool = True
     pattern: bool = True
+    bounds: bool = True
     cast: bool = False
     streaming: bool = False
 
@@ -97,6 +98,7 @@ _SWITCHES = (
     "foreign_keys",
     "hierarchy",
     "pattern",
+    "bounds",
 )
 _RENAMED_OPTIONS = {f"validate_{name}": name for name in _SWITCHES}
 _ACCEPTED_OPTIONS = accepted_options(ValidationOptions, renames=_RENAMED_OPTIONS)
@@ -285,13 +287,12 @@ def validate(
         that spec, its FrameSpec class, or its name. A key with no entry is
         reported as a `foreign_key_unresolved` finding.
     **option_kwargs
-        The fields of `ValidationOptions`, one at a time, with the six check
+        The fields of `ValidationOptions`, one at a time, with the check
         switches spelled `validate_rules`, `validate_validators`,
         `validate_unique`, `validate_checks`, `validate_foreign_keys`,
-        `validate_hierarchy` and `validate_pattern`. See `ValidationOptions`
-        for what each means and
-        what it defaults to; an unknown name raises `TypeError` naming the
-        closest match.
+        `validate_hierarchy`, `validate_pattern` and `validate_bounds`. See
+        `ValidationOptions` for what each means and what it defaults to; an
+        unknown name raises `TypeError` naming the closest match.
 
     Returns
     -------

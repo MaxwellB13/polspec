@@ -389,7 +389,7 @@ def _value_constraints(
             )
         )
 
-    if spec.bounds is not None and not spec.bounds.is_open_both:
+    if options.bounds and spec.bounds is not None and not spec.bounds.is_open_both:
         constraints.append(
             _Bounds(
                 key=f"{where}__bounds",
