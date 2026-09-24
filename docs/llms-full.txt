@@ -5600,6 +5600,71 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-09-24
+
+The fixes from a review of 0.9.1, and the three numeric dtypes 0.9.0's
+"every dtype generates" missed: `Int128`, `UInt128` and `Float16` now
+generate, and a census test fails the day Polars adds one that does not.
+The one to know about: a `unique=True` column repeats its values in every
+batch of `generate_batches`, `scan()` and the sinks -- that has been true
+since batching arrived, and the docs understated it. This release warns
+when it happens and says so plainly; 0.10.0 makes the draw batch-stable.
+No seeded output of an existing spec changes, and no spec file needs
+migrating.
+
+### Added
+
+- **`Int128`, `UInt128` and `Float16` generate.** They declared and
+  validated before, but `generate()` failed with an engine error and
+  `to_yaml` could not write them. Each is drawn through a type the engine
+  has and cast back, as a `Decimal` is: a 128-bit integer through 64 bits
+  -- bounds past that are refused at `generate()`, naming the column,
+  while validation checks the full range -- and a half as a single,
+  rounded to the nearest half. The draw stays between the halves nearest
+  each bound from inside, so rounding never carries a value past one;
+  bounds too close together to hold any half are refused where they are
+  written, and a unique half is drawn from the finite set of halves
+  between its bounds. YAML, `to_python`, `estimated_size` and
+  `from_dataframe` know all three.
+
+  "Every dtype" now reads *every dtype that holds data*: `Null`, `Object`,
+  `Unknown` and extension types declare and validate by dtype, and
+  `generate()` refuses each by name. A census test walks every dtype class
+  Polars exports and fails on one that is neither.
+
+### Changed
+
+- **A unique column that repeats across batches says so.** Under
+  `generate_batches`, `scan()` and every `sink_*`, a `unique=True`
+  column's draw starts over in each batch the same way, so every batch
+  holds the same values -- the docs called it "drawn per batch", which
+  read as independent draws. polspec now warns once, as the second batch
+  is drawn, naming the columns and pointing at `generate()` for a frame
+  that must be unique throughout; a run that fits in one batch, or a scan
+  that never collects the column, stays silent. The limitations and
+  generating pages describe what happens.
+
+### Fixed
+
+- **A finding on a zoned `Datetime` no longer panics on Windows.** A
+  finding's samples are Python values, and a zoned datetime needs the IANA
+  database to become one; Windows ships none, so Polars panicked -- past
+  any `except Exception` -- on the first finding on such a column. `tzdata`
+  is now a dependency on Windows.
+
+- **`ColSpec(pl.Struct({}))` generates a `Struct({})` column**, where it
+  generated an untyped null one.
+
+- **Docs**: `comparison.md` no longer says polspec has no drift detection,
+  and `architecture.md`'s module table gains the seven modules it had
+  fallen behind on, pinned by a test.
+
+### Internal
+
+- Warnings are errors in the test suite, so a warning is asserted where it
+  is expected -- with `pytest.warns`, or the doc runner's new
+  `<!-- docs: warns -->` marker -- and a failure everywhere else.
+
 ## [0.9.1] - 2026-09-24
 
 A patch release around one question: *someone hands you a CSV, and there
@@ -6824,7 +6889,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/MaxwellB13/polspec/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/MaxwellB13/polspec/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/MaxwellB13/polspec/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/MaxwellB13/polspec/compare/v0.7.0...v0.8.0
