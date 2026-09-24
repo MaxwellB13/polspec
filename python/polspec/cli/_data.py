@@ -8,6 +8,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 from polspec.cli._io import (
     _DATA_WRITERS,
@@ -38,13 +39,14 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     spec_cls = _single_spec(source, args.cls)
     references = _references_from(args.references)
 
-    df = _read_data_file(data_path, None)
+    df = _read_data_file(data_path, None, spec_cls.spec)
     report = spec_cls.inspect(
         df,
         references=references,
         extra_cols="allow" if args.allow_extra else "raise",
         missing_cols="allow" if args.allow_missing else "raise",
         strict_dtypes=args.strict_dtypes,
+        **_skipped(args),
     )
 
     if args.json:
@@ -52,6 +54,11 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     else:
         print(str(report))
     return 0 if report.passed else 1
+
+
+def _skipped(args: argparse.Namespace) -> dict[str, Any]:
+    """`--skip NAME ...` as the `validate_NAME=False` switches `inspect` takes."""
+    return {f"validate_{name}": False for name in args.skip or ()}
 
 
 def _cmd_generate(args: argparse.Namespace) -> int:
@@ -152,6 +159,7 @@ def _validate_all(args: argparse.Namespace) -> int:
         extra_cols="allow" if args.allow_extra else "raise",
         missing_cols="allow" if args.allow_missing else "raise",
         strict_dtypes=args.strict_dtypes,
+        **_skipped(args),
     )
     if args.json:
         print(json.dumps({name: r.to_dict() for name, r in reports.items()}, indent=2))

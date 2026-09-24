@@ -15,12 +15,16 @@ import subprocess
 import sys
 import types
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import polars as pl
 
 from polspec import FrameSpec
 from polspec.errors import CliError
 from polspec.registry import Registry
+
+if TYPE_CHECKING:
+    from polspec.tablespec import TableSpec
 
 _DATA_READERS = {
     ".csv": pl.read_csv,
@@ -33,6 +37,14 @@ _DATA_READERS = {
     ".arrow": pl.read_ipc,
     ".ipc": pl.read_ipc,
     ".feather": pl.read_ipc,
+}
+
+
+# A text format has no date type, so a reader with no spec to go by -- only
+# `schema infer` -- asks Polars to recognise dates itself.
+_DATE_INFERRING_READERS = {
+    ".csv": lambda p: pl.read_csv(p, try_parse_dates=True),
+    ".tsv": lambda p: pl.read_csv(p, separator="\t", try_parse_dates=True),
 }
 
 
@@ -57,18 +69,78 @@ def _existing(path_text: str, *, what: str = "file") -> Path:
     return path
 
 
-def _read_data_file(path: Path, sample: int | None) -> pl.DataFrame:
-    reader = _DATA_READERS.get(path.suffix.lower())
+def _read_data_file(
+    path: Path,
+    sample: int | None,
+    spec: TableSpec | None = None,
+    *,
+    infer_dates: bool = False,
+) -> pl.DataFrame:
+    """A data file as a frame, read in `spec`'s terms when there is one.
+
+    With a spec, a column it declares as a date or time that arrived as
+    text is parsed as what it declares (`_parse_declared_temporals`).
+    Without one, `infer_dates` has Polars recognise dates in a CSV itself.
+    """
+    suffix = path.suffix.lower()
+    reader = _DATA_READERS.get(suffix)
     if reader is None:
         raise CliError(
             f"don't know how to read {path.suffix!r} files ({path}). "
             f"Supported: {', '.join(sorted(_DATA_READERS))}"
         )
+    if infer_dates:
+        reader = _DATE_INFERRING_READERS.get(suffix, reader)
     try:
         df = reader(path)
     except Exception as exc:
         raise CliError(f"could not read {path}: {exc}") from exc
-    return df.head(sample) if sample is not None else df
+    if sample is not None:
+        df = df.head(sample)
+    return _parse_declared_temporals(df, spec) if spec is not None else df
+
+
+def _parse_declared_temporals(df: pl.DataFrame, spec: TableSpec) -> pl.DataFrame:
+    """Each column `spec` declares as a `Date`, `Datetime` or `Time` that
+    arrived as text, parsed as what it declares -- when every value parses.
+
+    A CSV or JSON file has no date type, so a date column arrives as
+    `String`, and validation would report its dtype and check nothing else
+    about it. Only declared columns are touched, so a `String` column of
+    date-shaped text stays text. A column holding a value that does not
+    parse is left as it was read: validation then reports the dtype, which
+    is true, rather than a null that was never in the file.
+    """
+    parsed = []
+    for name, column in spec.columns.items():
+        if name not in df.columns or df.schema[name] != pl.String:
+            continue
+        values = _parse_temporal(df[name], column.dtype)
+        if values is not None and values.null_count() == df[name].null_count():
+            parsed.append(values)
+    return df.with_columns(parsed) if parsed else df
+
+
+def _parse_temporal(text: pl.Series, dtype: pl.DataType) -> pl.Series | None:
+    """`text` as `dtype`, with a value that does not parse as a null; None
+    for a dtype that is not a date or time, or text Polars cannot read as
+    one at all. Parsed as a Series rather than an expression, which is how
+    Polars allows an offset-aware value to be read into a naive column."""
+    try:
+        if dtype == pl.Date:
+            return text.str.to_date(strict=False)
+        if dtype == pl.Time:
+            return text.str.to_time(strict=False)
+        if dtype == pl.Datetime:
+            declared = dtype if isinstance(dtype, pl.Datetime) else pl.Datetime()
+            return text.str.to_datetime(
+                time_unit=declared.time_unit,
+                time_zone=declared.time_zone,
+                strict=False,
+            )
+    except pl.exceptions.PolarsError:
+        return None
+    return None
 
 
 def _write_data_file(df: pl.DataFrame, path: Path) -> None:
@@ -119,7 +191,7 @@ def frames_named_after_specs(
     error rather than a silent pass.
     """
     frames = {
-        name: _read_data_file(path, None)
+        name: _read_data_file(path, None, registry[name])
         for name in registry.names
         if (path := _data_file_for(data_dir, name)) is not None
     }
