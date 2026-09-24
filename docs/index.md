@@ -39,11 +39,11 @@ production will reject.
 
 - **Types and shape**
 
-    Every dtype polspec can generate — integers, floats, `Decimal`,
+    Every dtype, generated and validated — integers, floats, `Decimal`,
     booleans, strings, binary, all four temporal types, `Enum`,
-    `Categorical`, and a `List` or `Array` of any of them — plus
-    nullability, bounds, string lengths, value domains and named string
-    formats such as `uuid4` and `email`.
+    `Categorical`, and a `List`, `Array` or `Struct` of any of them, nested
+    to any depth — plus nullability, bounds, string lengths, value domains
+    and named string formats such as `uuid4` and `email`.
 
     [Declaring columns](how-to/columns.md) ·
     [String formats](how-to/formats.md)

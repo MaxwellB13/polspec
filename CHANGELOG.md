@@ -8,6 +8,23 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-24
+
+Two things are **removed**, as 0.8.0 announced: `generate(lazy=True)`,
+which is now a `TypeError` -- `scan()` is the lazy frame -- and the
+`polspec[arrow]` extra, which no longer resolves. Both are under
+*Removed* below. Everything else in the release is additive.
+
+The headline is `Struct`, the last dtype polspec declared and could not
+generate. `ColSpec(fields={name: ColSpec(...)})` says what is claimed about
+each field's values, so a field is described exactly as a column of its
+dtype would be, and every part of polspec reads it: generation, validation,
+the spec file, `diff` and `drift`, `from_dataframe`, the data dictionary
+and `estimated_size`. The same recursion generates a `List(Struct)`, a
+`List(List)` and an `Array(Struct)`, so every dtype now generates, nested
+to any depth. No seeded output of an existing spec changes, and no spec
+file needs migrating.
+
 ### Added
 
 - **Every dtype generates.** A `Struct` column is generated from its
@@ -1155,7 +1172,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/MaxwellB13/polspec/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/MaxwellB13/polspec/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/MaxwellB13/polspec/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/MaxwellB13/polspec/compare/v0.5.0...v0.6.0
