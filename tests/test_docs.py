@@ -233,3 +233,10 @@ def test_every_docstring_parses_as_numpy():
     finally:
         logger.removeHandler(handler)
     assert not warnings, "\n".join(sorted(set(warnings)))
+
+
+def test_the_package_says_which_version_it_is():
+    """`polspec.__version__` is the installed version, which is the one
+    `pyproject.toml` sets -- a stale build fails here, not in a bug report."""
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert polspec.__version__ == pyproject["project"]["version"]

@@ -71,6 +71,24 @@ def test_the_estimate_matches_what_polars_says_a_frame_holds():
         (ColSpec(pl.Enum(["a", "b", "c"])), 0),
         (ColSpec(pl.String, string_length=(20, 30)), VIEW),
         (ColSpec(pl.String, format="uuid4"), VIEW),
+        # A null row keeps its view but has no bytes, and a null list no
+        # elements; an Array's slots are allocated either way.
+        (
+            ColSpec(
+                pl.String, string_length=(20, 30), nullable=True, null_probability=0.3
+            ),
+            VIEW,
+        ),
+        (
+            ColSpec(
+                pl.List(pl.Int64),
+                list_length=(2, 6),
+                nullable=True,
+                null_probability=0.3,
+            ),
+            0,
+        ),
+        (ColSpec(pl.Array(pl.Int64, 3), nullable=True, null_probability=0.3), 0),
     ]:
         spec_cls = type("S", (FrameSpec,), {"__columns__": {"c": column}})
         df = spec_cls.generate(200_000, seed=1)
