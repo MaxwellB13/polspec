@@ -84,6 +84,10 @@ def scan(
     `batch_size` left unset lets polars ask for the size it would like, so a
     sink gets the batches it writes best; setting it pins the size whatever
     polars asks.
+
+    A scan is batched, so it has `generate_batches`' terms: a `unique=True`
+    column repeats its values in every batch, and says so with a warning
+    when a collected scan draws a second batch that holds it.
     """
     from polspec.generation import (
         _check_counts,

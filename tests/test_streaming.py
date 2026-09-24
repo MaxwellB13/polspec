@@ -332,3 +332,47 @@ def test_a_sink_is_a_scan_written_out(tmp_path):
     assert pl.read_parquet(path).equals(
         StreamDataSource.scan(5_000, seed=9, batch_size=1_000).collect()
     )
+
+
+# ---------------------------------------------------------------------------
+# A unique column repeats its values in every batch, and says so
+# ---------------------------------------------------------------------------
+
+
+class Keyed(FrameSpec):
+    key = ColSpec(pl.Int64, bounds=(1, 1_000_000), unique=True)
+    code = ColSpec(pl.String, unique=True)
+    value = ColSpec(pl.Int64)
+
+
+REPEATS = "repeat their values in every batch"
+
+
+def test_a_unique_column_repeats_in_every_batch_and_warns_once():
+    """The behaviour the warning describes, pinned alongside it: the draw
+    starts over the same way in every batch, so the batches hold the same
+    keys. Batch-stable uniqueness is 0.10's to fix; until then it is said."""
+    with pytest.warns(UserWarning, match=REPEATS) as caught:
+        batches = list(Keyed.generate_batches(30, batch_size=10, seed=1))
+    assert len([w for w in caught if REPEATS in str(w.message)]) == 1
+    message = str(caught[0].message)
+    assert "'key'" in message and "'code'" in message
+    assert batches[0]["key"].equals(batches[1]["key"])
+    assert not batches[0]["value"].equals(batches[1]["value"])
+
+
+def test_a_scan_and_a_sink_say_it_too(tmp_path):
+    with pytest.warns(UserWarning, match=REPEATS):
+        Keyed.scan(30, seed=1, batch_size=10).collect()
+    with pytest.warns(UserWarning, match=REPEATS):
+        Keyed.sink_parquet(tmp_path / "k.parquet", 30, batch_size=10, seed=1)
+
+
+def test_nothing_is_said_when_nothing_repeats():
+    """Warnings are errors in this suite, so running is the assertion."""
+    # One batch holds every row: nothing starts over.
+    Keyed.generate_batches(30, batch_size=30, seed=1).__next__()
+    list(Keyed.generate_batches(30, batch_size=100, seed=1))
+    # No unique column, or none that is collected.
+    list(PlainSource.generate_batches(30, batch_size=10, seed=1))
+    Keyed.scan(30, seed=1, batch_size=10).select("value").collect()

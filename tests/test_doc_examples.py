@@ -14,6 +14,7 @@ which renders as nothing:
 
     <!-- docs: skip -->      an illustrative fragment, not a runnable example
     <!-- docs: raises -->    demonstrates an error, and must actually raise
+    <!-- docs: warns -->     demonstrates a warning, and must actually warn
 
 A marker is a claim about the block, so both are checked: `raises` fails the
 suite if the block stops raising, the same way `xfail(strict=True)` pins the
@@ -36,7 +37,7 @@ BLOCK = re.compile(
     re.S | re.M,
 )
 
-MARKERS = {"skip", "raises"}
+MARKERS = {"skip", "raises", "warns"}
 
 # The names pages take for granted, declared once. A page that needs more of
 # its own declares it in a block of its own, which is also what a reader
@@ -142,6 +143,12 @@ def test_a_pages_examples_run(page: Path, tmp_path: Path, monkeypatch) -> None:
             with pytest.raises(Exception):  # noqa: B017 - the page names which
                 exec(compiled, namespace)
             continue
+        if marker == "warns":
+            # Warnings are errors in this suite, so a block that demonstrates
+            # one says so, and must keep doing it.
+            with pytest.warns(Warning):
+                exec(compiled, namespace)
+            continue
         try:
             exec(compiled, namespace)
         except Exception as exc:  # noqa: BLE001 - reported as a test failure
@@ -149,7 +156,8 @@ def test_a_pages_examples_run(page: Path, tmp_path: Path, monkeypatch) -> None:
                 f"{where} raised {type(exc).__name__}: {exc}\n\n"
                 f"Fix the example, or mark the block:\n"
                 f"    <!-- docs: skip -->     if it is an illustrative fragment\n"
-                f"    <!-- docs: raises -->   if it demonstrates this error"
+                f"    <!-- docs: raises -->   if it demonstrates this error\n"
+                f"    <!-- docs: warns -->    if it demonstrates this warning"
             )
 
 
