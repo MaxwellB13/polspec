@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 import decimal
+import struct
 
 import polars as pl
 from polars.datatypes import DataTypeClass
@@ -62,12 +63,15 @@ _INT_DTYPE_LIMITS: dict[DtypeLike, tuple[int, int]] = {
     pl.UInt16: (0, 65_535),
     pl.UInt32: (0, 4_294_967_295),
     pl.UInt64: (0, 2**64 - 1),
+    pl.Int128: (-(2**127), 2**127 - 1),
+    pl.UInt128: (0, 2**128 - 1),
 }
 
 # Largest finite magnitude each float dtype represents. Exceeding these turns
 # into an infinity on the way to Rust, which then panics building a
 # distribution over a non-finite range.
 _FLOAT_DTYPE_LIMITS: dict[DtypeLike, tuple[float, float]] = {
+    pl.Float16: (-65504.0, 65504.0),
     pl.Float32: (-3.4028234663852886e38, 3.4028234663852886e38),
     pl.Float64: (-1.7976931348623157e308, 1.7976931348623157e308),
 }
@@ -161,3 +165,23 @@ def _typed_values(values, dtype: pl.DataType) -> pl.Series:
     `datetime` on a `Datetime` column stays a datetime.
     """
     return pl.Series(list(values), dtype=dtype, strict=False)
+
+
+def float16_inside(value: float, *, up: bool) -> float:
+    """The half-precision value nearest `value` that is not past it: at or
+    above it when `up`, at or below it otherwise."""
+    half = struct.unpack("<e", struct.pack("<e", value))[0]
+    if half == value or (half > value) == up:
+        return half
+    bits = struct.unpack("<H", struct.pack("<e", half))[0]
+    negative = bits & 0x8000
+    # Adjacent halves are adjacent bit patterns within one sign; moving away
+    # from zero raises the magnitude, toward it lowers it, and zero itself
+    # steps to the smallest subnormal of the sign it moves into.
+    if half == 0.0:
+        bits = 0x0001 if up else 0x8001
+    elif bool(negative) != up:
+        bits += 1
+    else:
+        bits -= 1
+    return struct.unpack("<e", struct.pack("<H", bits))[0]

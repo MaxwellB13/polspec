@@ -470,8 +470,8 @@ for you, so `pl.Int64` and `pl.Int64()` mean the same thing.
 
 | Family | Types |
 |:--|:--|
-| Integer | `Int8` `Int16` `Int32` `Int64` `UInt8` `UInt16` `UInt32` `UInt64` |
-| Float | `Float32` `Float64` |
+| Integer | `Int8` `Int16` `Int32` `Int64` `Int128` `UInt8` `UInt16` `UInt32` `UInt64` `UInt128` |
+| Float | `Float16` `Float32` `Float64` |
 | Decimal | `Decimal(precision, scale)` |
 | Boolean | `Boolean` |
 | Text | `String` |
@@ -480,8 +480,13 @@ for you, so `pl.Int64` and `pl.Int64()` mean the same thing.
 | Categorical | `Enum` `Categorical` |
 | Nested | `List(inner)` `Array(inner, width)` `Struct({name: dtype})` — nested to any depth; see [Nested columns](#nested-columns) |
 
-That is every dtype: since 0.9.0 there is none polspec declares and cannot
-generate.
+That is every dtype that holds data. `Null`, `Object`, `Unknown` and
+extension types declare and validate by dtype, but hold nothing polspec can
+draw, so `generate()` refuses each by name. A 128-bit integer is drawn
+through 64 bits and a `Float16` as a `Float32` rounded to the nearest half,
+so bounds past 64 bits are refused at `generate()` and bounds too close to
+hold a half at declaration; see
+[Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/#smaller-sharp-edges).
 
 ## Nullability
 
@@ -5162,9 +5167,17 @@ them. See [String formats](https://maxwellb13.github.io/polspec/how-to/formats/)
 - **A list's elements are never null.** Generation fills a `List` column's
   cells with non-null elements, and no field can ask otherwise; validation
   reports a null element as a `nullability` finding.
-- **A `Decimal` is drawn through 64 bits.** Generation fills a Decimal as
-  its physical integer, so bounds needing more than eighteen significant
-  digits are refused at `generate()`. Validation checks the full precision.
+- **A `Decimal`, `Int128` or `UInt128` is drawn through 64 bits.**
+  Generation fills a Decimal as its physical integer and a 128-bit integer
+  as a 64-bit one, so bounds past what 64 bits hold -- eighteen significant
+  digits, for a Decimal -- are refused at `generate()`. Validation checks
+  the full range.
+- **A `Float16` is drawn as a `Float32` and rounded.** Values are drawn
+  between the halves nearest each bound from inside, so rounding never
+  carries one past a bound; bounds too close together to hold any half are
+  refused where they are written. A unique `Float16` is drawn from the
+  finite set of halves between its bounds, since distinct singles can round
+  to the same half.
 - **`missing_cols="add"` can produce a frame that fails re-validation**, since
   columns are added after validation runs, including for non-nullable columns.
 - **A `Hierarchy` cannot be batched or streamed.** `generate_batches` and
@@ -5413,7 +5426,8 @@ Source: https://maxwellb13.github.io/polspec/explanation/roadmap/
 
 ## Dtype coverage is complete
 
-polspec generates every Polars dtype it accepts — integers, floats,
+polspec generates every Polars dtype that holds data — integers to 128
+bits, floats from half to double precision,
 `Decimal`, booleans, strings, binary, `Date`/`Time`/`Datetime`/`Duration`,
 `Enum`, `Categorical`, and `List`, `Array` and `Struct` of any of them,
 nested to any depth. A `Datetime` carrying a `time_zone` is included: the

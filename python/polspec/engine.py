@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import dataclasses
 import decimal
+import functools
 import hashlib
 import random
+import struct
 from typing import TYPE_CHECKING
 
 import polars as pl
@@ -27,6 +29,7 @@ from polspec.dtypes import (
     _dtype_value_limits,
     _typed_values,
     field_dtypes,
+    float16_inside,
 )
 from polspec.errors import GenerationError
 from polspec.formats import lookup as _lookup_format
@@ -104,7 +107,7 @@ def _resolve_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
     """
     lo, hi = _default_numeric_bounds(spec)
     if spec.bounds is None:
-        return lo, hi
+        return _representable(spec, lo, hi)
 
     if spec.bounds.min is not None:
         lo = _bound_endpoint_to_physical(spec.bounds.min, spec.dtype)
@@ -116,13 +119,56 @@ def _resolve_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
     # to the dtype's own limit rather than hand the engine an inverted range,
     # which it would silently swap.
     if lo > hi:
-        limits = _dtype_value_limits(spec.dtype)
+        limits = _dtype_value_limits(_DRAWN_AS.get(spec.dtype, spec.dtype))
         if limits is not None:
             if spec.bounds.max is None:
                 hi = limits[1]
             elif spec.bounds.min is None:
                 lo = limits[0]
-    return lo, hi
+    return _representable(spec, lo, hi)
+
+
+# A dtype the engine has no kind for is drawn as the nearest one it has and
+# cast back in `_finish`, the way a Decimal is drawn as its physical integer:
+# a 128-bit integer through 64 bits, a half-precision float as a single.
+_DRAWN_AS: dict[DtypeLike, pl.DataType] = {
+    pl.Int128: pl.Int64(),
+    pl.UInt128: pl.UInt64(),
+    pl.Float16: pl.Float32(),
+}
+
+
+def _representable(
+    spec: ColSpec, lo: float | int, hi: float | int
+) -> tuple[float | int, float | int]:
+    """`[lo, hi]` narrowed to values the column can hold exactly at both ends.
+
+    Only a `Float16` needs it. A value drawn as a `Float32` rounds to the
+    nearest half when it is cast, and near an endpoint the half can land
+    *outside* the bounds -- the nearest half to `0.1001` is above it. Drawn
+    between the halves nearest each endpoint from inside, rounding can move
+    a value only as far as a half it cannot pass.
+    """
+    if spec.dtype != pl.Float16:
+        return lo, hi
+    top = _FLOAT16_MAX
+    return (
+        float16_inside(max(float(lo), -top), up=True),
+        float16_inside(min(float(hi), top), up=False),
+    )
+
+
+_FLOAT16_MAX = 65504.0
+
+
+@functools.cache
+def _every_float16() -> pl.Series:
+    """Every finite half, ascending: 63,487 of them, distinct."""
+    halves = {
+        struct.unpack("<e", struct.pack("<H", bits))[0] for bits in range(1 << 16)
+    }
+    finite = sorted(h for h in halves if h == h and abs(h) != float("inf"))
+    return pl.Series(finite, dtype=pl.Float16)
 
 
 def _default_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
@@ -139,7 +185,7 @@ def _default_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
     """
     kind = _column_kind(spec.dtype)
     if kind == "int":
-        if spec.dtype not in (pl.Int64, pl.UInt64):
+        if spec.dtype not in (pl.Int64, pl.UInt64, pl.Int128, pl.UInt128):
             limits = _dtype_value_limits(spec.dtype)
             if limits is not None:
                 return limits
@@ -201,6 +247,13 @@ def _domain(spec: ColSpec) -> pl.Series | None:
     dtype = spec.value_dtype
     if spec.choices is not None:
         return _typed_values(spec.choices, dtype)
+    if spec.unique and dtype == pl.Float16:
+        # Distinct singles can round to the same half, so a unique half is
+        # drawn from the halves themselves: the finite set between the
+        # bounds, sampled without replacement like any other domain.
+        lo, hi = _resolve_numeric_bounds(spec)
+        halves = _every_float16()
+        return halves.filter(halves.is_between(lo, hi))
     if isinstance(dtype, pl.Enum):
         return pl.Series(dtype.categories, dtype=dtype)
     if spec.format is not None:
@@ -236,7 +289,7 @@ def _plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None
         return plan, domain
 
     if kind in ("int", "float", "temporal", "decimal"):
-        engine_kind = _ENGINE_KINDS.get(spec.dtype, kind)
+        engine_kind = _ENGINE_KINDS.get(_DRAWN_AS.get(spec.dtype, spec.dtype), kind)
         if kind == "decimal":
             # A Decimal is filled as its physical integer and scaled back in
             # `_finish`; the draw is 64-bit, whatever the declared precision.
@@ -253,6 +306,14 @@ def _plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None
             options["min"], options["max"] = _resolve_numeric_bounds(spec)
             if kind == "decimal":
                 _check_decimal_fits_the_draw(name, spec, options["min"], options["max"])
+            if spec.dtype in (pl.Int128, pl.UInt128):
+                _check_wide_int_fits_the_draw(
+                    name, spec, options["min"], options["max"]
+                )
+        elif spec.dtype == pl.Float16:
+            # A distribution with no bounds keeps its own shape, but not past
+            # what a half holds: beyond it the cast is an infinity.
+            options["min"], options["max"] = -_FLOAT16_MAX, _FLOAT16_MAX
         elif spec.dtype.is_temporal():
             # A non-uniform distribution with no explicit bounds is left to
             # its own shape rather than squeezed into polspec's default
@@ -316,6 +377,21 @@ def _check_decimal_fits_the_draw(
         f"Column {name!r}: bounds {spec.bounds} on {spec.dtype!r} need more "
         "than 18 significant digits, which generation cannot draw. Validation "
         "checks the full precision; narrow the bounds to generate."
+    )
+
+
+def _check_wide_int_fits_the_draw(
+    name: str, spec: ColSpec, lo: float | int, hi: float | int
+) -> None:
+    drawn = _DRAWN_AS[spec.dtype]
+    limits = _dtype_value_limits(drawn)
+    assert limits is not None  # noqa: S101 - a 64-bit integer has limits
+    if limits[0] <= lo and hi <= limits[1]:
+        return
+    raise GenerationError(
+        f"Column {name!r}: bounds {spec.bounds} on {spec.dtype!r} reach past "
+        f"the {drawn!r} range generation draws in. Validation checks the full "
+        "range; narrow the bounds to generate."
     )
 
 

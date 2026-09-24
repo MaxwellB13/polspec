@@ -10,7 +10,8 @@
 
 ## Dtype coverage is complete
 
-polspec generates every Polars dtype it accepts — integers, floats,
+polspec generates every Polars dtype that holds data — integers to 128
+bits, floats from half to double precision,
 `Decimal`, booleans, strings, binary, `Date`/`Time`/`Datetime`/`Duration`,
 `Enum`, `Categorical`, and `List`, `Array` and `Struct` of any of them,
 nested to any depth. A `Datetime` carrying a `time_zone` is included: the

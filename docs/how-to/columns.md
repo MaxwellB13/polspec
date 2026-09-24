@@ -34,8 +34,8 @@ for you, so `pl.Int64` and `pl.Int64()` mean the same thing.
 
 | Family | Types |
 |:--|:--|
-| Integer | `Int8` `Int16` `Int32` `Int64` `UInt8` `UInt16` `UInt32` `UInt64` |
-| Float | `Float32` `Float64` |
+| Integer | `Int8` `Int16` `Int32` `Int64` `Int128` `UInt8` `UInt16` `UInt32` `UInt64` `UInt128` |
+| Float | `Float16` `Float32` `Float64` |
 | Decimal | `Decimal(precision, scale)` |
 | Boolean | `Boolean` |
 | Text | `String` |
@@ -44,8 +44,13 @@ for you, so `pl.Int64` and `pl.Int64()` mean the same thing.
 | Categorical | `Enum` `Categorical` |
 | Nested | `List(inner)` `Array(inner, width)` `Struct({name: dtype})` — nested to any depth; see [Nested columns](#nested-columns) |
 
-That is every dtype: since 0.9.0 there is none polspec declares and cannot
-generate.
+That is every dtype that holds data. `Null`, `Object`, `Unknown` and
+extension types declare and validate by dtype, but hold nothing polspec can
+draw, so `generate()` refuses each by name. A 128-bit integer is drawn
+through 64 bits and a `Float16` as a `Float32` rounded to the nearest half,
+so bounds past 64 bits are refused at `generate()` and bounds too close to
+hold a half at declaration; see
+[Known limitations](../explanation/limitations.md#smaller-sharp-edges).
 
 ## Nullability
 

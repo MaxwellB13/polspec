@@ -25,6 +25,7 @@ from polspec.dtypes import (
     _dtype_value_limits,
     element_dtype,
     field_dtypes,
+    float16_inside,
 )
 from polspec.errors import SpecError
 from polspec.expr import Pred
@@ -823,6 +824,29 @@ class ColSpec:
                     f"ColSpec.bounds {label} ({endpoint!r}) is outside the range "
                     f"{self.value_dtype!r} can represent [{lo_limit}, {hi_limit}]"
                 )
+        if self.value_dtype == pl.Float16:
+            self._validate_bounds_hold_a_half()
+
+    def _validate_bounds_hold_a_half(self) -> None:
+        """Bounds so close that no half-precision value lies between them.
+
+        Halves near 1.3 are about 0.001 apart, so `(-1.3, -1.2999)` admits
+        none: no data could satisfy it, generated or real.
+        """
+        assert self.bounds is not None  # noqa: S101 - the caller checked
+        low, high = self.bounds.min, self.bounds.max
+        if low is None or high is None:
+            return
+        above, below = (
+            float16_inside(float(low), up=True),
+            float16_inside(float(high), up=False),
+        )
+        if above > below:
+            raise SpecError(
+                f"ColSpec.bounds {self.bounds} hold no Float16 value: the "
+                f"nearest halves are {below} and {above}. Widen the bounds, or "
+                "declare a wider float."
+            )
 
     def _normalize_validators(self) -> None:
         given: Any = self.validators
