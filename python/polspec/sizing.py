@@ -50,6 +50,9 @@ _FIXED_WIDTHS: dict[object, float] = {
     pl.UInt64: 8,
     pl.Float64: 8,
     pl.Time: 8,
+    pl.Float16: 2,
+    pl.Int128: 16,
+    pl.UInt128: 16,
 }
 
 

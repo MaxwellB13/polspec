@@ -88,9 +88,17 @@ them. See [String formats](../how-to/formats.md).
 - **A list's elements are never null.** Generation fills a `List` column's
   cells with non-null elements, and no field can ask otherwise; validation
   reports a null element as a `nullability` finding.
-- **A `Decimal` is drawn through 64 bits.** Generation fills a Decimal as
-  its physical integer, so bounds needing more than eighteen significant
-  digits are refused at `generate()`. Validation checks the full precision.
+- **A `Decimal`, `Int128` or `UInt128` is drawn through 64 bits.**
+  Generation fills a Decimal as its physical integer and a 128-bit integer
+  as a 64-bit one, so bounds past what 64 bits hold -- eighteen significant
+  digits, for a Decimal -- are refused at `generate()`. Validation checks
+  the full range.
+- **A `Float16` is drawn as a `Float32` and rounded.** Values are drawn
+  between the halves nearest each bound from inside, so rounding never
+  carries one past a bound; bounds too close together to hold any half are
+  refused where they are written. A unique `Float16` is drawn from the
+  finite set of halves between its bounds, since distinct singles can round
+  to the same half.
 - **`missing_cols="add"` can produce a frame that fails re-validation**, since
   columns are added after validation runs, including for non-nullable columns.
 - **A `Hierarchy` cannot be batched or streamed.** `generate_batches` and

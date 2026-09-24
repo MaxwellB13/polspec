@@ -916,15 +916,23 @@ def test_a_hand_built_cycle_still_validates():
 # ---------------------------------------------------------------------------
 # Which dtypes the property covers
 #
-# All of them, since 0.9.0 -- every dtype the docs list generates and
-# validates, nested to any depth. This pins that claim, and the one people
-# assume is missing and is not.
+# Every dtype that holds data, nested to any depth -- and the census below
+# fails the day Polars adds a dtype this list does not name, which is how
+# Int128, UInt128 and Float16 went unnoticed through 0.9.0.
 # ---------------------------------------------------------------------------
 
 EVERY_DTYPE = [
     pl.Int8,
+    pl.Int16,
+    pl.Int32,
     pl.Int64,
+    pl.Int128,
+    pl.UInt8,
+    pl.UInt16,
     pl.UInt32,
+    pl.UInt64,
+    pl.UInt128,
+    pl.Float16,
     pl.Float32,
     pl.Float64,
     pl.Decimal(10, 2),
@@ -948,6 +956,41 @@ EVERY_DTYPE = [
     pl.Struct({"xs": pl.List(pl.Int64)}),
     pl.Struct({"inner": pl.Struct({"a": pl.Int64})}),
 ]
+
+
+# Dtypes that hold no data of their own to generate: a column of nothing,
+# arbitrary Python objects, a placeholder, and the extension mechanism.
+# Declared and validated by dtype; generate() refuses each by name.
+NOT_DATA = {"Null", "Object", "Unknown", "Extension", "BaseExtension"}
+
+
+def test_every_polars_dtype_is_generated_or_named_as_not_data():
+    import inspect as _inspect
+
+    # By each class's own name, so an alias (`Utf8` is `String`) counts once.
+    exported = {
+        obj.__name__
+        for obj in vars(pl).values()
+        if _inspect.isclass(obj)
+        and issubclass(obj, pl.DataType)
+        and obj is not pl.DataType
+        and not _inspect.isabstract(obj)
+        and not obj.__name__.endswith("Type")
+    }
+    covered = {
+        (dtype if isinstance(dtype, type) else type(dtype)).__name__
+        for dtype in EVERY_DTYPE
+    }
+    assert exported - covered - NOT_DATA == set(), (
+        "a Polars dtype neither generates nor is named as holding no data"
+    )
+
+
+@pytest.mark.parametrize("name", sorted(NOT_DATA - {"Extension", "BaseExtension"}))
+def test_a_dtype_that_holds_no_data_is_refused_by_name(name):
+    spec = TableSpec("NotData", {"c": ColSpec(getattr(pl, name))})
+    with pytest.raises(SpecError, match="cannot generate data for dtype"):
+        generate(spec, ROWS, seed=SEED)
 
 
 @pytest.mark.parametrize("dtype", EVERY_DTYPE, ids=str)
