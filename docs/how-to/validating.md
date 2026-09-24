@@ -43,7 +43,8 @@ report = Orders.inspect(suspect)
 report.passed                 # False
 for finding in report:
     finding.code              # "bounds", "check", "foreign_key", ...
-    finding.key               # "total__bounds", "check:total_covers_subtotal"
+    finding.key               # "total__bounds", "check:total_covers_subtotal",
+                              # "point.lat__bounds" for a struct's field
     finding.columns           # ("total",)
     finding.count             # rows violating it (None for structural findings)
     finding.samples           # up to five offending values

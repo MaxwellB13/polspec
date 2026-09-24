@@ -460,23 +460,16 @@ def _generate_column(
     return _finish(_generate_dataframe([plan], n, seed, row_offset)[name], spec, domain)
 
 
-def _field_spec(spec: ColSpec, name: str, dtype: pl.DataType, seed_key: str) -> ColSpec:
+def _field_spec(spec: ColSpec, name: str, seed_key: str) -> ColSpec:
     """The declaration one struct field is generated from.
 
     What `fields` says about it, or its dtype alone when `fields` says
-    nothing -- `fields` is partial by design. A field is never null (a null
-    *cell* is the whole struct), and is seeded under its parent so that
-    renaming the column moves every field with it and adding a field beside
-    one moves nothing.
+    nothing -- `fields` is partial by design, and a field is null only
+    where its own declaration says so. It is seeded under its parent so
+    that renaming the column moves every field with it and adding a field
+    beside one moves nothing.
     """
-    declared = (spec.fields or {}).get(name)
-    field = declared if declared is not None else ColSpec(dtype)
-    return dataclasses.replace(
-        field,
-        nullable=False,
-        null_probability=0.0,
-        seed_name=f"{seed_key}.{name}",
-    )
+    return dataclasses.replace(spec._field(name), seed_name=f"{seed_key}.{name}")
 
 
 def _generate_struct_column(
@@ -494,12 +487,12 @@ def _generate_struct_column(
     fields = [
         _generate_column(
             field_name,
-            _field_spec(spec, field_name, field_dtype, seed_key),
+            _field_spec(spec, field_name, seed_key),
             n,
             seed,
             row_offset,
         )
-        for field_name, field_dtype in field_dtypes(dtype).items()
+        for field_name in field_dtypes(dtype)
     ]
     cells = (
         pl.DataFrame(fields).to_struct(name) if fields else pl.Series(name, [None] * n)
@@ -560,14 +553,7 @@ def _generate_list_column(
     counts = lengths.fill_null(0)
     total = int(counts.sum())
 
-    element_spec = dataclasses.replace(
-        spec,
-        dtype=spec.value_dtype,
-        list_length=None,
-        nullable=False,
-        null_probability=0.0,
-        seed_name=seed_key,
-    )
+    element_spec = dataclasses.replace(spec._element(), seed_name=seed_key)
     # The element is a column in its own right, so a list of structs -- or
     # of lists -- is the same recursion one level down.
     elements = _generate_column(name, element_spec, total, seed)

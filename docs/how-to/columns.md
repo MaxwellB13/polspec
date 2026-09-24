@@ -256,10 +256,13 @@ where one needs bounds spells one field, and the rest are generated from
 their dtypes alone. A name the dtype does not declare, or a field spec
 whose dtype disagrees with the struct's, is refused where it is written.
 
-A field is a value, not a column, so `unique`, `rules`, `seed_name` and
-`col_name` are refused on one — each is a claim about a column among
-columns. As with a list, `nullable` describes the *cell*: a null struct,
-not a null field.
+A field is a value, not a column, so `unique`, `rules`, `validators`,
+`seed_name` and `col_name` are refused on one — each is a claim about a
+column among columns. (A validator about a field is written on the struct
+column instead: `pl.col("point").struct.field("lat") != 0`.) As with a
+list, the column's `nullable` describes the *cell* — a null struct — and a
+field's own `nullable` says whether it may be null inside a struct that is
+present. It defaults to `False`, like any column's.
 
 A `List` of a `Struct` takes `fields` too, describing its element, and a
 field may itself be a struct or a list, so a declaration nests as deeply as
@@ -274,6 +277,15 @@ Generation makes one column per field and gathers them, so a field is drawn
 by the code that draws a column of its dtype — and a struct column is
 seeded by name like any other: renaming it with `seed_name` keeps every
 field, and adding a field beside one moves nothing.
+
+Validation checks each field's claims in place, and a finding names the
+field it is about — its key is `point.lat__bounds`, its message says
+`Column 'point.lat'` — while its `columns` stay `("point",)`, so
+`report.rows(finding)` returns the rows of the frame that hold the
+offending structs. Inside a list the samples are the offending lists, as
+for any list. A struct in the data matches a declared one by field name,
+not order, each field compatible by the usual rules; a field missing or
+added is a `dtype` finding.
 
 ## String formats
 

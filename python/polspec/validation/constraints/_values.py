@@ -1,6 +1,7 @@
 """What one value must be: present, in the domain, within bounds, of a
 length, of a format, matching a pattern, distinct -- built against the column
-for a scalar and lifted through `list.eval` for the elements of a List.
+for a scalar, against each field for a Struct, and lifted through `list.eval`
+for the elements of a List, recursing as deeply as the dtype nests.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 
 from polspec.constraints import is_textual as _is_textual
-from polspec.dtypes import _typed_values, element_dtype
+from polspec.dtypes import _typed_values, element_dtype, field_dtypes
 from polspec.formats import lookup as _lookup_format
 from polspec.validation.report import FindingCode
 
@@ -32,46 +33,57 @@ from polspec.validation.constraints._rules import _rule_constraints
 
 
 @dataclass(kw_only=True)
-class _Nullability(_Constraint):
+class _ColumnConstraint(_Constraint):
+    """A claim about one column's values -- or about a field inside them.
+
+    `where` names the value the claim is about: the column, or a path into
+    it such as `point.lat`. The rows are always the column's, so a finding
+    is involved with the column alone and `rows()` locates it there.
+    """
+
     column: str
-    sample_expr: None = None
-    code: FindingCode = "nullability"
+    where: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.where:
+            self.where = self.column
 
     def involved(self) -> tuple[str, ...]:
         return (self.column,)
 
+
+@dataclass(kw_only=True)
+class _Nullability(_ColumnConstraint):
+    sample_expr: None = None
+    code: FindingCode = "nullability"
+
     def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
+        kind = "column" if self.where == self.column else "field"
         return (
-            f"Column '{self.column}': non-nullable column contains "
-            f"{count} null value(s)"
+            f"Column '{self.where}': non-nullable {kind} contains {count} null value(s)"
         )
 
 
 @dataclass(kw_only=True)
-class _AllowedValues(_Constraint):
-    column: str
+class _AllowedValues(_ColumnConstraint):
     allowed: list[Any]
     code: FindingCode = "choices"
-
-    def involved(self) -> tuple[str, ...]:
-        return (self.column,)
 
     def details(self, stats: dict[str, list]) -> dict[str, Any]:
         return {"allowed": list(self.allowed)}
 
     def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
         return (
-            f"Column '{self.column}': found {count} invalid value(s) not in "
+            f"Column '{self.where}': found {count} invalid value(s) not in "
             f"allowed choices/categories {self.allowed}. Invalid samples: {samples}"
         )
 
 
 @dataclass(kw_only=True)
-class _Bounds(_Constraint):
-    column: str
+class _Bounds(_ColumnConstraint):
     bounds: Bound[Any]
-    # The values the extremes are measured over: the column, or for a List
-    # column its elements.
+    # The values the extremes are measured over: the column, a field, or for
+    # a List the elements, however deep.
     values: pl.Expr
     unique_samples: bool = False
     code: FindingCode = "bounds"
@@ -85,9 +97,6 @@ class _Bounds(_Constraint):
             self.values.max().alias(self._alias("max")),
         ]
 
-    def involved(self) -> tuple[str, ...]:
-        return (self.column,)
-
     def details(self, stats: dict[str, list]) -> dict[str, Any]:
         return {
             "bounds": [self.bounds.min, self.bounds.max] if self.bounds else None,
@@ -99,21 +108,17 @@ class _Bounds(_Constraint):
         found_min = stats[self._alias("min")][0]
         found_max = stats[self._alias("max")][0]
         return (
-            f"Column '{self.column}': found {count} value(s) out of bounds "
+            f"Column '{self.where}': found {count} value(s) out of bounds "
             f"{self.bounds} (min found: {found_min}, max found: {found_max}). "
             f"Out of bounds samples: {samples}"
         )
 
 
 @dataclass(kw_only=True)
-class _StringLength(_Constraint):
-    column: str
+class _StringLength(_ColumnConstraint):
     length: Bound[int]
     unique_samples: bool = False
     code: FindingCode = "string_length"
-
-    def involved(self) -> tuple[str, ...]:
-        return (self.column,)
 
     def details(self, stats: dict[str, list]) -> dict[str, Any]:
         return {
@@ -122,98 +127,78 @@ class _StringLength(_Constraint):
 
     def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
         return (
-            f"Column '{self.column}': found {count} value(s) with string length "
+            f"Column '{self.where}': found {count} value(s) with string length "
             f"outside [{self.length.min}, {self.length.max}]. "
             f"Invalid samples: {samples}"
         )
 
 
 @dataclass(kw_only=True)
-class _ListLength(_Constraint):
-    column: str
+class _ListLength(_ColumnConstraint):
     length: Bound[int]
     unique_samples: bool = False
     code: FindingCode = "list_length"
-
-    def involved(self) -> tuple[str, ...]:
-        return (self.column,)
 
     def details(self, stats: dict[str, list]) -> dict[str, Any]:
         return {"list_length": [self.length.min, self.length.max]}
 
     def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
         return (
-            f"Column '{self.column}': found {count} list(s) with a length "
+            f"Column '{self.where}': found {count} list(s) with a length "
             f"outside [{self.length.min}, {self.length.max}]. "
             f"Invalid samples: {samples}"
         )
 
 
 @dataclass(kw_only=True)
-class _ListElementNull(_Constraint):
+class _ListElementNull(_ColumnConstraint):
     """A null *inside* a list. Generation never makes one, and no field on
     a ColSpec can ask for one, so it is reported under the nullability code
     like a null in a non-nullable column."""
 
-    column: str
     code: FindingCode = "nullability"
-
-    def involved(self) -> tuple[str, ...]:
-        return (self.column,)
 
     def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
         return (
-            f"Column '{self.column}': found {count} list(s) containing a null "
+            f"Column '{self.where}': found {count} list(s) containing a null "
             f"element. Samples: {samples}"
         )
 
 
 @dataclass(kw_only=True)
-class _Format(_Constraint):
-    column: str
+class _Format(_ColumnConstraint):
     format: Format
     code: FindingCode = "format"
-
-    def involved(self) -> tuple[str, ...]:
-        return (self.column,)
 
     def details(self, stats: dict[str, list]) -> dict[str, Any]:
         return {"format": self.format.name}
 
     def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
         return (
-            f"Column '{self.column}': found {count} value(s) that are not "
+            f"Column '{self.where}': found {count} value(s) that are not "
             f"{self.format}. Invalid samples: {samples}"
         )
 
 
 @dataclass(kw_only=True)
-class _Pattern(_Constraint):
-    column: str
+class _Pattern(_ColumnConstraint):
     pattern: str
     code: FindingCode = "pattern"
-
-    def involved(self) -> tuple[str, ...]:
-        return (self.column,)
 
     def details(self, stats: dict[str, list]) -> dict[str, Any]:
         return {"pattern": self.pattern}
 
     def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
         return (
-            f"Column '{self.column}': found {count} value(s) not matching "
+            f"Column '{self.where}': found {count} value(s) not matching "
             f"pattern {self.pattern!r}. Invalid samples: {samples}"
         )
 
 
 @dataclass(kw_only=True)
-class _ColumnValidator(_Constraint):
-    column: str
+class _ColumnValidator(_ColumnConstraint):
     validator: Check
     code: FindingCode = "validator"
-
-    def involved(self) -> tuple[str, ...]:
-        return (self.column,)
 
     def details(self, stats: dict[str, list]) -> dict[str, Any]:
         return {"validator": self.validator.name, "condition": str(self.validator.expr)}
@@ -229,12 +214,8 @@ class _ColumnValidator(_Constraint):
 
 
 @dataclass(kw_only=True)
-class _UniqueValues(_Constraint):
-    column: str
+class _UniqueValues(_ColumnConstraint):
     code: FindingCode = "unique"
-
-    def involved(self) -> tuple[str, ...]:
-        return (self.column,)
 
     def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
         return (
@@ -314,12 +295,7 @@ def _column_constraints(
     if not compatible:
         return constraints
 
-    if isinstance(actual_dtype, (pl.List, pl.Array)):
-        constraints.extend(_list_constraints(name, spec, actual_dtype, options))
-    else:
-        constraints.extend(
-            _value_constraints(name, spec, actual_dtype, column, options)
-        )
+    constraints.extend(_value_tree(name, name, spec, actual_dtype, column, options))
 
     if options.rules and spec.rules:
         constraints.extend(_rule_constraints(name, spec, actual_dtype, df_col_names))
@@ -349,16 +325,39 @@ def _column_constraints(
     return constraints
 
 
-def _value_constraints(
+def _value_tree(
     name: str,
+    where: str,
     spec: ColSpec,
     actual_dtype: pl.DataType,
     column: pl.Expr,
     options: ValidationOptions,
 ) -> list[_Constraint]:
-    """The constraints on one *value* -- its domain, bounds, length, format,
-    pattern -- with masks over `column`, which is the column itself for a
-    scalar and `pl.element()` for the elements of a List.
+    """Every constraint on the values `column` holds, recursing on kind.
+
+    `column` is the expression for the value at this depth -- the column,
+    a field of a struct, or `pl.element()` inside a list -- and every mask
+    returned is aligned with it, so the level above can lift it: a struct
+    reads its fields in place, and a list runs its elements' masks through
+    `list.eval`. `where` names the value, so a finding says which field.
+    """
+    if isinstance(actual_dtype, (pl.List, pl.Array)):
+        return _list_constraints(name, where, spec, actual_dtype, column, options)
+    if isinstance(actual_dtype, pl.Struct):
+        return _struct_constraints(name, where, spec, actual_dtype, column, options)
+    return _value_constraints(name, where, spec, actual_dtype, column, options)
+
+
+def _value_constraints(
+    name: str,
+    where: str,
+    spec: ColSpec,
+    actual_dtype: pl.DataType,
+    column: pl.Expr,
+    options: ValidationOptions,
+) -> list[_Constraint]:
+    """The constraints on one scalar *value* -- its domain, bounds, length,
+    format, pattern -- with masks over `column`.
     """
     present = column.is_not_null()
     dtype = spec.value_dtype
@@ -381,10 +380,11 @@ def _value_constraints(
             sample_expr = column
         constraints.append(
             _AllowedValues(
-                key=f"{name}__choices",
+                key=f"{where}__choices",
                 mask=present & ~in_domain,
                 sample_expr=sample_expr,
                 column=name,
+                where=where,
                 allowed=allowed,
             )
         )
@@ -392,10 +392,11 @@ def _value_constraints(
     if spec.bounds is not None and not spec.bounds.is_open_both:
         constraints.append(
             _Bounds(
-                key=f"{name}__bounds",
+                key=f"{where}__bounds",
                 mask=present & _out_of_bounds(column, spec.bounds, actual_dtype),
                 sample_expr=column,
                 column=name,
+                where=where,
                 bounds=spec.bounds,
                 values=column,
             )
@@ -408,10 +409,11 @@ def _value_constraints(
             too_long = measured > spec.string_length.max
             constraints.append(
                 _StringLength(
-                    key=f"{name}__len",
+                    key=f"{where}__len",
                     mask=present & (too_short | too_long),
                     sample_expr=column,
                     column=name,
+                    where=where,
                     length=spec.string_length,
                 )
             )
@@ -420,10 +422,11 @@ def _value_constraints(
         fmt = _lookup_format(spec.format)
         constraints.append(
             _Format(
-                key=f"{name}__format",
+                key=f"{where}__format",
                 mask=present & ~fmt.check(column),
                 sample_expr=column,
                 column=name,
+                where=where,
                 format=fmt,
             )
         )
@@ -431,10 +434,11 @@ def _value_constraints(
     if options.pattern and spec.pattern is not None:
         constraints.append(
             _Pattern(
-                key=f"{name}__pattern",
+                key=f"{where}__pattern",
                 mask=present & ~column.str.contains(spec.pattern),
                 sample_expr=column,
                 column=name,
+                where=where,
                 pattern=spec.pattern,
             )
         )
@@ -442,20 +446,64 @@ def _value_constraints(
     return constraints
 
 
-def _list_constraints(
+def _struct_constraints(
     name: str,
+    where: str,
     spec: ColSpec,
-    actual_dtype: pl.List | pl.Array,
+    actual_dtype: pl.Struct,
+    column: pl.Expr,
     options: ValidationOptions,
 ) -> list[_Constraint]:
-    """A List column's constraints: its length, no null elements, and every
-    value constraint lifted over its elements.
+    """A Struct's constraints: each field's, read in place.
 
-    Each value constraint is built with `pl.element()` as its column, then
-    its mask is run inside `list.eval` and a list fails where *any* element
-    does. The samples and the located rows are the offending lists.
+    A field is addressable, so its constraints are built with
+    `column.struct.field(f)` as their column and need no lifting -- each
+    mask is already one per struct. A null field inside a present struct is
+    reported unless the field is declared nullable, and a null struct has
+    no fields to check.
     """
-    column = pl.col(name)
+    declared_dtype = spec.value_dtype
+    assert isinstance(declared_dtype, pl.Struct)  # noqa: S101 - compatible with one
+    present = column.is_not_null()
+    actual_fields = field_dtypes(actual_dtype)
+    constraints: list[_Constraint] = []
+    for field in field_dtypes(declared_dtype):
+        if field not in actual_fields:
+            continue  # a dtype finding already says so
+        declared = spec._field(field)
+        value = column.struct.field(field)
+        path = f"{where}.{field}"
+        if not declared.nullable:
+            constraints.append(
+                _Nullability(
+                    key=f"{path}__null",
+                    mask=present & value.is_null(),
+                    column=name,
+                    where=path,
+                )
+            )
+        constraints.extend(
+            _value_tree(name, path, declared, actual_fields[field], value, options)
+        )
+    return constraints
+
+
+def _list_constraints(
+    name: str,
+    where: str,
+    spec: ColSpec,
+    actual_dtype: pl.List | pl.Array,
+    column: pl.Expr,
+    options: ValidationOptions,
+) -> list[_Constraint]:
+    """A List's constraints: its length, no null elements, and every
+    constraint its elements carry, lifted.
+
+    The elements' constraints are built with `pl.element()` as their column
+    -- recursing, so an element may be a struct or a list itself -- then
+    each mask is run inside `list.eval` and a list fails where *any* element
+    does. The samples are the offending lists.
+    """
     present = column.is_not_null()
     constraints: list[_Constraint] = []
 
@@ -463,11 +511,12 @@ def _list_constraints(
         length = column.list.len()
         constraints.append(
             _ListLength(
-                key=f"{name}__list_len",
+                key=f"{where}__list_len",
                 mask=present
                 & ~length.is_between(spec.list_length.min, spec.list_length.max),
                 sample_expr=column,
                 column=name,
+                where=where,
                 length=spec.list_length,
             )
         )
@@ -485,15 +534,21 @@ def _list_constraints(
     elements = column.arr if is_array else column.list
     constraints.append(
         _ListElementNull(
-            key=f"{name}__element_null",
+            key=f"{where}__element_null",
             mask=present & any_element(pl.element().is_null()),
             sample_expr=column,
             column=name,
+            where=where,
         )
     )
 
-    for constraint in _value_constraints(
-        name, spec, element_dtype(actual_dtype), pl.element(), options
+    inner = element_dtype(actual_dtype)
+    # A list of lists has two levels of list claims under one name; `[]`
+    # tells the inner one's apart. Every other element keeps its list's name,
+    # so a List column's findings read as they always have.
+    inner_where = f"{where}[]" if isinstance(inner, (pl.List, pl.Array)) else where
+    for constraint in _value_tree(
+        name, inner_where, spec._element(), inner, pl.element(), options
     ):
         lifted: dict[str, Any] = {
             "mask": present & any_element(constraint.mask),
