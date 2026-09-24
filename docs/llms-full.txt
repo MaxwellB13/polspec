@@ -241,7 +241,9 @@ Customers.validate(
 
 By default a String column arriving where an `Enum` was declared is accepted —
 that is how data comes back from CSV and JSON. `strict_dtypes=True` demands the
-exact dtype.
+exact dtype. For a file someone else hands you, [Checking a file you were
+given](https://maxwellb13.github.io/polspec/how-to/validating/#checking-a-file-you-were-given) walks through
+the whole flow, dates included.
 
 ## Infer a spec instead of writing one
 
@@ -1623,6 +1625,8 @@ parent directory if needed, and pass extra keyword arguments through to
 polars' own sink. Nothing beyond Polars is needed for any of them.
 
 With `n=0`, Parquet, IPC and CSV still write a valid schema-bearing file.
+A CSV cannot hold a `Duration`, `List` or `Struct` column, so `sink_csv`
+refuses a spec with one; Parquet and IPC keep every dtype.
 
 A sink is the shorthand; `Orders.scan(n, seed=1).sink_parquet(path)` is the
 same write with the rest of a lazy plan available — a `filter`, a `select`,
@@ -1786,6 +1790,103 @@ the structural transformations below. The full list of codes is in
 [Errors](https://maxwellb13.github.io/polspec/reference/errors/#finding-codes), and `polspec validate` on the
 [command line](https://maxwellb13.github.io/polspec/how-to/cli/#validate-check-data-against-a-schema) prints the same
 report.
+
+## Checking a file you were given
+
+The usual way in: someone hands you a file, and there is a spec it should
+meet. Read it loosely, let `inspect()` say everything that is wrong, decide
+whether the file or the spec is at fault, and only then ask for the typed
+frame.
+
+```python
+Path("customers.csv").write_text(          # the file you were handed
+    "id,name,country,signed_up\n"
+    "1,Ada Lovelace,UK,2021-03-04\n"
+    "2,Grace Hopper,US,2019-12-31\n"
+    "2,Al,FR,2022-01-01\n"
+)
+```
+
+**1. Read it without forcing the spec's types.**
+
+```python
+given = pl.read_csv("customers.csv", try_parse_dates=True)
+```
+
+`try_parse_dates=True` matters: a CSV has no date type, so without it
+`signed_up` arrives as `String`, the report says only *expected Date, got
+String*, and none of the column's own checks run. The other gaps between a
+CSV and a spec take care of themselves -- a `String` column is accepted
+where an `Enum` or `Categorical` is declared, an integer where a float or
+`Decimal` is, and the values are checked either way.
+
+Reading with the spec's schema is the tempting alternative, and the wrong
+first step: Polars stops at the first value that does not fit, so one
+error replaces the whole report.
+
+<!-- docs: raises -->
+```python
+pl.read_csv("customers.csv", schema_overrides=Customers.schema())
+# ComputeError: could not parse `FR` as dtype `enum` at column 'country'
+```
+
+**2. Ask what is wrong -- all of it.**
+
+```python
+report = Customers.inspect(given)
+print(report)
+```
+
+```
+Validation failed for DataFrame against 'Customers' (4 error(s) found):
+  - Column 'id': unique column contains 2 duplicate value(s). Duplicate samples: [2]
+  - Column 'name': found 1 value(s) with string length outside [3, 20]. Invalid samples: ['Al']
+  - Column 'country': found 1 invalid value(s) not in allowed choices/categories ['UK', 'US', 'DE']. Invalid samples: ['FR']
+  - Column 'signed_up': found 1 value(s) out of bounds [2020-01-01, 2026-01-01] (min found: 2019-12-31, max found: 2022-01-01). Out of bounds samples: [datetime.date(2019, 12, 31)]
+```
+
+`report.rows(finding)` is the offending rows, and `report.to_json()` is
+something to send back to whoever sent the file:
+
+```python
+report.rows(report.by_code("choices")[0]).collect()   # the row with country "FR"
+```
+
+**3. Decide which is wrong: the file, or the spec.** A bad row is fixed or
+filtered at the source. A spec that has fallen behind -- `FR` is a real
+country now -- is changed, and [`diff`](https://maxwellb13.github.io/polspec/how-to/drift/#two-declarations) says
+whether the change is breaking for anything already validated against it:
+
+```python
+Widened = Customers.spec.with_columns(country=ColSpec(pl.Enum(["UK", "US", "DE", "FR"])))
+Customers.diff(Widened).breaking      # () -- widening a domain breaks nothing
+```
+
+While you are still finding out what the ranges really are,
+`validate_bounds=False` checks everything but the bounds, and
+[`from_dataframe`](https://maxwellb13.github.io/polspec/tutorial/getting-started/#infer-a-spec-instead-of-writing-one)
+describes what the file actually holds, to compare against what the spec
+says it should.
+
+**4. Then take the typed frame.** Once it passes, `cast=True` returns each
+column as its declared dtype -- the `Enum` an `Enum`, not the `String` the
+CSV held -- so the code downstream reads the types the spec promises:
+
+```python
+corrected = given.filter(pl.col("name") == "Ada Lovelace")   # the file, fixed
+clean = Customers.validate(corrected, cast=True)
+clean.schema["country"]       # Enum(categories=['UK', 'US', 'DE'])
+```
+
+From the shell, `polspec validate customers.py customers.csv` does steps 1
+and 2 in one go, parsing the columns the spec declares as dates and times;
+see [the CLI](https://maxwellb13.github.io/polspec/how-to/cli/#validate-check-data-against-a-schema).
+
+!!! note "What a CSV cannot hold"
+
+    A CSV has no way to write a `Duration`, a `List` or a `Struct`, so a
+    spec with one of those cannot be met by a CSV however it is read.
+    Parquet or Arrow IPC keeps every dtype.
 
 ## Options
 
@@ -3348,7 +3449,9 @@ for `validate`.
 
 The frame is built in memory and written once. For a file too large to hold,
 the streaming [`sink_*`](https://maxwellb13.github.io/polspec/how-to/generating/#writing-straight-to-a-file) functions
-are a Python surface.
+are a Python surface. A CSV or TSV cannot hold a `Duration`, `List` or
+`Struct` column; Polars refuses to write one, so use Parquet or Arrow IPC
+for a spec that has any.
 
 ### `--all` — every spec in a directory
 
@@ -3383,7 +3486,18 @@ Python at all.
 `--references NAME=PATH` supplies parent data for a foreign key to another
 spec, by that spec's name; repeat it for several. `--allow-extra` and
 `--allow-missing` relax the structural checks; `--strict-dtypes` tightens the
-dtype check.
+dtype check. `--skip CHECK` turns off one kind of check, as the matching
+`validate_*=False` does in Python -- `--skip bounds --skip checks` -- and
+takes any of `rules`, `validators`, `unique`, `checks`, `foreign_keys`,
+`hierarchy`, `pattern` and `bounds`.
+
+A CSV, TSV or JSON file has no date type, so a date arrives as text. The CLI
+reads each column the spec declares as a `Date`, `Datetime` or `Time` as
+that type when every value in it parses; a column holding a value that does
+not stays text, and is reported as a `dtype` finding rather than turned into
+a null. A `String` column of date-shaped text is left alone. `drift` reads
+the same way, and `schema infer`, with no spec to go by, recognises a CSV's
+dates itself.
 
 ### `--all` — every spec against the file named after it
 
@@ -4381,6 +4495,8 @@ renames : mapping, optional
 options : DriftOptions, optional
     Only `strict_dtypes` is read when diffing two specs.
 
+Notes
+-----
 A finding is *breaking* when a frame that satisfied `old` could fail
 `new`: a narrowed domain, a dropped nullability, a column added (a frame
 that lacks it fails `missing_cols="raise"`), a constraint added. A
@@ -4403,6 +4519,8 @@ options : DriftOptions, optional
 **option_kwargs
     The fields of `DriftOptions`, one at a time.
 
+Notes
+-----
 A finding is *breaking* when this frame fails this spec on that column:
 values outside the domain, a bound exceeded, nulls where none are
 allowed, a format not matched. A null rate that moved within a nullable

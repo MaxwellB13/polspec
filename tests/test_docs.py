@@ -196,3 +196,40 @@ def test_llms_txt_follows_the_convention():
     for _section, title, relative in generator.walk_nav(config["project"]["nav"]):
         url = generator.url_for(site, relative)
         assert f"[{title}]({url})" in text, f"{title} is missing from llms.txt"
+
+
+def test_every_docstring_parses_as_numpy():
+    """What the API reference renders is what griffe parses, and a line of
+    prose left under *Parameters* renders as a parameter named `A` or
+    `that`. The strict docs build only logs that, so it is pinned here:
+    every docstring in the package parses without a warning."""
+    import logging
+
+    import griffe
+
+    warnings: list[str] = []
+
+    class Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            warnings.append(record.getMessage())
+
+    logger = logging.getLogger("griffe")
+    handler = Collect(level=logging.WARNING)
+    logger.addHandler(handler)
+    try:
+        package = griffe.load(
+            "polspec", search_paths=[str(ROOT / "python")], docstring_parser="numpy"
+        )
+        seen: set[str] = set()
+        stack = [package]
+        while stack:
+            obj = stack.pop()
+            if obj.path in seen:
+                continue
+            seen.add(obj.path)
+            if obj.docstring is not None:
+                obj.docstring.parsed  # noqa: B018 - parsing is what warns
+            stack.extend(m for m in obj.members.values() if not m.is_alias)
+    finally:
+        logger.removeHandler(handler)
+    assert not warnings, "\n".join(sorted(set(warnings)))

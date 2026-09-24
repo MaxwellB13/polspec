@@ -871,6 +871,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         validate_rules, validate_validators, validate_unique, validate_checks, validate_foreign_keys, validate_hierarchy, validate_pattern, validate_bounds
             The check switches: `validate_` in front of the field they set.
 
+        Notes
+        -----
         A keyword left as `None` takes the `ValidationOptions` default; see
         that class for what every option means.
         """

@@ -191,7 +191,9 @@ for `validate`.
 
 The frame is built in memory and written once. For a file too large to hold,
 the streaming [`sink_*`](generating.md#writing-straight-to-a-file) functions
-are a Python surface.
+are a Python surface. A CSV or TSV cannot hold a `Duration`, `List` or
+`Struct` column; Polars refuses to write one, so use Parquet or Arrow IPC
+for a spec that has any.
 
 ### `--all` — every spec in a directory
 
@@ -226,7 +228,18 @@ Python at all.
 `--references NAME=PATH` supplies parent data for a foreign key to another
 spec, by that spec's name; repeat it for several. `--allow-extra` and
 `--allow-missing` relax the structural checks; `--strict-dtypes` tightens the
-dtype check.
+dtype check. `--skip CHECK` turns off one kind of check, as the matching
+`validate_*=False` does in Python -- `--skip bounds --skip checks` -- and
+takes any of `rules`, `validators`, `unique`, `checks`, `foreign_keys`,
+`hierarchy`, `pattern` and `bounds`.
+
+A CSV, TSV or JSON file has no date type, so a date arrives as text. The CLI
+reads each column the spec declares as a `Date`, `Datetime` or `Time` as
+that type when every value in it parses; a column holding a value that does
+not stays text, and is reported as a `dtype` finding rather than turned into
+a null. A `String` column of date-shaped text is left alone. `drift` reads
+the same way, and `schema infer`, with no spec to go by, recognises a CSV's
+dates itself.
 
 ### `--all` — every spec against the file named after it
 
