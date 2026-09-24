@@ -37,6 +37,7 @@ from polspec import (
     TableSpec,
     col,
     generate,
+    validate,
 )
 from polspec.formats import FORMATS
 
@@ -915,25 +916,46 @@ def test_a_hand_built_cycle_still_validates():
 # ---------------------------------------------------------------------------
 # Which dtypes the property covers
 #
-# The round-trip needs both halves, so a dtype validate() understands but
-# generate() cannot fill is outside it. Docs name the one left; this pins it
-# so the page cannot go stale, and pins the ones people assume are missing
-# and are not.
+# All of them, since 0.9.0 -- every dtype the docs list generates and
+# validates, nested to any depth. This pins that claim, and the one people
+# assume is missing and is not.
 # ---------------------------------------------------------------------------
 
-UNGENERATABLE_DTYPES = [
-    pl.Struct({"a": pl.Int64}),
+EVERY_DTYPE = [
+    pl.Int8,
+    pl.Int64,
+    pl.UInt32,
+    pl.Float32,
+    pl.Float64,
+    pl.Decimal(10, 2),
+    pl.Boolean,
+    pl.String,
+    pl.Binary,
+    pl.Date,
+    pl.Time,
+    pl.Datetime("us"),
+    pl.Duration("ms"),
+    pl.Enum(["a", "b"]),
+    pl.Categorical,
+    pl.List(pl.Int64),
+    pl.Array(pl.Float64, 3),
+    pl.Struct({"a": pl.Int64, "b": pl.String}),
+    # Nested to two levels, every way round.
     pl.List(pl.List(pl.Int64)),
     pl.List(pl.Struct({"a": pl.Int64})),
+    pl.Array(pl.Struct({"a": pl.Int64}), 2),
+    pl.Struct({"xs": pl.List(pl.Int64)}),
+    pl.Struct({"inner": pl.Struct({"a": pl.Int64})}),
 ]
 
 
-@pytest.mark.parametrize("dtype", UNGENERATABLE_DTYPES, ids=str)
-def test_an_ungeneratable_dtype_declares_and_refuses_only_at_generate(dtype):
-    """Accepted at declaration, named at generation -- see limitations.md."""
-    spec = TableSpec("Ungeneratable", {"c": ColSpec(dtype)})
-    with pytest.raises(SpecError, match="cannot generate data for dtype"):
-        generate(spec, ROWS, seed=SEED)
+@pytest.mark.parametrize("dtype", EVERY_DTYPE, ids=str)
+def test_every_dtype_generates_and_validates(dtype):
+    """There is no dtype left that declares and cannot be generated."""
+    spec = TableSpec("Every", {"c": ColSpec(dtype)})
+    df = generate(spec, ROWS, seed=SEED)
+    assert df.schema["c"] == ColSpec(dtype).dtype
+    validate(spec, df)
 
 
 def test_a_time_zoned_datetime_completes_the_round_trip():

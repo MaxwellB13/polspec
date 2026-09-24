@@ -26,6 +26,7 @@ from polspec.dtypes import (
     _bound_endpoint_to_physical,
     _dtype_value_limits,
     _typed_values,
+    field_dtypes,
 )
 from polspec.errors import GenerationError
 from polspec.formats import lookup as _lookup_format
@@ -404,7 +405,8 @@ def _generate_random(
 ) -> pl.DataFrame:
     """`n` rows drawn per column -- rows `[row_offset, row_offset + n)` of the
     frame `seed` describes, so a batch is a window onto one frame. A List
-    column's lengths are a window too; its elements are drawn per call."""
+    column's lengths are a window too; its elements are drawn per call,
+    and so are the fields of a struct."""
     if not columns:
         return pl.DataFrame()
     frame_seed = seed if seed is not None else random.randrange(2**63)
@@ -413,8 +415,13 @@ def _generate_random(
         for name, spec in columns.items()
     }
     # `_column_kind` refuses what the engine cannot fill, so every column is
-    # classified before any is generated.
-    scalars = {n_: s for n_, s in columns.items() if _column_kind(s.dtype) != "list"}
+    # classified before any is generated. The scalar ones share a single
+    # engine call; a nested one is built from the columns it contains.
+    scalars = {
+        n_: s
+        for n_, s in columns.items()
+        if _column_kind(s.dtype) not in ("list", "struct")
+    }
     plans: list[ColumnPlan] = []
     domains: dict[str, pl.Series | None] = {}
     for name, spec in scalars.items():
@@ -429,8 +436,92 @@ def _generate_random(
         if name in scalars:
             finished[name] = _finish(raw.pop(name), spec, domains[name])
         else:
-            finished[name] = _generate_list_column(name, spec, n, seed, row_offset)
+            finished[name] = _generate_column(name, spec, n, seed, row_offset)
     return pl.DataFrame([finished[name] for name in columns])
+
+
+def _generate_column(
+    name: str, spec: ColSpec, n: int, seed: int | None, row_offset: int = 0
+) -> pl.Series:
+    """One column of `n` values, whatever its dtype nests.
+
+    The scalar path is a plan handed to the engine; a `List` wraps the
+    column its elements make, and a `Struct` gathers the columns its fields
+    make -- each by calling back here, so a dtype nests as deeply as it
+    likes and every value is drawn by the code that draws a column of its
+    own type.
+    """
+    kind = _column_kind(spec.dtype)
+    if kind == "list":
+        return _generate_list_column(name, spec, n, seed, row_offset)
+    if kind == "struct":
+        return _generate_struct_column(name, spec, n, seed, row_offset)
+    plan, domain = _plan_column(name, spec)
+    return _finish(_generate_dataframe([plan], n, seed, row_offset)[name], spec, domain)
+
+
+def _field_spec(spec: ColSpec, name: str, dtype: pl.DataType, seed_key: str) -> ColSpec:
+    """The declaration one struct field is generated from.
+
+    What `fields` says about it, or its dtype alone when `fields` says
+    nothing -- `fields` is partial by design. A field is never null (a null
+    *cell* is the whole struct), and is seeded under its parent so that
+    renaming the column moves every field with it and adding a field beside
+    one moves nothing.
+    """
+    declared = (spec.fields or {}).get(name)
+    field = declared if declared is not None else ColSpec(dtype)
+    return dataclasses.replace(
+        field,
+        nullable=False,
+        null_probability=0.0,
+        seed_name=f"{seed_key}.{name}",
+    )
+
+
+def _generate_struct_column(
+    name: str, spec: ColSpec, n: int, seed: int | None, row_offset: int = 0
+) -> pl.Series:
+    """A `Struct` column: one column per field, gathered into a struct.
+
+    The cell's own nullability rides on a separate draw, so a null struct
+    is a null cell rather than a struct of nulls.
+    """
+    dtype = spec.value_dtype
+    assert isinstance(dtype, pl.Struct)  # noqa: S101 - the caller checked the kind
+    seed_key = spec.seed_name or name
+
+    fields = [
+        _generate_column(
+            field_name,
+            _field_spec(spec, field_name, field_dtype, seed_key),
+            n,
+            seed,
+            row_offset,
+        )
+        for field_name, field_dtype in field_dtypes(dtype).items()
+    ]
+    cells = (
+        pl.DataFrame(fields).to_struct(name) if fields else pl.Series(name, [None] * n)
+    )
+    if not spec.nullable:
+        return cells
+    return cells.zip_with(_present(name, spec, n, seed, row_offset), pl.Series([None]))
+
+
+def _present(
+    name: str, spec: ColSpec, n: int, seed: int | None, row_offset: int
+) -> pl.Series:
+    """A mask of the rows a nullable cell is present on, drawn at the
+    declared rate from a name no user column can carry."""
+    plan = column_plan(
+        name,
+        "int64",
+        nullable=True,
+        null_probability=spec.null_probability,
+        seed_name=f"{spec.seed_name or name}\x00null",
+    )
+    return _generate_dataframe([plan], n, seed, row_offset)[name].is_not_null()
 
 
 def _generate_list_column(
@@ -477,10 +568,9 @@ def _generate_list_column(
         null_probability=0.0,
         seed_name=seed_key,
     )
-    plan, domain = _plan_column(name, element_spec)
-    elements = _finish(
-        _generate_dataframe([plan], total, seed)[name], element_spec, domain
-    )
+    # The element is a column in its own right, so a list of structs -- or
+    # of lists -- is the same recursion one level down.
+    elements = _generate_column(name, element_spec, total, seed)
 
     row_of_element = (
         pl.int_range(0, n, eager=True).repeat_by(counts).explode(empty_as_null=False)

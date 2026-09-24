@@ -50,10 +50,10 @@ def _column_kind(dtype: pl.DataType) -> str:
         return "enum"
     if _is_categorical_dtype(dtype):
         return "categorical"
-    if isinstance(dtype, (pl.List, pl.Array)) and not isinstance(
-        dtype.inner, (pl.List, pl.Array, pl.Struct)
-    ):
+    if isinstance(dtype, (pl.List, pl.Array)):
         return "list"
+    if isinstance(dtype, pl.Struct):
+        return "struct"
     raise SpecError(f"polspec cannot generate data for dtype {dtype!r}")
 
 

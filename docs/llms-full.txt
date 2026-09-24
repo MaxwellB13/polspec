@@ -476,11 +476,10 @@ for you, so `pl.Int64` and `pl.Int64()` mean the same thing.
 | Bytes | `Binary` |
 | Temporal | `Date` `Time` `Datetime` `Duration` |
 | Categorical | `Enum` `Categorical` |
-| Nested | `List(inner)` `Array(inner, width)` of any dtype above — see [Nested columns](#nested-columns) |
+| Nested | `List(inner)` `Array(inner, width)` `Struct({name: dtype})` — nested to any depth; see [Nested columns](#nested-columns) |
 
-Anything else — `Struct`, and a `List` whose elements are themselves a
-`List` or `Struct` — can be *validated* but not generated; `generate()`
-raises `SpecError` naming the dtype.
+That is every dtype: since 0.9.0 there is none polspec declares and cannot
+generate.
 
 ## Nullability
 
@@ -697,8 +696,18 @@ columns. As with a list, `nullable` describes the *cell*: a null struct,
 not a null field.
 
 A `List` of a `Struct` takes `fields` too, describing its element, and a
-field may itself be a struct, so a declaration nests as deeply as the
-dtype does.
+field may itself be a struct or a list, so a declaration nests as deeply as
+the dtype does:
+
+```python
+ColSpec(pl.Struct({"xs": pl.List(pl.Int64)}),
+        fields={"xs": ColSpec(pl.List(pl.Int64), bounds=(0, 9), list_length=(2, 2))})
+```
+
+Generation makes one column per field and gathers them, so a field is drawn
+by the code that draws a column of its dtype — and a struct column is
+seeded by name like any other: renaming it with `seed_name` keeps every
+field, and adding a field beside one moves nothing.
 
 ## String formats
 
@@ -4977,10 +4986,9 @@ them. See [String formats](https://maxwellb13.github.io/polspec/how-to/formats/)
 
 ## Smaller sharp edges
 
-- **Unsupported dtypes are accepted at declaration.** `ColSpec(pl.Struct(...))`
-  constructs and validates; only `generate()` objects. That is `Struct`,
-  and a `List` or `Array` whose elements are a `List` or `Struct`. See
-  [Dtype coverage](https://maxwellb13.github.io/polspec/explanation/roadmap/#dtype-coverage-is-not-complete-yet).
+- **A struct's fields are never null.** Generation fills every field of a
+  struct it makes; a null *cell* is the whole struct. Validation still
+  reports a null field it finds in real data, under `nullability`.
 - **A list's elements are never null.** Generation fills a `List` column's
   cells with non-null elements, and no field can ask otherwise; validation
   reports a null element as a `nullability` finding.
@@ -5227,38 +5235,25 @@ Source: https://maxwellb13.github.io/polspec/explanation/roadmap/
     the library produces, as breakable between versions until it says
     otherwise.
 
-## Dtype coverage is not complete yet
+## Dtype coverage is complete
 
-polspec generates every scalar and temporal Polars dtype — integers, floats,
+polspec generates every Polars dtype it accepts — integers, floats,
 `Decimal`, booleans, strings, binary, `Date`/`Time`/`Datetime`/`Duration`,
-`Enum` and `Categorical`. A `Datetime` carrying a `time_zone` is included: the
+`Enum`, `Categorical`, and `List`, `Array` and `Struct` of any of them,
+nested to any depth. A `Datetime` carrying a `time_zone` is included: the
 physical value is an offset from the naive epoch whatever the zone, so the
 zone rides along and `generate()` hands back a column of the dtype you
-declared. A `Decimal` is the same idea: an integer and a scale, drawn as the
-integer and scaled back.
+declared. A `Decimal` is the same idea: an integer and a scale, drawn as
+the integer and scaled back.
 
-A `List` or `Array` of any of those is generated too, its elements described
-by the same fields a scalar column takes
-([Nested columns](https://maxwellb13.github.io/polspec/how-to/columns/#nested-columns)). What is left out:
-
-- `Struct`
-- a `List` or `Array` whose elements are themselves a `List` or `Struct`
-
-A `ColSpec` for these constructs without complaint and can be *validated*
-against by dtype — `FrameSpec.validate()` doesn't need to know how to
-generate a dtype to check one. `generate()` is where it stops, with a
-`SpecError` naming the dtype. If you need one today, generate the column
-separately and attach it with `with_columns` after `generate()` returns.
-
-`Struct` is the open question. A struct column is a set of named, typed
-fields, which is what a `FrameSpec` already is — so the question is less
-"how is this generated" than whether a struct's fields *are* a nested
-`TableSpec` (one declaration, reused by generation, validation, drift and
-the file format) or a second, smaller thing. The first is the polspec
-answer, and it needs the facade, the serialization format and the
-per-column registries to become recursive, which is why it is a release of
-its own rather than a field. A list of lists waits on the same decision:
-once a value can be described by a nested declaration, so can an element.
+What a nested column *claims* is one declaration per value: a `List`'s
+elements take the fields a scalar column takes, and a `Struct`'s take a
+`ColSpec` each under
+[`fields=`](https://maxwellb13.github.io/polspec/how-to/columns/#fields-what-a-structs-values-are). The
+question this answered — whether a struct's fields are a declaration of
+their own or a second, smaller thing — is settled the first way: a value
+is described the same way wherever it sits, which is why the same change
+that generated a struct generated a list of lists.
 
 ## Generation is getting more guardrails, not fewer
 
@@ -5415,6 +5410,21 @@ seed produces; see
 
 ### Added
 
+- **Every dtype generates.** A `Struct` column is generated from its
+  [`fields`](https://maxwellb13.github.io/polspec/how-to/columns/#fields-what-a-structs-values-are)
+  -- one column per field, gathered -- and the same recursion generates a
+  `List(Struct)`, a `List(List)`, an `Array(Struct)` and a struct of
+  either, nested as deeply as the dtype goes. There is no dtype left that
+  polspec declares and cannot generate, and `test_roundtrip.py` pins that
+  claim rather than the list of exceptions it used to hold.
+
+  A field is drawn by the code that draws a column of its dtype, and is
+  seeded under its parent by name: renaming a struct column with
+  `seed_name` keeps every field, adding a field beside one moves nothing,
+  and a struct column is a window under `generate_batches` and `scan()`
+  like any other. A field is never null -- a null *cell* is the whole
+  struct -- which is the rule a `List`'s elements already followed.
+
 - **`ColSpec(fields=…)`: what is claimed about a struct's field values.**
   A `Struct` column's dtype is its schema -- every field's name and type
   comes from it -- and `fields` is a `ColSpec` per field saying what its
@@ -5442,9 +5452,6 @@ seed produces; see
   `List(Struct)` and `List(List)`, which had no written form before. The
   format version stays at 3: `fields:` is an added optional key. `diff`
   reports a field described, no longer described, or changed.
-
-  Generating a struct arrives in the next release; `generate()` still
-  refuses one by name.
 
 ### Removed
 
