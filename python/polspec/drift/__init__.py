@@ -126,6 +126,8 @@ def diff(
     options : DriftOptions, optional
         Only `strict_dtypes` is read when diffing two specs.
 
+    Notes
+    -----
     A finding is *breaking* when a frame that satisfied `old` could fail
     `new`: a narrowed domain, a dropped nullability, a column added (a frame
     that lacks it fails `missing_cols="raise"`), a constraint added. A
@@ -212,6 +214,8 @@ def drift(
     **option_kwargs
         The fields of `DriftOptions`, one at a time.
 
+    Notes
+    -----
     A finding is *breaking* when this frame fails this spec on that column:
     values outside the domain, a bound exceeded, nulls where none are
     allowed, a format not matched. A null rate that moved within a nullable

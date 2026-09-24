@@ -168,6 +168,8 @@ parent directory if needed, and pass extra keyword arguments through to
 polars' own sink. Nothing beyond Polars is needed for any of them.
 
 With `n=0`, Parquet, IPC and CSV still write a valid schema-bearing file.
+A CSV cannot hold a `Duration`, `List` or `Struct` column, so `sink_csv`
+refuses a spec with one; Parquet and IPC keep every dtype.
 
 A sink is the shorthand; `Orders.scan(n, seed=1).sink_parquet(path)` is the
 same write with the rest of a lazy plan available — a `filter`, a `select`,

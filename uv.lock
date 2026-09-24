@@ -411,6 +411,7 @@ bench = [
     { name = "numpy" },
 ]
 dev = [
+    { name = "griffelib" },
     { name = "maturin" },
     { name = "numpy" },
     { name = "pyarrow" },
@@ -433,6 +434,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 bench = [{ name = "numpy", specifier = ">=2.5.2" }]
 dev = [
+    { name = "griffelib", specifier = ">=2.3" },
     { name = "maturin", specifier = ">=1.7" },
     { name = "numpy", specifier = ">=2.5.2" },
     { name = "pyarrow", specifier = ">=14.0.0" },

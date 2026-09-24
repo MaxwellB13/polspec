@@ -104,7 +104,9 @@ Customers.validate(
 
 By default a String column arriving where an `Enum` was declared is accepted —
 that is how data comes back from CSV and JSON. `strict_dtypes=True` demands the
-exact dtype.
+exact dtype. For a file someone else hands you, [Checking a file you were
+given](../how-to/validating.md#checking-a-file-you-were-given) walks through
+the whole flow, dates included.
 
 ## Infer a spec instead of writing one
 
