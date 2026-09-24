@@ -8,38 +8,25 @@
     the library produces, as breakable between versions until it says
     otherwise.
 
-## Dtype coverage is not complete yet
+## Dtype coverage is complete
 
-polspec generates every scalar and temporal Polars dtype — integers, floats,
+polspec generates every Polars dtype it accepts — integers, floats,
 `Decimal`, booleans, strings, binary, `Date`/`Time`/`Datetime`/`Duration`,
-`Enum` and `Categorical`. A `Datetime` carrying a `time_zone` is included: the
+`Enum`, `Categorical`, and `List`, `Array` and `Struct` of any of them,
+nested to any depth. A `Datetime` carrying a `time_zone` is included: the
 physical value is an offset from the naive epoch whatever the zone, so the
 zone rides along and `generate()` hands back a column of the dtype you
-declared. A `Decimal` is the same idea: an integer and a scale, drawn as the
-integer and scaled back.
+declared. A `Decimal` is the same idea: an integer and a scale, drawn as
+the integer and scaled back.
 
-A `List` or `Array` of any of those is generated too, its elements described
-by the same fields a scalar column takes
-([Nested columns](../how-to/columns.md#nested-columns)). What is left out:
-
-- `Struct`
-- a `List` or `Array` whose elements are themselves a `List` or `Struct`
-
-A `ColSpec` for these constructs without complaint and can be *validated*
-against by dtype — `FrameSpec.validate()` doesn't need to know how to
-generate a dtype to check one. `generate()` is where it stops, with a
-`SpecError` naming the dtype. If you need one today, generate the column
-separately and attach it with `with_columns` after `generate()` returns.
-
-`Struct` is the open question. A struct column is a set of named, typed
-fields, which is what a `FrameSpec` already is — so the question is less
-"how is this generated" than whether a struct's fields *are* a nested
-`TableSpec` (one declaration, reused by generation, validation, drift and
-the file format) or a second, smaller thing. The first is the polspec
-answer, and it needs the facade, the serialization format and the
-per-column registries to become recursive, which is why it is a release of
-its own rather than a field. A list of lists waits on the same decision:
-once a value can be described by a nested declaration, so can an element.
+What a nested column *claims* is one declaration per value: a `List`'s
+elements take the fields a scalar column takes, and a `Struct`'s take a
+`ColSpec` each under
+[`fields=`](../how-to/columns.md#fields-what-a-structs-values-are). The
+question this answered — whether a struct's fields are a declaration of
+their own or a second, smaller thing — is settled the first way: a value
+is described the same way wherever it sits, which is why the same change
+that generated a struct generated a list of lists.
 
 ## Generation is getting more guardrails, not fewer
 

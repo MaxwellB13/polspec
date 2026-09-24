@@ -42,11 +42,10 @@ for you, so `pl.Int64` and `pl.Int64()` mean the same thing.
 | Bytes | `Binary` |
 | Temporal | `Date` `Time` `Datetime` `Duration` |
 | Categorical | `Enum` `Categorical` |
-| Nested | `List(inner)` `Array(inner, width)` of any dtype above — see [Nested columns](#nested-columns) |
+| Nested | `List(inner)` `Array(inner, width)` `Struct({name: dtype})` — nested to any depth; see [Nested columns](#nested-columns) |
 
-Anything else — `Struct`, and a `List` whose elements are themselves a
-`List` or `Struct` — can be *validated* but not generated; `generate()`
-raises `SpecError` naming the dtype.
+That is every dtype: since 0.9.0 there is none polspec declares and cannot
+generate.
 
 ## Nullability
 
@@ -263,8 +262,18 @@ columns. As with a list, `nullable` describes the *cell*: a null struct,
 not a null field.
 
 A `List` of a `Struct` takes `fields` too, describing its element, and a
-field may itself be a struct, so a declaration nests as deeply as the
-dtype does.
+field may itself be a struct or a list, so a declaration nests as deeply as
+the dtype does:
+
+```python
+ColSpec(pl.Struct({"xs": pl.List(pl.Int64)}),
+        fields={"xs": ColSpec(pl.List(pl.Int64), bounds=(0, 9), list_length=(2, 2))})
+```
+
+Generation makes one column per field and gathers them, so a field is drawn
+by the code that draws a column of its dtype — and a struct column is
+seeded by name like any other: renaming it with `seed_name` keeps every
+field, and adding a field beside one moves nothing.
 
 ## String formats
 

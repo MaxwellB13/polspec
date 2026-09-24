@@ -65,13 +65,11 @@ def test_what_a_list_column_refuses():
         ColSpec(pl.List(pl.Int64), unique=True)
     with pytest.raises(SpecError, match="a list value would be a list of lists"):
         ColSpec(pl.List(pl.Int64), rules=[ColRule(when=col("x") > 1, choices=(1,))])
-    # A list of lists declares and validates by dtype; only generate() objects,
-    # and the value fields have nothing to describe on it.
+    # A list of lists generates, but its *value* is a list, so the fields
+    # that describe a scalar have nothing to say about it.
     ColSpec(pl.List(pl.List(pl.Int64)))
     with pytest.raises(SpecError, match="bounds is only supported"):
         ColSpec(pl.List(pl.List(pl.Int64)), bounds=(0, 1))
-    with pytest.raises(SpecError, match="cannot generate data for dtype"):
-        _spec_for(ColSpec(pl.Array(pl.Struct({"a": pl.Int64}), 2))).generate(1)
 
 
 def test_an_element_class_is_instantiated_like_a_dtype_class():

@@ -10,6 +10,21 @@ seed produces; see
 
 ### Added
 
+- **Every dtype generates.** A `Struct` column is generated from its
+  [`fields`](https://maxwellb13.github.io/polspec/how-to/columns/#fields-what-a-structs-values-are)
+  -- one column per field, gathered -- and the same recursion generates a
+  `List(Struct)`, a `List(List)`, an `Array(Struct)` and a struct of
+  either, nested as deeply as the dtype goes. There is no dtype left that
+  polspec declares and cannot generate, and `test_roundtrip.py` pins that
+  claim rather than the list of exceptions it used to hold.
+
+  A field is drawn by the code that draws a column of its dtype, and is
+  seeded under its parent by name: renaming a struct column with
+  `seed_name` keeps every field, adding a field beside one moves nothing,
+  and a struct column is a window under `generate_batches` and `scan()`
+  like any other. A field is never null -- a null *cell* is the whole
+  struct -- which is the rule a `List`'s elements already followed.
+
 - **`ColSpec(fields=…)`: what is claimed about a struct's field values.**
   A `Struct` column's dtype is its schema -- every field's name and type
   comes from it -- and `fields` is a `ColSpec` per field saying what its
@@ -37,9 +52,6 @@ seed produces; see
   `List(Struct)` and `List(List)`, which had no written form before. The
   format version stays at 3: `fields:` is an added optional key. `diff`
   reports a field described, no longer described, or changed.
-
-  Generating a struct arrives in the next release; `generate()` still
-  refuses one by name.
 
 ### Removed
 

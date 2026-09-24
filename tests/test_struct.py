@@ -191,3 +191,126 @@ def test_diff_reports_a_field_described_added_removed_and_changed():
     assert changed.details["field"] == "fields.lat"
 
     assert diff(described, described).unchanged
+
+
+# ---------------------------------------------------------------------------
+# Generation
+# ---------------------------------------------------------------------------
+
+
+def _spec_for(column: ColSpec) -> type[FrameSpec]:
+    return type("Structured", (FrameSpec,), {"__columns__": {"c": column}})
+
+
+def test_a_struct_is_its_fields_gathered():
+    spec_cls = _spec_for(
+        ColSpec(POINT, fields={"lat": ColSpec(pl.Float64, bounds=(-90, 90))})
+    )
+    df = spec_cls.generate(500, seed=1)
+    assert df.schema["c"] == POINT
+    assert df["c"].null_count() == 0
+    lat = df["c"].struct.field("lat")
+    assert lat.min() >= -90 and lat.max() <= 90
+    assert df["c"].struct.field("label").null_count() == 0
+    spec_cls.validate(df)
+
+
+def test_a_field_fields_omits_is_generated_from_its_dtype():
+    """`fields` is partial: the rest are drawn as a column of their dtype."""
+    spec_cls = _spec_for(ColSpec(POINT, fields={"lat": ColSpec(pl.Float64)}))
+    df = spec_cls.generate(200, seed=1)
+    assert df["c"].struct.field("label").str.len_chars().min() >= 1
+
+
+def test_nullable_describes_the_cell_never_a_field():
+    spec_cls = _spec_for(ColSpec(POINT, nullable=True, null_probability=0.5))
+    df = spec_cls.generate(2_000, seed=1)
+    assert 800 < df["c"].null_count() < 1_200
+    present = df["c"].drop_nulls()
+    assert present.struct.field("lat").null_count() == 0
+
+
+def test_a_struct_nests_as_deep_as_its_dtype():
+    inner = pl.Struct({"x": pl.Int64})
+    outer = pl.Struct({"point": inner, "name": pl.String})
+    spec_cls = _spec_for(
+        ColSpec(
+            outer,
+            fields={
+                "point": ColSpec(inner, fields={"x": ColSpec(pl.Int64, bounds=(0, 9))})
+            },
+        )
+    )
+    df = spec_cls.generate(200, seed=1)
+    xs = df["c"].struct.field("point").struct.field("x")
+    assert xs.min() >= 0 and xs.max() <= 9
+    spec_cls.validate(df)
+
+
+def test_a_list_of_structs_describes_its_element():
+    spec_cls = _spec_for(
+        ColSpec(
+            pl.List(POINT),
+            fields={"lat": ColSpec(pl.Float64, bounds=(0, 1))},
+            list_length=(1, 3),
+        )
+    )
+    df = spec_cls.generate(300, seed=1)
+    assert df.schema["c"] == pl.List(POINT)
+    lengths = df["c"].list.len()
+    assert lengths.min() == 1 and lengths.max() == 3
+    lat = df["c"].explode(empty_as_null=False).struct.field("lat")
+    assert lat.min() >= 0 and lat.max() <= 1
+
+
+def test_a_struct_of_a_list_is_a_column_inside_a_value():
+    dtype = pl.Struct({"xs": pl.List(pl.Int64)})
+    spec_cls = _spec_for(
+        ColSpec(
+            dtype,
+            fields={
+                "xs": ColSpec(pl.List(pl.Int64), bounds=(0, 9), list_length=(2, 2))
+            },
+        )
+    )
+    df = spec_cls.generate(200, seed=1)
+    xs = df["c"].struct.field("xs")
+    assert set(xs.list.len().unique().to_list()) == {2}
+    assert xs.explode(empty_as_null=False).max() <= 9
+
+
+def test_a_struct_column_is_seeded_by_name_like_any_other():
+    """Renaming with `seed_name` keeps every field, and a field added beside
+    another moves nothing: each is seeded under its parent by name."""
+    before = _spec_for(ColSpec(POINT))
+    renamed = type(
+        "Renamed",
+        (FrameSpec,),
+        {"__columns__": {"d": ColSpec(POINT, seed_name="c")}},
+    )
+    assert renamed.generate(100, seed=5)["d"].equals(before.generate(100, seed=5)["c"])
+
+    wider = pl.Struct(
+        {"lat": pl.Float64, "lon": pl.Float64, "label": pl.String, "z": pl.Int64}
+    )
+    added = _spec_for(ColSpec(wider))
+    original = before.generate(100, seed=5)["c"]
+    grown = added.generate(100, seed=5)["c"]
+    for field in ("lat", "lon", "label"):
+        assert grown.struct.field(field).equals(original.struct.field(field)), field
+
+
+def test_a_struct_column_is_a_window_under_batching():
+    spec_cls = _spec_for(ColSpec(POINT, nullable=True))
+    whole = spec_cls.generate(1_000, seed=7)["c"]
+    batched = pl.concat(list(spec_cls.generate_batches(1_000, batch_size=250, seed=7)))
+    assert batched["c"].equals(whole)
+
+
+def test_a_struct_scans_and_sinks(tmp_path):
+    spec_cls = _spec_for(ColSpec(POINT, nullable=True))
+    path = tmp_path / "rows.parquet"
+    spec_cls.scan(5_000, seed=1, batch_size=1_000).sink_parquet(path)
+    assert pl.read_parquet(path).equals(
+        spec_cls.scan(5_000, seed=1, batch_size=1_000).collect()
+    )
