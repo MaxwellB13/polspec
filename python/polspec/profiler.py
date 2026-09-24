@@ -12,6 +12,7 @@ import polars as pl
 
 from polspec.bound import Bound
 from polspec.constants import _DEFAULT_NULL_PROBABILITY
+from polspec.dtypes import field_dtypes
 from polspec.spec import ColSpec, _is_categorical_dtype
 
 
@@ -65,12 +66,43 @@ def _profile_column(
             else None,
         )
 
-    if isinstance(dtype, (pl.List, pl.Array)) and not isinstance(
-        dtype.inner, (pl.List, pl.Array, pl.Struct)
+    if isinstance(dtype, pl.Struct):
+        # Described as its fields: each profiled as a column of its own over
+        # the structs that are present, so a field's null rate is how often
+        # it is null inside one. The dtype is rebuilt from the fields', since
+        # profiling may narrow a String field to an Enum as it would a column.
+        fields = {
+            field: _profile_column(
+                non_null.struct.field(field),
+                field,
+                total_rows=len(non_null),
+                with_weights=with_weights,
+                max_unique_enum=max_unique_enum,
+                calculate_bounds=calculate_bounds,
+            )
+            for field in field_dtypes(dtype)
+        }
+        return spec(
+            dtype=pl.Struct({field: fs.dtype for field, fs in fields.items()}),
+            fields=fields or None,
+        )
+
+    if isinstance(dtype, (pl.List, pl.Array)) and isinstance(
+        dtype.inner, (pl.List, pl.Array)
     ):
+        # A list of lists: nothing a declaration can say describes the inner
+        # values, so only the outer list's length is recorded.
+        return spec(
+            dtype=dtype,
+            list_length=_extent(non_null.list.len(), int, calculate_bounds)
+            if isinstance(dtype, pl.List)
+            else None,
+        )
+
+    if isinstance(dtype, (pl.List, pl.Array)):
         # Described as its elements: profile the exploded values as a column
         # of the inner dtype, then put the list's own nullability and length
-        # back on top.
+        # back on top. An element that is a struct brings its fields along.
         elements = _profile_column(
             non_null.explode(empty_as_null=False).drop_nulls(),
             name,
@@ -136,8 +168,8 @@ def _profile_column(
             ),
         )
 
-    # A dtype polspec cannot generate. Recorded faithfully so validation still
-    # works; `generate()` is what will object.
+    # A dtype with nothing to measure (a `Null` column, an `Object`): recorded
+    # faithfully so validation still reads it.
     return spec(dtype=dtype)
 
 

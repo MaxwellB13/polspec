@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 import polars as pl
 
 from polspec.constants import _DEFAULT_LIST_LEN, _DEFAULT_STRING_LEN
-from polspec.dtypes import element_dtype
+from polspec.dtypes import element_dtype, field_dtypes
 from polspec.formats import lookup as _lookup_format
 
 if TYPE_CHECKING:
@@ -87,14 +87,18 @@ def _value_bytes(spec: ColSpec, dtype: pl.DataType) -> float:
     if dtype in (pl.String, pl.Utf8, pl.Binary):
         return _VIEW_BYTES + _bytes_past_inline(spec)
     if isinstance(dtype, pl.List):
-        # An offset per row, plus however many elements the row holds.
+        # An offset per row, plus however many elements the row holds, each
+        # read through the declaration generation draws it from.
         lengths = spec.list_length.closed() if spec.list_length else _DEFAULT_LIST_LEN
         mean_len = (lengths[0] + lengths[1]) / 2
-        return 8 + mean_len * _value_bytes(spec, element_dtype(dtype))
+        return 8 + mean_len * _value_bytes(spec._element(), element_dtype(dtype))
     if isinstance(dtype, pl.Array):
-        return dtype.size * _value_bytes(spec, element_dtype(dtype))
-    # A dtype generation cannot fill has no size to predict; count the view
-    # a Struct or a nested List costs at minimum and leave it there.
+        return dtype.size * _value_bytes(spec._element(), element_dtype(dtype))
+    if isinstance(dtype, pl.Struct):
+        # A struct holds no values of its own: it is its fields, each a
+        # column with its own validity when it can be null.
+        return sum(_column_bytes(spec._field(name)) for name in field_dtypes(dtype))
+    # A dtype with no values to hold (a `Null` column) costs its view at most.
     return _VIEW_BYTES
 
 

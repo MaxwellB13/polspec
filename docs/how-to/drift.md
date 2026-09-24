@@ -122,6 +122,15 @@ it, the same round trip validation is held to. The other direction is pinned
 too -- every breaking finding is a column `validate()` would report -- so
 `breaking` never means more than "validation fails here".
 
+A struct column is compared field by field, in both directions: each
+field its `fields` describes -- or its dtype alone, where `fields` says
+nothing -- goes through every comparison a column does, and a finding names
+it by path. Describing `point.lat` with bounds is `domain_narrowed` on
+`point.lat`, breaking for the same reason it is on a column; data whose
+`lat` escapes those bounds is `bounds_exceeded` on `point.lat`. A field's
+null rate is measured inside the structs that are present, which is what
+its `null_probability` claims. The finding's `columns` stay `("point",)`.
+
 What `drift()` does **not** measure is what validation already does:
 uniqueness, composite keys, foreign keys and checks are pass/fail claims
 about rows, not summaries that move. `validate()` is still the verdict.

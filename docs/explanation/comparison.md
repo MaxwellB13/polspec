@@ -185,7 +185,7 @@ Worth being direct about, in the same spirit as the
 - **Not a property-based shrinking engine.** No search, no shrinking —
   `method="cartesian"` is a fixed set of known-important cases, not an
   open-ended exploration.
-- **Not feature-complete yet.** `Struct` columns aren't generatable, and
+- **Not everything that validates generates.**
   `__checks__`/`ColSpec.validators`/`ColSpec.pattern` are validated but not
   generated, by design — see [Known limitations](limitations.md).
 

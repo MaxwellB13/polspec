@@ -15,13 +15,14 @@ shorter than translating the profiler's answers.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
 import polars as pl
 
 from polspec.bound import Bound
 from polspec.constraints import Domain, is_textual
+from polspec.dtypes import field_dtypes
 from polspec.formats import lookup as _lookup_format
 
 if TYPE_CHECKING:
@@ -58,6 +59,12 @@ class Observed:
         Declared values the column never holds.
     format_failures : tuple[int, tuple]
         Rows failing the declared `format`, and up to `max_samples` of them.
+    fields : dict[str, Observed]
+        For a Struct column -- or a List of structs -- each field the
+        declaration and the data share, measured against its own
+        declaration over the structs that are present. A field's `height`
+        is that count, so its null rate is how often it is null inside a
+        struct, which is what its `null_probability` claims.
     """
 
     dtype: pl.DataType
@@ -69,6 +76,7 @@ class Observed:
     outside: tuple[int, tuple[Any, ...]] = (0, ())
     unseen: tuple[Any, ...] = ()
     format_failures: tuple[int, tuple[Any, ...]] = (0, ())
+    fields: dict[str, Observed] = field(default_factory=dict)
 
     @property
     def null_rate(self) -> float | None:
@@ -103,6 +111,21 @@ class Observed:
             values = values.explode(empty_as_null=False).drop_nulls()
             if len(values) == 0:
                 return cls(**measured)
+
+        if isinstance(values.dtype, pl.Struct):
+            # A struct is its fields: each measured as a column of its own.
+            declared_dtype = declared.value_dtype
+            shared = (
+                field_dtypes(declared_dtype)
+                if isinstance(declared_dtype, pl.Struct)
+                else {}
+            )
+            measured["fields"] = {
+                name: cls.of(values.struct.field(name), declared._field(name), options)
+                for name in field_dtypes(values.dtype)
+                if name in shared
+            }
+            return cls(**measured)
 
         if declared.bounds is not None and _extent_measurable(values.dtype):
             measured["extent"] = Bound(values.min(), values.max())
