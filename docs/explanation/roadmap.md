@@ -162,6 +162,8 @@ validation, foreign keys and drift read; `ColSpec` still stores the three
 fields it is derived from, and every module re-derives it. Folding the fields
 into the domain would remove that repetition and nothing a user can see, at
 the cost of touching every attribute read in the library. It has been
-considered and set aside at each of the last two releases, and will be
-revisited only if nested dtypes force a richer domain model than the current
-one — not before.
+considered and set aside at each of the last three releases. The condition
+it waited on — nested dtypes forcing a richer domain model — was tested by
+0.9.0 and did not hold: a struct's fields are described by `ColSpec`s of
+their own, so each field has an ordinary domain and `Domain` needed no
+struct case. It stays deferred until something else asks for it.

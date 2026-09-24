@@ -50,11 +50,11 @@ production will reject.
 
 - **Types and shape**
 
-    Every dtype polspec can generate — integers, floats, `Decimal`,
+    Every dtype, generated and validated — integers, floats, `Decimal`,
     booleans, strings, binary, all four temporal types, `Enum`,
-    `Categorical`, and a `List` or `Array` of any of them — plus
-    nullability, bounds, string lengths, value domains and named string
-    formats such as `uuid4` and `email`.
+    `Categorical`, and a `List`, `Array` or `Struct` of any of them, nested
+    to any depth — plus nullability, bounds, string lengths, value domains
+    and named string formats such as `uuid4` and `email`.
 
     [Declaring columns](https://maxwellb13.github.io/polspec/how-to/columns/) ·
     [String formats](https://maxwellb13.github.io/polspec/how-to/formats/)
@@ -5416,9 +5416,11 @@ validation, foreign keys and drift read; `ColSpec` still stores the three
 fields it is derived from, and every module re-derives it. Folding the fields
 into the domain would remove that repetition and nothing a user can see, at
 the cost of touching every attribute read in the library. It has been
-considered and set aside at each of the last two releases, and will be
-revisited only if nested dtypes force a richer domain model than the current
-one — not before.
+considered and set aside at each of the last three releases. The condition
+it waited on — nested dtypes forcing a richer domain model — was tested by
+0.9.0 and did not hold: a struct's fields are described by `ColSpec`s of
+their own, so each field has an ordinary domain and `Domain` needed no
+struct case. It stays deferred until something else asks for it.
 
 ---
 
@@ -5434,6 +5436,23 @@ seed produces; see
 [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/).
 
 ## [Unreleased]
+
+## [0.9.0] - 2026-09-24
+
+Two things are **removed**, as 0.8.0 announced: `generate(lazy=True)`,
+which is now a `TypeError` -- `scan()` is the lazy frame -- and the
+`polspec[arrow]` extra, which no longer resolves. Both are under
+*Removed* below. Everything else in the release is additive.
+
+The headline is `Struct`, the last dtype polspec declared and could not
+generate. `ColSpec(fields={name: ColSpec(...)})` says what is claimed about
+each field's values, so a field is described exactly as a column of its
+dtype would be, and every part of polspec reads it: generation, validation,
+the spec file, `diff` and `drift`, `from_dataframe`, the data dictionary
+and `estimated_size`. The same recursion generates a `List(Struct)`, a
+`List(List)` and an `Array(Struct)`, so every dtype now generates, nested
+to any depth. No seeded output of an existing spec changes, and no spec
+file needs migrating.
 
 ### Added
 
@@ -6582,7 +6601,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/MaxwellB13/polspec/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/MaxwellB13/polspec/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/MaxwellB13/polspec/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/MaxwellB13/polspec/compare/v0.5.0...v0.6.0
