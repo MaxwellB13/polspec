@@ -85,13 +85,16 @@ def _value_bytes(spec: ColSpec, dtype: pl.DataType) -> float:
     if isinstance(dtype, pl.Categorical):
         return float(_FIXED_WIDTHS.get(dtype.categories.physical(), 4))
     if dtype in (pl.String, pl.Utf8, pl.Binary):
-        return _VIEW_BYTES + _bytes_past_inline(spec)
+        # Every row has a view, null or not; only a present value has bytes.
+        return _VIEW_BYTES + _bytes_past_inline(spec) * _present(spec)
     if isinstance(dtype, pl.List):
         # An offset per row, plus however many elements the row holds, each
-        # read through the declaration generation draws it from.
+        # read through the declaration generation draws it from. A null list
+        # holds none.
         lengths = spec.list_length.closed() if spec.list_length else _DEFAULT_LIST_LEN
         mean_len = (lengths[0] + lengths[1]) / 2
-        return 8 + mean_len * _value_bytes(spec._element(), element_dtype(dtype))
+        element = _value_bytes(spec._element(), element_dtype(dtype))
+        return 8 + mean_len * element * _present(spec)
     if isinstance(dtype, pl.Array):
         return dtype.size * _value_bytes(spec._element(), element_dtype(dtype))
     if isinstance(dtype, pl.Struct):
@@ -100,6 +103,17 @@ def _value_bytes(spec: ColSpec, dtype: pl.DataType) -> float:
         return sum(_column_bytes(spec._field(name)) for name in field_dtypes(dtype))
     # A dtype with no values to hold (a `Null` column) costs its view at most.
     return _VIEW_BYTES
+
+
+def _present(spec: ColSpec) -> float:
+    """The fraction of rows expected to hold a value rather than a null.
+
+    Only what a present value brings with it scales by this -- a string's
+    bytes past its view, a list's elements. Fixed-width values, views,
+    offsets, an `Array`'s slots and a struct's fields are allocated on a
+    null row too.
+    """
+    return 1.0 - spec.null_probability if spec.nullable else 1.0
 
 
 def _physical_width(n_categories: int) -> float:

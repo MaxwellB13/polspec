@@ -1657,8 +1657,8 @@ What each column costs per row:
 | `Decimal` | 16 |
 | `Enum` | 1, 2 or 4 — the narrowest that holds the categories |
 | `Categorical` | its registry's physical width, 4 by default |
-| `String`, `Binary` | **16**, plus the length of any value past 12 bytes |
-| `List(inner)` | 8, plus the mean `list_length` × the element's cost |
+| `String`, `Binary` | **16**, plus the length of any value past 12 bytes, on the rows that are not null |
+| `List(inner)` | 8, plus the mean `list_length` × the element's cost, on the rows that are not null |
 | `Array(inner, w)` | `w` × the element's cost |
 | `Struct` | the sum of its fields, each costed as a column |
 | `nullable=True` | + ⅛ |

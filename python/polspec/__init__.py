@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from importlib.metadata import version as _version
+
 from polspec.bound import Bound
 from polspec.catspec import CatSpec
 from polspec.check import Check
@@ -39,6 +41,8 @@ from polspec.validation import (
     inspect,
     validate,
 )
+
+__version__ = _version("polspec")
 
 __all__ = [
     "Bound",
