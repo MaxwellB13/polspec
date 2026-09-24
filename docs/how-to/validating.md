@@ -104,6 +104,7 @@ Orders.validate(
     validate_foreign_keys=True,
     validate_hierarchy=True,
     validate_pattern=True,
+    validate_bounds=True,
 )
 ```
 
@@ -117,7 +118,7 @@ report.options.checks        # False
 report.options.extra_cols    # "raise"
 ```
 
-The six `validate_*` switches are named for what they switch, so
+The `validate_*` switches are named for what they switch, so
 `validate_checks` is `options.checks`. An option name polspec does not accept
 is a `TypeError` naming the closest one it does.
 
@@ -170,11 +171,35 @@ than memory.
 
 ### Turning checks off
 
-The five `validate_*` flags disable whole categories. Useful when generation
-cannot satisfy something yet:
+Each `validate_*` switch disables a whole category of check. Most exist for
+what generation cannot satisfy yet -- `__checks__`, validators and `pattern`
+are validated but not generated:
 
 ```python
 Orders.validate(Orders.generate(1_000, seed=1), validate_checks=False)
+```
+
+`validate_bounds=False` is the other way round: generation always stays in
+bounds, so it is for real data -- a file whose ranges you want to look at
+before holding it to them, while every other claim is still checked. It
+covers every `bounds`, including a `List`'s elements and a struct's fields;
+`string_length` and `list_length` have codes of their own and stay on.
+
+```python
+Orders.validate(df, validate_bounds=False)
+```
+
+To loosen one column rather than all of them, validate against a spec with
+that column's bounds removed:
+
+```python
+import dataclasses
+from polspec import validate
+
+loose = Orders.spec.with_columns(
+    total=dataclasses.replace(Orders.col("total"), bounds=None)
+)
+validate(loose, df)
 ```
 
 ## What gets checked

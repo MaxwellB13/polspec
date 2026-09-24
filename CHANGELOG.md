@@ -8,6 +8,16 @@ seed produces; see
 
 ## [Unreleased]
 
+### Added
+
+- **`validate_bounds=False`** turns off the bounds checks, beside the
+  other `validate_*` switches and as `ValidationOptions(bounds=False)`. The
+  other switches cover what generation cannot yet satisfy; this one is for
+  real data, whose ranges you may want to look at before holding it to
+  them while every other claim is still checked. It covers every `bounds`,
+  a `List`'s elements and a struct's fields included; `string_length` and
+  `list_length` stay on.
+
 ## [0.9.0] - 2026-09-24
 
 Two things are **removed**, as 0.8.0 announced: `generate(lazy=True)`,

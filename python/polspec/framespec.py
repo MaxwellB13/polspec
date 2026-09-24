@@ -749,6 +749,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         validate_foreign_keys: bool | None = None,
         validate_hierarchy: bool | None = None,
         validate_pattern: bool | None = None,
+        validate_bounds: bool | None = None,
         cast: bool | None = None,
         streaming: bool | None = None,
     ) -> validation.ValidationReport:
@@ -775,6 +776,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
                 validate_foreign_keys=validate_foreign_keys,
                 validate_hierarchy=validate_hierarchy,
                 validate_pattern=validate_pattern,
+                validate_bounds=validate_bounds,
                 cast=cast,
                 streaming=streaming,
             ),
@@ -798,6 +800,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         validate_foreign_keys: bool | None = None,
         validate_hierarchy: bool | None = None,
         validate_pattern: bool | None = None,
+        validate_bounds: bool | None = None,
         cast: bool | None = None,
         streaming: bool | None = None,
     ) -> pl.DataFrame: ...
@@ -820,6 +823,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         validate_foreign_keys: bool | None = None,
         validate_hierarchy: bool | None = None,
         validate_pattern: bool | None = None,
+        validate_bounds: bool | None = None,
         cast: bool | None = None,
         streaming: bool | None = None,
     ) -> pl.LazyFrame: ...
@@ -841,6 +845,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         validate_foreign_keys: bool | None = None,
         validate_hierarchy: bool | None = None,
         validate_pattern: bool | None = None,
+        validate_bounds: bool | None = None,
         cast: bool | None = None,
         streaming: bool | None = None,
     ) -> pl.DataFrame | pl.LazyFrame:
@@ -863,7 +868,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             spec, its FrameSpec class, or its name.
         extra_cols, missing_cols, strict_dtypes, cast, streaming
             The structural options, named as on `ValidationOptions`.
-        validate_rules, validate_validators, validate_unique, validate_checks, validate_foreign_keys, validate_hierarchy, validate_pattern
+        validate_rules, validate_validators, validate_unique, validate_checks, validate_foreign_keys, validate_hierarchy, validate_pattern, validate_bounds
             The check switches: `validate_` in front of the field they set.
 
         A keyword left as `None` takes the `ValidationOptions` default; see
@@ -885,6 +890,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
                 validate_foreign_keys=validate_foreign_keys,
                 validate_hierarchy=validate_hierarchy,
                 validate_pattern=validate_pattern,
+                validate_bounds=validate_bounds,
                 cast=cast,
                 streaming=streaming,
             ),

@@ -986,3 +986,57 @@ def test_validation_column_validators_combine_with_other_errors():
     err_str = str(err)
     assert "out of bounds" in err_str
     assert "validator" in err_str
+
+
+# ---------------------------------------------------------------------------
+# validate_bounds
+# ---------------------------------------------------------------------------
+
+
+class Ranged(FrameSpec):
+    total = ColSpec(pl.Float64, bounds=(0, 100))
+    code = ColSpec(pl.String, string_length=(2, 3))
+    ids = ColSpec(pl.List(pl.Int64), bounds=(0, 9), list_length=(1, 2))
+    point = ColSpec(
+        pl.Struct({"lat": pl.Float64}),
+        fields={"lat": ColSpec(pl.Float64, bounds=(-90, 90))},
+    )
+
+
+OUT_OF_RANGE = pl.DataFrame(
+    {
+        "total": [500.0],
+        "code": ["toolong"],
+        "ids": [[50, 1, 2]],
+        "point": [{"lat": 200.0}],
+    },
+    schema=Ranged.schema(),
+)
+
+
+def test_validate_bounds_false_turns_off_every_bounds_check_and_nothing_else():
+    """Column, list element and struct field bounds all go; the length
+    claims have codes of their own and stay."""
+    assert {f.key for f in Ranged.inspect(OUT_OF_RANGE).findings} == {
+        "total__bounds",
+        "code__len",
+        "ids__bounds",
+        "ids__list_len",
+        "point.lat__bounds",
+    }
+    report = Ranged.inspect(OUT_OF_RANGE, validate_bounds=False)
+    assert {f.key for f in report.findings} == {"code__len", "ids__list_len"}
+    assert report.options.bounds is False
+
+
+def test_validate_bounds_is_an_option_like_the_others():
+    from polspec import ValidationOptions, inspect
+
+    in_range = OUT_OF_RANGE.with_columns(
+        code=pl.lit("ok"), ids=pl.lit([1], dtype=pl.List(pl.Int64))
+    )
+    with pytest.raises(ValidationError, match="out of bounds"):
+        Ranged.validate(in_range)
+    assert Ranged.validate(in_range, validate_bounds=False).height == 1
+    assert inspect(Ranged.spec, in_range, validate_bounds=False).passed
+    assert Ranged.inspect(in_range, options=ValidationOptions(bounds=False)).passed
