@@ -8,7 +8,29 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-09-24
+
+A patch release around one question: *someone hands you a CSV, and there
+is a spec it should meet -- what do you do?* The CLI now reads a text
+file's dates the way the spec declares them, where before every CSV with
+a date column failed `polspec validate`; the docs walk the flow end to
+end; and bounds can be set aside while you find out what the ranges
+really are. No seeded output changes, and no spec file needs migrating.
+
 ### Added
+
+- **Checking a file you were given**, a section of
+  [Validating data](https://maxwellb13.github.io/polspec/how-to/validating/#checking-a-file-you-were-given):
+  read the file with `try_parse_dates=True` rather than the spec's schema
+  (which stops at the first bad value), `inspect()` it for every problem at
+  once, decide whether the file or the spec is wrong, then
+  `validate(cast=True)` for the typed frame. The example runs in the suite.
+
+- **`polspec validate --skip CHECK`**, repeatable, for any of the
+  `validate_*` switches -- `--skip bounds --skip checks`. Its choices come
+  from the switch list itself, so a switch added later reaches the CLI.
+
+- **`polspec.__version__`**, the installed version.
 
 - **`validate_bounds=False`** turns off the bounds checks, beside the
   other `validate_*` switches and as `ValidationOptions(bounds=False)`. The
@@ -17,6 +39,34 @@ seed produces; see
   them while every other claim is still checked. It covers every `bounds`,
   a `List`'s elements and a struct's fields included; `string_length` and
   `list_length` stay on.
+
+### Fixed
+
+- **The CLI reads a text file's dates in the spec's terms.** A CSV or JSON
+  file has no date type, so a `Date` column arrived as text and validation
+  reported its dtype and checked nothing else -- every CSV with a date
+  column failed `polspec validate`, including one `polspec generate` had
+  just written. `validate`, `drift` and both `--all` modes now parse each
+  column the spec declares as a `Date`, `Datetime` or `Time` that arrived
+  as text, keeping the parse only when every value parses: a column with
+  a bad value stays text, so its `dtype` finding stays true, and a
+  `String` column of date-shaped text is left alone. `schema infer`, with
+  no spec to go by, reads a CSV with `try_parse_dates` and declares a date
+  column as a `Date`.
+
+- **`estimated_size` no longer charges a null row for content it does not
+  hold.** A nullable text or `List` column was estimated as if every row
+  held a value -- 23% high for a string column at a 30% null rate, 32-38%
+  for a list. A string's bytes past its view and a list's elements now
+  scale by the share of rows expected to be present; views, offsets,
+  fixed-width values, an `Array`'s slots and a struct's fields are paid
+  on a null row too and are unchanged.
+
+- **The API reference for `FrameSpec.validate`, `diff` and `drift`**
+  rendered prose after their parameter lists as parameters named `A`,
+  `that` and `Uniqueness`. It is a *Notes* section now, and a test parses
+  every docstring in the package as the reference does, failing on a
+  warning.
 
 ## [0.9.0] - 2026-09-24
 
@@ -1182,7 +1232,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/MaxwellB13/polspec/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/MaxwellB13/polspec/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/MaxwellB13/polspec/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/MaxwellB13/polspec/compare/v0.6.0...v0.7.0
