@@ -31,7 +31,7 @@ import polars as pl
 from polspec.constraints import Domain
 from polspec.drift.data import Observed
 from polspec.drift.report import DriftFinding, Severity
-from polspec.dtypes import _bound_endpoint_to_physical
+from polspec.dtypes import _bound_endpoint_to_physical, field_dtypes
 from polspec.formats import lookup as _lookup_format
 from polspec.validation.constraints import _is_dtype_compatible
 
@@ -50,13 +50,21 @@ class Pair:
 
     `declared` is always a `ColSpec`. `other` is a `ColSpec` when two specs
     are being diffed and an `Observed` when a spec is being held against a
-    frame; `mode` says which.
+    frame; `mode` says which. `where` names a field inside the column
+    (`point.lat`) when the pair is one of a struct's fields: a finding's key
+    and message name it, while its `columns` stay the column's.
     """
 
     column: str
     declared: ColSpec
     other: ColSpec | Observed
     options: DriftOptions
+    where: str = ""
+
+    @property
+    def label(self) -> str:
+        """What the pair is about: the column, or the field within it."""
+        return self.where or self.column
 
     @property
     def mode(self) -> Literal["diff", "drift"]:
@@ -86,8 +94,8 @@ class Pair:
         return DriftFinding(
             code=code,
             severity=severity,
-            key=f"{self.column}__{suffix}",
-            message=f"Column '{self.column}': {message}",
+            key=f"{self.label}__{suffix}",
+            message=f"Column '{self.label}': {message}",
             columns=(self.column,),
             details=details,
         )
@@ -517,7 +525,7 @@ def _member(pair: Pair, kind: str, key: str, *, added: bool) -> DriftFinding:
     return DriftFinding(
         code=finding.code,
         severity=finding.severity,
-        key=f"{pair.column}__{kind}:{key}",
+        key=f"{pair.label}__{kind}:{key}",
         message=finding.message,
         columns=finding.columns,
         details={**finding.details, "name": key},
@@ -557,47 +565,41 @@ def _field_changed(pair: Pair, name: str, old: Any, new: Any) -> DriftFinding:
 
 
 def _compare_struct_fields(pair: Pair) -> list[DriftFinding]:
-    """A struct's fields, compared as the columns they describe.
+    """A struct's fields, each compared as a column is.
 
-    A field added is a column added inside the value and a field removed a
-    column removed, under the same codes and the same severity rule the
-    frame's own columns use -- `old.field` is the key, so one field's
-    history reads the same whether it sits in a struct or beside one. A
-    field that both sides declare is compared by every comparator that
-    applies to a column.
+    Every comparator runs again on the field pair -- the declared field
+    against the other side's, a second declaration in `diff` and what the
+    data's field holds in `drift` -- keyed by its path (`point.lat`). So a
+    field's bounds narrowing is breaking for the reason a column's is, and
+    one field's history reads the same whether it sits in a struct or
+    beside one. A field `fields` does not describe is compared as its dtype
+    alone; a field only one side's dtype has is the dtype comparator's
+    finding.
     """
-    if pair.mode == "drift":
-        return []  # the data side measures fields in `drift/data.py`
-    old = pair.declared.fields or {}
-    new = pair.new.fields or {}
+    declared = pair.declared.value_dtype
+    if not isinstance(declared, pl.Struct):
+        return []
+    if pair.mode == "diff":
+        new = pair.new.value_dtype
+        if not isinstance(new, pl.Struct):
+            return []
+        others: dict[str, ColSpec | Observed] = {
+            name: pair.new._field(name)
+            for name in field_dtypes(new)
+            if name in field_dtypes(declared)
+        }
+    else:
+        others = dict(pair.observed.fields)
     findings: list[DriftFinding] = []
-    for name in old.keys() - new.keys():
-        findings.append(
-            pair.finding(
-                "column_removed",
-                "compatible",
-                f"field {name!r} is no longer described; its values are "
-                "generated from the dtype alone",
-                suffix=f"fields.{name}",
-                field=f"fields.{name}",
-            )
+    for name, other in others.items():
+        field_pair = Pair(
+            pair.column,
+            pair.declared._field(name),
+            other,
+            pair.options,
+            where=f"{pair.label}.{name}",
         )
-    for name in new.keys() - old.keys():
-        findings.append(
-            pair.finding(
-                "column_added",
-                "breaking",
-                f"field {name!r} is now described, so a value that passed "
-                "before may fail",
-                suffix=f"fields.{name}",
-                field=f"fields.{name}",
-            )
-        )
-    for name in sorted(old.keys() & new.keys()):
-        if old[name] != new[name]:
-            findings.append(
-                _field_changed(pair, f"fields.{name}", old[name], new[name])
-            )
+        findings.extend(compare_column(field_pair))
     return findings
 
 

@@ -1656,6 +1656,7 @@ What each column costs per row:
 | `String`, `Binary` | **16**, plus the length of any value past 12 bytes |
 | `List(inner)` | 8, plus the mean `list_length` × the element's cost |
 | `Array(inner, w)` | `w` × the element's cost |
+| `Struct` | the sum of its fields, each costed as a column |
 | `nullable=True` | + ⅛ |
 
 The sixteen bytes a text value costs before any content is the lever worth
@@ -2046,6 +2047,15 @@ The generated frame drifts by nothing, and that is pinned by a test: what
 it, the same round trip validation is held to. The other direction is pinned
 too -- every breaking finding is a column `validate()` would report -- so
 `breaking` never means more than "validation fails here".
+
+A struct column is compared field by field, in both directions: each
+field its `fields` describes -- or its dtype alone, where `fields` says
+nothing -- goes through every comparison a column does, and a finding names
+it by path. Describing `point.lat` with bounds is `domain_narrowed` on
+`point.lat`, breaking for the same reason it is on a column; data whose
+`lat` escapes those bounds is `bounds_exceeded` on `point.lat`. A field's
+null rate is measured inside the structs that are present, which is what
+its `null_probability` claims. The finding's `columns` stay `("point",)`.
 
 What `drift()` does **not** measure is what validation already does:
 uniqueness, composite keys, foreign keys and checks are pass/fail claims
@@ -4627,7 +4637,11 @@ otherwise. See [Schema and data drift](https://maxwellb13.github.io/polspec/how-
 | `cardinality_moved` | `drift` | compatible | declared values the data never holds |
 | `constraint_added` | `diff` | breaking | `unique`, a validator, rule, check, composite key, foreign key or hierarchy present only in the new spec |
 | `constraint_removed` | `diff` | compatible | the reverse |
-| `field_changed` | `diff` | compatible | `tags`, `weights`, `distribution`, `distribution_params`, `null_probability`, `pattern`, `seed_name` or a struct field's declaration differ |
+| `field_changed` | `diff` | compatible | `tags`, `weights`, `distribution`, `distribution_params`, `null_probability`, `pattern` or `seed_name` differ |
+
+A struct's fields are compared by every row above, as columns are, and a
+finding about one is keyed by its path -- `point.lat__domain` -- with
+`columns` naming the struct column.
 
 ---
 
@@ -5221,7 +5235,7 @@ Worth being direct about, in the same spirit as the
 - **Not a property-based shrinking engine.** No search, no shrinking —
   `method="cartesian"` is a fixed set of known-important cases, not an
   open-ended exploration.
-- **Not feature-complete yet.** `Struct` columns aren't generatable, and
+- **Not everything that validates generates.**
   `__checks__`/`ColSpec.validators`/`ColSpec.pattern` are validated but not
   generated, by design — see [Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/).
 
@@ -5474,8 +5488,18 @@ seed produces; see
   A `Struct` dtype now has a spec-file form (`{Struct: {name: <dtype>}}`),
   so a struct column round-trips through YAML and `to_python` -- and so do
   `List(Struct)` and `List(List)`, which had no written form before. The
-  format version stays at 3: `fields:` is an added optional key. `diff`
-  reports a field described, no longer described, or changed.
+  format version stays at 3: `fields:` is an added optional key.
+
+- **The rest of polspec reads a struct too.** `diff` and `drift` compare
+  a struct's fields as they compare columns -- every comparator, keyed by
+  path, so describing `point.lat` with bounds is `domain_narrowed` on
+  `point.lat` (breaking, as on a column) and data escaping them is
+  `bounds_exceeded` there; a field's null rate is measured inside the
+  structs that are present. `from_dataframe` re-declares a struct column by
+  its fields, a `List` of structs by its element's, and a `List` of lists
+  by its outer length, where it used to record the dtype alone. The data
+  dictionary gives each field a row (`point.lat`) under its column, and
+  `estimated_size` costs a struct as the sum of its fields.
 
 ### Removed
 

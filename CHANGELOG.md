@@ -61,8 +61,18 @@ seed produces; see
   A `Struct` dtype now has a spec-file form (`{Struct: {name: <dtype>}}`),
   so a struct column round-trips through YAML and `to_python` -- and so do
   `List(Struct)` and `List(List)`, which had no written form before. The
-  format version stays at 3: `fields:` is an added optional key. `diff`
-  reports a field described, no longer described, or changed.
+  format version stays at 3: `fields:` is an added optional key.
+
+- **The rest of polspec reads a struct too.** `diff` and `drift` compare
+  a struct's fields as they compare columns -- every comparator, keyed by
+  path, so describing `point.lat` with bounds is `domain_narrowed` on
+  `point.lat` (breaking, as on a column) and data escaping them is
+  `bounds_exceeded` there; a field's null rate is measured inside the
+  structs that are present. `from_dataframe` re-declares a struct column by
+  its fields, a `List` of structs by its element's, and a `List` of lists
+  by its outer length, where it used to record the dtype alone. The data
+  dictionary gives each field a row (`point.lat`) under its column, and
+  `estimated_size` costs a struct as the sum of its fields.
 
 ### Removed
 

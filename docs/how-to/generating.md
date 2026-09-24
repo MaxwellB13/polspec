@@ -201,6 +201,7 @@ What each column costs per row:
 | `String`, `Binary` | **16**, plus the length of any value past 12 bytes |
 | `List(inner)` | 8, plus the mean `list_length` × the element's cost |
 | `Array(inner, w)` | `w` × the element's cost |
+| `Struct` | the sum of its fields, each costed as a column |
 | `nullable=True` | + ⅛ |
 
 The sixteen bytes a text value costs before any content is the lever worth

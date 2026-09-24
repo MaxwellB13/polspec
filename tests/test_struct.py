@@ -15,8 +15,17 @@ from __future__ import annotations
 
 import polars as pl
 import pytest
-from polspec import ColRule, ColSpec, FrameSpec, SpecError, TableSpec, col
-from polspec.drift import diff
+from polspec import (
+    ColRule,
+    ColSpec,
+    FrameSpec,
+    SpecError,
+    TableSpec,
+    col,
+    generate,
+    inspect,
+)
+from polspec.drift import diff, drift
 
 POINT = pl.Struct({"lat": pl.Float64, "lon": pl.Float64, "label": pl.String})
 
@@ -177,23 +186,41 @@ def _with_fields(fields) -> TableSpec:
     return TableSpec("T", {"c": ColSpec(POINT, fields=fields)})
 
 
-def test_diff_reports_a_field_described_added_removed_and_changed():
+def test_diff_compares_a_field_as_it_would_a_column():
+    """A field is compared by every comparator a column is, keyed by its
+    path -- so describing a field narrows it, and narrowing is breaking for
+    the reason it is on a column."""
     described = _with_fields({"lat": ColSpec(pl.Float64, bounds=(-90, 90))})
     undescribed = _with_fields(None)
 
-    (added,) = diff(undescribed, described).findings
-    assert added.code == "column_added" and added.breaking
-    assert added.details["field"] == "fields.lat"
+    (narrowed,) = diff(undescribed, described).findings
+    assert narrowed.code == "domain_narrowed" and narrowed.breaking
+    assert narrowed.key == "c.lat__domain"
+    assert narrowed.columns == ("c",)
+    assert "Column 'c.lat'" in narrowed.message
 
-    (removed,) = diff(described, undescribed).findings
-    assert removed.code == "column_removed" and not removed.breaking
+    (widened,) = diff(described, undescribed).findings
+    assert widened.code == "domain_widened" and not widened.breaking
 
-    widened = _with_fields({"lat": ColSpec(pl.Float64, bounds=(-180, 180))})
-    (changed,) = diff(described, widened).findings
-    assert changed.code == "field_changed"
-    assert changed.details["field"] == "fields.lat"
+    wider = _with_fields({"lat": ColSpec(pl.Float64, bounds=(-180, 180))})
+    (widened,) = diff(described, wider).findings
+    assert widened.code == "domain_widened" and widened.key == "c.lat__domain"
 
     assert diff(described, described).unchanged
+
+
+def test_diff_reaches_a_field_nested_in_a_list_of_structs():
+    def spec(nullable: bool) -> TableSpec:
+        dtype = pl.List(pl.Struct({"inner": pl.Struct({"x": pl.Int64})}))
+        inner = ColSpec(
+            pl.Struct({"x": pl.Int64}),
+            fields={"x": ColSpec(pl.Int64, nullable=nullable)},
+        )
+        return TableSpec("T", {"c": ColSpec(dtype, fields={"inner": inner})})
+
+    (finding,) = diff(spec(True), spec(False)).findings
+    assert finding.key == "c.inner.x__nullable"
+    assert finding.code == "nullability_changed" and finding.breaking
 
 
 # ---------------------------------------------------------------------------
@@ -485,3 +512,188 @@ def test_a_struct_missing_a_field_is_a_different_struct():
     )
     (finding,) = spec_cls.inspect(df).findings
     assert finding.code == "dtype"
+
+
+# ---------------------------------------------------------------------------
+# Drift, profiling, reporting and sizing
+# ---------------------------------------------------------------------------
+
+
+def test_drift_measures_each_field_against_its_declaration():
+    spec = TableSpec(
+        "T",
+        {
+            "c": ColSpec(
+                POINT,
+                fields={
+                    "lat": ColSpec(pl.Float64, bounds=(-90, 90)),
+                    "label": ColSpec(pl.String, choices=["a", "b"]),
+                },
+                nullable=True,
+            )
+        },
+    )
+    df = _frame(
+        [
+            {"lat": 95.0, "lon": 0.0, "label": "a"},
+            {"lat": 1.0, "lon": None, "label": "z"},
+            None,
+        ],
+        POINT,
+    )
+    by_key = {f.key: f for f in drift(spec, df).breaking}
+    assert set(by_key) == {"c.lat__bounds", "c.label__values", "c.lon__nullable"}
+    assert by_key["c.lat__bounds"].code == "bounds_exceeded"
+    assert by_key["c.lat__bounds"].details["max_found"] == 95.0
+    assert by_key["c.label__values"].details["values"] == ["z"]
+    assert all(f.columns == ("c",) for f in by_key.values())
+
+
+def test_a_fields_null_rate_is_measured_inside_the_present_structs():
+    """Half the cells are null and none of the fields: the field's rate is
+    zero, not a half -- a null cell is not a null field."""
+    spec = TableSpec(
+        "T",
+        {
+            "c": ColSpec(
+                POINT,
+                nullable=True,
+                null_probability=0.5,
+                fields={
+                    "label": ColSpec(pl.String, nullable=True, null_probability=0.5)
+                },
+            )
+        },
+    )
+    df = _frame(
+        [
+            {"lat": 1.0, "lon": 1.0, "label": None},
+            {"lat": 1.0, "lon": 1.0, "label": "a"},
+            None,
+            None,
+        ],
+        POINT,
+    )
+    assert drift(spec, df).unchanged
+
+
+def test_from_dataframe_re_declares_a_struct_by_its_fields():
+    source = _spec_for(
+        ColSpec(
+            POINT,
+            fields={
+                "lat": ColSpec(pl.Float64, bounds=(-90, 90)),
+                "label": ColSpec(pl.String, nullable=True, null_probability=0.25),
+            },
+            nullable=True,
+        )
+    )
+    df = source.generate(2_000, seed=3)
+    profiled = FrameSpec.from_dataframe(df, max_unique_enum=0).spec.columns["c"]
+    assert profiled.dtype == POINT
+    assert profiled.nullable
+    lat = profiled.fields["lat"]
+    assert lat.bounds.min >= -90 and lat.bounds.max <= 90
+    label = profiled.fields["label"]
+    assert label.nullable and 0.15 < label.null_probability < 0.35
+    assert not profiled.fields["lon"].nullable
+    _spec_for(profiled).validate(df)
+
+
+def test_from_dataframe_re_declares_a_list_of_structs_and_a_list_of_lists():
+    df = pl.DataFrame(
+        {"ls": [[{"x": 1}, {"x": 5}], []], "ll": [[[1], [2, 3]], [[4]]]},
+        schema={
+            "ls": pl.List(pl.Struct({"x": pl.Int64})),
+            "ll": pl.List(pl.List(pl.Int64)),
+        },
+    )
+    profiled = FrameSpec.from_dataframe(df).spec.columns
+    assert profiled["ls"].list_length.max == 2
+    assert profiled["ls"].fields["x"].bounds.max == 5
+    assert profiled["ll"].dtype == pl.List(pl.List(pl.Int64))
+    assert profiled["ll"].list_length.max == 2
+    _spec_for(profiled["ls"]).validate(df.select(c="ls"))
+
+
+def test_a_narrowed_field_rebuilds_the_struct_dtype():
+    """Profiling narrows a small String field to an Enum as it would a
+    column, so the struct's dtype follows its fields'."""
+    df = _frame([{"lat": 1.0, "lon": 1.0, "label": "a"}], POINT)
+    profiled = FrameSpec.from_dataframe(df).spec.columns["c"]
+    assert profiled.fields["label"].dtype == pl.Enum(["a"])
+    assert profiled.value_dtype.to_schema()["label"] == pl.Enum(["a"])
+    _spec_for(profiled).validate(df)
+
+
+def test_the_data_dictionary_gives_each_field_a_row():
+    spec_cls = _spec_for(
+        ColSpec(POINT, fields={"lat": ColSpec(pl.Float64, bounds=(-90, 90))})
+    )
+    markdown = spec_cls.to_markdown()
+    assert "struct of 3 field(s)" in markdown
+    assert "| `c.lat` | `Float64` | No | [-90, 90]" in markdown
+    assert "| `c.label` | `String`" in markdown
+    assert "fields: [lat, lon, label]" in spec_cls.to_mermaid()
+
+
+def test_estimated_size_of_a_struct_is_its_fields():
+    fields_alone = TableSpec(
+        "F",
+        {
+            "lat": ColSpec(pl.Float64),
+            "lon": ColSpec(pl.Float64),
+            "label": ColSpec(
+                pl.String, string_length=(20, 30), nullable=True, null_probability=0.01
+            ),
+        },
+    )
+    struct = _spec_for(
+        ColSpec(
+            POINT,
+            fields={
+                "label": ColSpec(
+                    pl.String,
+                    string_length=(20, 30),
+                    nullable=True,
+                    null_probability=0.01,
+                )
+            },
+        )
+    )
+    n = 10_000
+    assert struct.estimated_size(n) == fields_alone.estimated_size(n)
+
+    # Polars' own accounting leaves out the 16-byte view per text value.
+    df = struct.generate(n, seed=1)
+    polars_says = df.estimated_size() + 16 * n
+    assert struct.estimated_size(n) == pytest.approx(polars_says, rel=0.02)
+
+
+def test_every_breaking_field_finding_is_a_validation_failure_on_that_field():
+    """The severity rule, one level down: a breaking drift finding about
+    `c.lat` is a validation finding about `c.lat`, matched by path."""
+    spec = TableSpec(
+        "T",
+        {
+            "c": ColSpec(
+                POINT,
+                fields={
+                    "lat": ColSpec(pl.Float64, bounds=(-90, 90)),
+                    "label": ColSpec(pl.String, choices=["a", "b"]),
+                },
+            )
+        },
+    )
+    df = generate(spec, 500, seed=1).with_columns(
+        pl.col("c").struct.with_fields(
+            pl.field("lat") * 3,
+            pl.lit("zzz").alias("label"),
+            pl.lit(None, dtype=pl.Float64).alias("lon"),
+        )
+    )
+    breaking = drift(spec, df).breaking
+    assert {f.key.split("__")[0] for f in breaking} == {"c.lat", "c.label", "c.lon"}
+    failed = {f.key.split("__")[0] for f in inspect(spec, df).findings}
+    for finding in breaking:
+        assert finding.key.split("__")[0] in failed, finding.key

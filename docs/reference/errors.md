@@ -83,4 +83,8 @@ otherwise. See [Schema and data drift](../how-to/drift.md).
 | `cardinality_moved` | `drift` | compatible | declared values the data never holds |
 | `constraint_added` | `diff` | breaking | `unique`, a validator, rule, check, composite key, foreign key or hierarchy present only in the new spec |
 | `constraint_removed` | `diff` | compatible | the reverse |
-| `field_changed` | `diff` | compatible | `tags`, `weights`, `distribution`, `distribution_params`, `null_probability`, `pattern`, `seed_name` or a struct field's declaration differ |
+| `field_changed` | `diff` | compatible | `tags`, `weights`, `distribution`, `distribution_params`, `null_probability`, `pattern` or `seed_name` differ |
+
+A struct's fields are compared by every row above, as columns are, and a
+finding about one is keyed by its path -- `point.lat__domain` -- with
+`columns` naming the struct column.

@@ -48,6 +48,29 @@ ROUND_TRIP_SPECS = {
     "narrow_ints": TableSpec(
         "Narrow", {"i8": ColSpec(pl.Int8), "u16": ColSpec(pl.UInt16, bounds=(5, 9))}
     ),
+    "nested": TableSpec(
+        "Nested",
+        {
+            "point": ColSpec(
+                pl.Struct({"lat": pl.Float64, "tag": pl.String}),
+                fields={
+                    "lat": ColSpec(pl.Float64, bounds=(-90, 90)),
+                    "tag": ColSpec(
+                        pl.String,
+                        choices=["a", "b"],
+                        nullable=True,
+                        null_probability=0.2,
+                    ),
+                },
+                nullable=True,
+            ),
+            "path": ColSpec(
+                pl.List(pl.Struct({"x": pl.Int64})),
+                fields={"x": ColSpec(pl.Int64, bounds=(0, 9))},
+                list_length=(1, 3),
+            ),
+        },
+    ),
 }
 
 

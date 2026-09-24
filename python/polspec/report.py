@@ -57,6 +57,12 @@ def _describe_dtype(dtype: pl.DataType) -> str:
 
 def _describe_domain(cs) -> str:
     """The Domain column of the table: the choices, or the format."""
+    value_dtype = cs.value_dtype
+    if isinstance(value_dtype, pl.Struct):
+        described = f"struct of {len(value_dtype.fields)} field(s)"
+        if cs.list_length is not None:
+            return f"{cs.list_length.min}..{cs.list_length.max} elements, {described}"
+        return described
     if cs.format is not None:
         return f"format `{cs.format}`"
     if cs.pattern is not None:
@@ -103,23 +109,32 @@ def _columns_section(spec: TableSpec) -> list[str]:
         "|:---|:---|:---|:---|:---|:---|:---|:---|:---|",
     ]
     for name, cs in spec.columns.items():
-        length = (
-            f"[{cs.string_length.min}, {cs.string_length.max}]"
-            if cs.string_length
-            else "-"
-        )
-        lines.append(
-            f"| `{name}` "
-            f"| `{_describe_dtype(cs.dtype)}` "
-            f"| {'Yes' if cs.nullable else 'No'} "
-            f"| {str(cs.bounds) if cs.bounds else '-'} "
-            f"| {_describe_domain(cs)} "
-            f"| {length} "
-            f"| {', '.join(f'`{t}`' for t in cs.tags) if cs.tags else '-'} "
-            f"| {f'{len(cs.rules)} rule(s)' if cs.rules else '-'} "
-            f"| {'Yes' if cs.unique else 'No'} |"
-        )
+        lines.extend(_column_rows(name, cs))
     return lines
+
+
+def _column_rows(name: str, cs) -> list[str]:
+    """A column's row, then a row per struct field beneath it, named by
+    path (`point.lat`) and nested as deeply as the dtype does."""
+    length = (
+        f"[{cs.string_length.min}, {cs.string_length.max}]" if cs.string_length else "-"
+    )
+    rows = [
+        f"| `{name}` "
+        f"| `{_describe_dtype(cs.dtype)}` "
+        f"| {'Yes' if cs.nullable else 'No'} "
+        f"| {str(cs.bounds) if cs.bounds else '-'} "
+        f"| {_describe_domain(cs)} "
+        f"| {length} "
+        f"| {', '.join(f'`{t}`' for t in cs.tags) if cs.tags else '-'} "
+        f"| {f'{len(cs.rules)} rule(s)' if cs.rules else '-'} "
+        f"| {'Yes' if cs.unique else 'No'} |"
+    ]
+    value_dtype = cs.value_dtype
+    if isinstance(value_dtype, pl.Struct):
+        for field in value_dtype.fields:
+            rows.extend(_column_rows(f"{name}.{field.name}", cs._field(field.name)))
+    return rows
 
 
 def _constraints_section(spec: TableSpec) -> list[str]:
@@ -327,6 +342,10 @@ def _entity_lines(spec: TableSpec, entity_name: str) -> list[str]:
             comments.append(f"tags: [{', '.join(cs.tags)}]")
         if cs.string_length is not None:
             comments.append(f"len: [{cs.string_length.min}, {cs.string_length.max}]")
+        if isinstance(cs.value_dtype, pl.Struct):
+            comments.append(
+                f"fields: [{', '.join(f.name for f in cs.value_dtype.fields)}]"
+            )
 
         comment_body = ", ".join(comments).replace('"', "'")
         comment_str = f' "{comment_body}"' if comments else ""
