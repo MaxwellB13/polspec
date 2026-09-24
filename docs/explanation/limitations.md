@@ -85,9 +85,6 @@ them. See [String formats](../how-to/formats.md).
 
 ## Smaller sharp edges
 
-- **A struct's fields are never null.** Generation fills every field of a
-  struct it makes; a null *cell* is the whole struct. Validation still
-  reports a null field it finds in real data, under `nullability`.
 - **A list's elements are never null.** Generation fills a `List` column's
   cells with non-null elements, and no field can ask otherwise; validation
   reports a null element as a `nullability` finding.

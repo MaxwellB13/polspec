@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import decimal
 import math
 import warnings
@@ -149,10 +150,13 @@ class ColSpec:
         fields where one needs bounds spells one field. A field the
         mapping omits is generated from its dtype alone.
 
-        A field is a value, not a column: `unique`, `rules`, `seed_name`
-        and `col_name` are refused on one, since each is a statement about
-        a column among columns. Everything that describes a value is
-        allowed, `fields` included, so a struct may nest to any depth.
+        A field is a value, not a column: `unique`, `rules`, `validators`,
+        `seed_name` and `col_name` are refused on one, since each is a
+        statement about a column among columns. Everything that describes a
+        value is allowed -- `nullable` included, which says whether the
+        field may be null inside a struct that is present -- and `fields`
+        too, so a struct may nest to any depth. A finding about a field
+        names it: `point.lat`.
 
         A `List` or `Array` of a `Struct` takes `fields` too: it describes
         the element, as `bounds` and `format` already do.
@@ -290,6 +294,29 @@ class ColSpec:
         value is checked against this."""
         return _value_dtype(self.dtype)
 
+    def _element(self) -> ColSpec:
+        """What a `List`'s elements are claimed to be: this declaration with
+        the list's own claims -- its length, whether a cell is null -- taken
+        off. Generation draws an element from it and validation checks one
+        against it, so the two read one answer."""
+        return dataclasses.replace(
+            self,
+            dtype=self.value_dtype,
+            list_length=None,
+            nullable=False,
+            null_probability=0.0,
+        )
+
+    def _field(self, name: str) -> ColSpec:
+        """What one field of a struct value is claimed to be: what `fields`
+        says, or its dtype alone when `fields` says nothing about it."""
+        declared = (self.fields or {}).get(name)
+        if declared is not None:
+            return declared
+        dtype = self.value_dtype
+        assert isinstance(dtype, pl.Struct)  # noqa: S101 - only a struct has fields
+        return ColSpec(field_dtypes(dtype)[name])
+
     def _validate_nesting(self) -> None:
         """A `List` or `Array` needs an element dtype to describe."""
         if not isinstance(self.dtype, (pl.List, pl.Array)):
@@ -335,7 +362,7 @@ class ColSpec:
                     f"struct declares {declared[name]!r}. The dtype is the "
                     "schema; fields describes the values in it."
                 )
-            for claim in ("unique", "rules", "seed_name", "col_name"):
+            for claim in ("unique", "rules", "validators", "seed_name", "col_name"):
                 if getattr(spec, claim):
                     raise SpecError(
                         f"ColSpec.fields[{name!r}] sets {claim}, which has no "

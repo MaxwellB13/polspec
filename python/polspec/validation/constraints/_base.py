@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from polspec.dtypes import _typed_values, element_dtype
+from polspec.dtypes import _typed_values, element_dtype, field_dtypes
 from polspec.validation.report import Finding, FindingCode
 
 if TYPE_CHECKING:
@@ -138,6 +138,16 @@ def _is_dtype_compatible(
             and _is_dtype_compatible(
                 element_dtype(expected), element_dtype(actual), strict=strict
             )
+        )
+    if isinstance(expected, pl.Struct):
+        # The fields by name, each compatible: order is how the data was
+        # written, not what it claims, and a field missing or added is a
+        # different struct.
+        if not isinstance(actual, pl.Struct):
+            return False
+        want, got = field_dtypes(expected), field_dtypes(actual)
+        return want.keys() == got.keys() and all(
+            _is_dtype_compatible(want[f], got[f], strict=strict) for f in want
         )
     return actual == expected
 

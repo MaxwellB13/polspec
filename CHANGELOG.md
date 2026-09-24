@@ -22,8 +22,18 @@ seed produces; see
   seeded under its parent by name: renaming a struct column with
   `seed_name` keeps every field, adding a field beside one moves nothing,
   and a struct column is a window under `generate_batches` and `scan()`
-  like any other. A field is never null -- a null *cell* is the whole
-  struct -- which is the rule a `List`'s elements already followed.
+  like any other. The column's `nullable` is the *cell* -- a null struct
+  -- and a field's own `nullable` says whether it may be null inside a
+  struct that is present.
+
+  Validation checks each field's claims in place, and a finding names the
+  field: key `point.lat__bounds`, message `Column 'point.lat'`, while its
+  `columns` stay `("point",)` so `report.rows()` returns the offending
+  rows. Inside a list the samples are the offending lists, and a list of
+  lists tells its levels apart (`c__element_null`, `c[]__element_null`).
+  A struct in the data matches a declared one by field name rather than
+  order, each field compatible by the usual rules -- an `Int32` field
+  stands in for a declared `Int64` outside `strict_dtypes`.
 
 - **`ColSpec(fields=…)`: what is claimed about a struct's field values.**
   A `Struct` column's dtype is its schema -- every field's name and type
@@ -42,10 +52,11 @@ seed produces; see
   It is **partial**: a struct of twenty fields where one needs bounds
   spells one field. A name the dtype does not declare, or a field spec
   whose dtype disagrees with the struct's, is refused where it is written,
-  as are `unique`, `rules`, `seed_name` and `col_name` -- each a claim
-  about a column among columns, which a value inside a struct is not. A
-  `List` of a `Struct` takes `fields` too, and a field may itself be a
-  struct, so a declaration nests as deeply as the dtype does.
+  as are `unique`, `rules`, `validators`, `seed_name` and `col_name` --
+  each a claim about a column among columns, which a value inside a
+  struct is not. A `List` of a `Struct` takes `fields` too, and a field
+  may itself be a struct, so a declaration nests as deeply as the dtype
+  does.
 
   A `Struct` dtype now has a spec-file form (`{Struct: {name: <dtype>}}`),
   so a struct column round-trips through YAML and `to_python` -- and so do

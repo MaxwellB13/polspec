@@ -6,8 +6,9 @@ fields where one needs bounds spells one field. A field is a value, not a
 column, so the claims that only mean something about a column among columns
 are refused on one.
 
-Generation of a struct arrives in the next pass; this file covers the
-declaration and what it round-trips to.
+This file covers the declaration, what it round-trips to, how a struct is
+generated, and how each field's claim is checked -- a finding names the
+field (`point.lat`) and locates the column's rows.
 """
 
 from __future__ import annotations
@@ -86,11 +87,13 @@ def test_a_field_must_be_a_colspec():
         ("unique", True),
         ("seed_name", "other"),
         ("col_name", "other"),
+        ("validators", pl.col("lat") > 0),
     ],
 )
 def test_a_field_is_a_value_not_a_column(claim, value):
     """Uniqueness spans rows, a seed name names a column, a col_name is the
-    name in the frame -- none of which a field inside a value has."""
+    name in the frame, a validator is an expression over columns -- none of
+    which a field inside a value has."""
     with pytest.raises(SpecError, match=f"sets {claim}, which has no meaning"):
         ColSpec(POINT, fields={"lat": ColSpec(pl.Float64, **{claim: value})})
 
@@ -222,12 +225,28 @@ def test_a_field_fields_omits_is_generated_from_its_dtype():
     assert df["c"].struct.field("label").str.len_chars().min() >= 1
 
 
-def test_nullable_describes_the_cell_never_a_field():
+def test_nullable_describes_the_cell_not_its_fields():
     spec_cls = _spec_for(ColSpec(POINT, nullable=True, null_probability=0.5))
     df = spec_cls.generate(2_000, seed=1)
     assert 800 < df["c"].null_count() < 1_200
     present = df["c"].drop_nulls()
     assert present.struct.field("lat").null_count() == 0
+
+
+def test_a_field_is_null_where_its_own_declaration_says_so():
+    """A field spec is a ColSpec, and its `nullable` is a claim like any
+    other: generation honours it, inside the cells that are present."""
+    spec_cls = _spec_for(
+        ColSpec(
+            POINT,
+            fields={"label": ColSpec(pl.String, nullable=True, null_probability=0.5)},
+        )
+    )
+    df = spec_cls.generate(2_000, seed=1)
+    assert df["c"].null_count() == 0
+    assert 800 < df["c"].struct.field("label").null_count() < 1_200
+    assert df["c"].struct.field("lat").null_count() == 0
+    spec_cls.validate(df)
 
 
 def test_a_struct_nests_as_deep_as_its_dtype():
@@ -314,3 +333,155 @@ def test_a_struct_scans_and_sinks(tmp_path):
     assert pl.read_parquet(path).equals(
         spec_cls.scan(5_000, seed=1, batch_size=1_000).collect()
     )
+
+
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
+
+def _frame(values, dtype) -> pl.DataFrame:
+    return pl.DataFrame({"c": values}, schema={"c": dtype})
+
+
+def test_a_fields_claim_is_a_finding_named_for_the_field():
+    spec_cls = _spec_for(
+        ColSpec(
+            POINT,
+            fields={
+                "lat": ColSpec(pl.Float64, bounds=(-90, 90)),
+                "label": ColSpec(pl.String, string_length=(1, 4)),
+            },
+            nullable=True,
+        )
+    )
+    df = _frame(
+        [
+            {"lat": 10.0, "lon": 0.0, "label": "ok"},
+            {"lat": 120.0, "lon": 0.0, "label": "far too long"},
+            None,
+        ],
+        POINT,
+    )
+    report = spec_cls.inspect(df)
+    by_key = {f.key: f for f in report.findings}
+    assert set(by_key) == {"c.lat__bounds", "c.label__len"}
+
+    bounds = by_key["c.lat__bounds"]
+    assert bounds.code == "bounds"
+    assert bounds.columns == ("c",), "the rows are the column's"
+    assert "Column 'c.lat'" in bounds.message
+    assert bounds.samples == (120.0,)
+    assert bounds.details["max_found"] == 120.0
+    located = report.rows(bounds).collect()
+    assert located["c"].struct.field("lat").to_list() == [120.0]
+
+
+def test_a_null_field_is_reported_unless_the_field_is_nullable():
+    df = _frame([{"lat": None, "lon": 1.0, "label": None}, None], POINT)
+    strict = _spec_for(ColSpec(POINT, nullable=True))
+    by_key = {f.key: f for f in strict.inspect(df).findings}
+    assert set(by_key) == {"c.lat__null", "c.label__null"}
+    assert by_key["c.lat__null"].code == "nullability"
+    assert by_key["c.lat__null"].count == 1, "a null cell has no fields to be null"
+    assert "non-nullable field" in by_key["c.lat__null"].message
+
+    lenient = _spec_for(
+        ColSpec(
+            POINT,
+            fields={
+                "lat": ColSpec(pl.Float64, nullable=True),
+                "label": ColSpec(pl.String, nullable=True),
+            },
+            nullable=True,
+        )
+    )
+    assert lenient.inspect(df).passed
+
+
+def test_a_nested_fields_claim_names_the_whole_path():
+    inner = pl.Struct({"x": pl.Int64})
+    outer = pl.Struct({"point": inner})
+    spec_cls = _spec_for(
+        ColSpec(
+            outer,
+            fields={
+                "point": ColSpec(inner, fields={"x": ColSpec(pl.Int64, bounds=(0, 9))})
+            },
+        )
+    )
+    (finding,) = spec_cls.inspect(
+        _frame([{"point": {"x": 1}}, {"point": {"x": 50}}], outer)
+    ).findings
+    assert finding.key == "c.point.x__bounds"
+    assert "Column 'c.point.x'" in finding.message
+    assert finding.samples == (50,)
+
+
+def test_a_list_of_structs_reports_the_offending_lists():
+    dtype = pl.List(pl.Struct({"lat": pl.Float64}))
+    spec_cls = _spec_for(
+        ColSpec(dtype, fields={"lat": ColSpec(pl.Float64, bounds=(-90, 90))})
+    )
+    report = spec_cls.inspect(
+        _frame([[{"lat": 1.0}], [{"lat": 2.0}, {"lat": 95.0}], [{"lat": None}]], dtype)
+    )
+    by_key = {f.key: f for f in report.findings}
+    assert set(by_key) == {"c.lat__bounds", "c.lat__null"}
+    assert by_key["c.lat__bounds"].samples == ([{"lat": 2.0}, {"lat": 95.0}],)
+    assert by_key["c.lat__bounds"].details["max_found"] == 95.0
+    assert report.rows(by_key["c.lat__bounds"]).collect().height == 1
+
+
+def test_a_list_inside_a_struct_carries_its_list_claims():
+    dtype = pl.Struct({"xs": pl.List(pl.Int64)})
+    spec_cls = _spec_for(
+        ColSpec(
+            dtype,
+            fields={
+                "xs": ColSpec(pl.List(pl.Int64), bounds=(0, 9), list_length=(1, 2))
+            },
+        )
+    )
+    report = spec_cls.inspect(
+        _frame([{"xs": [1]}, {"xs": [1, 2, 3]}, {"xs": [50]}, {"xs": [None]}], dtype)
+    )
+    by_key = {f.key: f for f in report.findings}
+    assert set(by_key) == {"c.xs__list_len", "c.xs__bounds", "c.xs__element_null"}
+    assert by_key["c.xs__bounds"].samples == ([50],)
+    assert by_key["c.xs__list_len"].samples == ([1, 2, 3],)
+
+
+def test_a_list_of_lists_tells_its_two_levels_apart():
+    dtype = pl.List(pl.List(pl.Int64))
+    spec_cls = _spec_for(ColSpec(dtype))
+    report = spec_cls.inspect(_frame([[[1], None], [[1, None]], [[2]]], dtype))
+    by_key = {f.key: f for f in report.findings}
+    assert set(by_key) == {"c__element_null", "c[]__element_null"}
+    assert by_key["c__element_null"].samples == ([[1], None],)
+    assert by_key["c[]__element_null"].samples == ([[1, None]],)
+
+
+def test_a_struct_of_a_widened_field_is_compatible_unless_strict():
+    wide = pl.Struct({"lat": pl.Int32, "lon": pl.Float64, "label": pl.String})
+    df = _frame([{"lat": 1, "lon": 2.0, "label": "a"}], wide)
+    spec_cls = _spec_for(ColSpec(POINT))
+    assert spec_cls.inspect(df).passed
+    (finding,) = spec_cls.inspect(df, strict_dtypes=True).findings
+    assert finding.code == "dtype"
+
+
+def test_a_struct_is_compatible_by_field_name_not_order():
+    reordered = pl.Struct({"label": pl.String, "lon": pl.Float64, "lat": pl.Float64})
+    df = _frame([{"label": "a", "lon": 2.0, "lat": 1.0}], reordered)
+    assert _spec_for(ColSpec(POINT)).inspect(df).passed
+
+
+def test_a_struct_missing_a_field_is_a_different_struct():
+    narrow = pl.Struct({"lat": pl.Float64, "lon": pl.Float64})
+    df = _frame([{"lat": 1.0, "lon": 2.0}], narrow)
+    spec_cls = _spec_for(
+        ColSpec(POINT, fields={"lat": ColSpec(pl.Float64, bounds=(0, 9))})
+    )
+    (finding,) = spec_cls.inspect(df).findings
+    assert finding.code == "dtype"
