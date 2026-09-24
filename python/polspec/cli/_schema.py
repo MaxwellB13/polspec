@@ -22,7 +22,7 @@ def _cmd_schema_infer(args: argparse.Namespace) -> int:
     if not source.exists():
         raise CliError(f"no such file: {source}")
 
-    df = _read_data_file(source, args.sample)
+    df = _read_data_file(source, args.sample, infer_dates=True)
     if df.height == 0:
         raise CliError(f"{source} has no rows to profile")
 

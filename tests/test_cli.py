@@ -818,3 +818,129 @@ def test_no_command_is_an_error():
     with pytest.raises(SystemExit) as exc:
         run_cli()
     assert exc.value.code != 0
+
+
+# ---------------------------------------------------------------------------
+# A text file read in the spec's terms
+# ---------------------------------------------------------------------------
+
+TEMPORAL_SPEC = """
+import datetime as dt
+import polars as pl
+from polspec import ColSpec, FrameSpec
+
+class Events(FrameSpec):
+    day = ColSpec(pl.Date, bounds=(dt.date(2024, 1, 1), dt.date(2025, 1, 1)))
+    at = ColSpec(pl.Datetime("us"))
+    zoned = ColSpec(pl.Datetime("ms", "Europe/London"))
+    clock = ColSpec(pl.Time)
+    ref = ColSpec(pl.String)
+"""
+
+
+def _temporal_spec(tmp_path):
+    source = tmp_path / "events.py"
+    source.write_text(TEMPORAL_SPEC, encoding="utf-8")
+    return source
+
+
+@pytest.mark.parametrize("suffix", [".csv", ".tsv", ".ndjson", ".json"])
+def test_a_text_file_polspec_wrote_validates_against_its_spec(tmp_path, capsys, suffix):
+    """A text format has no date type, so a Date arrives as text; the CLI
+    parses each column the spec declares as a date or time, and the file
+    `generate` wrote validates against the spec that wrote it."""
+    source = _temporal_spec(tmp_path)
+    data = tmp_path / f"events{suffix}"
+    assert run_cli("generate", source, "-n", "200", "--seed", "1", "-o", data) == 0
+    capsys.readouterr()
+    assert run_cli("validate", source, data) == 0, capsys.readouterr().out
+    assert run_cli("drift", source, data, "--fail-on", "breaking") == 0
+
+
+def test_a_date_out_of_bounds_in_a_csv_is_a_bounds_finding(tmp_path, capsys):
+    """Parsed, the column's own checks run -- where before the dtype
+    finding was the whole answer."""
+    source = _temporal_spec(tmp_path)
+    data = tmp_path / "events.csv"
+    data.write_text(
+        "day,at,zoned,clock,ref\n"
+        "2023-06-01,2024-01-01T00:00:00,2024-01-01T00:00:00+0000,12:00:00,x\n",
+        encoding="utf-8",
+    )
+    assert run_cli("validate", source, data, "--json") == 1
+    findings = json.loads(capsys.readouterr().out)["findings"]
+    assert [f["key"] for f in findings] == ["day__bounds"]
+
+
+def test_a_date_that_does_not_parse_stays_text_and_says_so(tmp_path, capsys):
+    """One bad value leaves the column as it was read: the dtype finding is
+    true, where parsing it to a null would invent one."""
+    source = _temporal_spec(tmp_path)
+    data = tmp_path / "events.csv"
+    data.write_text(
+        "day,at,zoned,clock,ref\n"
+        "2024-06-01,2024-01-01T00:00:00,2024-01-01T00:00:00+0000,12:00:00,x\n"
+        "not a date,2024-01-01T00:00:00,2024-01-01T00:00:00+0000,12:00:00,x\n",
+        encoding="utf-8",
+    )
+    assert run_cli("validate", source, data, "--json") == 1
+    findings = json.loads(capsys.readouterr().out)["findings"]
+    assert [(f["code"], f["key"]) for f in findings] == [("dtype", "day__dtype")]
+
+
+def test_a_string_column_of_date_shaped_text_stays_a_string(tmp_path, capsys):
+    source = _temporal_spec(tmp_path)
+    data = tmp_path / "events.csv"
+    data.write_text(
+        "day,at,zoned,clock,ref\n"
+        "2024-06-01,2024-01-01T00:00:00,2024-01-01T00:00:00+0000,12:00:00,"
+        "2024-06-01\n",
+        encoding="utf-8",
+    )
+    assert run_cli("validate", source, data) == 0, capsys.readouterr().out
+
+
+def test_schema_infer_reads_a_csv_date_as_a_date(tmp_path):
+    data = tmp_path / "events.csv"
+    data.write_text("day,n\n2024-01-02,1\n2024-03-04,2\n", encoding="utf-8")
+    out = tmp_path / "events.yaml"
+    assert run_cli("schema", "infer", data, "-o", out) == 0
+    inferred = FrameSpec.from_yaml(out)
+    assert inferred.spec.columns["day"].dtype == pl.Date
+
+
+# ---------------------------------------------------------------------------
+# --skip
+# ---------------------------------------------------------------------------
+
+
+def test_validate_skip_turns_off_a_kind_of_check(tmp_path, capsys):
+    source = _temporal_spec(tmp_path)
+    data = tmp_path / "events.csv"
+    data.write_text(
+        "day,at,zoned,clock,ref\n"
+        "2023-06-01,2024-01-01T00:00:00,2024-01-01T00:00:00+0000,12:00:00,x\n",
+        encoding="utf-8",
+    )
+    assert run_cli("validate", source, data) == 1
+    capsys.readouterr()
+    assert run_cli("validate", source, data, "--skip", "bounds", "--json") == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["findings"] == []
+
+
+def test_validate_skip_takes_every_switch_and_nothing_else(tmp_path, capsys):
+    from polspec.validation import _SWITCHES
+
+    source = _temporal_spec(tmp_path)
+    data = tmp_path / "events.csv"
+    data.write_text(
+        "day,at,zoned,clock,ref\n"
+        "2024-06-01,2024-01-01T00:00:00,2024-01-01T00:00:00+0000,12:00:00,x\n",
+        encoding="utf-8",
+    )
+    every = [arg for name in _SWITCHES for arg in ("--skip", name)]
+    assert run_cli("validate", source, data, *every) == 0
+    with pytest.raises(SystemExit):
+        run_cli("validate", source, data, "--skip", "nope")
+    assert "invalid choice: 'nope'" in capsys.readouterr().err

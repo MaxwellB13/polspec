@@ -113,5 +113,5 @@ def _cmd_drift(args: argparse.Namespace) -> int:
     source = _existing(args.spec)
     data_path = _existing(args.data)
     spec_cls = _single_spec(source, args.cls)
-    df = _read_data_file(data_path, args.sample)
+    df = _read_data_file(data_path, args.sample, spec_cls.spec)
     return _print_drift(drift(spec_cls, df, options=_drift_options(args)), args)

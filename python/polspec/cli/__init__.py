@@ -27,6 +27,7 @@ from polspec.cli._drift import _FAIL_ON, _cmd_diff, _cmd_drift
 from polspec.cli._schema import _cmd_schema_infer, _cmd_schema_new
 from polspec.cli._test import _cmd_test
 from polspec.errors import PolspecError
+from polspec.validation import _SWITCHES
 
 try:
     from importlib.metadata import version as _pkg_version
@@ -170,6 +171,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "--strict-dtypes",
         action="store_true",
         help="Require exact dtypes rather than compatible ones",
+    )
+    validate.add_argument(
+        "--skip",
+        action="append",
+        choices=_SWITCHES,
+        metavar="CHECK",
+        help=(
+            "Turn off one kind of check, as validate_CHECK=False does; repeat "
+            f"for several. One of: {', '.join(_SWITCHES)}"
+        ),
     )
     validate.add_argument(
         "--json",
