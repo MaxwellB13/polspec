@@ -201,12 +201,6 @@ def _when_from_data(value: Any, ctx: Ctx, path: str) -> Any:
     return pred_from_data(value)
 
 
-def _pred_to_data(check: Check) -> Any:
-    if check.pred is None:
-        raise SerializationError(f"Check {check.name!r} wraps a raw polars.Expr")
-    return check.pred.to_data()
-
-
 # ---------------------------------------------------------------------------
 # Check / validators
 # ---------------------------------------------------------------------------

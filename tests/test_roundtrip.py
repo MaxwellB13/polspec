@@ -940,6 +940,7 @@ EVERY_DTYPE = [
     pl.List(pl.Int64),
     pl.Array(pl.Float64, 3),
     pl.Struct({"a": pl.Int64, "b": pl.String}),
+    pl.Struct({}),
     # Nested to two levels, every way round.
     pl.List(pl.List(pl.Int64)),
     pl.List(pl.Struct({"a": pl.Int64})),

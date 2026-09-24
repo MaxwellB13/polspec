@@ -180,8 +180,10 @@ Worth being direct about, in the same spirit as the
 
 - **Not a realistic-fake-data library.** No locales, no plausible names or
   addresses out of the box — pair it with Faker for that.
-- **Not a data-quality or monitoring platform.** No drift detection, no
-  profiling dashboards, no anomaly scoring.
+- **Not a data-quality or monitoring platform.** `drift()` measures a frame
+  against its declaration and says what moved, but there are no dashboards,
+  no scheduling, no history kept between runs and no anomaly scoring --
+  polspec answers when asked.
 - **Not a property-based shrinking engine.** No search, no shrinking —
   `method="cartesian"` is a fixed set of known-important cases, not an
   open-ended exploration.
