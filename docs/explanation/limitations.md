@@ -106,10 +106,12 @@ them. See [String formats](../how-to/formats.md).
   references have to come from one pool for the two columns to join at all.
 - **A composite key is distinct within a batch, not across batches.** A
   `unique=True` column is a permutation of its value space, unique across a
-  whole frame however it is batched. A `__unique_together__` group and a
-  foreign key sampled without replacement are drawn afresh per batch of
-  `generate_batches`, a `scan()` or a `sink_*`, so they collide across
-  batches only by chance; generate the frame whole when that matters.
+  whole frame however it is batched -- including one a foreign key fills,
+  which takes a permutation of its parent's keys. A `__unique_together__`
+  group, and a unique key that references its own spec, are drawn afresh per
+  batch of `generate_batches`, a `scan()` or a `sink_*`, so they collide
+  across batches only by chance; generate the frame whole when that
+  matters.
 - **A unique string favours its longest lengths.** It is drawn uniformly
   from every string its lengths allow, and the longest lengths hold nearly
   all of them.
