@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import polars as pl
 import pytest
+from helpers import spec_for
 from polspec import (
     ColRule,
     ColSpec,
@@ -228,12 +229,8 @@ def test_diff_reaches_a_field_nested_in_a_list_of_structs():
 # ---------------------------------------------------------------------------
 
 
-def _spec_for(column: ColSpec) -> type[FrameSpec]:
-    return type("Structured", (FrameSpec,), {"__columns__": {"c": column}})
-
-
 def test_a_struct_is_its_fields_gathered():
-    spec_cls = _spec_for(
+    spec_cls = spec_for(
         ColSpec(POINT, fields={"lat": ColSpec(pl.Float64, bounds=(-90, 90))})
     )
     df = spec_cls.generate(500, seed=1)
@@ -247,13 +244,13 @@ def test_a_struct_is_its_fields_gathered():
 
 def test_a_field_fields_omits_is_generated_from_its_dtype():
     """`fields` is partial: the rest are drawn as a column of their dtype."""
-    spec_cls = _spec_for(ColSpec(POINT, fields={"lat": ColSpec(pl.Float64)}))
+    spec_cls = spec_for(ColSpec(POINT, fields={"lat": ColSpec(pl.Float64)}))
     df = spec_cls.generate(200, seed=1)
     assert df["c"].struct.field("label").str.len_chars().min() >= 1
 
 
 def test_nullable_describes_the_cell_not_its_fields():
-    spec_cls = _spec_for(ColSpec(POINT, nullable=True, null_probability=0.5))
+    spec_cls = spec_for(ColSpec(POINT, nullable=True, null_probability=0.5))
     df = spec_cls.generate(2_000, seed=1)
     assert 800 < df["c"].null_count() < 1_200
     present = df["c"].drop_nulls()
@@ -263,7 +260,7 @@ def test_nullable_describes_the_cell_not_its_fields():
 def test_a_field_is_null_where_its_own_declaration_says_so():
     """A field spec is a ColSpec, and its `nullable` is a claim like any
     other: generation honours it, inside the cells that are present."""
-    spec_cls = _spec_for(
+    spec_cls = spec_for(
         ColSpec(
             POINT,
             fields={"label": ColSpec(pl.String, nullable=True, null_probability=0.5)},
@@ -279,7 +276,7 @@ def test_a_field_is_null_where_its_own_declaration_says_so():
 def test_a_struct_nests_as_deep_as_its_dtype():
     inner = pl.Struct({"x": pl.Int64})
     outer = pl.Struct({"point": inner, "name": pl.String})
-    spec_cls = _spec_for(
+    spec_cls = spec_for(
         ColSpec(
             outer,
             fields={
@@ -294,7 +291,7 @@ def test_a_struct_nests_as_deep_as_its_dtype():
 
 
 def test_a_list_of_structs_describes_its_element():
-    spec_cls = _spec_for(
+    spec_cls = spec_for(
         ColSpec(
             pl.List(POINT),
             fields={"lat": ColSpec(pl.Float64, bounds=(0, 1))},
@@ -311,7 +308,7 @@ def test_a_list_of_structs_describes_its_element():
 
 def test_a_struct_of_a_list_is_a_column_inside_a_value():
     dtype = pl.Struct({"xs": pl.List(pl.Int64)})
-    spec_cls = _spec_for(
+    spec_cls = spec_for(
         ColSpec(
             dtype,
             fields={
@@ -328,7 +325,7 @@ def test_a_struct_of_a_list_is_a_column_inside_a_value():
 def test_a_struct_column_is_seeded_by_name_like_any_other():
     """Renaming with `seed_name` keeps every field, and a field added beside
     another moves nothing: each is seeded under its parent by name."""
-    before = _spec_for(ColSpec(POINT))
+    before = spec_for(ColSpec(POINT))
     renamed = type(
         "Renamed",
         (FrameSpec,),
@@ -339,7 +336,7 @@ def test_a_struct_column_is_seeded_by_name_like_any_other():
     wider = pl.Struct(
         {"lat": pl.Float64, "lon": pl.Float64, "label": pl.String, "z": pl.Int64}
     )
-    added = _spec_for(ColSpec(wider))
+    added = spec_for(ColSpec(wider))
     original = before.generate(100, seed=5)["c"]
     grown = added.generate(100, seed=5)["c"]
     for field in ("lat", "lon", "label"):
@@ -347,14 +344,14 @@ def test_a_struct_column_is_seeded_by_name_like_any_other():
 
 
 def test_a_struct_column_is_a_window_under_batching():
-    spec_cls = _spec_for(ColSpec(POINT, nullable=True))
+    spec_cls = spec_for(ColSpec(POINT, nullable=True))
     whole = spec_cls.generate(1_000, seed=7)["c"]
     batched = pl.concat(list(spec_cls.generate_batches(1_000, batch_size=250, seed=7)))
     assert batched["c"].equals(whole)
 
 
 def test_a_struct_scans_and_sinks(tmp_path):
-    spec_cls = _spec_for(ColSpec(POINT, nullable=True))
+    spec_cls = spec_for(ColSpec(POINT, nullable=True))
     path = tmp_path / "rows.parquet"
     spec_cls.scan(5_000, seed=1, batch_size=1_000).sink_parquet(path)
     assert pl.read_parquet(path).equals(
@@ -372,7 +369,7 @@ def _frame(values, dtype) -> pl.DataFrame:
 
 
 def test_a_fields_claim_is_a_finding_named_for_the_field():
-    spec_cls = _spec_for(
+    spec_cls = spec_for(
         ColSpec(
             POINT,
             fields={
@@ -406,14 +403,14 @@ def test_a_fields_claim_is_a_finding_named_for_the_field():
 
 def test_a_null_field_is_reported_unless_the_field_is_nullable():
     df = _frame([{"lat": None, "lon": 1.0, "label": None}, None], POINT)
-    strict = _spec_for(ColSpec(POINT, nullable=True))
+    strict = spec_for(ColSpec(POINT, nullable=True))
     by_key = {f.key: f for f in strict.inspect(df).findings}
     assert set(by_key) == {"c.lat__null", "c.label__null"}
     assert by_key["c.lat__null"].code == "nullability"
     assert by_key["c.lat__null"].count == 1, "a null cell has no fields to be null"
     assert "non-nullable field" in by_key["c.lat__null"].message
 
-    lenient = _spec_for(
+    lenient = spec_for(
         ColSpec(
             POINT,
             fields={
@@ -429,7 +426,7 @@ def test_a_null_field_is_reported_unless_the_field_is_nullable():
 def test_a_nested_fields_claim_names_the_whole_path():
     inner = pl.Struct({"x": pl.Int64})
     outer = pl.Struct({"point": inner})
-    spec_cls = _spec_for(
+    spec_cls = spec_for(
         ColSpec(
             outer,
             fields={
@@ -447,7 +444,7 @@ def test_a_nested_fields_claim_names_the_whole_path():
 
 def test_a_list_of_structs_reports_the_offending_lists():
     dtype = pl.List(pl.Struct({"lat": pl.Float64}))
-    spec_cls = _spec_for(
+    spec_cls = spec_for(
         ColSpec(dtype, fields={"lat": ColSpec(pl.Float64, bounds=(-90, 90))})
     )
     report = spec_cls.inspect(
@@ -462,7 +459,7 @@ def test_a_list_of_structs_reports_the_offending_lists():
 
 def test_a_list_inside_a_struct_carries_its_list_claims():
     dtype = pl.Struct({"xs": pl.List(pl.Int64)})
-    spec_cls = _spec_for(
+    spec_cls = spec_for(
         ColSpec(
             dtype,
             fields={
@@ -481,7 +478,7 @@ def test_a_list_inside_a_struct_carries_its_list_claims():
 
 def test_a_list_of_lists_tells_its_two_levels_apart():
     dtype = pl.List(pl.List(pl.Int64))
-    spec_cls = _spec_for(ColSpec(dtype))
+    spec_cls = spec_for(ColSpec(dtype))
     report = spec_cls.inspect(_frame([[[1], None], [[1, None]], [[2]]], dtype))
     by_key = {f.key: f for f in report.findings}
     assert set(by_key) == {"c__element_null", "c[]__element_null"}
@@ -492,7 +489,7 @@ def test_a_list_of_lists_tells_its_two_levels_apart():
 def test_a_struct_of_a_widened_field_is_compatible_unless_strict():
     wide = pl.Struct({"lat": pl.Int32, "lon": pl.Float64, "label": pl.String})
     df = _frame([{"lat": 1, "lon": 2.0, "label": "a"}], wide)
-    spec_cls = _spec_for(ColSpec(POINT))
+    spec_cls = spec_for(ColSpec(POINT))
     assert spec_cls.inspect(df).passed
     (finding,) = spec_cls.inspect(df, strict_dtypes=True).findings
     assert finding.code == "dtype"
@@ -501,13 +498,13 @@ def test_a_struct_of_a_widened_field_is_compatible_unless_strict():
 def test_a_struct_is_compatible_by_field_name_not_order():
     reordered = pl.Struct({"label": pl.String, "lon": pl.Float64, "lat": pl.Float64})
     df = _frame([{"label": "a", "lon": 2.0, "lat": 1.0}], reordered)
-    assert _spec_for(ColSpec(POINT)).inspect(df).passed
+    assert spec_for(ColSpec(POINT)).inspect(df).passed
 
 
 def test_a_struct_missing_a_field_is_a_different_struct():
     narrow = pl.Struct({"lat": pl.Float64, "lon": pl.Float64})
     df = _frame([{"lat": 1.0, "lon": 2.0}], narrow)
-    spec_cls = _spec_for(
+    spec_cls = spec_for(
         ColSpec(POINT, fields={"lat": ColSpec(pl.Float64, bounds=(0, 9))})
     )
     (finding,) = spec_cls.inspect(df).findings
@@ -578,7 +575,7 @@ def test_a_fields_null_rate_is_measured_inside_the_present_structs():
 
 
 def test_from_dataframe_re_declares_a_struct_by_its_fields():
-    source = _spec_for(
+    source = spec_for(
         ColSpec(
             POINT,
             fields={
@@ -597,7 +594,7 @@ def test_from_dataframe_re_declares_a_struct_by_its_fields():
     label = profiled.fields["label"]
     assert label.nullable and 0.15 < label.null_probability < 0.35
     assert not profiled.fields["lon"].nullable
-    _spec_for(profiled).validate(df)
+    spec_for(profiled).validate(df)
 
 
 def test_from_dataframe_re_declares_a_list_of_structs_and_a_list_of_lists():
@@ -613,7 +610,7 @@ def test_from_dataframe_re_declares_a_list_of_structs_and_a_list_of_lists():
     assert profiled["ls"].fields["x"].bounds.max == 5
     assert profiled["ll"].dtype == pl.List(pl.List(pl.Int64))
     assert profiled["ll"].list_length.max == 2
-    _spec_for(profiled["ls"]).validate(df.select(c="ls"))
+    spec_for(profiled["ls"]).validate(df.select(c="ls"))
 
 
 def test_a_narrowed_field_rebuilds_the_struct_dtype():
@@ -623,11 +620,11 @@ def test_a_narrowed_field_rebuilds_the_struct_dtype():
     profiled = FrameSpec.from_dataframe(df).spec.columns["c"]
     assert profiled.fields["label"].dtype == pl.Enum(["a"])
     assert profiled.value_dtype.to_schema()["label"] == pl.Enum(["a"])
-    _spec_for(profiled).validate(df)
+    spec_for(profiled).validate(df)
 
 
 def test_the_data_dictionary_gives_each_field_a_row():
-    spec_cls = _spec_for(
+    spec_cls = spec_for(
         ColSpec(POINT, fields={"lat": ColSpec(pl.Float64, bounds=(-90, 90))})
     )
     markdown = spec_cls.to_markdown()
@@ -648,7 +645,7 @@ def test_estimated_size_of_a_struct_is_its_fields():
             ),
         },
     )
-    struct = _spec_for(
+    struct = spec_for(
         ColSpec(
             POINT,
             fields={
@@ -700,7 +697,7 @@ def test_every_breaking_field_finding_is_a_validation_failure_on_that_field():
 
 
 def test_a_struct_with_no_fields_is_still_a_struct():
-    spec_cls = _spec_for(ColSpec(pl.Struct({}), nullable=True, null_probability=0.5))
+    spec_cls = spec_for(ColSpec(pl.Struct({}), nullable=True, null_probability=0.5))
     df = spec_cls.generate(200, seed=1)
     assert df.schema["c"] == pl.Struct({})
     assert 0 < df["c"].null_count() < 200

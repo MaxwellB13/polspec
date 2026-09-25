@@ -87,9 +87,9 @@ uv run --group docs zensical build --strict  # what the docs workflow runs
 ## Conventions
 
 - **Generate and validate must agree.** Anything `generate()` produces,
-  `validate()` must accept. `tests/test_roundtrip.py` pins that property. A
-  known gap is recorded once in
-  [`docs/reference/limitations.md`](docs/reference/limitations.md) and once as
+  `validate()` must accept. `tests/contracts/test_roundtrip.py` pins that
+  property. A known gap is recorded once in
+  [`docs/explanation/limitations.md`](docs/explanation/limitations.md) and once as
   an `xfail(strict=True)` test, so fixing it forces the docs to be updated.
 - **Error messages name the fix.** Say what was declared, what was expected,
   and what to change. Look at the existing `ValueError`s in
@@ -97,12 +97,17 @@ uv run --group docs zensical build --strict  # what the docs workflow runs
 - **Two tables must match.** The distribution parameter aliases live in both
   `python/polspec/distributions.py` and `DistKind::from_spec` in
   `src/lib.rs`. Change them together.
-- **A new `ColSpec` field touches four registries**, each with a test that
-  fails when it is missing: the `TYPE_CHECKING` constructor beside the
-  fields (`tests/test_declaration.py`), the serialization `Field` list
-  (`tests/test_serialization_format.py`), the drift comparator table
-  (`tests/test_drift.py`), and -- if it is a validation switch -- the
-  `FrameSpec` facade signature (`tests/test_framespec.py`).
+- **A new `ColSpec` field touches four registries**: the `TYPE_CHECKING`
+  constructor beside the fields, the serialization `Field` list, the drift
+  comparator table, and -- if it is a validation switch -- the `FrameSpec`
+  facade signature. `tests/contracts/test_parity.py` holds a test for each,
+  and fails naming what is missing.
+- **Tests live in a folder by what they cover**: `contracts/` (the
+  round trip, the parity tests), `declaration/`, `generation/`,
+  `validation/`, `drift/`, `serialization/`, `features/` (one file per
+  feature across every verb), `cli/`, `docs/`. Every module opens with a
+  docstring saying what it covers; `tests/helpers.py` holds what several
+  share.
 - **What the constructor accepts is not what the instance holds.** `ColSpec`,
   `Check` and `ForeignKey` annotate their fields with the normalised form
   (`pl.DataType`, `Bound`, tuples) and declare the accepted forms in an

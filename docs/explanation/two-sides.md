@@ -33,7 +33,7 @@ symptom: `Spec.validate(Spec.generate(n))` raising. Data the library made,
 rejected by the library that made it.
 
 That property has a name here — the *round-trip* — and it is asserted
-directly, in `tests/test_roundtrip.py`:
+directly, in `tests/contracts/test_roundtrip.py`:
 
 <!-- docs: skip -->
 ```python

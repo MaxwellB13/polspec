@@ -1,3 +1,7 @@
+"""Batching: `generate_batches` as windows onto one frame, and the file sinks
+that write a scan out.
+"""
+
 import warnings
 
 import polars as pl

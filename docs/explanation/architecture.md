@@ -147,11 +147,17 @@ match the module.
 
 ## Tests
 
-Each test file opens with a docstring saying what it covers, which is the
-map this page used to keep and let fall behind. Two kinds of test hold the
-design together rather than any one feature: `test_roundtrip.py`, the
-property that anything `generate()` produces `validate()` accepts, across
-every dtype; and the registry parity tests, which fail when a `ColSpec`
-field is added without its serialization entry, its drift comparator or its
-place in the facade's signatures. Warnings are errors in the suite, so a
-warning is asserted where it is expected and a failure everywhere else.
+`tests/` is grouped by what a file covers: `declaration/`, `generation/`,
+`validation/`, `drift/` and `serialization/` follow the package, `features/`
+holds one file per feature across every verb (structs, lists, formats,
+foreign keys, ...), and `cli/` and `docs/` hold the command line and the
+documentation's own checks. Each file opens with a docstring saying what it
+covers, and a test holds the suite to both rules.
+
+`contracts/` holds what keeps the design together rather than any one
+feature: `test_roundtrip.py`, the property that anything `generate()`
+produces `validate()` accepts, across every dtype; and `test_parity.py`,
+which fails when a field is added without its serialization entry, its drift
+comparator, its typed constructor parameter or its place in the facade's
+signatures. Warnings are errors in the suite, so a warning is asserted where
+it is expected and a failure everywhere else.

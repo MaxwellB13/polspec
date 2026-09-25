@@ -14,6 +14,7 @@ import json
 
 import polars as pl
 import pytest
+from helpers import spec_for
 from polspec import (
     ColRule,
     ColSpec,
@@ -24,11 +25,6 @@ from polspec import (
     col,
 )
 from polspec.drift import diff, drift
-
-
-def _spec_for(column: ColSpec) -> type[FrameSpec]:
-    return type("Nested", (FrameSpec,), {"__columns__": {"c": column}})
-
 
 # ---------------------------------------------------------------------------
 # Declaration
@@ -83,7 +79,7 @@ def test_an_element_class_is_instantiated_like_a_dtype_class():
 
 
 def test_lengths_and_elements_respect_the_declaration():
-    spec_cls = _spec_for(ColSpec(pl.List(pl.Int64), bounds=(0, 9), list_length=(1, 3)))
+    spec_cls = spec_for(ColSpec(pl.List(pl.Int64), bounds=(0, 9), list_length=(1, 3)))
     df = spec_cls.generate(500, seed=1)
     assert df.schema["c"] == pl.List(pl.Int64)
     lengths = df["c"].list.len()
@@ -95,15 +91,13 @@ def test_lengths_and_elements_respect_the_declaration():
 
 
 def test_the_default_length_is_zero_to_five():
-    df = _spec_for(ColSpec(pl.List(pl.String))).generate(500, seed=2)
+    df = spec_for(ColSpec(pl.List(pl.String))).generate(500, seed=2)
     lengths = df["c"].list.len()
     assert lengths.min() == 0 and lengths.max() == 5
 
 
 def test_nullability_is_the_lists_and_never_the_elements():
-    spec_cls = _spec_for(
-        ColSpec(pl.List(pl.Int64), nullable=True, null_probability=0.5)
-    )
+    spec_cls = spec_for(ColSpec(pl.List(pl.Int64), nullable=True, null_probability=0.5))
     df = spec_cls.generate(1_000, seed=3)
     assert 300 < df["c"].null_count() < 700
     elements = df["c"].explode(empty_as_null=False)
@@ -111,7 +105,7 @@ def test_nullability_is_the_lists_and_never_the_elements():
 
 
 def test_an_array_takes_its_width_from_the_dtype():
-    spec_cls = _spec_for(
+    spec_cls = spec_for(
         ColSpec(pl.Array(pl.Float64, 3), bounds=(0.0, 1.0), nullable=True)
     )
     df = spec_cls.generate(200, seed=4)
@@ -122,7 +116,7 @@ def test_an_array_takes_its_width_from_the_dtype():
 
 
 def test_a_list_column_keeps_its_data_across_a_rename():
-    before = _spec_for(ColSpec(pl.List(pl.Int64), list_length=(0, 4), nullable=True))
+    before = spec_for(ColSpec(pl.List(pl.Int64), list_length=(0, 4), nullable=True))
     renamed = ColSpec(
         pl.List(pl.Int64), list_length=(0, 4), nullable=True, seed_name="c"
     )
@@ -208,7 +202,7 @@ def test_a_list_of_the_wrong_element_dtype_is_a_dtype_finding_only():
 
 
 def test_a_list_of_a_wider_element_is_compatible_unless_strict():
-    spec_cls = _spec_for(ColSpec(pl.List(pl.Int32)))
+    spec_cls = spec_for(ColSpec(pl.List(pl.Int32)))
     df = pl.DataFrame({"c": [[1, 2]]}, schema={"c": pl.List(pl.Int64)})
     assert spec_cls.inspect(df).passed
     assert not spec_cls.inspect(df, strict_dtypes=True).passed
@@ -252,7 +246,7 @@ def test_diff_reports_a_list_length_change_like_a_string_length_change():
 
 
 def test_drift_measures_a_list_column_as_its_elements_and_its_length():
-    spec_cls = _spec_for(ColSpec(pl.List(pl.Int64), bounds=(0, 9), list_length=(1, 3)))
+    spec_cls = spec_for(ColSpec(pl.List(pl.Int64), bounds=(0, 9), list_length=(1, 3)))
     assert drift(spec_cls, spec_cls.generate(200, seed=7)).unchanged
     bad = pl.DataFrame({"c": [[1, 2, 3, 4, 50]] * 10}, schema={"c": pl.List(pl.Int64)})
     report = drift(spec_cls, bad)
@@ -278,5 +272,5 @@ def test_from_dataframe_declares_a_list_by_its_elements():
 
 
 def test_reports_show_the_list_length():
-    spec_cls = _spec_for(ColSpec(pl.List(pl.Int64), list_length=(1, 3)))
+    spec_cls = spec_for(ColSpec(pl.List(pl.Int64), list_length=(1, 3)))
     assert "1..3 elements" in spec_cls.to_markdown()

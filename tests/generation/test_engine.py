@@ -53,7 +53,7 @@ def test_the_stub_matches_the_module():
 
     stub = Path(_polspec.__file__).with_suffix(".pyi")
     if not stub.exists():  # an installed wheel places the stub beside the package
-        stub = Path(__file__).parents[1] / "python" / "polspec" / "_polspec.pyi"
+        stub = Path(__file__).parents[2] / "python" / "polspec" / "_polspec.pyi"
     tree = ast.parse(stub.read_text(encoding="utf-8"))
     declared = {
         node.name

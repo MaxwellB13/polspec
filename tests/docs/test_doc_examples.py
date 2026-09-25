@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-DOCS = Path(__file__).resolve().parents[1] / "docs"
+DOCS = Path(__file__).resolve().parents[2] / "docs"
 
 # A ```python fence, with whatever HTML comment sits on the line above it.
 BLOCK = re.compile(

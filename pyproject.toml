@@ -107,6 +107,11 @@ ignore = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Test files are grouped in folders by what they cover, and two folders may
+# hold the same basename; importlib mode lets them. `helpers` is importable
+# from every folder.
+addopts = "--import-mode=importlib"
+pythonpath = ["tests"]
 # A warning is either expected -- and asserted with pytest.warns or a
 # `docs: warns` marker -- or a bug; none is printed and forgotten.
 filterwarnings = ["error"]
@@ -120,4 +125,4 @@ include = ["python/polspec"]
 # suppressed here: a dataclass whose constructor accepts more than its
 # fields hold (`ColSpec`, `Check`, `ForeignKey`) spells the accepted
 # signature out in a `TYPE_CHECKING`-only `__init__`, held to the fields
-# by a test in `tests/test_declaration.py`.
+# by a test in `tests/contracts/test_parity.py`.

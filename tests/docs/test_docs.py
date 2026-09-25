@@ -17,7 +17,7 @@ from pathlib import Path
 import polspec
 from polspec.serialization import FORMAT_VERSION
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 DOCS = ROOT / "docs"
 API = DOCS / "reference" / "api"
 
@@ -256,3 +256,19 @@ def test_every_module_is_on_the_architecture_page():
     }
     assert modules - listed == set(), "add a row to architecture.md"
     assert listed - modules == set(), "architecture.md names a module that is gone"
+
+
+def test_every_test_file_lives_in_a_folder_and_says_what_it_covers():
+    """`tests/` is grouped by what a file covers, and each file's docstring is
+    the map -- so a file at the top level, or one without a docstring, is how
+    the layout starts to fall apart again."""
+    import ast
+
+    tests = ROOT / "tests"
+    assert sorted(p.name for p in tests.glob("test_*.py")) == []
+    undocumented = [
+        path.relative_to(tests).as_posix()
+        for path in sorted(tests.rglob("test_*.py"))
+        if not ast.get_docstring(ast.parse(path.read_text(encoding="utf-8")))
+    ]
+    assert undocumented == []

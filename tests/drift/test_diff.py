@@ -8,7 +8,6 @@ makes the comparison complete: one comparator per field of `ColSpec` and of
 
 from __future__ import annotations
 
-import dataclasses
 import datetime as dt
 import json
 
@@ -29,7 +28,6 @@ from polspec import (
     col,
 )
 from polspec.drift import diff
-from polspec.drift.fields import FIELD_COMPARATORS, TABLE_COMPARATORS
 
 
 def _spec(**columns: ColSpec) -> TableSpec:
@@ -40,19 +38,6 @@ def _one(report: DriftReport, code: str) -> DriftFinding:
     found = report.by_code(code)
     assert len(found) == 1, f"expected one {code}, got {[f.code for f in report]}"
     return found[0]
-
-
-# ---------------------------------------------------------------------------
-# Completeness
-# ---------------------------------------------------------------------------
-
-
-def test_every_colspec_field_has_a_comparator():
-    assert set(FIELD_COMPARATORS) == {f.name for f in dataclasses.fields(ColSpec)}
-
-
-def test_every_tablespec_field_has_a_comparator():
-    assert set(TABLE_COMPARATORS) == {f.name for f in dataclasses.fields(TableSpec)}
 
 
 def test_a_spec_does_not_drift_from_itself():
