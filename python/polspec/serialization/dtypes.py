@@ -70,6 +70,20 @@ def physical_from_name(name: object) -> DtypeLike:
     return dtype
 
 
+# Polars 2's `Map(key, value)`; None on Polars 1, which has no such dtype.
+# Reached through getattr so the module imports, and type-checks, on both.
+_MAP: Any = getattr(pl, "Map", None)
+
+
+def _map_parts(dtype: pl.DataType) -> tuple[pl.DataType, pl.DataType] | None:
+    """A `Map`'s key and value dtypes, or None for any other dtype -- and for
+    every dtype on Polars 1."""
+    if _MAP is None or not isinstance(dtype, _MAP):
+        return None
+    map_dtype: Any = dtype
+    return map_dtype.key, map_dtype.value
+
+
 # ---------------------------------------------------------------------------
 # Writing
 # ---------------------------------------------------------------------------
@@ -111,6 +125,9 @@ def dtype_to_data(dtype: pl.DataType) -> str | dict[str, Any]:
                 for name, field in field_dtypes(dtype).items()
             }
         }
+    if (parts := _map_parts(dtype)) is not None:
+        key, value = parts
+        return {"Map": {"key": dtype_to_data(key), "value": dtype_to_data(value)}}
     if _is_categorical_dtype(dtype):
         if isinstance(dtype, pl.Categorical) and dtype.categories.name():
             return {"Categorical": _categories_info(dtype.categories)}
@@ -143,6 +160,9 @@ def dtype_to_source(dtype: pl.DataType) -> str:
             for name, field in field_dtypes(dtype).items()
         )
         return f"pl.Struct({{{inner}}})"
+    if (parts := _map_parts(dtype)) is not None:
+        key, value = parts
+        return f"pl.Map({dtype_to_source(key)}, {dtype_to_source(value)})"
     if _is_categorical_dtype(dtype):
         if isinstance(dtype, pl.Categorical) and dtype.categories.name():
             cats = dtype.categories
@@ -214,6 +234,23 @@ def _array_from_data(payload: Any, categories: CatSpec | None) -> pl.DataType:
     return pl.Array(dtype_from_data(payload["inner"], categories), payload["width"])
 
 
+def _map_from_data(payload: Any, categories: CatSpec | None) -> pl.DataType:
+    if not isinstance(payload, dict) or set(payload) != {"key", "value"}:
+        raise SerializationError(
+            "A Map dtype is written as {Map: {key: <dtype>, value: <dtype>}}, "
+            f"got {payload!r}"
+        )
+    if _MAP is None:
+        raise SerializationError(
+            f"This spec declares a Map column, a dtype Polars 2 introduced; "
+            f"this is Polars {pl.__version__}. Upgrade Polars to read it."
+        )
+    return _MAP(
+        dtype_from_data(payload["key"], categories),
+        dtype_from_data(payload["value"], categories),
+    )
+
+
 def _enum_from_data(payload: Any, categories: CatSpec | None) -> pl.DataType:
     if not isinstance(payload, str):
         return pl.Enum(payload)
@@ -267,6 +304,7 @@ _BUILDERS = {
     "List": lambda payload, cats: pl.List(dtype_from_data(payload, cats)),
     "Array": _array_from_data,
     "Struct": _struct_from_data,
+    "Map": _map_from_data,
 }
 
 

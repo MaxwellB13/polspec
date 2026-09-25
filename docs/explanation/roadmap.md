@@ -14,7 +14,10 @@ polspec generates every Polars dtype that holds data — integers to 128
 bits, floats from half to double precision,
 `Decimal`, booleans, strings, binary, `Date`/`Time`/`Datetime`/`Duration`,
 `Enum`, `Categorical`, and `List`, `Array` and `Struct` of any of them,
-nested to any depth. A `Datetime` carrying a `time_zone` is included: the
+nested to any depth. The exception is Polars 2's new `Map(key, value)`,
+which polspec declares, validates, profiles and writes to a spec file but
+does not generate yet -- the next dtype on this list, and the reason the
+dtype census in the tests names it rather than covers it. A `Datetime` carrying a `time_zone` is included: the
 physical value is an offset from the naive epoch whatever the zone, so the
 zone rides along and `generate()` hands back a column of the dtype you
 declared. A `Decimal` is the same idea: an integer and a scale, drawn as
