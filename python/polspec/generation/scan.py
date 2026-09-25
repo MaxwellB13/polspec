@@ -26,8 +26,10 @@ would while a ruled or foreign-keyed one is drawn per batch.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import TYPE_CHECKING
+import functools
+import inspect
+from collections.abc import Callable, Iterator
+from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
@@ -129,11 +131,57 @@ def scan(
             kept = batch if predicate is None else batch.filter(predicate)
             yield kept.select(wanted)
 
-    return pl.io.plugins.register_io_source(
+    register = pl.io.plugins.register_io_source
+    return register(
         io_source,
         schema=spec.schema(),
         validate_schema=True,
         # Pure for a given seed: the same rows however many times the plan
         # asks for them, which lets polars de-duplicate a repeated scan.
         is_pure=seed is not None,
+        **_explain_labels(register, spec, n, seed, batch_size, method),
     )
+
+
+def _explain_labels(
+    register: Callable[..., pl.LazyFrame],
+    spec: TableSpec,
+    n: int,
+    seed: int | None,
+    batch_size: int | None,
+    method: Method,
+) -> dict[str, Any]:
+    """What the scan says about itself in `explain()`, where Polars lets a
+    source say anything: `PYTHON[polspec: Orders] SCAN`, and an `INFO:` line
+    with how many rows, from which seed, in what batches.
+
+    Polars 2 added `explain_name` and `explain_detail` to
+    `register_io_source`; Polars 1 has neither and would refuse them. Whether
+    to pass them is read off the function's own signature, not a version
+    number, so a Polars that has them gets them and one that does not sees
+    exactly the call it always did.
+    """
+    if not _takes_explain_labels(register):
+        return {}
+    detail = [
+        f"{n:,} rows",
+        f"seed={seed}" if seed is not None else "unseeded",
+        f"batches of {batch_size:,}" if batch_size else "batches chosen by polars",
+    ]
+    if method != "random":
+        detail.append(f"method={method}")
+    return {
+        "explain_name": f"polspec: {spec.name}",
+        "explain_detail": ", ".join(detail),
+    }
+
+
+@functools.cache
+def _takes_explain_labels(register: Callable[..., pl.LazyFrame]) -> bool:
+    """Whether `register` accepts both explain labels -- asked once per
+    function, since a signature does not change under a running process."""
+    try:
+        parameters = inspect.signature(register).parameters
+    except (TypeError, ValueError):  # a builtin or C function with no signature
+        return False
+    return "explain_name" in parameters and "explain_detail" in parameters

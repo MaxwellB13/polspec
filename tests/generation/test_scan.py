@@ -24,7 +24,7 @@ from polspec import (
     col,
     scan,
 )
-from polspec.generation.scan import needed_columns
+from polspec.generation.scan import _takes_explain_labels, needed_columns
 
 ROWS, SEED = 250_000, 1
 
@@ -237,3 +237,77 @@ def test_scan_all_threads_parents_and_agrees_with_generate_all():
 
 def test_scan_is_exported_as_a_function_over_a_tablespec():
     assert scan(Source.spec, 10, seed=SEED).collect().height == 10
+
+
+# ---------------------------------------------------------------------------
+# What a scan says about itself in explain(), where Polars lets it
+# ---------------------------------------------------------------------------
+
+
+class Named(FrameSpec):
+    id = ColSpec(pl.Int64, unique=True)
+    total = ColSpec(pl.Float64)
+
+
+def _register_standing_in(monkeypatch, accepts_labels: bool) -> dict:
+    """A `register_io_source` that records what it was given, with or
+    without the explain parameters Polars 2 added -- so both branches run on
+    whichever Polars is installed."""
+    seen: dict = {}
+
+    if accepts_labels:
+
+        def register(
+            io_source,
+            *,
+            schema,
+            validate_schema=False,
+            is_pure=False,
+            explain_name=None,
+            explain_detail=None,
+        ):
+            seen.update(explain_name=explain_name, explain_detail=explain_detail)
+            return pl.LazyFrame(schema=schema)
+
+    else:
+
+        def register(io_source, *, schema, validate_schema=False, is_pure=False):
+            seen["called"] = True
+            return pl.LazyFrame(schema=schema)
+
+    monkeypatch.setattr(pl.io.plugins, "register_io_source", register)
+    return seen
+
+
+def test_a_polars_that_takes_explain_labels_is_given_them(monkeypatch):
+    seen = _register_standing_in(monkeypatch, accepts_labels=True)
+    Named.scan(1_000_000, seed=100, batch_size=50_000)
+    assert seen["explain_name"] == "polspec: Named"
+    assert seen["explain_detail"] == "1,000,000 rows, seed=100, batches of 50,000"
+
+
+def test_a_polars_without_them_is_called_exactly_as_before(monkeypatch):
+    """Polars 1 has no explain parameters and would refuse them; the call
+    made there is the one polspec has always made."""
+    seen = _register_standing_in(monkeypatch, accepts_labels=False)
+    Named.scan(10, seed=1)
+    assert seen == {"called": True}
+
+
+def test_the_detail_says_what_was_asked_for(monkeypatch):
+    seen = _register_standing_in(monkeypatch, accepts_labels=True)
+    Named.scan(12_345, method="cartesian")
+    assert seen["explain_detail"] == (
+        "12,345 rows, unseeded, batches chosen by polars, method=cartesian"
+    )
+
+
+@pytest.mark.skipif(
+    not _takes_explain_labels(pl.io.plugins.register_io_source),
+    reason="this Polars gives an IO source no name in explain()",
+)
+def test_explain_names_the_scan_where_polars_can():
+    plan = Named.scan(1_000_000, seed=100).select("id").explain()
+    assert plan.startswith("PYTHON[polspec: Named] SCAN")
+    assert "INFO: 1,000,000 rows, seed=100, batches chosen by polars" in plan
+    assert "PROJECT 1/2 COLUMNS" in plan
