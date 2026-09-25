@@ -44,9 +44,12 @@ for you, so `pl.Int64` and `pl.Int64()` mean the same thing.
 | Categorical | `Enum` `Categorical` |
 | Nested | `List(inner)` `Array(inner, width)` `Struct({name: dtype})` — nested to any depth; see [Nested columns](#nested-columns) |
 
-That is every dtype that holds data. `Null`, `Object`, `Unknown` and
-extension types declare and validate by dtype, but hold nothing polspec can
-draw, so `generate()` refuses each by name. A 128-bit integer is drawn
+That is every dtype that holds data, with one exception so far: Polars 2's
+`Map(key, value)`. A `Map` column declares, validates, profiles and is
+written to a spec file by its dtype, and `generate()` refuses it by name --
+drawing its values is planned. `Null`, `Object`, `Unknown` and extension
+types declare and validate by dtype, but hold nothing polspec can draw, so
+`generate()` refuses each by name too. A 128-bit integer is drawn
 through 64 bits and a `Float16` as a `Float32` rounded to the nearest half,
 so bounds past 64 bits are refused at `generate()` and bounds too close to
 hold a half at declaration; see

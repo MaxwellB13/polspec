@@ -963,6 +963,11 @@ EVERY_DTYPE = [
 # Declared and validated by dtype; generate() refuses each by name.
 NOT_DATA = {"Null", "Object", "Unknown", "Extension", "BaseExtension"}
 
+# Dtypes that hold data polspec does not generate yet: declared, validated,
+# profiled and written to a spec file by dtype, refused by name at generate().
+# `Map` arrived with Polars 2.
+NOT_YET = {"Map"}
+
 
 def test_every_polars_dtype_is_generated_or_named_as_not_data():
     import inspect as _inspect
@@ -981,8 +986,9 @@ def test_every_polars_dtype_is_generated_or_named_as_not_data():
         (dtype if isinstance(dtype, type) else type(dtype)).__name__
         for dtype in EVERY_DTYPE
     }
-    assert exported - covered - NOT_DATA == set(), (
-        "a Polars dtype neither generates nor is named as holding no data"
+    assert exported - covered - NOT_DATA - NOT_YET == set(), (
+        "a Polars dtype neither generates nor is named as holding no data, or "
+        "as not generated yet"
     )
 
 
