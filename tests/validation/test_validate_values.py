@@ -4,6 +4,9 @@ off), string lengths, rules, and the samples a finding carries.
 
 from __future__ import annotations
 
+import datetime
+import decimal
+
 import polars as pl
 import pytest
 from polspec import (
@@ -11,8 +14,11 @@ from polspec import (
     ColRule,
     ColSpec,
     FrameSpec,
+    TableSpec,
     ValidationError,
     col,
+    generate,
+    inspect,
 )
 
 
@@ -275,3 +281,52 @@ def test_a_finding_on_a_zoned_datetime_carries_its_samples():
     (finding,) = Zoned.inspect(df).findings
     assert finding.key == "at__bounds"
     assert finding.samples[0].year == 2030
+
+
+# ---------------------------------------------------------------------------
+# Choices compare in the column's own dtype
+# ---------------------------------------------------------------------------
+
+_TYPED_CHOICES = [
+    # int choices on a float column: Polars 2 refuses to coerce them lossily
+    (pl.Float64, [1, 2], 9.0),
+    # a Python datetime is microseconds; the column is milliseconds
+    (pl.Datetime("ms"), [datetime.datetime(2024, 1, 1)], datetime.datetime(2030, 1, 1)),
+    # a Python Decimal list arrives at full precision
+    (
+        pl.Decimal(10, 2),
+        [decimal.Decimal("1.50"), decimal.Decimal("2.25")],
+        decimal.Decimal("9.99"),
+    ),
+    (pl.Int8, [1, 2, 3], 9),
+]
+
+
+@pytest.mark.parametrize(("dtype", "choices", "outside"), _TYPED_CHOICES, ids=str)
+def test_choices_are_compared_in_the_columns_own_dtype(dtype, choices, outside):
+    """A Python list of choices reaches `is_in` at its widest type -- an int
+    list on a float column, microseconds on a millisecond column, a Decimal
+    at full precision -- which Polars will not compare (strictly so from
+    Polars 2). Typed as the column, the choices validate what they should
+    and reject what they should, on either line."""
+    spec = TableSpec("T", {"c": ColSpec(dtype, choices=choices)})
+    df = generate(spec, 100, seed=1)
+    assert inspect(spec, df).passed
+    bad = df.with_columns(pl.lit(outside).cast(dtype).alias("c"))
+    assert [f.key for f in inspect(spec, bad).findings] == ["c__choices"]
+
+
+def test_a_rules_choices_are_compared_in_the_columns_own_dtype():
+    spec = TableSpec(
+        "R",
+        {
+            "flag": ColSpec(pl.Boolean),
+            "v": ColSpec(
+                pl.Float64,
+                choices=[1, 2, 3],
+                rules=[ColRule(when=col("flag"), choices=(1,))],
+            ),
+        },
+    )
+    df = generate(spec, 200, seed=1)
+    assert inspect(spec, df).passed

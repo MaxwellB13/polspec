@@ -304,3 +304,23 @@ def test_the_facade_forwards_only_what_was_given():
     df = Orders.generate(50, seed=1)
     report = Orders.drift(df, null_rate_tolerance=0.5)
     assert report.options == DriftOptions(null_rate_tolerance=0.5)
+
+
+@pytest.mark.parametrize(
+    "column",
+    [
+        ColSpec(pl.Decimal(10, 2), choices=[1.5, 2.25]),
+        ColSpec(
+            pl.Datetime("ms"),
+            choices=[dt.datetime(2024, 1, 1), dt.datetime(2024, 2, 1)],
+        ),
+        ColSpec(pl.Float64, choices=[1, 2]),
+    ],
+    ids=lambda c: str(c.dtype),
+)
+def test_drift_compares_a_domain_in_the_columns_own_dtype(column):
+    """The declared values are held as a Series of the column's dtype, and
+    compared as that Series -- not as a list, which reaches `is_in` at its
+    widest type and failed for a Decimal or a millisecond column."""
+    spec = TableSpec("T", {"c": column})
+    assert drift(spec, generate(spec, 500, seed=1)).breaking == ()
