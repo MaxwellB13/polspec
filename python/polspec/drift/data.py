@@ -203,7 +203,10 @@ def _against_domain(
     else:
         observed = values
         declared = pl.Series(list(declared_values), dtype=values.dtype, strict=False)
-    outside_mask = ~observed.is_in(declared.to_list())
+    # The typed Series itself, not its values as a list: a list reaches
+    # `is_in` at its widest type, which a Decimal or a millisecond column
+    # does not compare against.
+    outside_mask = ~observed.is_in(declared.implode())
     outside_values = observed.filter(outside_mask).unique(maintain_order=True)
     outside = (int(outside_mask.sum()), tuple(outside_values.head(max_samples)))
     present = set(observed.unique().to_list())

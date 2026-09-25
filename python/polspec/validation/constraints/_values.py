@@ -368,15 +368,13 @@ def _value_constraints(
         if _is_textual(actual_dtype):
             in_domain = column.cast(pl.String).is_in(_as_strings(allowed, dtype))
             sample_expr = column.cast(pl.String)
-        elif isinstance(dtype, pl.Decimal):
-            # A Python list of Decimals reaches Polars at the widest precision,
-            # which it refuses to compare; a Series of the column's own type,
-            # imploded so Polars reads it as one set rather than row by row,
-            # is compared as values.
-            in_domain = column.is_in(_typed_values(allowed, dtype).implode())
-            sample_expr = column
         else:
-            in_domain = column.is_in(allowed)
+            # The choices as a Series of the column's own dtype: `is_in` compares
+            # like with like -- strictly so from Polars 2 -- and a Python list
+            # reaches it at its widest type, a datetime at microseconds or a
+            # Decimal at full precision, which the column's own may not be.
+            # Imploded, so Polars reads the Series as one set, not row by row.
+            in_domain = column.is_in(_typed_values(allowed, actual_dtype).implode())
             sample_expr = column
         constraints.append(
             _AllowedValues(

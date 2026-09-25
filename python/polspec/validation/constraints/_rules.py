@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from polspec.rules import ColRule
     from polspec.spec import ColSpec
 
+from polspec.dtypes import _typed_values
 from polspec.validation.constraints._base import _as_strings, _Constraint
 
 
@@ -76,7 +77,11 @@ def _rule_constraints(
             )
             sample_expr = column.cast(pl.String)
         else:
-            in_choices = column.is_in(list(rule.choices))
+            # In the column's own dtype, for the reason `_value_constraints`
+            # gives for choices.
+            in_choices = column.is_in(
+                _typed_values(rule.choices, actual_dtype).implode()
+            )
             sample_expr = column
 
         constraints.append(

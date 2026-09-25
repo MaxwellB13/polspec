@@ -129,3 +129,42 @@ jobs:
 
       - name: Run tests
         run: uv run pytest
+
+  polars-next:
+    # The next major Polars, ahead of its release: pip installs the newest 2.x
+    # release candidate over the lock, outside the bound pyproject.toml
+    # declares. Informational until 2.0 is final -- a regression in a release
+    # candidate should show here without blocking unrelated work. When the
+    # bound widens to <3, polars-latest tests 2.x within it; this job goes
+    # and that one becomes the required 2.x run.
+    name: Test (ubuntu, py3.13, polars 2 pre-release)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+
+      - name: Sync dependencies
+        run: uv sync --all-extras
+
+      - name: Install the newest Polars 2 pre-release over the lock
+        run: uv pip install --prerelease=allow "polars>=2.0.0rc1,<3"
+
+      - name: Report polars version
+        run: uv run --no-sync python -c "import polars; print(polars.__version__)"
+
+      - name: Build extension (maturin develop)
+        run: uv run --no-sync maturin develop --release
+
+      - name: Run tests
+        run: uv run --no-sync pytest
