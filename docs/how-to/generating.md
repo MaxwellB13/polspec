@@ -87,10 +87,26 @@ column means.
 
 Rows arrive in batches, so a scan carries the terms
 [batching](#batching) does: a spec declaring a `__hierarchy__` is refused,
-and a unique string column repeats its values in every batch -- polspec
-warns when it does; see [Known
-limitations](../explanation/limitations.md#smaller-sharp-edges). Leaving `batch_size` unset lets polars
-ask for the size it wants; setting it pins the size.
+and a composite key is distinct within each batch rather than across the
+scan; see [Known limitations](../explanation/limitations.md#smaller-sharp-edges).
+Leaving `batch_size` unset lets polars ask for the size it wants; setting it
+pins the size.
+
+**Reading `explain()` for a scan.** The generator appears in a query plan as
+a Python scan, with the columns and the filter polars handed it underneath:
+
+```
+SLICE[offset: 0, len: 5]
+  PYTHON SCAN []
+  PROJECT 1/18 COLUMNS
+  SELECTION: col("int1") > 0
+```
+
+`PROJECT 1/18 COLUMNS` says one of the spec's eighteen columns is
+generated; `SELECTION` is the predicate applied to the rows drawn; `*` in
+place of a count means every column. The brackets are empty because Polars
+1.x gives a Python source no name to show there -- a named header,
+`PYTHON[...]`, arrives with Polars 2.
 
 `Registry.scan_all()` is the same for a set of specs: parents are generated
 eagerly — a foreign key needs the whole parent column to sample from — and
@@ -146,9 +162,7 @@ per batch instead, deterministic but not row for row the whole frame's, is
 a column with rules, a foreign key, a composite key, and a `List` column's
 elements (its lengths are a window). A `unique=True` column is a window
 too: its values are a permutation of its value space, unique across every
-batch. A unique string with no finite set of values is the exception, for
-now: its draw starts over in every batch, the same way each time, and
-polspec warns when a second batch is drawn.
+batch.
 
 A batch smaller than 65,536 rows -- the engine's chunk -- costs up to one
 chunk of extra draws per batch, because a window that starts mid-chunk fills

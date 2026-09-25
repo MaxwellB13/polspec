@@ -365,10 +365,22 @@ ColSpec(
 ## Uniqueness
 
 `unique=True` declares that values must be distinct. `generate()` draws the
-column without replacement, so the data it produces satisfies it.
+column as a permutation of everything it could hold -- the integers in its
+bounds, its choices, a grid over a float range, every string its lengths or
+`format` allow -- so the data it produces satisfies it, and a value depends
+only on its row and the seed. That makes a unique column unique across a
+whole frame however it is produced: `generate_batches`, `scan()` and the
+sinks give the same values `generate()` does.
+
+Drawn uniformly from every string it could hold, a unique string favours
+its longer lengths, since they hold most of the strings: with
+`string_length=(5, 15)` nearly every value is fifteen characters. Narrow the
+lengths if their spread matters.
 
 Nulls are exempt, as they are for foreign keys: a null means "no value", so a
-nullable unique column may repeat nulls and nothing else.
+nullable unique column may repeat nulls and nothing else. A null row still
+takes its place in the permutation, so the column's domain has to hold every
+row, nulls included.
 
 A domain too small to cover the row count is refused, naming the column:
 

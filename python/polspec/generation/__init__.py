@@ -19,7 +19,7 @@ import polars as pl
 
 from polspec.constants import _LARGE_FRAME_BYTES
 from polspec.constraints import ordered_passes, rewritable_members
-from polspec.engine import _domain, _generate_cartesian, _generate_random
+from polspec.engine import _generate_cartesian, _generate_random
 from polspec.errors import GenerationError, SpecError
 from polspec.foreign_key import _apply_foreign_key
 from polspec.frames import Method, References, to_eager
@@ -29,7 +29,7 @@ from polspec.generation.seeds import pass_seed
 from polspec.generation.sinks import sink_csv, sink_ipc, sink_ndjson, sink_parquet
 from polspec.hierarchy import _apply_hierarchy
 from polspec.rules import _apply_column_rules
-from polspec.spec import ColSpec, _column_kind
+from polspec.spec import ColSpec
 from polspec.tablespec import TableSpec, require_columns, resolve_references
 
 __all__ = [
@@ -78,30 +78,6 @@ def _check_counts(n: int, batch_size: int | None = None) -> None:
         raise ValueError("n must be >= 0")
     if batch_size is not None and batch_size <= 0:
         raise ValueError("batch_size must be > 0")
-
-
-def _repeats_per_batch(column: ColSpec) -> bool:
-    """A unique column the engine still draws by rejection, afresh in every
-    batch: a string with no finite set of values to draw from. Every other
-    unique column is a permutation of its value space, so a batch is a
-    window onto it like any column."""
-    return (
-        column.unique
-        and _domain(column) is None
-        and _column_kind(column.value_dtype) in ("string", "binary", "categorical")
-    )
-
-
-def _warn_unique_repeats(spec: TableSpec, columns: list[str], batch_size: int) -> None:
-    """A unique string column spans more than one batch, where its draw
-    starts over: every batch holds the same values."""
-    warnings.warn(
-        f"{spec.name}: unique column(s) {', '.join(map(repr, columns))} repeat "
-        f"their values in every batch of {batch_size:,} rows -- uniqueness holds "
-        "within a batch, not across batches. Use generate() for a frame that "
-        "is unique throughout.",
-        stacklevel=3,
-    )
 
 
 def _warn_unused_references(spec: TableSpec, parents: dict[str, Any]) -> None:
@@ -398,13 +374,10 @@ def generate_batches(
     rules, a foreign key, a composite key, and a List column's elements.
 
     A `unique=True` column is a window too: its values are a permutation of
-    its value space, unique across the whole `n` however it is batched. The
-    exception, for now, is a unique string with no finite set of values to
-    draw from, which is drawn the same way in every batch -- its values
-    *repeat* batch after batch, and a `UserWarning` says so as the second
-    batch is drawn. A `__unique_together__` group and a foreign-key column
-    sampled without replacement are drawn afresh per batch, so they collide
-    across batches only by chance.
+    its value space, unique across the whole `n` however it is batched. A
+    `__unique_together__` group and a foreign-key column sampled without
+    replacement are drawn afresh per batch, so they are distinct within a
+    batch and collide across batches only by chance.
     """
     require_columns(spec)
     _requires_whole_frame(spec, "generate_batches")
@@ -430,9 +403,6 @@ def generate_batches(
 
     frame_seed = _frame_seed(seed)
     produced = 0
-    repeating = [
-        name for name, column in spec.columns.items() if _repeats_per_batch(column)
-    ]
 
     if method == "cartesian":
         # The coverage set is a property of the spec, not of a window: it is
@@ -452,11 +422,6 @@ def generate_batches(
 
     while produced < n:
         current = min(n - produced, batch_size)
-        if produced and repeating:
-            # Said once, as the first batch that repeats is drawn: a run that
-            # fits in one batch has nothing to repeat.
-            _warn_unique_repeats(spec, repeating, batch_size)
-            repeating = []
         yield _window(
             spec,
             current,
