@@ -15,6 +15,7 @@ which renders as nothing:
     <!-- docs: skip -->      an illustrative fragment, not a runnable example
     <!-- docs: raises -->    demonstrates an error, and must actually raise
     <!-- docs: warns -->     demonstrates a warning, and must actually warn
+    <!-- docs: polars2 -->   uses a Polars 2 dtype; runs only where it exists
 
 A marker is a claim about the block, so both are checked: `raises` fails the
 suite if the block stops raising, the same way `xfail(strict=True)` pins the
@@ -26,18 +27,23 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import polars as pl
 import pytest
 
 DOCS = Path(__file__).resolve().parents[2] / "docs"
 
 # A ```python fence, with whatever HTML comment sits on the line above it.
 BLOCK = re.compile(
-    r"(?:^[ \t]*<!--[ \t]*docs:[ \t]*(?P<marker>[a-z]+)[ \t]*-->[ \t]*\n)?"
+    r"(?:^[ \t]*<!--[ \t]*docs:[ \t]*(?P<marker>[a-z0-9]+)[ \t]*-->[ \t]*\n)?"
     r"^```python\n(?P<code>.*?)^```",
     re.S | re.M,
 )
 
-MARKERS = {"skip", "raises", "warns"}
+MARKERS = {"skip", "raises", "warns", "polars2"}
+
+# `Map` is the Polars 2 dtype a `polars2` block uses; on Polars 1 the block
+# is skipped, and it runs -- and must pass -- everywhere else.
+HAS_POLARS_2 = hasattr(pl, "Map")
 
 # The names pages take for granted, declared once. A page that needs more of
 # its own declares it in a block of its own, which is also what a reader
@@ -135,7 +141,7 @@ def test_a_pages_examples_run(page: Path, tmp_path: Path, monkeypatch) -> None:
     exec(compile(PREAMBLE, "<preamble>", "exec"), namespace)
 
     for line, marker, code in _blocks(page):
-        if marker == "skip":
+        if marker == "skip" or (marker == "polars2" and not HAS_POLARS_2):
             continue
         where = f"{page.relative_to(DOCS).as_posix()}:{line}"
         compiled = compile(code, where, "exec")

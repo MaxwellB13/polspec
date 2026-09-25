@@ -2,10 +2,11 @@
 
 A `Map` is the list of `{key, value}` entries it is, so it is declared and
 generated as one -- `list_length`, `fields` -- with a map's own two rules on
-top: a key is never null, and no key repeats within a map. It validates by
-dtype, profiles, drifts, and round-trips through a spec file. Polars 1 has
-no `Map`, so most of this runs only where it exists, and one test pins what
-Polars 1 says on meeting one in a file.
+top: a key is never null, and no key repeats within a map. It validates,
+drifts, profiles and is sized as that list too, with a finding about a key
+or a value named `m.key` or `m.value`, and round-trips through a spec file.
+Polars 1 has no `Map`, so most of this runs only where it exists, and one
+test pins what Polars 1 says on meeting one in a file.
 """
 
 from __future__ import annotations
@@ -82,6 +83,8 @@ def test_a_map_generates_with_distinct_keys_and_its_declared_claims():
     assert values.null_count() > 0
     assert values.drop_nulls().is_between(0, 9).all()
     assert generate(spec, 2_000, seed=1).equals(df)
+    assert inspect(spec, df).passed
+    assert drift(spec, df).breaking == ()
 
 
 @needs_map
@@ -232,3 +235,158 @@ def test_polars_1_names_the_version_a_map_needs(monkeypatch):
         dtype_codec.dtype_from_data({"Map": {"key": "String", "value": "Int64"}})
     with pytest.raises(SerializationError, match=r"written as \{Map"):
         dtype_codec.dtype_from_data({"Map": ["String", "Int64"]})
+
+
+# ---------------------------------------------------------------------------
+# Validation, drift, profiling, sizing and the report read a map as its list
+# ---------------------------------------------------------------------------
+
+
+def _metrics():
+    return ColSpec(
+        _map(pl.String, pl.Int64),
+        nullable=True,
+        list_length=(1, 3),
+        fields={
+            "key": ColSpec(pl.String, choices=["cpu", "mem", "disk"]),
+            "value": ColSpec(pl.Int64, bounds=(0, 100)),
+        },
+    )
+
+
+def _metrics_frame(*maps):
+    return pl.DataFrame({"m": pl.Series(list(maps), dtype=_map(pl.String, pl.Int64))})
+
+
+@needs_map
+def test_a_bad_key_or_value_is_found_under_its_name():
+    spec = TableSpec("T", {"m": _metrics()})
+    df = _metrics_frame(
+        {"cpu": 5},
+        {"gpu": 1},
+        {"mem": 500},
+        {"cpu": 1, "mem": 2, "disk": 3},
+        {},
+        None,
+    )
+    report = inspect(spec, df)
+    assert {f.key: f.count for f in report.findings} == {
+        "m.key__choices": 1,
+        "m.value__bounds": 1,
+        "m__list_len": 1,
+    }
+    assert report.rows(report.by_code("bounds")[0]).collect()["m"].to_list() == [
+        {"mem": 500}
+    ]
+
+
+@needs_map
+def test_a_map_read_from_arrow_can_repeat_a_key_and_is_found():
+    """Polars folds a repeated key away when it casts to a `Map`, but a map
+    that arrives from Arrow keeps both entries."""
+    import pyarrow as pa
+
+    maps = pa.array(
+        [[("cpu", 1), ("cpu", 2)], [("mem", 3)]],
+        type=pa.map_(pa.string(), pa.int64()),
+    )
+    df = pl.DataFrame({"m": pl.from_arrow(maps)})
+    assert df["m"].map.len().to_list() == [2, 1]
+    (finding,) = inspect(TableSpec("T", {"m": _metrics()}), df).findings
+    assert (finding.key, finding.code, finding.count) == ("m.key__unique", "unique", 1)
+
+
+@needs_map
+def test_a_map_of_a_wider_key_or_value_is_compatible_unless_strict():
+    spec = TableSpec("T", {"m": ColSpec(_map(pl.String, pl.Int32))})
+    wider = pl.DataFrame({"m": pl.Series([{"a": 1}], dtype=_map(pl.String, pl.Int64))})
+    assert inspect(spec, wider).passed
+    assert [f.code for f in inspect(spec, wider, strict_dtypes=True)] == ["dtype"]
+    as_list = wider.with_columns(
+        pl.col("m")
+        .cast(_map(pl.String, pl.Int64))
+        .cast(pl.List(pl.Struct({"key": pl.String, "value": pl.Int64})))
+    )
+    assert [f.code for f in inspect(spec, as_list)] == ["dtype"]
+
+
+@needs_map
+def test_a_map_in_a_list_is_named_apart_from_the_list():
+    inner = _map(pl.String, pl.Int8)
+    spec = TableSpec(
+        "T",
+        {
+            "c": ColSpec(
+                pl.List(inner),
+                list_length=(1, 2),
+            )
+        },
+    )
+    df = generate(spec, 200, seed=1)
+    assert inspect(spec, df).passed
+    too_long = pl.DataFrame({"c": pl.Series([[{"a": 1}] * 3], dtype=pl.List(inner))})
+    assert [f.key for f in inspect(spec, too_long).findings] == ["c__list_len"]
+
+
+@needs_map
+def test_drift_reads_a_maps_key_value_and_length():
+    spec = TableSpec("T", {"m": _metrics()})
+    df = _metrics_frame(
+        {"gpu": 1}, {"mem": 500}, {"cpu": 1, "mem": 2, "disk": 3, "x": 4}
+    )
+    by_key = {f.key: f for f in drift(spec, df).breaking}
+    assert set(by_key) >= {"m.key__values", "m.value__bounds"}
+    assert any(key.startswith("m__list") for key in by_key), sorted(by_key)
+    assert by_key["m.value__bounds"].details["max_found"] == 500
+    assert all(f.columns == ("m",) for f in by_key.values())
+
+
+@needs_map
+def test_from_dataframe_re_declares_a_map_by_its_key_and_value():
+    source = TableSpec("T", {"m": _metrics()})
+    df = generate(source, 2_000, seed=7)
+    profiled = FrameSpec.from_dataframe(df).spec.columns["m"]
+    assert profiled.list_length is not None
+    assert (profiled.list_length.min, profiled.list_length.max) == (1, 3)
+    assert profiled.fields is not None
+    assert isinstance(profiled.fields["key"].dtype, pl.Enum)
+    assert profiled.dtype == _map(profiled.fields["key"].dtype, pl.Int64)
+    assert profiled.element_null_probability == 0.0
+    assert inspect(TableSpec("P", {"m": profiled}), df).passed
+
+
+@needs_map
+def test_a_map_is_sized_as_the_list_it_is():
+    as_map = ColSpec(
+        _map(pl.Int64, pl.Float64),
+        list_length=(4, 4),
+        fields={"key": ColSpec(pl.Int64, bounds=(0, 10_000))},
+    )
+    spec = TableSpec("S", {"c": as_map})
+    df = generate(spec, 100_000, seed=1)
+    assert spec.estimated_size(100_000) == pytest.approx(df.estimated_size(), rel=0.02)
+    # An undeclared length is as long as the map draws: two, for Boolean keys.
+    flags = TableSpec("F", {"c": ColSpec(_map(pl.Boolean, pl.Int64))})
+    assert flags.estimated_size(100_000) == pytest.approx(
+        generate(flags, 100_000, seed=1).estimated_size(), rel=0.05
+    )
+
+
+@needs_map
+def test_the_report_describes_a_maps_entries_and_their_key_and_value():
+    spec_cls = FrameSpec.from_spec(TableSpec("Metrics", {"m": _metrics()}))
+    text = spec_cls.to_markdown()
+    assert "1..3 entries" in text
+    assert "`m.key`" in text and "`m.value`" in text
+    assert "Map m" in spec_cls.to_mermaid()
+
+
+@needs_map
+def test_a_declared_map_round_trips_through_a_spec_file(tmp_path):
+    spec_cls = FrameSpec.from_spec(TableSpec("T", {"m": _metrics()}))
+    spec_cls.to_yaml(tmp_path / "s.yaml")
+    assert FrameSpec.from_yaml(tmp_path / "s.yaml").spec == spec_cls.spec
+    spec_cls.to_python(tmp_path / "s.py")
+    namespace: dict = {}
+    exec((tmp_path / "s.py").read_text(encoding="utf-8"), namespace)
+    assert namespace[spec_cls.__name__].spec == spec_cls.spec

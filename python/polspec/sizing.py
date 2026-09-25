@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 import polars as pl
 
 from polspec.constants import _DEFAULT_LIST_LEN, _DEFAULT_STRING_LEN
-from polspec.dtypes import field_dtypes
+from polspec.dtypes import field_dtypes, map_entries
 from polspec.formats import lookup as _lookup_format
 
 if TYPE_CHECKING:
@@ -90,6 +90,9 @@ def _value_bytes(spec: ColSpec, dtype: pl.DataType) -> float:
     if dtype in (pl.String, pl.Utf8, pl.Binary):
         # Every row has a view, null or not; only a present value has bytes.
         return _VIEW_BYTES + _bytes_past_inline(spec) * _present(spec)
+    if map_entries(dtype) is not None:
+        # A map is held as the list of entries it is, as long as it is drawn.
+        return _column_bytes(spec._as_drawn_list())
     if isinstance(dtype, pl.List):
         # An offset per row, plus however many elements the row holds, each
         # read through the declaration generation draws it from. A null list

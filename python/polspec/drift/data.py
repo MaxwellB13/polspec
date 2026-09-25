@@ -22,7 +22,7 @@ import polars as pl
 
 from polspec.bound import Bound
 from polspec.constraints import Domain, is_textual
-from polspec.dtypes import field_dtypes
+from polspec.dtypes import field_dtypes, map_entries
 from polspec.formats import lookup as _lookup_format
 
 if TYPE_CHECKING:
@@ -111,6 +111,13 @@ class Observed:
         }
         if len(values) == 0:
             return cls(**measured)
+
+        if (entries := map_entries(values.dtype)) is not None:
+            # A map is measured as the list of entries it is: its length,
+            # and its key and value as the fields of a struct.
+            values = values.cast(entries)
+            if map_entries(declared.dtype) is not None:
+                declared = declared._as_list()
 
         if isinstance(values.dtype, (pl.List, pl.Array)):
             # A List column is measured as its elements; only the length is

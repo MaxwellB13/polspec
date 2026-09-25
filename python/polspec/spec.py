@@ -357,19 +357,25 @@ class ColSpec:
         """A `Map` column as the list it is: this declaration with the dtype
         `List(Struct({"key": K, "value": V}))`, which Polars casts to and from
         the map. Everything a list of structs has -- its length, its entries'
-        `fields` -- is then read by the code that reads a list of structs.
+        `fields` -- is then read by the code that reads a list of structs."""
+        entries = map_entries(self.dtype)
+        assert entries is not None  # noqa: S101 - only a map is a list of entries
+        return dataclasses.replace(self, dtype=entries)
+
+    def _as_drawn_list(self) -> ColSpec:
+        """`_as_list`, with the length generation draws.
 
         A map with no `list_length` of its own is as long as a list, unless
         its keys run out first: a map of `Boolean` keys holds at most two
-        entries, without having to be told."""
-        entries = map_entries(self.dtype)
-        assert entries is not None  # noqa: S101 - only a map is a list of entries
-        length = self.list_length
-        if length is None:
-            lo, hi = _DEFAULT_LIST_LEN
-            keys = _distinct_values(self._field("key"))
-            length = Bound(lo, hi if keys is None else min(hi, keys))
-        return dataclasses.replace(self, dtype=entries, list_length=length)
+        entries, without having to be told. Validation reads `_as_list`,
+        where an undeclared length is no claim at all."""
+        entries = self._as_list()
+        if entries.list_length is not None:
+            return entries
+        lo, hi = _DEFAULT_LIST_LEN
+        keys = _distinct_values(self._field("key"))
+        length = Bound(lo, hi if keys is None else min(hi, keys))
+        return dataclasses.replace(entries, list_length=length)
 
     def _field(self, name: str) -> ColSpec:
         """What one field of a struct value is claimed to be: what `fields`

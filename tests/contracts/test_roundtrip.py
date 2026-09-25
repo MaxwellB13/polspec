@@ -39,6 +39,7 @@ from polspec import (
     generate,
     validate,
 )
+from polspec.dtypes import _MAP
 from polspec.formats import FORMATS
 
 ROWS = 300
@@ -956,6 +957,14 @@ EVERY_DTYPE = [
     pl.Struct({"xs": pl.List(pl.Int64)}),
     pl.Struct({"inner": pl.Struct({"a": pl.Int64})}),
 ]
+# Polars 2's `Map`, only where it exists: it is covered there, and on Polars
+# 1 there is no such dtype for the census to find.
+if _MAP is not None:
+    EVERY_DTYPE += [
+        _MAP(pl.String, pl.Int64),
+        _MAP(pl.Int64, pl.Struct({"a": pl.List(pl.Int8)})),
+        pl.List(_MAP(pl.Boolean, pl.String)),
+    ]
 
 
 # Dtypes that hold no data of their own to generate: a column of nothing,
@@ -965,8 +974,9 @@ NOT_DATA = {"Null", "Object", "Unknown", "Extension", "BaseExtension"}
 
 # Dtypes that hold data polspec does not generate yet: declared, validated,
 # profiled and written to a spec file by dtype, refused by name at generate().
-# `Map` arrived with Polars 2.
-NOT_YET = {"Map"}
+# Empty -- `Map`, which arrived with Polars 2, was the last -- and kept for
+# the next dtype Polars adds.
+NOT_YET: set[str] = set()
 
 
 def test_every_polars_dtype_is_generated_or_named_as_not_data():

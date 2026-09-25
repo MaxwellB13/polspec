@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
+from polspec.dtypes import map_entries
 from polspec.serialization.dtypes import DTYPE_NAMES
 from polspec.tablespec import TableSpec, as_table_spec
 
@@ -58,6 +59,10 @@ def _describe_dtype(dtype: pl.DataType) -> str:
 def _describe_domain(cs) -> str:
     """The Domain column of the table: the choices, or the format."""
     value_dtype = cs.value_dtype
+    if map_entries(cs.dtype) is not None:
+        if cs.list_length is not None:
+            return f"{cs.list_length.min}..{cs.list_length.max} entries"
+        return "entries"
     if isinstance(value_dtype, pl.Struct):
         described = f"struct of {len(value_dtype.fields)} field(s)"
         if cs.list_length is not None:

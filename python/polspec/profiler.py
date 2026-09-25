@@ -12,7 +12,7 @@ import polars as pl
 
 from polspec.bound import Bound
 from polspec.constants import _DEFAULT_NULL_PROBABILITY
-from polspec.dtypes import field_dtypes
+from polspec.dtypes import _MAP, field_dtypes, map_entries
 from polspec.spec import ColSpec, _is_categorical_dtype
 
 
@@ -64,6 +64,28 @@ def _profile_column(
             weights=_empirical_weights(non_null, name, categories)
             if with_weights
             else None,
+        )
+
+    if (entries := map_entries(dtype)) is not None:
+        # Described as the list of entries it is -- its length, its key and
+        # value as the fields of a struct -- then made a map again from the
+        # key and value dtypes profiling settled on, which may narrow a
+        # String key to an Enum as it would a column.
+        as_list = _profile_column(
+            series.cast(entries),
+            name,
+            total_rows=total_rows,
+            with_weights=with_weights,
+            max_unique_enum=max_unique_enum,
+            calculate_bounds=calculate_bounds,
+        )
+        parts = as_list.fields or {}
+        if set(parts) != {"key", "value"}:
+            return spec(dtype=dtype)
+        return dataclasses.replace(
+            as_list,
+            dtype=_MAP(parts["key"].dtype, parts["value"].dtype),
+            element_null_probability=0.0,
         )
 
     if isinstance(dtype, pl.Struct):
