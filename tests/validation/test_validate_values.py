@@ -292,6 +292,8 @@ _TYPED_CHOICES = [
     (pl.Float64, [1, 2], 9.0),
     # a Python datetime is microseconds; the column is milliseconds
     (pl.Datetime("ms"), [datetime.datetime(2024, 1, 1)], datetime.datetime(2030, 1, 1)),
+    # ...and on a nanosecond column the list rejected the column's own data
+    (pl.Datetime("ns"), [datetime.datetime(2024, 1, 1)], datetime.datetime(2030, 1, 1)),
     # a Python Decimal list arrives at full precision
     (
         pl.Decimal(10, 2),
