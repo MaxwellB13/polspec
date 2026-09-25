@@ -200,3 +200,23 @@ def test_rules_only_sample_what_they_scatter():
     assert df["carrier"].dtype == pl.Enum(["RM", "UPS", "DHL"])
     assert (df.filter(pl.col("region") == "US")["n"] == 7).all()
     Spec.validate(df)
+
+
+# ---------------------------------------------------------------------------
+# permuted_indices: the permutation, reachable from Python
+# ---------------------------------------------------------------------------
+
+
+def test_permuted_indices_are_a_permutation_and_a_window_is_its_slice():
+    whole = _ffi.permuted_indices(10_000, 7, 0, 10_000)
+    assert whole.dtype == pl.UInt64
+    assert whole.sort().to_list() == list(range(10_000))
+    for start, n in [(0, 5), (123, 1_000), (9_990, 10)]:
+        assert _ffi.permuted_indices(10_000, 7, start, n).equals(whole.slice(start, n))
+    assert not whole.equals(_ffi.permuted_indices(10_000, 8, 0, 10_000))
+
+
+def test_permuted_indices_refuse_a_window_past_the_domain():
+    with pytest.raises(GenerationError, match="110 distinct indices"):
+        _ffi.permuted_indices(100, 1, 90, 20)
+    assert _ffi.permuted_indices(0, 1, 0, 0).len() == 0
