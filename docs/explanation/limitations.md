@@ -85,9 +85,6 @@ them. See [String formats](../how-to/formats.md).
 
 ## Smaller sharp edges
 
-- **A list's elements are never null.** Generation fills a `List` column's
-  cells with non-null elements, and no field can ask otherwise; validation
-  reports a null element as a `nullability` finding.
 - **A `Decimal`, `Int128` or `UInt128` is drawn through 64 bits.**
   Generation fills a Decimal as its physical integer and a 128-bit integer
   as a 64-bit one, so bounds past what 64 bits hold -- eighteen significant

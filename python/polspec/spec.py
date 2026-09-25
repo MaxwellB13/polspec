@@ -141,8 +141,13 @@ class ColSpec:
         other field that describes a value -- `bounds`, `choices`, `weights`,
         `format`, `pattern`, `string_length`, `distribution` -- describes
         each *element*; `nullable` and `null_probability` describe the list
-        itself, and generation never puts a null inside one. An `Array`
-        takes its length from the dtype and refuses `list_length`.
+        itself. An `Array` takes its length from the dtype and refuses
+        `list_length`.
+    element_null_probability : float, optional
+        For a `List` or `Array` column, how often an element is null, from 0
+        (the default: elements are never null, and validation reports one)
+        to 1. The list's own `nullable` is a null cell; this is a null
+        inside a present one.
     fields : Mapping[str, ColSpec] | None, optional
         For a `Struct` column, what is claimed about each field's values:
         a `ColSpec` per field, keyed by name. The dtype is the schema --
@@ -223,6 +228,7 @@ class ColSpec:
     null_probability: float = _DEFAULT_NULL_PROBABILITY
     string_length: Bound[int] | None = None
     list_length: Bound[int] | None = None
+    element_null_probability: float = 0.0
     fields: Mapping[str, ColSpec] | None = None
     format: str | None = None
     pattern: str | None = None
@@ -247,6 +253,7 @@ class ColSpec:
             null_probability: float = _DEFAULT_NULL_PROBABILITY,
             string_length: Bound[int] | tuple[int, int] | list[int] | None = None,
             list_length: Bound[int] | tuple[int, int] | list[int] | None = None,
+            element_null_probability: float = 0.0,
             fields: Mapping[str, ColSpec] | None = None,
             format: str | None = None,
             pattern: str | None = None,
@@ -298,14 +305,16 @@ class ColSpec:
     def _element(self) -> ColSpec:
         """What a `List`'s elements are claimed to be: this declaration with
         the list's own claims -- its length, whether a cell is null -- taken
-        off. Generation draws an element from it and validation checks one
-        against it, so the two read one answer."""
+        off, and its element null rate as the element's own. Generation
+        draws an element from it and validation checks one against it, so
+        the two read one answer."""
         return dataclasses.replace(
             self,
             dtype=self.value_dtype,
             list_length=None,
-            nullable=False,
-            null_probability=0.0,
+            nullable=self.element_null_probability > 0,
+            null_probability=self.element_null_probability,
+            element_null_probability=0.0,
         )
 
     def _field(self, name: str) -> ColSpec:
@@ -373,7 +382,15 @@ class ColSpec:
 
     def _validate_list_fields(self) -> None:
         """What a `List` column takes, and what only a scalar one can."""
+        if not 0.0 <= self.element_null_probability <= 1.0:
+            raise SpecError("element_null_probability must be between 0 and 1")
         if not isinstance(self.dtype, (pl.List, pl.Array)):
+            if self.element_null_probability:
+                raise SpecError(
+                    "ColSpec.element_null_probability is only supported for pl.List "
+                    f"and pl.Array, got {self.dtype!r}. It is how often an element "
+                    "inside a list is null; null_probability is the column's own."
+                )
             if self.list_length is not None:
                 raise SpecError(
                     "ColSpec.list_length is only supported for pl.List, got "

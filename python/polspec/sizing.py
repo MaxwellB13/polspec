@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 import polars as pl
 
 from polspec.constants import _DEFAULT_LIST_LEN, _DEFAULT_STRING_LEN
-from polspec.dtypes import element_dtype, field_dtypes
+from polspec.dtypes import field_dtypes
 from polspec.formats import lookup as _lookup_format
 
 if TYPE_CHECKING:
@@ -96,10 +96,12 @@ def _value_bytes(spec: ColSpec, dtype: pl.DataType) -> float:
         # holds none.
         lengths = spec.list_length.closed() if spec.list_length else _DEFAULT_LIST_LEN
         mean_len = (lengths[0] + lengths[1]) / 2
-        element = _value_bytes(spec._element(), element_dtype(dtype))
+        # An element is a column of its own: a nullable one carries a
+        # validity bit, and its content only where it is present.
+        element = _column_bytes(spec._element())
         return 8 + mean_len * element * _present(spec)
     if isinstance(dtype, pl.Array):
-        return dtype.size * _value_bytes(spec._element(), element_dtype(dtype))
+        return dtype.size * _column_bytes(spec._element())
     if isinstance(dtype, pl.Struct):
         # A struct holds no values of its own: it is its fields, each a
         # column with its own validity when it can be null.

@@ -313,6 +313,11 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
         omit_if=lambda v, obj: v == _DEFAULT_NULL_PROBABILITY,
     ),
     Field(
+        "element_null_probability",
+        since=3,
+        omit_if=lambda v, obj: not v,
+    ),
+    Field(
         "string_length",
         to_data=_bound_to_data,
         from_data=_bound_from_data,
