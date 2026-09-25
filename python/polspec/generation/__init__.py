@@ -21,7 +21,7 @@ from polspec.constants import _LARGE_FRAME_BYTES
 from polspec.constraints import ordered_passes, rewritable_members
 from polspec.engine import _generate_cartesian, _generate_random
 from polspec.errors import GenerationError, SpecError
-from polspec.foreign_key import _apply_foreign_key
+from polspec.foreign_key import _apply_foreign_key, _unique_parent_shortfall
 from polspec.frames import Method, References, to_eager
 from polspec.generation.composite import apply_unique_together
 from polspec.generation.scan import scan
@@ -263,7 +263,9 @@ def _window(
     The columns are a window onto one frame: the engine numbers its chunks
     from the offset, so the same rows come back whatever `n` the call asks
     for. The passes are drawn per window, keyed by the offset, so two
-    windows never repeat each other's draws.
+    windows never repeat each other's draws -- except a unique foreign key,
+    which is a permutation of its parent's keys keyed by the frame, so a
+    window takes the keys the whole frame takes there.
     """
     columns = dict(spec.columns)
     if method == "cartesian":
@@ -279,6 +281,8 @@ def _window(
         df,
         references,
         pass_seed_,
+        row_offset=row_offset,
+        whole_seed=frame_seed,
         cycles=cycles,
         self_references=self_references,
     )
@@ -291,6 +295,8 @@ def _run_passes(
     references: References,
     frame_seed: int,
     *,
+    row_offset: int = 0,
+    whole_seed: int | None = None,
     cycles: int = 0,
     self_references: int = 0,
 ) -> pl.DataFrame:
@@ -302,6 +308,11 @@ def _run_passes(
     declared around them change the values any one of them samples. A
     column inserted ahead of a rules column leaves it alone; a rules column
     renamed with `seed_name` keeps its rule's draw as well as its own.
+
+    `frame_seed` seeds this window's passes; `whole_seed` is the seed of the
+    frame the window belongs to and `row_offset` where the window starts,
+    which a unique foreign key reads so that it is a window onto the whole
+    frame's draw.
     """
     runners: dict[str, Callable[[pl.DataFrame], pl.DataFrame]] = {}
 
@@ -335,9 +346,21 @@ def _run_passes(
                     _apply_foreign_key(frame, columns, fk, frame, seed)
                 )
             elif (parent := parents.get(fk.references)) is not None:
+                key_seed = pass_seed(
+                    whole_seed if whole_seed is not None else frame_seed,
+                    f"fk:{fk.name}",
+                )
                 runners[f"fk:{fk.name}"] = (
-                    lambda frame, fk=fk, parent=parent, seed=seed: _apply_foreign_key(
-                        frame, columns, fk, parent, seed
+                    lambda frame, fk=fk, parent=parent, seed=seed, k=key_seed: (
+                        _apply_foreign_key(
+                            frame,
+                            columns,
+                            fk,
+                            parent,
+                            seed,
+                            row_offset=row_offset,
+                            key_seed=k,
+                        )
                     )
                 )
 
@@ -374,10 +397,12 @@ def generate_batches(
     rules, a foreign key, a composite key, and a List column's elements.
 
     A `unique=True` column is a window too: its values are a permutation of
-    its value space, unique across the whole `n` however it is batched. A
-    `__unique_together__` group and a foreign-key column sampled without
-    replacement are drawn afresh per batch, so they are distinct within a
-    batch and collide across batches only by chance.
+    its value space -- or, filled by a foreign key, of its parent's keys --
+    unique across the whole `n` however it is batched; a parent too small
+    for all `n` is refused before the first batch. A `__unique_together__`
+    group and a unique key into the spec's own rows are drawn afresh per
+    batch, so they are distinct within a batch and collide across batches
+    only by chance.
     """
     require_columns(spec)
     _requires_whole_frame(spec, "generate_batches")
@@ -399,6 +424,16 @@ def generate_batches(
         _warn_unused_references(spec, resolved)
         targets = {fk.references for fk in spec.foreign_keys if fk.references != "self"}
         resolved = {k: v for k, v in resolved.items() if k in targets}
+        # A unique foreign key draws the whole frame's keys window by window,
+        # so a parent too small for all `n` rows is refused now, before the
+        # first batch -- not when a later one runs past it, halfway through a
+        # sink.
+        for fk in spec.foreign_keys:
+            parent = resolved.get(fk.references)
+            if parent is not None:
+                shortfall = _unique_parent_shortfall(fk, spec.columns, parent, n)
+                if shortfall is not None:
+                    raise GenerationError(shortfall)
     references = resolved or None
 
     frame_seed = _frame_seed(seed)

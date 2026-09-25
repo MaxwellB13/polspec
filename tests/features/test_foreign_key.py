@@ -10,6 +10,7 @@ from polspec import (
     ColSpec,
     ForeignKey,
     FrameSpec,
+    GenerationError,
     ValidationError,
 )
 
@@ -407,3 +408,67 @@ def test_generate_batches_and_sink_thread_foreign_key_references(tmp_path):
     sunk_vals = [v for v in sunk["customer_id"].to_list() if v is not None]
     assert sunk_vals
     assert all(v in customer_ids for v in sunk_vals)
+
+
+# ---------------------------------------------------------------------------
+# A unique foreign key is a permutation of the parent's keys
+# ---------------------------------------------------------------------------
+
+
+class Account(FrameSpec):
+    id = ColSpec(pl.Int64, unique=True)
+
+
+class Profile(FrameSpec):
+    """One profile per account: a unique column filled by a foreign key."""
+
+    account_id = ColSpec(pl.Int64, unique=True)
+    score = ColSpec(pl.Int64, bounds=(0, 9))
+    __foreign_keys__ = [ForeignKey("account_id", references=Account, ref_columns="id")]
+
+
+# Every size gives more than one batch of the 60,000 rows.
+@pytest.mark.parametrize("batch_size", [997, 20_000, 45_000])
+def test_a_unique_foreign_key_is_a_window_onto_the_whole_frame(batch_size):
+    """Each batch's rows take the parent keys the whole frame's rows take
+    there, so the column is unique across batches, not only within one."""
+    accounts = Account.generate(80_000, seed=1)
+    refs = {Account: accounts}
+    whole = Profile.generate(60_000, seed=5, references=refs)
+    batched = pl.concat(
+        list(
+            Profile.generate_batches(
+                60_000, batch_size=batch_size, seed=5, references=refs
+            )
+        )
+    )
+    assert batched["account_id"].equals(whole["account_id"])
+    assert whole["account_id"].n_unique() == 60_000
+    assert whole["account_id"].is_in(accounts["id"].implode()).all()
+    Profile.validate(batched, references=refs)
+
+
+def test_a_parent_too_small_is_refused_before_the_first_batch():
+    """Not when a later batch runs past it, halfway through writing a file."""
+    refs = {Account: Account.generate(50, seed=1)}
+    batches = Profile.generate_batches(60, batch_size=10, seed=5, references=refs)
+    with pytest.raises(GenerationError, match="offers only 50 distinct value"):
+        next(batches)
+    with pytest.raises(GenerationError, match="for 60 row"):
+        Profile.generate(60, seed=5, references=refs)
+
+
+def test_a_many_to_one_foreign_key_is_still_drawn_per_batch():
+    """With replacement, a key's draw is the window's own: it is a key into
+    the parent in every batch, but not the whole frame's row for row."""
+    refs = {GenCustomerSpec: GenCustomerSpec.generate(50, seed=1)}
+    whole = GenOrderSpec.generate(3_000, seed=5, references=refs)
+    batched = pl.concat(
+        list(
+            GenOrderSpec.generate_batches(
+                3_000, batch_size=1_000, seed=5, references=refs
+            )
+        )
+    )
+    assert not batched["customer_id"].equals(whole["customer_id"])
+    GenOrderSpec.validate(batched, references=refs)

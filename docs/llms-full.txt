@@ -4414,10 +4414,12 @@ deterministic, but not row for row the whole frame's -- is a column with
 rules, a foreign key, a composite key, and a List column's elements.
 
 A `unique=True` column is a window too: its values are a permutation of
-its value space, unique across the whole `n` however it is batched. A
-`__unique_together__` group and a foreign-key column sampled without
-replacement are drawn afresh per batch, so they are distinct within a
-batch and collide across batches only by chance.
+its value space -- or, filled by a foreign key, of its parent's keys --
+unique across the whole `n` however it is batched; a parent too small
+for all `n` is refused before the first batch. A `__unique_together__`
+group and a unique key into the spec's own rows are drawn afresh per
+batch, so they are distinct within a batch and collide across batches
+only by chance.
 ## scan
 
 ### scan(spec: 'TableSpec', n: 'int', *, seed: 'int | None' = None, batch_size: 'int | None' = None, method: 'Method' = 'random', references: 'References' = None) -> 'pl.LazyFrame'
@@ -4429,8 +4431,8 @@ sink gets the batches it writes best; setting it pins the size whatever
 polars asks.
 
 A scan is batched, so it has `generate_batches`' terms: a `unique=True`
-column is unique across the whole scan, and a composite key or a
-foreign key sampled without replacement only within each batch.
+column is unique across the whole scan -- a foreign-keyed one too -- and
+a composite key only within each batch.
 ## estimated_size
 
 ### estimated_size(spec: 'TableSpec', n: 'int') -> 'int'
@@ -5325,10 +5327,12 @@ them. See [String formats](https://maxwellb13.github.io/polspec/how-to/formats/)
   references have to come from one pool for the two columns to join at all.
 - **A composite key is distinct within a batch, not across batches.** A
   `unique=True` column is a permutation of its value space, unique across a
-  whole frame however it is batched. A `__unique_together__` group and a
-  foreign key sampled without replacement are drawn afresh per batch of
-  `generate_batches`, a `scan()` or a `sink_*`, so they collide across
-  batches only by chance; generate the frame whole when that matters.
+  whole frame however it is batched -- including one a foreign key fills,
+  which takes a permutation of its parent's keys. A `__unique_together__`
+  group, and a unique key that references its own spec, are drawn afresh per
+  batch of `generate_batches`, a `scan()` or a `sink_*`, so they collide
+  across batches only by chance; generate the frame whole when that
+  matters.
 - **A unique string favours its longest lengths.** It is drawn uniformly
   from every string its lengths allow, and the longest lengths hold nearly
   all of them.

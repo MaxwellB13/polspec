@@ -88,8 +88,8 @@ def scan(
     polars asks.
 
     A scan is batched, so it has `generate_batches`' terms: a `unique=True`
-    column is unique across the whole scan, and a composite key or a
-    foreign key sampled without replacement only within each batch.
+    column is unique across the whole scan -- a foreign-keyed one too -- and
+    a composite key only within each batch.
     """
     from polspec.generation import (
         _check_counts,

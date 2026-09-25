@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
+from polspec._ffi import permuted_indices
 from polspec.constants import _FILLED_IN
 from polspec.errors import GenerationError, SpecError
 from polspec.spec import ColSpec
@@ -13,6 +14,16 @@ from polspec.spec import ColSpec
 if TYPE_CHECKING:
     from polspec.framespec import FrameSpec
     from polspec.tablespec import TableSpec
+
+
+def _as_u64(seed: int | None) -> int:
+    """A seed the permutation takes: an unsigned 64-bit key, drawn at random
+    for an unseeded frame as `sample(seed=None)` would be."""
+    if seed is None:
+        import random
+
+        return random.getrandbits(64)
+    return seed & 0xFFFF_FFFF_FFFF_FFFF
 
 
 def _default_fk_name(columns: tuple[str, ...], references: str) -> str:
@@ -146,12 +157,35 @@ class ForeignKey:
         return hash((self.name, self.columns, self.ref_columns, self.references))
 
 
+def _unique_parent_shortfall(
+    fk: ForeignKey, columns: Mapping[str, ColSpec], parent_df: pl.DataFrame, rows: int
+) -> str | None:
+    """Why a unique column `fk` fills cannot be filled for `rows` rows, or
+    None when it can -- or when the column is not unique."""
+    local_cols = list(fk.columns)
+    if len(local_cols) != 1 or not columns[local_cols[0]].unique:
+        return None
+    ref_cols = list(fk.ref_columns)
+    distinct = parent_df.select(ref_cols).drop_nulls().unique().height
+    if distinct >= rows:
+        return None
+    return (
+        f"ForeignKey '{fk.name}' fills the unique column '{local_cols[0]}', but "
+        f"the referenced parent offers only {distinct} distinct value(s) for "
+        f"{rows} row(s). Every value has to come from the parent and no two may "
+        "repeat, so generate more parent rows, or fewer of these."
+    )
+
+
 def _apply_foreign_key(
     df: pl.DataFrame,
     columns: dict[str, ColSpec],
     fk: ForeignKey,
     parent_df: pl.DataFrame,
     seed: int | None,
+    *,
+    row_offset: int = 0,
+    key_seed: int | None = None,
 ) -> pl.DataFrame:
     """Overwrites `fk`'s non-null local values with values drawn from `parent_df`,
     so generated data satisfies referential integrity by construction.
@@ -165,6 +199,13 @@ def _apply_foreign_key(
     one: the column promises distinct values and every one of them has to
     come from the parent. Otherwise -- the common many-to-one case, and every
     composite key -- sampling is with replacement.
+
+    Without replacement is a permutation of the parent's keys: the row at
+    `row_offset + i` of the whole frame takes the key at `π(row_offset + i)`,
+    with `π` keyed by `key_seed`. So a batch's rows take the keys the whole
+    frame's rows take there, and the column is unique across batches, not
+    only within one. With replacement, the draw is the window's own, from
+    `seed`.
 
     `parent_df` for a self-referencing key is the frame as it stands when
     this pass runs, so a key reading a column another key rewrote draws from
@@ -183,18 +224,21 @@ def _apply_foreign_key(
         )
 
     wants_unique = len(local_cols) == 1 and columns[local_cols[0]].unique
-    if wants_unique and parent_keys.height < df.height:
-        raise GenerationError(
-            f"ForeignKey '{fk.name}' fills the unique column "
-            f"'{local_cols[0]}', but the referenced parent offers only "
-            f"{parent_keys.height} distinct value(s) for {df.height} row(s). "
-            "Every value has to come from the parent and no two may repeat, "
-            "so generate more parent rows, or fewer of these."
+    if wants_unique:
+        shortfall = _unique_parent_shortfall(
+            fk, columns, parent_df, row_offset + df.height
         )
-    with_replacement = not wants_unique
-    sampled_rows = parent_keys.sample(
-        n=df.height, with_replacement=with_replacement, seed=seed
-    )
+        if shortfall is not None:
+            raise GenerationError(shortfall)
+        picks = permuted_indices(
+            parent_keys.height,
+            _as_u64(key_seed if key_seed is not None else seed),
+            row_offset,
+            df.height,
+        )
+        sampled_rows = parent_keys[picks]
+    else:
+        sampled_rows = parent_keys.sample(n=df.height, with_replacement=True, seed=seed)
 
     exprs = []
     for local_col, ref_col in zip(local_cols, ref_cols, strict=True):
