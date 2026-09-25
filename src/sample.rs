@@ -42,7 +42,7 @@ pub const CHUNK_SIZE: usize = 65_536;
 /// Validity bytes covering exactly the rows of one chunk. The assertion below
 /// is what makes that division exact -- without it a chunk would own a
 /// fraction of a byte and two threads could write the same one.
-const VALIDITY_BYTES_PER_CHUNK: usize = CHUNK_SIZE / 8;
+pub(crate) const VALIDITY_BYTES_PER_CHUNK: usize = CHUNK_SIZE / 8;
 const _: () = assert!(
     CHUNK_SIZE.is_multiple_of(8),
     "a chunk must cover a whole number of validity bytes"
@@ -83,7 +83,7 @@ pub struct ColumnSeed {
 
 /// The RNG one chunk draws from.
 #[inline]
-fn chunk_rng(seed: ColumnSeed, chunk_index: usize) -> Xoshiro256PlusPlus {
+pub(crate) fn chunk_rng(seed: ColumnSeed, chunk_index: usize) -> Xoshiro256PlusPlus {
     Xoshiro256PlusPlus::seed_from_u64(seed_for_chunk(seed.base, seed.first_chunk + chunk_index))
 }
 
@@ -91,7 +91,7 @@ fn chunk_rng(seed: ColumnSeed, chunk_index: usize) -> Xoshiro256PlusPlus {
 ///
 /// `nullable` with a probability of zero never does, so it takes the cheaper
 /// path: no bitmap allocated, and no Bernoulli draw per row.
-fn draws_nulls(plan: &ColumnPlan) -> bool {
+pub(crate) fn draws_nulls(plan: &ColumnPlan) -> bool {
     plan.nullable && plan.null_probability > 0.0
 }
 
@@ -100,7 +100,7 @@ fn draws_nulls(plan: &ColumnPlan) -> bool {
 /// Built once per column rather than once per row: `Rng::random_bool`
 /// constructs one of these on every call, which for a nullable column is a
 /// float conversion and a `Result` per row of the frame.
-fn null_bernoulli(plan: &ColumnPlan) -> Result<Bernoulli, String> {
+pub(crate) fn null_bernoulli(plan: &ColumnPlan) -> Result<Bernoulli, String> {
     Bernoulli::new(plan.null_probability).map_err(|e| {
         format!(
             "Invalid null_probability {} for column '{}': {e}",
@@ -570,25 +570,27 @@ fn gen_template_column(
 /// ones the whole column holds at those rows whatever `n` and `row_offset`
 /// are; a call starting mid-chunk fills that chunk from its start and slices
 /// the head off, at most one partial chunk of extra work. A unique column is
-/// the exception: distinctness is a property of one call, so it ignores the
-/// offset and is drawn afresh.
+/// a window too, through a permutation of its value space -- except a unique
+/// string, which is still drawn by rejection in one pass per call.
 pub fn generate_series(
     plan: &ColumnPlan,
     n: usize,
     seed: u64,
     row_offset: usize,
 ) -> Result<Series, String> {
-    if plan.unique {
-        // Distinctness is a property of the whole column, so a unique column
-        // is filled in one pass rather than in independent chunks.
-        return crate::unique::generate_unique_series(plan, n, seed);
+    if plan.unique && !crate::unique::is_permuted(plan.kind) {
+        return crate::unique::generate_rejected_series(plan, n, seed);
     }
     let head = row_offset % CHUNK_SIZE;
     let seed = ColumnSeed {
         base: seed,
         first_chunk: row_offset / CHUNK_SIZE,
     };
-    let series = generate_chunked(plan, n + head, seed)?;
+    let series = if plan.unique {
+        crate::unique::generate_permuted_series(plan, n + head, seed)?
+    } else {
+        generate_chunked(plan, n + head, seed)?
+    };
     Ok(if head == 0 {
         series
     } else {

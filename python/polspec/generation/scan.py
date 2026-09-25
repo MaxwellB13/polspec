@@ -85,7 +85,7 @@ def scan(
     sink gets the batches it writes best; setting it pins the size whatever
     polars asks.
 
-    A scan is batched, so it has `generate_batches`' terms: a `unique=True`
+    A scan is batched, so it has `generate_batches`' terms: a unique string
     column repeats its values in every batch, and says so with a warning
     when a collected scan draws a second batch that holds it.
     """
