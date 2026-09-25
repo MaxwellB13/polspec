@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, overload
 import polars as pl
 
 from polspec import drift as drift_module
-from polspec import generation, serialization, validation
+from polspec import generation, reading, serialization, validation
 from polspec.catspec import CatSpec
 from polspec.check import Check
 from polspec.drift import DriftOptions, DriftReport
@@ -40,6 +40,8 @@ from polspec.tablespec import TableSpec, _parse_unique_together
 from polspec.validation import ValidationOptions
 
 if TYPE_CHECKING:
+    import os
+
     from polars._typing import IpcCompression, ParquetCompression
 
 
@@ -724,6 +726,15 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     # ------------------------------------------------------------------
     # Validation
     # ------------------------------------------------------------------
+
+    @classmethod
+    def read(cls, path: str | os.PathLike[str], **reader_options: Any) -> pl.DataFrame:
+        """A data file as a frame, in the terms this spec declares -- read, not
+        validated. See `polspec.read`: the extension picks the reader, a
+        declared date or time that arrived as text is parsed, and nothing else
+        is cast.
+        """
+        return reading.read(cls.spec, path, **reader_options)
 
     # Every validation option is named here, for completion and so a typo is
     # a `TypeError` from this signature rather than from somewhere inside

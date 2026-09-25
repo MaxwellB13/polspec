@@ -42,7 +42,7 @@ https://maxwellb13.github.io/polspec/llms-full.txt
 - [Specs](https://maxwellb13.github.io/polspec/reference/api/specs/): A spec is a `TableSpec`: an immutable record of columns and constraints.
 - [Registry and categories](https://maxwellb13.github.io/polspec/reference/api/registry/): A declared set of specs, and the shared category domains they draw on.
 - [Generation](https://maxwellb13.github.io/polspec/reference/api/generation/): Every function here takes a `TableSpec` as its first argument, and every one has a `FrameSpec` classmethod that forwards to it with `cls.spec` -- see Generating data for what the options mean and Specs as values for when to reach for which.
-- [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/): `inspect()` returns a report; `validate()` raises one.
+- [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/): `read()` brings a file in, in a spec's terms; `inspect()` returns a report on it and `validate()` raises one.
 - [Drift](https://maxwellb13.github.io/polspec/reference/api/drift/): `polspec.drift.diff()` compares two declarations; `polspec.drift.drift()` compares a declaration to a frame.
 - [Profiling](https://maxwellb13.github.io/polspec/reference/api/profiling/): Inferring a spec from data you already have.
 - [Exceptions](https://maxwellb13.github.io/polspec/reference/api/errors/): Every error polspec raises descends from `PolspecError`, so one `except` clause catches the lot.

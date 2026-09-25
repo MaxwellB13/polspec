@@ -105,15 +105,23 @@ Path("customers.csv").write_text(          # the file you were handed
 **1. Read it without forcing the spec's types.**
 
 ```python
-given = pl.read_csv("customers.csv", try_parse_dates=True)
+given = Customers.read("customers.csv")
 ```
 
-`try_parse_dates=True` matters: a CSV has no date type, so without it
-`signed_up` arrives as `String`, the report says only *expected Date, got
-String*, and none of the column's own checks run. The other gaps between a
-CSV and a spec take care of themselves -- a `String` column is accepted
-where an `Enum` or `Categorical` is declared, an integer where a float or
-`Decimal` is, and the values are checked either way.
+`read()` picks the reader from the extension (`.csv`, `.tsv`, `.parquet`,
+`.ndjson`, `.json`, `.arrow` -- the set `polspec validate` reads, with any
+Polars reader option passed through, such as `separator=";"`) and does one
+thing in the spec's name. A CSV has no date type, so `signed_up` arrives as
+text; `read()` parses each column the spec declares as a date or time, when
+every value in it parses. Without that, the report would say only *expected
+Date, got String*, and none of the column's own checks would run. The other
+gaps between a CSV and a spec take care of themselves -- a `String` column
+is accepted where an `Enum` or `Categorical` is declared, an integer where a
+float or `Decimal` is, and the values are checked either way.
+
+In plain Polars, `pl.read_csv("customers.csv", try_parse_dates=True)` comes
+close; the difference is that Polars parses every column that looks like a
+date, where `read()` parses only the ones the spec says are dates.
 
 Reading with the spec's schema is the tempting alternative, and the wrong
 first step: Polars stops at the first value that does not fit, so one

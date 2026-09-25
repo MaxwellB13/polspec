@@ -24,6 +24,7 @@ cannot describe a signature the code does not have.
 | [`sink_ipc`][polspec.sink_ipc] | [Generation](generation.md) |
 | [`sink_csv`][polspec.sink_csv] | [Generation](generation.md) |
 | [`sink_ndjson`][polspec.sink_ndjson] | [Generation](generation.md) |
+| [`read`][polspec.read] | [Validation](validation.md) |
 | [`inspect`][polspec.inspect] | [Validation](validation.md) |
 | [`validate`][polspec.validate] | [Validation](validation.md) |
 | [`ValidationOptions`][polspec.ValidationOptions] | [Validation](validation.md) |
