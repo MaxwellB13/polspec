@@ -115,7 +115,9 @@ Two things this project has made no compatibility promise about yet:
   so every seeded batched or sunk output changed, once. 0.10.0 was the
   third, for unique columns only: a unique column is now a permutation of
   its value space, unique across a whole frame however it is batched, so
-  every seeded unique column changed, once.
+  every seeded unique column changed, once. 0.11.0 finished the job for a
+  unique column a foreign key fills -- a permutation of its parent's keys
+  -- so that column's seeded values changed, once.
 
 The first of those is easier to live with than it sounds, because a spec file
 now says which format wrote it. Every file `to_yaml()` writes carries
