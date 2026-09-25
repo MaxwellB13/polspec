@@ -9,6 +9,7 @@
 
 mod dist;
 mod format;
+mod permute;
 mod plan;
 mod sample;
 mod unique;

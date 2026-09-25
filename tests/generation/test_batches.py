@@ -2,11 +2,22 @@
 that write a scan out.
 """
 
+import datetime as dt
 import warnings
 
 import polars as pl
 import pytest
-from polspec import Bound, ColRule, ColSpec, ForeignKey, FrameSpec, col
+from polspec import (
+    Bound,
+    ColRule,
+    ColSpec,
+    ForeignKey,
+    FrameSpec,
+    TableSpec,
+    col,
+    generate,
+    generate_batches,
+)
 
 
 class StreamDataSource(FrameSpec):
@@ -352,17 +363,47 @@ class Keyed(FrameSpec):
 REPEATS = "repeat their values in every batch"
 
 
-def test_a_unique_column_repeats_in_every_batch_and_warns_once():
-    """The behaviour the warning describes, pinned alongside it: the draw
-    starts over the same way in every batch, so the batches hold the same
-    keys. Batch-stable uniqueness is 0.10's to fix; until then it is said."""
+def test_a_unique_string_still_repeats_in_every_batch_and_warns_once():
+    """The behaviour the warning describes, pinned alongside it: a unique
+    string's draw starts over the same way in every batch. The integer key
+    beside it is a permutation, and does not."""
     with pytest.warns(UserWarning, match=REPEATS) as caught:
         batches = list(Keyed.generate_batches(30, batch_size=10, seed=1))
     assert len([w for w in caught if REPEATS in str(w.message)]) == 1
     message = str(caught[0].message)
-    assert "'key'" in message and "'code'" in message
-    assert batches[0]["key"].equals(batches[1]["key"])
-    assert not batches[0]["value"].equals(batches[1]["value"])
+    assert "'code'" in message and "'key'" not in message
+    assert batches[0]["code"].equals(batches[1]["code"])
+    assert not batches[0]["key"].equals(batches[1]["key"])
+
+
+PERMUTED = {
+    "i64": ColSpec(pl.Int64, unique=True),
+    "u16": ColSpec(pl.UInt16, bounds=(0, 60_000), unique=True),
+    "f64": ColSpec(pl.Float64, bounds=(0.0, 1.0), unique=True),
+    "f32": ColSpec(pl.Float32, unique=True),
+    "choice": ColSpec(pl.Int64, choices=list(range(0, 400_000, 2)), unique=True),
+    "day": ColSpec(
+        pl.Date, bounds=(dt.date(1900, 1, 1), dt.date(2100, 1, 1)), unique=True
+    ),
+    "price": ColSpec(pl.Decimal(12, 2), unique=True),
+    "half": ColSpec(pl.Float16, unique=True),  # all 63,487 finite halves
+    "wide": ColSpec(pl.Int128, unique=True),
+    "sparse": ColSpec(pl.Int32, unique=True, nullable=True, null_probability=0.3),
+}
+
+
+@pytest.mark.parametrize("batch_size", [997, 25_000, 65_536])
+def test_a_unique_column_is_a_window_onto_the_whole_frame(batch_size):
+    """Every unique kind the engine permutes: batched, the frame is the one
+    `generate` makes, and unique over all of it -- not batch by batch."""
+    spec = TableSpec("Unique", dict(PERMUTED))
+    n = 60_000
+    whole = generate(spec, n, seed=4)
+    batched = pl.concat(list(generate_batches(spec, n, batch_size=batch_size, seed=4)))
+    assert batched.equals(whole)
+    for name in PERMUTED:
+        present = whole[name].drop_nulls()
+        assert present.n_unique() == len(present), name
 
 
 def test_a_scan_and_a_sink_say_it_too(tmp_path):
@@ -377,6 +418,6 @@ def test_nothing_is_said_when_nothing_repeats():
     # One batch holds every row: nothing starts over.
     Keyed.generate_batches(30, batch_size=30, seed=1).__next__()
     list(Keyed.generate_batches(30, batch_size=100, seed=1))
-    # No unique column, or none that is collected.
+    # No unique column, none that repeats, or none that is collected.
     list(PlainSource.generate_batches(30, batch_size=10, seed=1))
-    Keyed.scan(30, seed=1, batch_size=10).select("value").collect()
+    Keyed.scan(30, seed=1, batch_size=10).select("value", "key").collect()
