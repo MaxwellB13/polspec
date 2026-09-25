@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from polspec.dtypes import DtypeLike, element_dtype, field_dtypes
+from polspec.dtypes import _MAP, DtypeLike, element_dtype, field_dtypes, map_parts
 from polspec.errors import SerializationError
 from polspec.spec import _is_categorical_dtype
 
@@ -70,20 +70,6 @@ def physical_from_name(name: object) -> DtypeLike:
     return dtype
 
 
-# Polars 2's `Map(key, value)`; None on Polars 1, which has no such dtype.
-# Reached through getattr so the module imports, and type-checks, on both.
-_MAP: Any = getattr(pl, "Map", None)
-
-
-def _map_parts(dtype: pl.DataType) -> tuple[pl.DataType, pl.DataType] | None:
-    """A `Map`'s key and value dtypes, or None for any other dtype -- and for
-    every dtype on Polars 1."""
-    if _MAP is None or not isinstance(dtype, _MAP):
-        return None
-    map_dtype: Any = dtype
-    return map_dtype.key, map_dtype.value
-
-
 # ---------------------------------------------------------------------------
 # Writing
 # ---------------------------------------------------------------------------
@@ -125,7 +111,7 @@ def dtype_to_data(dtype: pl.DataType) -> str | dict[str, Any]:
                 for name, field in field_dtypes(dtype).items()
             }
         }
-    if (parts := _map_parts(dtype)) is not None:
+    if (parts := map_parts(dtype)) is not None:
         key, value = parts
         return {"Map": {"key": dtype_to_data(key), "value": dtype_to_data(value)}}
     if _is_categorical_dtype(dtype):
@@ -160,7 +146,7 @@ def dtype_to_source(dtype: pl.DataType) -> str:
             for name, field in field_dtypes(dtype).items()
         )
         return f"pl.Struct({{{inner}}})"
-    if (parts := _map_parts(dtype)) is not None:
+    if (parts := map_parts(dtype)) is not None:
         key, value = parts
         return f"pl.Map({dtype_to_source(key)}, {dtype_to_source(value)})"
     if _is_categorical_dtype(dtype):
