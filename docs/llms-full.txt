@@ -5654,7 +5654,10 @@ Two things this project has made no compatibility promise about yet:
   that inserting a column never changes its neighbours again. 0.8.0 was
   another, for batched output only: `generate_batches` and the sinks now
   produce windows onto the frame `generate` would, whatever the batch size,
-  so every seeded batched or sunk output changed, once.
+  so every seeded batched or sunk output changed, once. 0.10.0 was the
+  third, for unique columns only: a unique column is now a permutation of
+  its value space, unique across a whole frame however it is batched, so
+  every seeded unique column changed, once.
 
 The first of those is easier to live with than it sounds, because a spec file
 now says which format wrote it. Every file `to_yaml()` writes carries
@@ -5727,6 +5730,91 @@ seed produces; see
 [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/).
 
 ## [Unreleased]
+
+## [0.10.0] - 2026-09-25
+
+**One seeded change, once: every `unique=True` column generates different
+values for the same seed** -- in `generate()` too, not only when batched --
+because a unique column is now a permutation of its value space. That is
+what makes it unique across a whole frame however it is produced: until
+now, `generate_batches`, `scan()` and the sinks drew a unique column afresh
+in every batch and the same way each time, so a key repeated every batch
+(0.9.2 warned; this release fixes it). Nothing else's seeded output
+changes, and no spec file needs migrating.
+
+Around it: `Orders.read(path)` reads a file in the spec's terms,
+`report.passing_rows()` and `polspec validate --output / --failing` split
+a file into what passed and what did not, a list's elements can be null,
+and the test suite is organised by what each file covers.
+
+### Changed
+
+- **A unique column is a permutation, so it is unique across the whole
+  frame.** Its value at row `r` is the `π(r)`-th value of its space, where
+  `π` is a keyed permutation -- a Feistel network walking its cycle back
+  into range -- so distinct rows get distinct values and a row's value
+  depends only on the row and the seed. Every unique kind: integers,
+  booleans, choices and `Enum` (an offset into the domain), floats (an
+  evenly spaced grid over the bounds, four ulps apart at the widest
+  magnitude so a cast cannot merge two points), dates, `Decimal`,
+  `Int128`, `Float16`, and strings and formats, whose values decode from an
+  index one digit per template part. A batch of `generate_batches`, a
+  `scan()` or a sink is now the whole frame's slice for a unique column as
+  for any other, and the 0.9.2 warning is gone with what it warned about.
+  `__unique_together__` and a foreign key drawn without replacement are
+  still distinct only within a batch.
+
+  Two consequences to know. A unique string is drawn uniformly from every
+  string its lengths allow, so it favours its longest length -- 98% of a
+  `string_length=(5, 15)` column is fifteen characters. And a null row
+  still takes its place in the permutation, so a nullable unique column's
+  domain has to hold every row, nulls included.
+
+- **Much faster, and bounded in memory.** The unique draw no longer holds a
+  set of the values it has drawn, and fills chunk by chunk in parallel
+  like any column: 10 million rows from a crowded integer domain take
+  0.016s where they took 1.42s, and a million unique strings 0.014s where
+  they took 0.185s.
+
+### Added
+
+- **`Orders.read(path)`** (and `polspec.read(spec, path)`): a data file in
+  the spec's terms. The extension picks the reader -- the set `polspec
+  validate` reads -- Polars' options pass through (`separator=";"`), and
+  each column the spec declares as a `Date`, `Datetime` or `Time` that
+  arrived as text is parsed when every value parses, leaving date-shaped
+  text in a `String` column alone. Nothing else is cast: the frame goes to
+  `inspect()` or `validate(cast=True)`. "Checking a file you were given"
+  starts with it, and the CLI reads through the same code.
+
+- **`report.passing_rows()`**: every row no finding touched, lazily and in
+  order -- the complement of `failing_rows()`, so the two split a frame
+  into what to keep and what to send back. A structural finding judges the
+  whole frame, so it refuses until that is fixed.
+
+- **`polspec validate --output PATH --failing PATH`**: the passing rows,
+  validated again with `cast=True` so the file is one the spec accepts and
+  typed as it declares, and the failing rows with the claim each broke.
+  The exit status is unchanged, so a pipeline can quarantine the bad rows
+  and still fail the step; notes go to stderr so `--json` stays one
+  document.
+
+- **`element_null_probability`**: how often an element inside a list is
+  null. 0 by default -- elements are never null, as before -- and any rate
+  up to 1 accepts them, on a `List` or an `Array`, a struct or list element
+  null as a whole. Generation, validation, the spec file (an added optional
+  key), `diff` and `drift` (which now measures element nulls), the
+  profiler, the data dictionary and `estimated_size` all read it.
+
+### Internal
+
+- **The test suite in folders, by what each file covers**: `contracts/`
+  (the round trip, and every "each field has an entry" test in one
+  `test_parity.py`), `declaration/`, `generation/`, `validation/`,
+  `drift/`, `serialization/`, `features/` (one file per feature across
+  every verb), `cli/` and `docs/`. The same 1135 tests collected before and
+  after the move; a test now fails on a test file at the top level or
+  without a docstring.
 
 ## [0.9.2] - 2026-09-24
 
@@ -7017,7 +7105,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/MaxwellB13/polspec/compare/v0.9.2...v0.10.0
 [0.9.2]: https://github.com/MaxwellB13/polspec/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/MaxwellB13/polspec/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/MaxwellB13/polspec/compare/v0.8.0...v0.9.0
