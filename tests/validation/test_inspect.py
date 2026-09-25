@@ -224,3 +224,61 @@ def test_lazyframe_in_report_stays_lazy():
     report = Orders.inspect(BAD.lazy(), references={Customers: CUSTOMERS.lazy()})
     assert isinstance(report.frame, pl.LazyFrame)
     assert report.by_code("foreign_key")[0].count == 1
+
+
+# ---------------------------------------------------------------------------
+# passing_rows(): the complement of failing_rows()
+# ---------------------------------------------------------------------------
+
+
+class Keyed(FrameSpec):
+    id = ColSpec(pl.Int64, unique=True, bounds=(1, 100))
+    total = ColSpec(pl.Float64, bounds=(0, 10))
+
+
+MIXED = pl.DataFrame(
+    {
+        "id": [1, 2, 2, 4, 500, 6, 7],
+        "total": [1.0, 2.0, 3.0, 4.0, 5.0, 99.0, 7.0],
+    }
+)
+
+
+def test_passing_rows_are_every_row_no_finding_touched_in_order():
+    report = Keyed.inspect(MIXED)
+    passing = report.passing_rows().collect()
+    # 2 and 2 are both duplicates, 500 is out of bounds, 6's total is.
+    assert passing["id"].to_list() == [1, 4, 7]
+    assert passing.columns == MIXED.columns
+    failing = report.failing_rows().collect()
+    assert set(failing["id"].to_list()) | set(passing["id"].to_list()) == set(
+        MIXED["id"]
+    )
+    Keyed.validate(passing)
+
+
+def test_a_passing_frame_passes_whole():
+    good = MIXED.filter(pl.col("id").is_in([1, 4, 7]))
+    report = Keyed.inspect(good)
+    assert report.passing_rows().collect().equals(good)
+
+
+def test_an_orphaned_key_is_not_a_passing_row():
+    parent = pl.DataFrame({"id": [1, 2]})
+    df = pl.DataFrame({"order_id": [1, 2, 3], "customer_id": [1, 9, 2]})
+
+    class Child(FrameSpec):
+        order_id = ColSpec(pl.Int64)
+        customer_id = ColSpec(pl.Int64)
+        __foreign_keys__ = [
+            ForeignKey("customer_id", references=Customers, ref_columns="id")
+        ]
+
+    report = Child.inspect(df, references={Customers: parent})
+    assert report.passing_rows().collect()["order_id"].to_list() == [1, 3]
+
+
+def test_a_structural_finding_has_no_passing_rows_to_give():
+    wrong = MIXED.with_columns(pl.col("id").cast(pl.String))
+    with pytest.raises(ValueError, match="id__dtype judge the whole frame"):
+        Keyed.inspect(wrong).passing_rows()

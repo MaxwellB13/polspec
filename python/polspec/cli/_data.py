@@ -8,7 +8,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from polspec.cli._io import (
     _DATA_WRITERS,
@@ -24,6 +24,12 @@ from polspec.constants import _LARGE_FRAME_BYTES
 from polspec.errors import CliError
 from polspec.generation import _describe_bytes
 from polspec.tablespec import TableSpec
+from polspec.validation import validate
+
+if TYPE_CHECKING:
+    import polars as pl
+
+    from polspec.validation import ValidationReport
 
 
 def _cmd_validate(args: argparse.Namespace) -> int:
@@ -33,27 +39,86 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     the arguments or files is reported like any other CLI error.
     """
     if args.all:
+        if args.output or args.failing:
+            raise CliError(
+                "--output and --failing each take one file, so they do not "
+                "combine with --all"
+            )
         return _validate_all(args)
+    for target in (args.output, args.failing):
+        if target is not None:
+            _writable(Path(target))
     source = _existing(args.spec)
     data_path = _existing(args.data)
     spec_cls = _single_spec(source, args.cls)
     references = _references_from(args.references)
+    options = _validation_options(args)
 
     df = _read_data_file(data_path, None, spec_cls.spec)
-    report = spec_cls.inspect(
-        df,
-        references=references,
-        extra_cols="allow" if args.allow_extra else "raise",
-        missing_cols="allow" if args.allow_missing else "raise",
-        strict_dtypes=args.strict_dtypes,
-        **_skipped(args),
-    )
+    report = spec_cls.inspect(df, references=references, **options)
 
     if args.json:
         print(report.to_json())
     else:
         print(str(report))
+    if args.output or args.failing:
+        _write_split(report, spec_cls.spec, args, references, options)
     return 0 if report.passed else 1
+
+
+def _validation_options(args: argparse.Namespace) -> dict[str, Any]:
+    """The `validate` options the command line sets, as `inspect` takes them."""
+    return {
+        "extra_cols": "allow" if args.allow_extra else "raise",
+        "missing_cols": "allow" if args.allow_missing else "raise",
+        "strict_dtypes": args.strict_dtypes,
+        **_skipped(args),
+    }
+
+
+def _writable(path: Path) -> None:
+    """Refuses an output path whose format polspec cannot write, before any
+    reading is done."""
+    if path.suffix.lower() not in _DATA_WRITERS:
+        raise CliError(
+            f"don't know how to write {path.suffix!r} files ({path}). "
+            f"Supported: {', '.join(sorted(_DATA_WRITERS))}"
+        )
+
+
+def _write_split(
+    report: ValidationReport,
+    spec: TableSpec,
+    args: argparse.Namespace,
+    references: dict[str, pl.DataFrame] | None,
+    options: dict[str, Any],
+) -> None:
+    """`--output` and `--failing`: the file split into what passed and what did
+    not. Notes go to stderr, so `--json` output stays one document.
+
+    The passing rows are validated again, cast to the declared dtypes: the
+    file `--output` writes is one the spec accepts, typed as it declares. A
+    structural finding judges the whole frame, so neither file is written.
+    """
+    structural = [f.key for f in report if not f.row_level]
+    if structural:
+        print(
+            f"note: {', '.join(structural)} judge the whole frame, so no "
+            "--output or --failing file was written",
+            file=sys.stderr,
+        )
+        return
+    if args.output:
+        passing = report.passing_rows().collect()
+        typed = validate(spec, passing, references=references, cast=True, **options)
+        _write_data_file(typed, Path(args.output))
+        print(f"Wrote {typed.height} passing row(s) to {args.output}", file=sys.stderr)
+    if args.failing:
+        failing = report.failing_rows().collect()
+        _write_data_file(failing, Path(args.failing))
+        print(
+            f"Wrote {failing.height} failing row(s) to {args.failing}", file=sys.stderr
+        )
 
 
 def _skipped(args: argparse.Namespace) -> dict[str, Any]:
@@ -154,12 +219,7 @@ def _validate_all(args: argparse.Namespace) -> int:
     frames = frames_named_after_specs(registry, data_dir, source)
     references = _references_from(args.references)
     reports = registry.inspect_all(
-        frames,
-        references=references,
-        extra_cols="allow" if args.allow_extra else "raise",
-        missing_cols="allow" if args.allow_missing else "raise",
-        strict_dtypes=args.strict_dtypes,
-        **_skipped(args),
+        frames, references=references, **_validation_options(args)
     )
     if args.json:
         print(json.dumps({name: r.to_dict() for name, r in reports.items()}, indent=2))

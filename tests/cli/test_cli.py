@@ -944,3 +944,80 @@ def test_validate_skip_takes_every_switch_and_nothing_else(tmp_path, capsys):
     with pytest.raises(SystemExit):
         run_cli("validate", source, data, "--skip", "nope")
     assert "invalid choice: 'nope'" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# --output and --failing: the file split into what passed and what did not
+# ---------------------------------------------------------------------------
+
+SPLIT_SPEC = """
+import polars as pl
+from polspec import ColSpec, FrameSpec
+
+class Orders(FrameSpec):
+    order_id = ColSpec(pl.Int64, unique=True)
+    status = ColSpec(pl.Enum(["NEW", "PAID"]))
+    total = ColSpec(pl.Float64, bounds=(0, 100))
+"""
+
+
+def _split_files(tmp_path, rows: str):
+    source = tmp_path / "orders.py"
+    source.write_text(SPLIT_SPEC, encoding="utf-8")
+    data = tmp_path / "orders.csv"
+    data.write_text("order_id,status,total\n" + rows, encoding="utf-8")
+    return source, data
+
+
+def test_output_and_failing_split_the_file(tmp_path, capsys):
+    source, data = _split_files(
+        tmp_path, "1,NEW,10\n2,LOST,20\n3,PAID,500\n4,PAID,30\n"
+    )
+    clean, bad = tmp_path / "clean.parquet", tmp_path / "bad.csv"
+    code = run_cli("validate", source, data, "--output", clean, "--failing", bad)
+    assert code == 1, "the exit status still says the file failed"
+    passing = pl.read_parquet(clean)
+    assert passing["order_id"].to_list() == [1, 4]
+    assert passing.schema["status"] == pl.Enum(["NEW", "PAID"]), "typed as declared"
+    failing = pl.read_csv(bad)
+    assert sorted(failing["order_id"].to_list()) == [2, 3]
+    assert "__polspec_finding" in failing.columns
+    err = capsys.readouterr().err
+    assert "2 passing row(s)" in err and "2 failing row(s)" in err
+
+
+def test_json_stays_one_document_when_files_are_written(tmp_path, capsys):
+    source, data = _split_files(tmp_path, "1,NEW,10\n2,LOST,20\n")
+    run_cli("validate", source, data, "--json", "--output", tmp_path / "c.parquet")
+    out = capsys.readouterr().out
+    assert json.loads(out)["passed"] is False
+
+
+def test_a_passing_file_writes_all_of_it_and_no_failures(tmp_path):
+    source, data = _split_files(tmp_path, "1,NEW,10\n2,PAID,20\n")
+    clean, bad = tmp_path / "clean.parquet", tmp_path / "bad.parquet"
+    assert run_cli("validate", source, data, "--output", clean, "--failing", bad) == 0
+    assert pl.read_parquet(clean).height == 2
+    assert pl.read_parquet(bad).height == 0
+
+
+def test_a_structural_finding_writes_neither_file(tmp_path, capsys):
+    source, data = _split_files(tmp_path, "1,NEW,10\n")
+    data.write_text("order_id,status\n1,NEW\n", encoding="utf-8")  # no total
+    clean = tmp_path / "clean.parquet"
+    assert run_cli("validate", source, data, "--output", clean) == 1
+    assert not clean.exists()
+    assert "judge the whole frame" in capsys.readouterr().err
+
+
+def test_output_is_refused_before_reading_what_it_cannot_write(tmp_path, capsys):
+    source, data = _split_files(tmp_path, "1,NEW,10\n")
+    assert run_cli("validate", source, data, "--output", tmp_path / "x.xlsx") == 1
+    assert "don't know how to write '.xlsx'" in capsys.readouterr().err
+    assert (
+        run_cli(
+            "validate", "--all", tmp_path, tmp_path, "--failing", tmp_path / "b.csv"
+        )
+        == 1
+    )
+    assert "do not combine with --all" in capsys.readouterr().err

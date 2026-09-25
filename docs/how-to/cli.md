@@ -225,6 +225,19 @@ structured report with `--json`. The exit status is 0 when the data passes
 and 1 when it does not, so a spec can gate a pipeline step in CI with no
 Python at all.
 
+`--output PATH` writes the rows that passed, typed as the spec declares --
+they are validated again with `cast=True`, so the file is one the spec
+accepts -- and `--failing PATH` writes the rows that did not, with a
+`__polspec_finding` column naming the claim each broke. Either or both; the
+extension picks the format, as for `generate`, and the exit status still
+says whether the whole file passed, so a pipeline can quarantine the bad
+rows and fail the step. A structural finding (a missing column, a wrong
+dtype) judges the whole file, so neither is written:
+
+```bash
+polspec validate orders.py orders.csv --output clean.parquet --failing rejected.csv
+```
+
 `--references NAME=PATH` supplies parent data for a foreign key to another
 spec, by that spec's name; repeat it for several. `--allow-extra` and
 `--allow-missing` relax the structural checks; `--strict-dtypes` tightens the
