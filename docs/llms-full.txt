@@ -1820,6 +1820,20 @@ quarantined = report.failing_rows().collect()
 quarantined.group_by(FINDING_COLUMN).len()   # how many rows each claim caught
 ```
 
+`passing_rows()` is the other half: every row no finding touched, in the
+frame's order, so the two split a frame into what to keep and what to send
+back. A duplicate key fails both of its rows, and an orphaned foreign key its
+row, so what passes is a frame the spec accepts:
+
+```python
+kept = report.passing_rows().collect()
+Orders.validate(kept)                 # passes
+```
+
+A structural finding -- a missing column, a wrong dtype -- judges the whole
+frame rather than rows, so `passing_rows()` refuses to answer until it is
+fixed.
+
 Structural findings (`extra_columns`, `missing_columns`, `dtype`,
 `foreign_key_unresolved`) describe the frame's shape rather than its rows and
 have no rows to return. `inspect()` takes exactly the options `validate()`
@@ -1913,6 +1927,11 @@ While you are still finding out what the ranges really are,
 [`from_dataframe`](https://maxwellb13.github.io/polspec/tutorial/getting-started/#infer-a-spec-instead-of-writing-one)
 describes what the file actually holds, to compare against what the spec
 says it should.
+
+If the file is mostly right and the rest can wait, keep what passed and
+send back what did not: `report.passing_rows()` and `report.failing_rows()`
+split it (see [Findings as data](#findings-as-data-inspect)), and
+`polspec validate --output --failing` does the same from the shell.
 
 **4. Then take the typed frame.** Once it passes, `cast=True` returns each
 column as its declared dtype -- the `Enum` an `Enum`, not the `String` the
@@ -3530,6 +3549,19 @@ structured report with `--json`. The exit status is 0 when the data passes
 and 1 when it does not, so a spec can gate a pipeline step in CI with no
 Python at all.
 
+`--output PATH` writes the rows that passed, typed as the spec declares --
+they are validated again with `cast=True`, so the file is one the spec
+accepts -- and `--failing PATH` writes the rows that did not, with a
+`__polspec_finding` column naming the claim each broke. Either or both; the
+extension picks the format, as for `generate`, and the exit status still
+says whether the whole file passed, so a pipeline can quarantine the bad
+rows and fail the step. A structural finding (a missing column, a wrong
+dtype) judges the whole file, so neither is written:
+
+```bash
+polspec validate orders.py orders.csv --output clean.parquet --failing rejected.csv
+```
+
 `--references NAME=PATH` supplies parent data for a foreign key to another
 spec, by that spec's name; repeat it for several. `--allow-extra` and
 `--allow-missing` relax the structural checks; `--strict-dtypes` tightens the
@@ -4515,6 +4547,8 @@ Every finding for one frame against one spec.
 - `ValidationReport.by_column(self) -> 'dict[str, tuple[Finding, ...]]'` -- Findings grouped by column; structural findings under `""`.
 
 - `ValidationReport.failing_rows(self) -> 'pl.LazyFrame'` -- Every row that violates a row-level finding, lazily.
+
+- `ValidationReport.passing_rows(self) -> 'pl.LazyFrame'` -- Every row no finding touched, lazily and in the frame's order -- the complement of `failing_rows()`, so the two split a frame into what passed and what to quarantine.
 
 - `ValidationReport.raise_if_failed(self) -> 'None'` -- Raises `ValidationError` carrying this report, if anything was found.
 

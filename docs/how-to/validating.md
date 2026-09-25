@@ -77,6 +77,20 @@ quarantined = report.failing_rows().collect()
 quarantined.group_by(FINDING_COLUMN).len()   # how many rows each claim caught
 ```
 
+`passing_rows()` is the other half: every row no finding touched, in the
+frame's order, so the two split a frame into what to keep and what to send
+back. A duplicate key fails both of its rows, and an orphaned foreign key its
+row, so what passes is a frame the spec accepts:
+
+```python
+kept = report.passing_rows().collect()
+Orders.validate(kept)                 # passes
+```
+
+A structural finding -- a missing column, a wrong dtype -- judges the whole
+frame rather than rows, so `passing_rows()` refuses to answer until it is
+fixed.
+
 Structural findings (`extra_columns`, `missing_columns`, `dtype`,
 `foreign_key_unresolved`) describe the frame's shape rather than its rows and
 have no rows to return. `inspect()` takes exactly the options `validate()`
@@ -170,6 +184,11 @@ While you are still finding out what the ranges really are,
 [`from_dataframe`](../tutorial/getting-started.md#infer-a-spec-instead-of-writing-one)
 describes what the file actually holds, to compare against what the spec
 says it should.
+
+If the file is mostly right and the rest can wait, keep what passed and
+send back what did not: `report.passing_rows()` and `report.failing_rows()`
+split it (see [Findings as data](#findings-as-data-inspect)), and
+`polspec validate --output --failing` does the same from the shell.
 
 **4. Then take the typed frame.** Once it passes, `cast=True` returns each
 column as its declared dtype -- the `Enum` an `Enum`, not the `String` the

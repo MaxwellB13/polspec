@@ -187,6 +187,19 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the report as JSON instead of text",
     )
+    validate.add_argument(
+        "--output",
+        metavar="PATH",
+        help=(
+            "Write the rows that passed, typed as the spec declares, to PATH "
+            "(the format by its extension)"
+        ),
+    )
+    validate.add_argument(
+        "--failing",
+        metavar="PATH",
+        help="Write the rows that failed, with the finding each broke, to PATH",
+    )
     validate.set_defaults(func=_cmd_validate)
 
     generate = subparsers.add_parser(

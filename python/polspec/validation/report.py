@@ -51,6 +51,10 @@ FindingCode = Literal[
 
 FINDING_COLUMN = "__polspec_finding"
 
+# A row's position while `passing_rows()` works out which rows were found;
+# never in what it returns.
+_ROW_INDEX = "__polspec_row"
+
 
 def json_value(value: Any) -> Any:
     """A JSON-serialisable stand-in for any value a finding may carry."""
@@ -202,6 +206,33 @@ class ValidationReport:
                 pl.lit(None, dtype=pl.String).alias(FINDING_COLUMN)
             )
         return pl.concat(parts, how="vertical_relaxed")
+
+    def passing_rows(self) -> pl.LazyFrame:
+        """Every row no finding touched, lazily and in the frame's order --
+        the complement of `failing_rows()`, so the two split a frame into
+        what passed and what to quarantine.
+
+        Raises `ValueError` when a structural finding (`dtype`,
+        `missing_columns`, `extra_columns`, `foreign_key_unresolved`) is in
+        the report: that is a verdict on the whole frame, not on rows, so
+        there is no row-level answer to give.
+        """
+        structural = [f.key for f in self.findings if not f.row_level]
+        if structural:
+            raise ValueError(
+                f"passing_rows() needs row-level findings only, but "
+                f"{', '.join(structural)} judge the whole frame; fix those first"
+            )
+        if not self.findings:
+            return self.frame
+        # Each finding locates its rows on a frame carrying a row index, which
+        # a filter and an anti-join both keep; what is left is every row none
+        # of them found.
+        indexed = self.frame.with_row_index(_ROW_INDEX)
+        failed = pl.concat([f.rows(indexed).select(_ROW_INDEX) for f in self.findings])
+        return indexed.join(
+            failed.unique(), on=_ROW_INDEX, how="anti", maintain_order="left"
+        ).drop(_ROW_INDEX)
 
     def to_dict(self) -> dict[str, Any]:
         """This report as JSON-ready data: the spec, the verdict, the findings."""
