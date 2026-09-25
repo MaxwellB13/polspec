@@ -62,6 +62,16 @@ def generate_dataframe(
         raise GenerationError(str(exc)) from exc
 
 
+def permuted_indices(domain: int, seed: int, start: int, n: int) -> pl.Series:
+    """Positions `start..start + n` of the permutation of `[0, domain)` that
+    `seed` keys: a window of rows takes the indices the whole range's rows
+    take there. A window past the domain is a `GenerationError`."""
+    try:
+        return _extension().permuted_indices(domain, seed, start, n)
+    except ValueError as exc:
+        raise GenerationError(str(exc)) from exc
+
+
 def distribution_params(name: str) -> list[tuple[str, float, bool]]:
     """The engine's `(name, default, must_be_positive)` for one distribution."""
     return _extension().distribution_params(name)

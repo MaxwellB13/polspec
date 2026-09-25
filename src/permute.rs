@@ -83,6 +83,30 @@ impl Permutation {
     }
 }
 
+/// Positions `start..start + n` of the permutation of `[0, domain)` that
+/// `seed` keys: the indices a window of rows takes, so any window is the
+/// whole range's slice. Refuses a window that runs past the domain -- there
+/// are not that many distinct indices -- naming both.
+pub fn window(domain: u64, seed: u64, start: u64, n: u64) -> Result<Vec<u64>, String> {
+    let end = start
+        .checked_add(n)
+        .filter(|end| *end <= domain)
+        .ok_or_else(|| {
+            format!(
+                "rows {start}..{} need {} distinct indices, but the domain holds {domain}",
+                start.saturating_add(n),
+                start.saturating_add(n)
+            )
+        })?;
+    if n == 0 {
+        return Ok(Vec::new());
+    }
+    let permutation = Permutation::new(domain as u128, seed);
+    Ok((start..end)
+        .map(|i| permutation.apply(i as u128) as u64)
+        .collect())
+}
+
 /// The splitmix64 finaliser: every input bit reaches every output bit.
 #[inline]
 fn mix(mut z: u64) -> u64 {
@@ -150,6 +174,32 @@ mod tests {
             .map(|b| (b - expected).powi(2) / expected)
             .sum();
         assert!(chi2 < 30.0, "chi-squared {chi2} over {buckets:?}");
+    }
+
+    #[test]
+    fn a_window_is_the_whole_ranges_slice() {
+        let whole = window(1_000, 9, 0, 1_000).unwrap();
+        let mut sorted = whole.clone();
+        sorted.sort_unstable();
+        assert!(sorted.into_iter().eq(0..1_000));
+        for (start, n) in [(0, 10), (17, 100), (990, 10), (500, 0)] {
+            let part = window(1_000, 9, start, n).unwrap();
+            assert_eq!(
+                part,
+                whole[start as usize..(start + n) as usize],
+                "{start}+{n}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_window_past_the_domain_is_refused() {
+        let err = window(100, 1, 90, 20).unwrap_err();
+        assert!(
+            err.contains("110 distinct") && err.contains("holds 100"),
+            "{err}"
+        );
+        assert!(window(0, 1, 0, 0).unwrap().is_empty());
     }
 
     #[test]

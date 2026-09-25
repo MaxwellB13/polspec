@@ -6,6 +6,8 @@
 //! - `dist.rs` -- the distributions and their canonical parameters.
 //! - `sample.rs` -- filling a column, in seeded parallel chunks.
 //! - `unique.rs` -- filling a column whose values must all differ.
+//! - `permute.rs` -- the keyed permutation behind both, and behind a unique
+//!   foreign key's pick of parent rows.
 
 mod dist;
 mod format;
@@ -17,7 +19,7 @@ mod unique;
 use polars::prelude::*;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3_polars::PyDataFrame;
+use pyo3_polars::{PyDataFrame, PySeries};
 use rayon::prelude::*;
 
 use plan::ColumnPlan;
@@ -65,6 +67,24 @@ fn generate_dataframe(
     Ok(PyDataFrame(df))
 }
 
+/// Positions `start..start + n` of the keyed permutation of `[0, domain)`,
+/// as `UInt64` indices -- the rows of a parent a unique foreign key takes, so
+/// a window of the child takes the parent rows the whole frame takes there.
+#[pyfunction]
+fn permuted_indices(
+    py: Python<'_>,
+    domain: u64,
+    seed: u64,
+    start: u64,
+    n: u64,
+) -> PyResult<PySeries> {
+    let indices = py
+        .detach(|| permute::window(domain, seed, start, n))
+        .map_err(PyValueError::new_err)?;
+    let series = UInt64Chunked::from_vec(PlSmallStr::from_static("index"), indices);
+    Ok(PySeries(series.into_series()))
+}
+
 /// The canonical parameters of one distribution: `(name, default, must_be_positive)`.
 #[pyfunction]
 fn distribution_params(name: &str) -> PyResult<Vec<(String, f64, bool)>> {
@@ -99,5 +119,6 @@ fn _polspec(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(distribution_params, m)?)?;
     m.add_function(wrap_pyfunction!(distributions, m)?)?;
     m.add_function(wrap_pyfunction!(kinds, m)?)?;
+    m.add_function(wrap_pyfunction!(permuted_indices, m)?)?;
     Ok(())
 }

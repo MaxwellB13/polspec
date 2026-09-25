@@ -86,3 +86,6 @@ def distributions() -> list[str]:
 
 def kinds() -> list[str]:
     """Every column kind a `ColumnPlan` accepts."""
+
+def permuted_indices(domain: int, seed: int, start: int, n: int) -> pl.Series:
+    """Positions `start..start + n` of the permutation of `[0, domain)` that `seed` keys, as `UInt64` indices; any window is the whole range's slice. Raises `ValueError` for a window past the domain."""
