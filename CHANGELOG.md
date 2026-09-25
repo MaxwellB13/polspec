@@ -8,6 +8,70 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-26
+
+**One seeded change, once: a `unique=True` column filled by a foreign key
+generates different parent keys for the same seed** -- in `generate()` too,
+not only when batched -- because it is now a permutation of the parent's
+keys. That is what makes it unique across a whole frame however it is
+produced: until now, `generate_batches`, `scan()` and the sinks drew it
+afresh in every batch, so two batches could hand out the same parent key.
+Nothing else's seeded output changes, and no spec file needs migrating.
+
+Alongside it, Polars 2's `Map(key, value)` generates, so every Polars
+dtype that holds data now does.
+
+### Changed
+
+- **A unique foreign key is a permutation of its parent's keys, so it is
+  unique across the whole frame.** Row `r` takes the parent key at `π(r)`,
+  for a permutation keyed by the frame's seed -- the one behind every
+  other unique column since 0.10.0 -- so a batch takes the keys the whole
+  frame takes there. This covers a key into another spec and a unique key
+  into the spec's own rows; a many-to-one key is still drawn with
+  replacement, and a `__unique_together__` group is still distinct within
+  a batch only.
+
+- **A parent too small for a unique foreign key is refused before the
+  first batch.** `generate_batches`, `scan()` and the sinks check that the
+  parent holds a distinct key for every one of the `n` rows up front.
+  Before, each batch needed only a batch's worth, so a frame larger than
+  its parent was produced -- with keys repeating across batches -- rather
+  than refused.
+
+### Added
+
+- **`Map` columns generate, on Polars 2.** A `Map(K, V)` is the list of
+  `{key, value}` entries Polars stores it as, and polspec declares it as
+  one: `list_length` is how many entries a map holds, and `fields` says
+  what its `key` and `value` are. Every map is drawn with its keys present
+  and distinct -- a key that repeats within its map is redrawn before the
+  cast, which would otherwise fold the two entries into one. With no
+  `list_length`, a map holds up to five entries, or as many as its keys
+  can take: two, for `Boolean` keys.
+
+  A nullable key, a declared `list_length` longer than the keys can fill,
+  and `choices`, `weights` or `element_null_probability` on the map itself
+  are refused at declaration.
+
+- **A `Map` validates, drifts, profiles and is sized as its entries.** A
+  finding about a key or a value is named `m.key` or `m.value`, the
+  length `m__list_len`, and a map holding one key twice -- which a map
+  read from Arrow can -- is `m.key__unique`. A map whose key or value is
+  wider than declared stands in for it unless `strict_dtypes=True`.
+  `from_dataframe` re-declares a map by its key and value, and the
+  generated docs list its entries.
+
+### Internal
+
+- The keyed permutation is reachable from Python as
+  `_ffi.permuted_indices(domain, seed, start, n)`: a window of it is the
+  whole range's slice.
+- The dtype census covers `Map` where Polars has one, and its list of
+  dtypes not generated yet is empty.
+- A docs example marked `<!-- docs: polars2 -->` runs only where Polars
+  2's dtypes exist.
+
 ## [0.10.1] - 2026-09-25
 
 Ready for Polars 2. polspec passes its whole suite on the Polars 2.0
@@ -1421,7 +1485,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/MaxwellB13/polspec/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/MaxwellB13/polspec/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/MaxwellB13/polspec/compare/v0.9.2...v0.10.0
 [0.9.2]: https://github.com/MaxwellB13/polspec/compare/v0.9.1...v0.9.2
