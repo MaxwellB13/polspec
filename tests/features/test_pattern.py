@@ -13,6 +13,7 @@ import textwrap
 
 import polars as pl
 import pytest
+from helpers import spec_for
 from polspec import (
     CatSpec,
     ColSpec,
@@ -26,10 +27,6 @@ from polspec.cli import main
 from polspec.drift import diff
 
 SKU = r"^[A-Z]{3}-\d{4}$"
-
-
-def _spec_for(column: ColSpec) -> type[FrameSpec]:
-    return type("Patterned", (FrameSpec,), {"__columns__": {"c": column}})
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +79,7 @@ def test_a_pattern_combines_with_what_it_does_not_contradict():
 
 
 def test_the_pattern_finding_names_the_pattern_and_samples():
-    spec_cls = _spec_for(ColSpec(pl.String, pattern=SKU, nullable=True))
+    spec_cls = spec_for(ColSpec(pl.String, pattern=SKU, nullable=True))
     df = pl.DataFrame({"c": ["ABC-1234", "abc-1234", None, "nope", "abc-1234"]})
     report = spec_cls.inspect(df)
     (finding,) = report.findings
@@ -102,12 +99,12 @@ def test_the_pattern_finding_names_the_pattern_and_samples():
 
 
 def test_matching_data_passes():
-    spec_cls = _spec_for(ColSpec(pl.String, pattern=SKU))
+    spec_cls = spec_for(ColSpec(pl.String, pattern=SKU))
     spec_cls.validate(pl.DataFrame({"c": ["ABC-1234", "XYZ-0001"]}))
 
 
 def test_the_check_has_a_switch_like_the_other_validation_only_claims():
-    spec_cls = _spec_for(ColSpec(pl.String, pattern=SKU))
+    spec_cls = spec_for(ColSpec(pl.String, pattern=SKU))
     df = pl.DataFrame({"c": ["nope"]})
     assert not spec_cls.inspect(df).passed
     assert spec_cls.inspect(df, validate_pattern=False).passed
@@ -116,7 +113,7 @@ def test_the_check_has_a_switch_like_the_other_validation_only_claims():
 
 
 def test_a_pattern_is_not_checked_on_a_column_of_the_wrong_dtype():
-    spec_cls = _spec_for(ColSpec(pl.String, pattern=SKU))
+    spec_cls = spec_for(ColSpec(pl.String, pattern=SKU))
     report = spec_cls.inspect(pl.DataFrame({"c": [1, 2]}))
     assert [f.code for f in report.findings] == ["dtype"]
 
@@ -127,7 +124,7 @@ def test_a_pattern_is_not_checked_on_a_column_of_the_wrong_dtype():
 
 
 def test_a_pattern_survives_a_file_round_trip(tmp_path):
-    spec_cls = _spec_for(ColSpec(pl.String, pattern=SKU))
+    spec_cls = spec_for(ColSpec(pl.String, pattern=SKU))
     path = tmp_path / "s.yaml"
     spec_cls.to_yaml(path)
     assert f"pattern: {SKU}" in path.read_text(encoding="utf-8")
@@ -147,7 +144,7 @@ def test_a_changed_pattern_is_a_compatible_change_not_a_domain_move():
 
 
 def test_reports_show_the_pattern():
-    spec_cls = _spec_for(ColSpec(pl.String, pattern=SKU))
+    spec_cls = spec_for(ColSpec(pl.String, pattern=SKU))
     assert f"pattern `{SKU}`" in spec_cls.to_markdown()
     assert f"pattern: {SKU}" in spec_cls.to_mermaid()
 

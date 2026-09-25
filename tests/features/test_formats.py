@@ -13,6 +13,7 @@ import warnings
 
 import polars as pl
 import pytest
+from helpers import spec_for
 from polspec import (
     CatSpec,
     ColSpec,
@@ -27,11 +28,6 @@ from polspec import (
 from polspec.constraints import Domain
 from polspec.engine import _plan_column
 from polspec.formats import FORMATS, Format, lookup, names
-
-
-def _spec_for(column: ColSpec) -> type[FrameSpec]:
-    return type("Formatted", (FrameSpec,), {"__columns__": {"c": column}})
-
 
 # ---------------------------------------------------------------------------
 # The registry
@@ -185,7 +181,7 @@ def test_a_format_allows_what_it_does_not_contradict():
 
 
 def test_the_format_finding_names_the_format_and_samples():
-    spec_cls = _spec_for(ColSpec(pl.String, format="ipv4", nullable=True))
+    spec_cls = spec_for(ColSpec(pl.String, format="ipv4", nullable=True))
     df = pl.DataFrame({"c": ["10.0.0.1", "300.1.1.1", None, "abc", "300.1.1.1"]})
     report = spec_cls.inspect(df)
     (finding,) = report.findings
@@ -203,7 +199,7 @@ def test_the_format_finding_names_the_format_and_samples():
 
 
 def test_a_finite_format_reports_as_format_not_choices():
-    spec_cls = _spec_for(ColSpec(pl.String, format="iso_currency"))
+    spec_cls = spec_for(ColSpec(pl.String, format="iso_currency"))
     report = spec_cls.inspect(pl.DataFrame({"c": ["USD", "usd", "XTS"]}))
     (finding,) = report.findings
     assert finding.code == "format"
@@ -215,7 +211,7 @@ def test_a_format_is_not_checked_on_a_column_of_the_wrong_dtype():
     """Only the dtype finding is worth reporting: the format check would be
     noise on top of it, or an expression Polars refuses to run on integers.
     """
-    spec_cls = _spec_for(ColSpec(pl.String, format="uuid4"))
+    spec_cls = spec_for(ColSpec(pl.String, format="uuid4"))
     report = spec_cls.inspect(pl.DataFrame({"c": [1, 2, 3]}))
     assert [f.code for f in report.findings] == ["dtype"]
 
@@ -320,7 +316,7 @@ def test_a_finite_format_reaches_the_engine_as_an_index():
 
 
 def test_a_unique_finite_format_refuses_when_the_list_runs_out():
-    spec_cls = _spec_for(ColSpec(pl.String, format="iso_country", unique=True))
+    spec_cls = spec_for(ColSpec(pl.String, format="iso_country", unique=True))
     with pytest.raises(GenerationError, match="only 249 distinct value"):
         spec_cls.generate(250, seed=1)
     df = spec_cls.generate(249, seed=1)
@@ -328,14 +324,14 @@ def test_a_unique_finite_format_refuses_when_the_list_runs_out():
 
 
 def test_a_unique_template_format_draws_without_replacement():
-    spec_cls = _spec_for(ColSpec(pl.String, format="mac", unique=True))
+    spec_cls = spec_for(ColSpec(pl.String, format="mac", unique=True))
     df = spec_cls.generate(20_000, seed=1)
     assert df["c"].n_unique() == 20_000
     spec_cls.validate(df)
 
 
 def test_nulls_follow_the_declared_rate():
-    spec_cls = _spec_for(
+    spec_cls = spec_for(
         ColSpec(pl.String, format="ipv6", nullable=True, null_probability=0.4)
     )
     df = spec_cls.generate(5_000, seed=1)
@@ -344,7 +340,7 @@ def test_nulls_follow_the_declared_rate():
 
 
 def test_the_same_seed_gives_the_same_values():
-    spec_cls = _spec_for(ColSpec(pl.String, format="uuid4"))
+    spec_cls = spec_for(ColSpec(pl.String, format="uuid4"))
     assert spec_cls.generate(100, seed=9).equals(spec_cls.generate(100, seed=9))
     assert not spec_cls.generate(100, seed=9).equals(spec_cls.generate(100, seed=10))
 

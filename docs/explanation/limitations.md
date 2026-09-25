@@ -6,7 +6,7 @@ hold, and the order the passes that rewrite a generated frame run in, both
 live in `polspec.constraints`. What is left below is what generation does not
 attempt at all, plus a few edges worth knowing about.
 
-Each is pinned by a test in `tests/test_roundtrip.py`. A gap meant to close
+Each is pinned by a test in `tests/contracts/test_roundtrip.py`. A gap meant to close
 one day carries `xfail(strict=True)`: the suite stays green while it exists,
 and the moment it is fixed pytest turns the XPASS into a failure. A boundary
 that is deliberate is pinned by an ordinary passing test instead. Either way

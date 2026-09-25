@@ -1,3 +1,7 @@
+"""`CatSpec`: a shared registry of enums and categoricals -- both declaration
+forms, that they agree, and what a spec reads from one.
+"""
+
 from __future__ import annotations
 
 import tempfile

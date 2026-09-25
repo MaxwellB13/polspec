@@ -14,13 +14,9 @@ from decimal import Decimal
 
 import polars as pl
 import pytest
+from helpers import spec_for
 from polspec import ColSpec, FrameSpec, SpecError, ValidationError
 from polspec.drift import drift
-
-
-def _spec_for(column: ColSpec) -> type[FrameSpec]:
-    return type("Priced", (FrameSpec,), {"__columns__": {"c": column}})
-
 
 # ---------------------------------------------------------------------------
 # Declaration
@@ -59,7 +55,7 @@ def test_an_endpoint_that_is_not_a_number_is_refused():
 
 
 def test_generated_values_have_the_declared_type_scale_and_bounds():
-    spec_cls = _spec_for(ColSpec(pl.Decimal(10, 2), bounds=(Decimal("0.50"), 10)))
+    spec_cls = spec_for(ColSpec(pl.Decimal(10, 2), bounds=(Decimal("0.50"), 10)))
     df = spec_cls.generate(500, seed=1)
     assert df.schema["c"] == pl.Decimal(10, 2)
     values = df["c"].to_list()
@@ -70,18 +66,18 @@ def test_generated_values_have_the_declared_type_scale_and_bounds():
 
 
 def test_the_default_range_respects_a_narrow_precision():
-    df = _spec_for(ColSpec(pl.Decimal(4, 2))).generate(1_000, seed=2)
+    df = spec_for(ColSpec(pl.Decimal(4, 2))).generate(1_000, seed=2)
     assert all(Decimal("-99.99") <= v <= Decimal("99.99") for v in df["c"].to_list())
 
 
 def test_bounds_needing_more_than_eighteen_digits_are_refused_at_generation():
-    spec_cls = _spec_for(ColSpec(pl.Decimal(38, 10), bounds=(0, 10**20)))
+    spec_cls = spec_for(ColSpec(pl.Decimal(38, 10), bounds=(0, 10**20)))
     with pytest.raises(Exception, match="more than 18 significant digits"):
         spec_cls.generate(5, seed=1)
 
 
 def test_cartesian_coverage_reaches_the_partitions():
-    df = _spec_for(ColSpec(pl.Decimal(6, 2), bounds=(-5, 5), nullable=True)).generate(
+    df = spec_for(ColSpec(pl.Decimal(6, 2), bounds=(-5, 5), nullable=True)).generate(
         1, seed=1, method="cartesian"
     )
     values = df["c"].to_list()
@@ -96,7 +92,7 @@ def test_cartesian_coverage_reaches_the_partitions():
 
 
 def test_bounds_are_checked_on_the_values_whatever_the_frame_holds():
-    spec_cls = _spec_for(ColSpec(pl.Decimal(10, 2), bounds=(0, 100)))
+    spec_cls = spec_for(ColSpec(pl.Decimal(10, 2), bounds=(0, 100)))
     spec_cls.validate(
         pl.DataFrame({"c": [Decimal("99.99")]}, schema={"c": pl.Decimal(10, 2)})
     )
@@ -109,7 +105,7 @@ def test_bounds_are_checked_on_the_values_whatever_the_frame_holds():
 
 
 def test_drift_measures_the_extent_in_the_columns_own_type():
-    spec_cls = _spec_for(ColSpec(pl.Decimal(10, 2), bounds=(0, 100)))
+    spec_cls = spec_for(ColSpec(pl.Decimal(10, 2), bounds=(0, 100)))
     df = spec_cls.generate(100, seed=1).with_columns(
         c=(pl.col("c") + 1000).cast(pl.Decimal(10, 2))
     )
@@ -126,7 +122,7 @@ def test_drift_measures_the_extent_in_the_columns_own_type():
 
 
 def test_a_decimal_spec_round_trips_through_yaml_and_python(tmp_path):
-    spec_cls = _spec_for(ColSpec(pl.Decimal(38, 4), bounds=("-1.5", 2), nullable=True))
+    spec_cls = spec_for(ColSpec(pl.Decimal(38, 4), bounds=("-1.5", 2), nullable=True))
     spec_cls.to_yaml(tmp_path / "s.yaml")
     text = (tmp_path / "s.yaml").read_text(encoding="utf-8")
     assert "Decimal:" in text and "'-1.5'" in text, text
@@ -137,7 +133,7 @@ def test_a_decimal_spec_round_trips_through_yaml_and_python(tmp_path):
     assert "pl.Decimal(38, 4)" in source and "Decimal('-1.5')" in source
     namespace: dict = {}
     exec(source, namespace)
-    assert namespace["Priced"].spec == spec_cls.spec
+    assert namespace[spec_cls.__name__].spec == spec_cls.spec
 
 
 def test_from_dataframe_declares_a_decimal_with_its_extent():

@@ -5,7 +5,6 @@ machinery that makes that true: every dataclass field has a registry entry,
 files carry a version, older versions migrate, unknown keys are refused.
 """
 
-import dataclasses
 import warnings
 
 import polars as pl
@@ -14,21 +13,13 @@ import yaml
 from polspec import (
     CatSpec,
     Check,
-    ColRule,
     ColSpec,
-    ForeignKey,
     FrameSpec,
     SerializationError,
-    TableSpec,
     col,
 )
 from polspec.serialization import (
-    CHECK_FIELDS,
-    COLRULE_FIELDS,
-    COLSPEC_FIELDS,
-    FK_FIELDS,
     FORMAT_VERSION,
-    TABLESPEC_FIELDS,
     from_dict,
     to_dict,
 )
@@ -42,27 +33,6 @@ from polspec.serialization.migrations import migrate
 _DERIVED = {
     Check: {"expr"}
 }  # `expr` is derived from `pred`; the registry writes `pred` as `expr`
-
-
-@pytest.mark.parametrize(
-    "cls, fields",
-    [
-        (ColSpec, COLSPEC_FIELDS),
-        (ColRule, COLRULE_FIELDS),
-        (Check, CHECK_FIELDS),
-        (ForeignKey, FK_FIELDS),
-        (TableSpec, TABLESPEC_FIELDS),
-    ],
-    ids=lambda x: getattr(x, "__name__", ""),
-)
-def test_every_dataclass_field_has_a_registry_entry(cls, fields):
-    declared = {f.name for f in dataclasses.fields(cls)} - _DERIVED.get(cls, set())
-    registered = {f.attribute for f in fields}
-    assert registered == declared, (
-        f"{cls.__name__}: registry and dataclass disagree. "
-        f"Missing from registry: {declared - registered}; "
-        f"registry-only: {registered - declared}"
-    )
 
 
 # ---------------------------------------------------------------------------

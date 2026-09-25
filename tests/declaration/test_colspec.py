@@ -7,31 +7,20 @@ that silently fails to exist, a name collision that disables a method, a
 the caller declared without saying so.
 """
 
-import ast
-import dataclasses
 import datetime as dt
-import inspect
-import textwrap
 
 import polars as pl
 import pytest
+from helpers import spec_for
 from polspec import (
     Bound,
-    Check,
     ColRule,
     ColSpec,
-    ForeignKey,
     FrameSpec,
     SpecError,
     ValidationError,
     col,
 )
-
-
-def _spec_for(column: ColSpec) -> type[FrameSpec]:
-    """A single-column FrameSpec with the column as `c`."""
-    return type("Declared", (FrameSpec,), {"__columns__": {"c": column}})
-
 
 # ---------------------------------------------------------------------------
 # C8 -- names that cannot be class attributes
@@ -206,28 +195,28 @@ def test_duplicate_choices_would_have_misapplied_weights():
 
 
 def test_open_upper_bound_generates_only_non_negative():
-    values = _spec_for(ColSpec(pl.Int64, bounds=(0, None))).generate(3000, seed=7)["c"]
+    values = spec_for(ColSpec(pl.Int64, bounds=(0, None))).generate(3000, seed=7)["c"]
     assert values.min() >= 0
 
 
 def test_open_lower_bound_generates_only_non_positive():
-    values = _spec_for(ColSpec(pl.Int64, bounds=(None, 0))).generate(3000, seed=7)["c"]
+    values = spec_for(ColSpec(pl.Int64, bounds=(None, 0))).generate(3000, seed=7)["c"]
     assert values.max() <= 0
 
 
 def test_open_end_generates_within_the_dtype_default():
     """Generation resolves the open end; it does not run away to the dtype max."""
-    values = _spec_for(ColSpec(pl.Int64, bounds=(0, None))).generate(3000, seed=7)["c"]
+    values = spec_for(ColSpec(pl.Int64, bounds=(0, None))).generate(3000, seed=7)["c"]
     assert values.max() <= 1_000_000  # polspec's default wide-int bound
 
     # A dtype whose own default range is narrower keeps that narrower range.
-    u8 = _spec_for(ColSpec(pl.UInt8, bounds=(0, None))).generate(3000, seed=7)["c"]
+    u8 = spec_for(ColSpec(pl.UInt8, bounds=(0, None))).generate(3000, seed=7)["c"]
     assert u8.max() <= 255
 
 
 def test_open_end_is_unconstrained_at_validation():
     """The point of the feature: no ceiling is invented for validation."""
-    spec_cls = _spec_for(ColSpec(pl.Int64, bounds=(0, None)))
+    spec_cls = spec_for(ColSpec(pl.Int64, bounds=(0, None)))
 
     # Far above anything generation would produce, and still valid.
     spec_cls.validate(pl.DataFrame({"c": [0, 10**9, 10**15]}))
@@ -237,14 +226,14 @@ def test_open_end_is_unconstrained_at_validation():
 
 
 def test_open_lower_end_is_unconstrained_at_validation():
-    spec_cls = _spec_for(ColSpec(pl.Int64, bounds=(None, 0)))
+    spec_cls = spec_for(ColSpec(pl.Int64, bounds=(None, 0)))
     spec_cls.validate(pl.DataFrame({"c": [0, -(10**15)]}))
     with pytest.raises(ValidationError, match="<= 0"):
         spec_cls.validate(pl.DataFrame({"c": [1]}))
 
 
 def test_open_temporal_bound():
-    spec_cls = _spec_for(ColSpec(pl.Date, bounds=(dt.date(2020, 1, 1), None)))
+    spec_cls = spec_for(ColSpec(pl.Date, bounds=(dt.date(2020, 1, 1), None)))
     assert spec_cls.generate(2000, seed=7)["c"].min() >= dt.date(2020, 1, 1)
     spec_cls.validate(pl.DataFrame({"c": [dt.date(2999, 1, 1)]}))
     with pytest.raises(ValidationError, match="out of bounds"):
@@ -263,7 +252,7 @@ def test_closed_end_beyond_the_default_still_generates_above_it():
     Resolving the open end to that default would invert the range, which the
     engine would silently swap; it widens to the dtype limit instead.
     """
-    values = _spec_for(ColSpec(pl.Int64, bounds=(2_000_000, None))).generate(
+    values = spec_for(ColSpec(pl.Int64, bounds=(2_000_000, None))).generate(
         2000, seed=7
     )["c"]
     assert values.min() >= 2_000_000
@@ -423,41 +412,3 @@ def test_col_name_survives_yaml_roundtrip(tmp_path):
     loaded = FrameSpec.from_yaml(path)
     assert list(loaded.spec.columns) == ["Unit Price"]
     assert loaded.generate(10, seed=1).columns == ["Unit Price"]
-
-
-# ---------------------------------------------------------------------------
-# What the constructor accepts vs what the instance holds
-# ---------------------------------------------------------------------------
-
-
-def _type_checking_init(cls: type) -> ast.FunctionDef:
-    """The `__init__` a class spells out under `if TYPE_CHECKING:`."""
-    tree = ast.parse(textwrap.dedent(inspect.getsource(cls)))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.If) and ast.unparse(node.test) == "TYPE_CHECKING":
-            for stmt in node.body:
-                if isinstance(stmt, ast.FunctionDef) and stmt.name == "__init__":
-                    return stmt
-    raise AssertionError(f"{cls.__name__} declares no TYPE_CHECKING __init__")
-
-
-@pytest.mark.parametrize("cls", [ColSpec, Check, ForeignKey], ids=lambda c: c.__name__)
-def test_the_declared_constructor_matches_the_fields(cls):
-    """`ColSpec`, `Check` and `ForeignKey` annotate their fields with what an
-    instance *holds* and spell out what the constructor *accepts* in an
-    `__init__` that exists only for type checkers. The dataclass generates
-    the real one from the fields, so the two must name the same parameters
-    in the same order, with a default on the same ones -- or a field added
-    to one is silently missing from the other.
-    """
-    stub = _type_checking_init(cls)
-    params = [a.arg for a in stub.args.args if a.arg != "self"]
-    fields = [f.name for f in dataclasses.fields(cls)]
-    assert params == fields
-    defaulted = params[len(params) - len(stub.args.defaults) :]
-    assert defaulted == [
-        f.name
-        for f in dataclasses.fields(cls)
-        if f.default is not dataclasses.MISSING
-        or f.default_factory is not dataclasses.MISSING
-    ]

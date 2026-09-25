@@ -331,22 +331,6 @@ def test_the_facade_refuses_a_typo_from_its_own_signature():
             verb(df, validate_uniqe=True)
 
 
-def test_the_facade_names_exactly_the_options_the_function_accepts():
-    """One list of options, on `ValidationOptions`; the facade's explicit
-    signature is a copy, and this is what keeps the copy honest.
-    """
-    from inspect import signature
-
-    from polspec.validation import _ACCEPTED_OPTIONS
-
-    for verb in (FrameSpec.inspect, FrameSpec.validate):
-        params = signature(verb).parameters
-        named = {name for name in params if name not in ("df", "options", "references")}
-        assert named == set(_ACCEPTED_OPTIONS), verb.__name__
-        # `None` is "not given": the defaults stay on the dataclass alone.
-        assert all(params[name].default is None for name in named), verb.__name__
-
-
 def test_the_option_switches_have_one_spelling():
     """`inspect` used to accept a second, bare spelling that `validate` did not."""
 

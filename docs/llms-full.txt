@@ -4959,14 +4959,20 @@ match the module.
 
 ## Tests
 
-Each test file opens with a docstring saying what it covers, which is the
-map this page used to keep and let fall behind. Two kinds of test hold the
-design together rather than any one feature: `test_roundtrip.py`, the
-property that anything `generate()` produces `validate()` accepts, across
-every dtype; and the registry parity tests, which fail when a `ColSpec`
-field is added without its serialization entry, its drift comparator or its
-place in the facade's signatures. Warnings are errors in the suite, so a
-warning is asserted where it is expected and a failure everywhere else.
+`tests/` is grouped by what a file covers: `declaration/`, `generation/`,
+`validation/`, `drift/` and `serialization/` follow the package, `features/`
+holds one file per feature across every verb (structs, lists, formats,
+foreign keys, ...), and `cli/` and `docs/` hold the command line and the
+documentation's own checks. Each file opens with a docstring saying what it
+covers, and a test holds the suite to both rules.
+
+`contracts/` holds what keeps the design together rather than any one
+feature: `test_roundtrip.py`, the property that anything `generate()`
+produces `validate()` accepts, across every dtype; and `test_parity.py`,
+which fails when a field is added without its serialization entry, its drift
+comparator, its typed constructor parameter or its place in the facade's
+signatures. Warnings are errors in the suite, so a warning is asserted where
+it is expected and a failure everywhere else.
 
 ---
 
@@ -5008,7 +5014,7 @@ symptom: `Spec.validate(Spec.generate(n))` raising. Data the library made,
 rejected by the library that made it.
 
 That property has a name here — the *round-trip* — and it is asserted
-directly, in `tests/test_roundtrip.py`:
+directly, in `tests/contracts/test_roundtrip.py`:
 
 <!-- docs: skip -->
 ```python
@@ -5085,7 +5091,7 @@ hold, and the order the passes that rewrite a generated frame run in, both
 live in `polspec.constraints`. What is left below is what generation does not
 attempt at all, plus a few edges worth knowing about.
 
-Each is pinned by a test in `tests/test_roundtrip.py`. A gap meant to close
+Each is pinned by a test in `tests/contracts/test_roundtrip.py`. A gap meant to close
 one day carries `xfail(strict=True)`: the suite stays green while it exists,
 and the moment it is fixed pytest turns the XPASS into a failure. A boundary
 that is deliberate is pinned by an ordinary passing test instead. Either way
