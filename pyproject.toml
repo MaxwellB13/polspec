@@ -2,7 +2,7 @@
 name = "polspec"
 # The one place the version is set. Bump with `uv version --bump patch|minor|major`.
 # maturin gives this field precedence over Cargo.toml's, which stays a placeholder.
-version = "0.10.0"
+version = "0.10.1"
 description = "Declare a Polars schema once, then generate data from it and validate data against it."
 readme = "README.md"
 authors = [
@@ -26,6 +26,9 @@ classifiers = [
 dependencies = [
     # Upper bound: the Rust extension links pyo3-polars, which is coupled to a
     # specific Polars release line. Raise the bound deliberately, not by accident.
+    # polspec passes its suite on the Polars 2.0 release candidates (the
+    # polars-next CI job); the bound widens to <3 once 2.0 itself is final
+    # and that job is green against it.
     "polars>=1.44.1,<2",
     "pyyaml>=6.0.3",
     # Windows ships no IANA database, and a zoned Datetime becoming a Python

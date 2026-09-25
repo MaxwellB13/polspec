@@ -5747,6 +5747,45 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-09-25
+
+Ready for Polars 2. polspec passes its whole suite on the Polars 2.0
+release candidates, and CI now runs it there on every change; the bound
+stays `polars>=1.44.1,<2` until 2.0 itself is released and the same suite
+is green against it. Along the way, testing against Polars 2 turned up two
+bugs that Polars 1 users hit today, both fixed here. No seeded output
+changes, and no spec file needs migrating.
+
+### Fixed
+
+- **`choices` on a `Decimal`, or a `Datetime` not in microseconds.** Drift
+  failed on a `Decimal` column with `choices`; validation raised an error on
+  a `Datetime("ms")` column with them, and on a `Datetime("ns")` column
+  rejected the column's own generated data. The choices reached Polars'
+  `is_in` as a Python list, which arrives at full precision or in
+  microseconds. Validation, a rule's choices and drift now compare
+  against the choices as a Series of the column's own dtype -- which is also
+  what Polars 2 requires of an integer choice on a float column.
+
+### Added
+
+- **`scan()` names itself in `explain()` on Polars 2.** A scan's node reads
+  `PYTHON[polspec: Orders] SCAN`, with an `INFO:` line giving the rows, the
+  seed and the batches. Whether to pass the labels is read off
+  `register_io_source`'s signature, so on Polars 1 the call is unchanged
+  and the header stays `PYTHON SCAN`.
+
+- **Polars 2's `Map` dtype has a spec-file form**, `{Map: {key: <dtype>,
+  value: <dtype>}}`, so a profiled map column can be saved -- `polspec
+  schema infer` on a file with one no longer fails. A `Map` column
+  declares, validates, profiles and drifts by its dtype; `generate()`
+  refuses it by name until drawing its values arrives.
+
+### Internal
+
+- A `polars-next` CI job runs the suite on the newest Polars 2
+  pre-release, informational until 2.0 is final.
+
 ## [0.10.0] - 2026-09-25
 
 **One seeded change, once: every `unique=True` column generates different
@@ -7121,7 +7160,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/MaxwellB13/polspec/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/MaxwellB13/polspec/compare/v0.9.2...v0.10.0
 [0.9.2]: https://github.com/MaxwellB13/polspec/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/MaxwellB13/polspec/compare/v0.9.0...v0.9.1
