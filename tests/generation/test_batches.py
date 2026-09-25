@@ -17,6 +17,8 @@ from polspec import (
     col,
     generate,
     generate_batches,
+    scan,
+    sink_parquet,
 )
 
 
@@ -350,30 +352,8 @@ def test_a_sink_is_a_scan_written_out(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# A unique column repeats its values in every batch, and says so
+# A unique column is a permutation of its value space, so a batch is a window
 # ---------------------------------------------------------------------------
-
-
-class Keyed(FrameSpec):
-    key = ColSpec(pl.Int64, bounds=(1, 1_000_000), unique=True)
-    code = ColSpec(pl.String, unique=True)
-    value = ColSpec(pl.Int64)
-
-
-REPEATS = "repeat their values in every batch"
-
-
-def test_a_unique_string_still_repeats_in_every_batch_and_warns_once():
-    """The behaviour the warning describes, pinned alongside it: a unique
-    string's draw starts over the same way in every batch. The integer key
-    beside it is a permutation, and does not."""
-    with pytest.warns(UserWarning, match=REPEATS) as caught:
-        batches = list(Keyed.generate_batches(30, batch_size=10, seed=1))
-    assert len([w for w in caught if REPEATS in str(w.message)]) == 1
-    message = str(caught[0].message)
-    assert "'code'" in message and "'key'" not in message
-    assert batches[0]["code"].equals(batches[1]["code"])
-    assert not batches[0]["key"].equals(batches[1]["key"])
 
 
 PERMUTED = {
@@ -389,13 +369,20 @@ PERMUTED = {
     "half": ColSpec(pl.Float16, unique=True),  # all 63,487 finite halves
     "wide": ColSpec(pl.Int128, unique=True),
     "sparse": ColSpec(pl.Int32, unique=True, nullable=True, null_probability=0.3),
+    "text": ColSpec(pl.String, unique=True),
+    "short": ColSpec(pl.String, string_length=(3, 3), unique=True),  # 62^3 = 238,328
+    "email": ColSpec(pl.String, format="email", unique=True),
+    "uuid": ColSpec(pl.String, format="uuid4", unique=True),
+    "blob": ColSpec(pl.Binary, unique=True),
+    "cat": ColSpec(pl.Categorical, unique=True),
 }
 
 
 @pytest.mark.parametrize("batch_size", [997, 25_000, 65_536])
 def test_a_unique_column_is_a_window_onto_the_whole_frame(batch_size):
-    """Every unique kind the engine permutes: batched, the frame is the one
-    `generate` makes, and unique over all of it -- not batch by batch."""
+    """Every unique kind -- numbers, dates, choices, strings and formats:
+    batched, the frame is the one `generate` makes, and unique over all of it
+    -- not batch by batch, as unique columns were before 0.10."""
     spec = TableSpec("Unique", dict(PERMUTED))
     n = 60_000
     whole = generate(spec, n, seed=4)
@@ -406,18 +393,12 @@ def test_a_unique_column_is_a_window_onto_the_whole_frame(batch_size):
         assert present.n_unique() == len(present), name
 
 
-def test_a_scan_and_a_sink_say_it_too(tmp_path):
-    with pytest.warns(UserWarning, match=REPEATS):
-        Keyed.scan(30, seed=1, batch_size=10).collect()
-    with pytest.warns(UserWarning, match=REPEATS):
-        Keyed.sink_parquet(tmp_path / "k.parquet", 30, batch_size=10, seed=1)
-
-
-def test_nothing_is_said_when_nothing_repeats():
-    """Warnings are errors in this suite, so running is the assertion."""
-    # One batch holds every row: nothing starts over.
-    Keyed.generate_batches(30, batch_size=30, seed=1).__next__()
-    list(Keyed.generate_batches(30, batch_size=100, seed=1))
-    # No unique column, none that repeats, or none that is collected.
-    list(PlainSource.generate_batches(30, batch_size=10, seed=1))
-    Keyed.scan(30, seed=1, batch_size=10).select("value", "key").collect()
+def test_a_scan_and_a_sink_hold_the_whole_frames_unique_values(tmp_path):
+    """Warnings are errors in this suite, so this also asserts nothing is
+    said: there is no longer anything to warn about."""
+    spec = TableSpec("Unique", {"key": PERMUTED["i64"], "code": PERMUTED["text"]})
+    whole = generate(spec, 30, seed=1)
+    assert scan(spec, 30, seed=1, batch_size=10).collect().equals(whole)
+    path = tmp_path / "k.parquet"
+    sink_parquet(spec, path, 30, batch_size=10, seed=1)
+    assert pl.read_parquet(path).equals(whole)

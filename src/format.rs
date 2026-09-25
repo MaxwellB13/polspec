@@ -10,6 +10,11 @@
 //!
 //! A `Template` is built once per column, at plan time, so a bad part is
 //! refused with the column's name before any row is drawn.
+//!
+//! A template's values are also enumerable: `decode` maps an index to a
+//! value, reading one mixed-radix digit per part, and is a bijection on
+//! `[0, cardinality())`. That is what lets a unique string column be a
+//! permutation of its value space rather than a draw against a set.
 
 use rand::Rng;
 use rand::distr::{Distribution as _, Uniform};
@@ -117,27 +122,70 @@ impl Template {
         self.max_bytes
     }
 
-    /// How many distinct values this template can produce, saturating.
-    ///
-    /// Only an estimate a `unique` draw uses to say "too small" with a
-    /// number in it: a `chars` part of width `w` over an alphabet of `a`
+    /// A template of one run of `min..=max` characters from `alphabet`: a
+    /// plain string column's value space, so it decodes like any format.
+    pub fn run(alphabet: &[u8], min: usize, max: usize) -> Self {
+        Template {
+            parts: vec![Part::Chars {
+                alphabet: alphabet.to_vec(),
+                min,
+                max: max.max(min),
+            }],
+            max_bytes: max.max(min),
+        }
+    }
+
+    /// How many distinct values this template can produce, saturating at
+    /// `u128::MAX`: a `chars` part of width `w` over an alphabet of `a`
     /// contributes `a^w` for each length in its range.
     pub fn cardinality(&self) -> u128 {
-        let mut total: u128 = 1;
+        self.parts.iter().fold(1u128, |total, part| {
+            total.saturating_mul(part.cardinality())
+        })
+    }
+
+    /// Writes the value at `index` into `out`, which is cleared first.
+    ///
+    /// Each part reads one digit of `index` in its own radix, its
+    /// cardinality: a literal none, a one-of the value's position, a run of
+    /// characters a width bucket and then a number in base `alphabet.len()`,
+    /// written at that width. Distinct indices below `cardinality()` give
+    /// distinct values. A saturated radix is read as the digit it is -- the
+    /// index is below it, so the digit is the whole index -- and stays
+    /// injective, since no two indices can reach the same digits.
+    pub fn decode(&self, mut index: u128, out: &mut Vec<u8>) {
+        out.clear();
         for part in &self.parts {
-            let here: u128 = match part {
-                Part::Literal(_) => 1,
-                Part::OneOf(values) => values.len() as u128,
-                Part::Chars { alphabet, min, max } => {
-                    let a = alphabet.len() as u128;
-                    (*min..=*max)
-                        .map(|w| a.saturating_pow(w as u32))
-                        .fold(0u128, |acc, x| acc.saturating_add(x))
+            match part {
+                Part::Literal(text) => out.extend_from_slice(text.as_bytes()),
+                Part::OneOf(values) => {
+                    let radix = values.len() as u128;
+                    out.extend_from_slice(values[(index % radix) as usize].as_bytes());
+                    index /= radix;
                 }
-            };
-            total = total.saturating_mul(here);
+                Part::Chars { alphabet, min, max } => {
+                    let radix = part.cardinality();
+                    let mut digit = index % radix;
+                    index /= radix;
+                    let a = alphabet.len() as u128;
+                    let mut width = *min;
+                    loop {
+                        let bucket = a.saturating_pow(width as u32);
+                        if digit < bucket || width == *max {
+                            break;
+                        }
+                        digit -= bucket;
+                        width += 1;
+                    }
+                    let start = out.len();
+                    out.resize(start + width, alphabet[0]);
+                    for slot in out[start..].iter_mut().rev() {
+                        *slot = alphabet[(digit % a) as usize];
+                        digit /= a;
+                    }
+                }
+            }
         }
-        total
     }
 
     /// A sampler over this template, with its distributions prepared once.
@@ -162,6 +210,22 @@ impl Template {
             })
             .collect();
         TemplateSampler { parts }
+    }
+}
+
+impl Part {
+    /// How many distinct strings this part contributes, saturating.
+    fn cardinality(&self) -> u128 {
+        match self {
+            Part::Literal(_) => 1,
+            Part::OneOf(values) => values.len() as u128,
+            Part::Chars { alphabet, min, max } => {
+                let a = alphabet.len() as u128;
+                (*min..=*max)
+                    .map(|w| a.saturating_pow(w as u32))
+                    .fold(0u128, |acc, x| acc.saturating_add(x))
+            }
+        }
     }
 }
 
@@ -279,6 +343,66 @@ mod tests {
         let err = Template::compile(&[raw("shout", &["!"], 0, 0)], "c").unwrap_err();
         assert!(err.contains("unknown kind 'shout'"), "{err}");
         assert!(Template::compile(&[], "c").is_err());
+    }
+
+    fn decoded(t: &Template) -> Vec<String> {
+        let mut out = Vec::new();
+        (0..t.cardinality())
+            .map(|i| {
+                t.decode(i, &mut out);
+                String::from_utf8(out.clone()).unwrap()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn decoding_is_a_bijection_onto_the_values() {
+        // 12 widths-and-letters x 1 literal x 2 choices: every index gives a
+        // different value, and every value the template can make appears.
+        let t = Template::compile(
+            &[
+                raw("chars", &["abc"], 1, 2),
+                raw("lit", &["-"], 0, 0),
+                raw("one_of", &["x", "yy"], 0, 0),
+            ],
+            "c",
+        )
+        .unwrap();
+        let values = decoded(&t);
+        assert_eq!(values.len(), 24);
+        let distinct: std::collections::HashSet<&String> = values.iter().collect();
+        assert_eq!(distinct.len(), 24);
+        for v in &values {
+            let (head, tail) = v.split_once('-').unwrap();
+            assert!((1..=2).contains(&head.len()) && head.bytes().all(|b| b"abc".contains(&b)));
+            assert!(tail == "x" || tail == "yy", "{v}");
+        }
+    }
+
+    #[test]
+    fn a_run_holds_every_string_its_lengths_allow_including_the_empty_one() {
+        let values = decoded(&Template::run(b"ab", 0, 2));
+        let mut sorted = values.clone();
+        sorted.sort();
+        assert_eq!(sorted, ["", "a", "aa", "ab", "b", "ba", "bb"]);
+    }
+
+    #[test]
+    fn a_saturated_space_still_decodes_distinct_values() {
+        // 62 letters up to 40 wide: far past u128, so the radix saturates.
+        let t = Template::run(
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
+            1,
+            40,
+        );
+        assert_eq!(t.cardinality(), u128::MAX);
+        let mut out = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for i in [0, 1, 61, 62, 1 << 64, u128::MAX - 1, u128::MAX / 3] {
+            t.decode(i, &mut out);
+            assert!(out.len() <= 40);
+            assert!(seen.insert(out.clone()), "index {i} repeated a value");
+        }
     }
 
     #[test]

@@ -1,7 +1,8 @@
 //! Filling a column whose values must all differ.
 //!
-//! A column with an enumerable value space -- an integer range, a set of
-//! categories, the two booleans, a grid over a float range -- is filled
+//! Every unique column has an enumerable value space -- an integer range, a
+//! set of categories, the two booleans, a grid over a float range, the
+//! strings a template can make -- and is filled
 //! through a keyed permutation of that space (`crate::permute`): the value at
 //! row `r` is the `π(r)`-th value of the space. Distinct rows get distinct
 //! values, and a row's value depends only on the row and the seed, so the
@@ -9,40 +10,32 @@
 //! column's slice -- a batch of `generate_batches` included -- and chunks
 //! fill in parallel with nothing held but the output.
 //!
-//! Strings and templated strings are still drawn by rejection against a set,
-//! in one pass per call, until their value spaces are enumerated too; until
-//! then they repeat from batch to batch, and Python says so.
+//! A string's space is enumerable too: a template's values -- or a plain
+//! string's, a template of one run of characters -- decode from an index one
+//! mixed-radix digit per part (`format::Template::decode`). Drawn uniformly
+//! from that space, a unique string favours its longer lengths, which hold
+//! most of the strings.
 //!
 //! Nulls are exempt, as they are everywhere else in polspec: a null means "no
 //! value", and repeating it is not repeating a value. The null mask is the
 //! ordinary per-row draw, and a null row simply spends its index -- so a
 //! permuted column's space has to hold every row, not only the non-null ones.
 
-use std::collections::HashSet;
-use std::hash::Hash;
-
 use polars::prelude::*;
 use polars_arrow::array::BooleanArray;
 use polars_arrow::bitmap::Bitmap;
 use polars_arrow::datatypes::ArrowDataType;
 use polars_core::chunked_array::builder::StringChunkedBuilder;
-use rand::SeedableRng;
-use rand::distr::{Bernoulli, Distribution as _, Uniform};
-use rand_xoshiro::Xoshiro256PlusPlus;
+use rand::distr::Distribution as _;
 use rayon::prelude::*;
 
+use crate::format::Template;
 use crate::permute::Permutation;
 use crate::plan::{ColumnPlan, Kind};
 use crate::sample::{
     CHARSET, CHUNK_SIZE, ColumnSeed, VALIDITY_BYTES_PER_CHUNK, chunk_rng, draws_nulls,
-    null_bernoulli, random_ascii, seed_for_chunk,
+    null_bernoulli,
 };
-
-/// How many draws a rejection loop may take per value before giving up. A
-/// domain wide enough to be rejected against needs barely more than one; this
-/// only stops a domain that is secretly too small -- three-character strings
-/// -- from looping forever.
-const MAX_DRAWS_PER_VALUE: usize = 64;
 
 /// A float grid's points sit this many units in the last place apart at the
 /// widest magnitude of its range, so rounding a point to the column's float
@@ -89,8 +82,7 @@ where
     if n == 0 {
         return Ok((values, None));
     }
-    // Keyed apart from the chunk seeds the null mask draws from.
-    let permutation = Permutation::new(domain, seed.base ^ 0x5EED_0F5A_BE11_A5E5);
+    let permutation = Permutation::new(domain, permutation_seed(seed));
     let at = |i: usize, row: usize| {
         decode(permutation.apply((first_row + i * CHUNK_SIZE + row) as u128))
     };
@@ -124,6 +116,12 @@ where
             }
         });
     Ok((values, Some(Bitmap::from_u8_vec(validity, n))))
+}
+
+/// The key a column's permutation is built from: the column seed, kept apart
+/// from the chunk seeds its null mask draws from.
+fn permutation_seed(seed: ColumnSeed) -> u64 {
+    seed.base ^ 0x5EED_0F5A_BE11_A5E5
 }
 
 fn permuted_column<T, F>(
@@ -249,158 +247,65 @@ fn unique_index(plan: &ColumnPlan, n: usize, seed: ColumnSeed) -> Result<UInt32C
     permuted_column(plan, n, seed, domain, |i| i as u32)
 }
 
-// ---------------------------------------------------------------------------
-// The rejected kinds: strings, until their value spaces are enumerated
-// ---------------------------------------------------------------------------
-
-/// Which rows are null, and how many are not.
-fn null_mask(
+/// A string column -- plain, or with a `format=` template -- through its
+/// template's value space, chunk by chunk like `sample::gen_template_column`.
+fn unique_strings(
     plan: &ColumnPlan,
     n: usize,
-    rng: &mut Xoshiro256PlusPlus,
-) -> Result<(Vec<bool>, usize), String> {
-    if !plan.nullable || plan.null_probability <= 0.0 {
-        return Ok((vec![false; n], n));
+    seed: ColumnSeed,
+    template: &Template,
+) -> Result<StringChunked, String> {
+    let name = PlSmallStr::from(plan.name.as_str());
+    let first_row = seed.first_chunk * CHUNK_SIZE;
+    let domain = template.cardinality();
+    let rows = (first_row + n) as u128;
+    if rows > domain {
+        return Err(too_small(plan, rows, domain));
     }
-    let bernoulli = Bernoulli::new(plan.null_probability).map_err(|e| {
-        format!(
-            "Invalid null_probability {} for column '{}': {e}",
-            plan.null_probability, plan.name
-        )
-    })?;
-    let mask: Vec<bool> = (0..n).map(|_| bernoulli.sample(rng)).collect();
-    let wanted = mask.iter().filter(|is_null| !**is_null).count();
-    Ok((mask, wanted))
-}
-
-/// `wanted` distinct values drawn by rejection, for a domain with no offsets.
-///
-/// `key` is what "distinct" means for the value type. Returns None when the
-/// budget runs out, which is the caller's cue to explain what its domain
-/// could not supply.
-fn distinct_by_rejection<T, K>(
-    wanted: usize,
-    mut draw: impl FnMut() -> T,
-    key: impl Fn(&T) -> K,
-) -> Option<Vec<T>>
-where
-    K: Eq + Hash,
-{
-    let mut seen: HashSet<K> = HashSet::with_capacity(wanted);
-    let mut out: Vec<T> = Vec::with_capacity(wanted);
-    for _ in 0..wanted.saturating_mul(MAX_DRAWS_PER_VALUE) {
-        if out.len() == wanted {
-            break;
-        }
-        let candidate = draw();
-        if seen.insert(key(&candidate)) {
-            out.push(candidate);
-        }
+    if n == 0 {
+        return Ok(StringChunkedBuilder::new(name, 0).finish());
     }
-    (out.len() == wanted).then_some(out)
-}
+    let permutation = Permutation::new(domain, permutation_seed(seed));
+    let bernoulli = draws_nulls(plan)
+        .then(|| null_bernoulli(plan))
+        .transpose()?;
 
-/// Spreads `values` over the non-null rows of `mask`.
-macro_rules! place {
-    ($builder:expr, $mask:expr, $values:expr) => {{
-        let mut values = $values.into_iter();
-        for is_null in $mask {
-            if is_null {
-                $builder.append_null();
-            } else {
-                $builder.append_value(values.next().expect("one value per non-null row"));
+    let chunks: Vec<StringChunked> = (0..n.div_ceil(CHUNK_SIZE))
+        .into_par_iter()
+        .map(|i| {
+            let start = i * CHUNK_SIZE;
+            let len = (start + CHUNK_SIZE).min(n) - start;
+            let mut builder = StringChunkedBuilder::new(name.clone(), len);
+            let mut rng = chunk_rng(seed, i);
+            let mut scratch: Vec<u8> = Vec::with_capacity(template.max_bytes());
+            for row in 0..len {
+                if bernoulli.as_ref().is_some_and(|b| b.sample(&mut rng)) {
+                    builder.append_null();
+                    continue;
+                }
+                let index = permutation.apply((first_row + start + row) as u128);
+                template.decode(index, &mut scratch);
+                // SAFETY: every template part is ASCII or a `String`, so the
+                // buffer is valid UTF-8 -- see `format::Template::compile`.
+                builder.append_value(unsafe { std::str::from_utf8_unchecked(&scratch) });
             }
-        }
-        $builder.finish()
-    }};
+            builder.finish()
+        })
+        .collect();
+
+    Ok(StringChunked::from_chunk_iter(
+        name,
+        chunks.iter().map(|ca| {
+            ca.downcast_iter()
+                .next()
+                .expect("one chunk per part")
+                .clone()
+        }),
+    ))
 }
 
-fn unique_string(plan: &ColumnPlan, n: usize, seed: u64) -> Result<StringChunked, String> {
-    let name = PlSmallStr::from(plan.name.as_str());
-    let mut builder = StringChunkedBuilder::new(name, n);
-    if n == 0 {
-        return Ok(builder.finish());
-    }
-    let min_len = plan.str_min_len;
-    let max_len = plan.str_max_len.max(min_len);
-    let len_dist = match max_len > min_len {
-        true => Some(Uniform::new_inclusive(min_len, max_len).map_err(|e| {
-            format!(
-                "Cannot sample string lengths for column '{}' over [{min_len}, {max_len}]: {e}",
-                plan.name
-            )
-        })?),
-        false => None,
-    };
-
-    let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed_for_chunk(seed, 0));
-    let (mask, wanted) = null_mask(plan, n, &mut rng)?;
-
-    let mut scratch = vec![0u8; max_len];
-    let values = distinct_by_rejection(
-        wanted,
-        || {
-            let len = len_dist.as_ref().map_or(min_len, |d| d.sample(&mut rng));
-            random_ascii(&mut rng, &mut scratch, len);
-            // SAFETY: CHARSET holds only ASCII bytes.
-            unsafe { std::str::from_utf8_unchecked(&scratch[..len]) }.to_owned()
-        },
-        |s: &String| s.clone(),
-    )
-    .ok_or_else(|| {
-        format!(
-            "Column '{}' is unique, but {wanted} distinct string(s) of length {min_len}..\
-             {max_len} could not be drawn from a {}-character alphabet. Allow longer \
-             strings, or generate fewer rows.",
-            plan.name,
-            CHARSET.len()
-        )
-    })?;
-    Ok(place!(builder, mask, values))
-}
-
-/// A templated string column drawn without replacement.
-///
-/// Rejection against a set, like `unique_string`. The refusal names the
-/// template's own cardinality, so `format="uuid4"` can ask for a billion rows
-/// and an `iso_country` column is told at 250 that there is nothing left.
-fn unique_template(plan: &ColumnPlan, n: usize, seed: u64) -> Result<StringChunked, String> {
-    let name = PlSmallStr::from(plan.name.as_str());
-    let mut builder = StringChunkedBuilder::new(name, n);
-    if n == 0 {
-        return Ok(builder.finish());
-    }
-    let template = plan
-        .template
-        .as_ref()
-        .ok_or_else(|| format!("Column '{}' has kind 'template' but no template", plan.name))?;
-    let sampler = template.sampler();
-
-    let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed_for_chunk(seed, 0));
-    let (mask, wanted) = null_mask(plan, n, &mut rng)?;
-    if (wanted as u128) > template.cardinality() {
-        return Err(too_small(plan, wanted as u128, template.cardinality()));
-    }
-
-    let mut scratch = Vec::with_capacity(template.max_bytes());
-    let values = distinct_by_rejection(
-        wanted,
-        || sampler.draw(&mut rng, &mut scratch),
-        |s: &String| s.clone(),
-    )
-    .ok_or_else(|| too_small(plan, wanted as u128, template.cardinality()))?;
-    Ok(place!(builder, mask, values))
-}
-
-/// Whether a unique column of `kind` is filled through the permutation -- so
-/// a window of it is the whole column's slice -- or drawn per call by
-/// rejection.
-pub fn is_permuted(kind: Kind) -> bool {
-    !matches!(kind, Kind::String | Kind::Template)
-}
-
-/// Rows of a permuted unique column, from where `seed`'s first chunk starts.
-pub fn generate_permuted_series(
+/// Rows of a unique column, from where `seed`'s first chunk starts.
+pub fn generate_unique_series(
     plan: &ColumnPlan,
     n: usize,
     seed: ColumnSeed,
@@ -418,28 +323,15 @@ pub fn generate_permuted_series(
         Kind::Float32 => unique_float32(plan, n, seed)?.into_series(),
         Kind::Bool => unique_bool(plan, n, seed)?.into_series(),
         Kind::Index => unique_index(plan, n, seed)?.into_series(),
-        Kind::String | Kind::Template => {
-            return Err(format!(
-                "Column '{}': a unique {} column is drawn by rejection, not permuted",
-                plan.name,
-                plan.kind.name()
-            ));
+        Kind::String => {
+            let run = Template::run(CHARSET, plan.str_min_len, plan.str_max_len);
+            unique_strings(plan, n, seed, &run)?.into_series()
         }
-    })
-}
-
-/// A unique string or templated column, drawn by rejection in one pass per
-/// call -- so, for now, the same rows in every batch.
-pub fn generate_rejected_series(plan: &ColumnPlan, n: usize, seed: u64) -> Result<Series, String> {
-    Ok(match plan.kind {
-        Kind::String => unique_string(plan, n, seed)?.into_series(),
-        Kind::Template => unique_template(plan, n, seed)?.into_series(),
-        _ => {
-            return Err(format!(
-                "Column '{}': a unique {} column is permuted, not rejected",
-                plan.name,
-                plan.kind.name()
-            ));
+        Kind::Template => {
+            let template = plan.template.as_ref().ok_or_else(|| {
+                format!("Column '{}' has kind 'template' but no template", plan.name)
+            })?;
+            unique_strings(plan, n, seed, template)?.into_series()
         }
     })
 }
@@ -585,6 +477,61 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn template_plan(parts: &[(&str, &[&str], usize, usize)]) -> ColumnPlan {
+        let raw: Vec<crate::format::RawPart> = parts
+            .iter()
+            .map(|(kind, strings, lo, hi)| {
+                (
+                    kind.to_string(),
+                    strings.iter().map(|s| s.to_string()).collect(),
+                    *lo,
+                    *hi,
+                )
+            })
+            .collect();
+        ColumnPlan::build(PlanArgs {
+            name: "c".into(),
+            kind: "template",
+            template: Some(&raw),
+            unique: true,
+            ..Default::default()
+        })
+        .expect("valid plan")
+    }
+
+    #[test]
+    fn a_string_or_template_column_is_a_window_too() {
+        let whole_n = CHUNK_SIZE * 2 + 300;
+        for p in [
+            plan("string", None, None, None),
+            template_plan(&[
+                ("chars", &["abcdefghijklmnopqrstuvwxyz"], 3, 8),
+                ("lit", &["@example."], 0, 0),
+                ("one_of", &["com", "org", "net"], 0, 0),
+            ]),
+        ] {
+            let whole = column(&p, whole_n, 21).unwrap();
+            assert_eq!(distinct_count(&whole), whole_n, "{:?} repeated", p.kind);
+            for (offset, n) in [(0, 10), (CHUNK_SIZE - 3, 10), (CHUNK_SIZE + 77, 5_000)] {
+                let window = generate_series(&p, n, 21, offset).unwrap();
+                assert!(window.equals_missing(&whole.slice(offset as i64, n)));
+            }
+        }
+    }
+
+    #[test]
+    fn a_template_smaller_than_the_frame_names_the_column() {
+        // "a" or "b", one or two wide: six strings in all.
+        let p = template_plan(&[("chars", &["ab"], 1, 2)]);
+        let s = column(&p, 6, 3).unwrap();
+        assert_eq!(distinct_count(&s), 6);
+        let err = column(&p, 7, 3).unwrap_err();
+        assert!(
+            err.contains("6 distinct value(s)") && err.contains("7 are needed"),
+            "{err}"
+        );
     }
 
     #[test]

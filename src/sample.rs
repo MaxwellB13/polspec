@@ -570,24 +570,20 @@ fn gen_template_column(
 /// ones the whole column holds at those rows whatever `n` and `row_offset`
 /// are; a call starting mid-chunk fills that chunk from its start and slices
 /// the head off, at most one partial chunk of extra work. A unique column is
-/// a window too, through a permutation of its value space -- except a unique
-/// string, which is still drawn by rejection in one pass per call.
+/// a window too, through a permutation of its value space.
 pub fn generate_series(
     plan: &ColumnPlan,
     n: usize,
     seed: u64,
     row_offset: usize,
 ) -> Result<Series, String> {
-    if plan.unique && !crate::unique::is_permuted(plan.kind) {
-        return crate::unique::generate_rejected_series(plan, n, seed);
-    }
     let head = row_offset % CHUNK_SIZE;
     let seed = ColumnSeed {
         base: seed,
         first_chunk: row_offset / CHUNK_SIZE,
     };
     let series = if plan.unique {
-        crate::unique::generate_permuted_series(plan, n + head, seed)?
+        crate::unique::generate_unique_series(plan, n + head, seed)?
     } else {
         generate_chunked(plan, n + head, seed)?
     };

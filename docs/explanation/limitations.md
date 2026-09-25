@@ -107,16 +107,15 @@ them. See [String formats](../how-to/formats.md).
 - **A `Hierarchy` owns both its columns.** A `null_probability`,
   `distribution` or `weights` declared on either is not what you get: the
   references have to come from one pool for the two columns to join at all.
-- **A unique string repeats its values in every batch.** A unique
-  integer, float, boolean, date, `Decimal` or choice is a permutation of its
-  value space, so a batch of `generate_batches`, a `scan()` or a `sink_*`
-  is a window onto one frame unique throughout. A unique `String` (or
-  `format=`) column with no finite set of values is still drawn afresh in
-  each batch -- and the same way, so every batch holds *the same* values.
-  polspec warns as the second batch is drawn; for a key that must be unique
-  throughout, generate the frame whole with `generate()`. A
-  `__unique_together__` group, a rule and a foreign key are drawn afresh per
-  batch, so a composite key collides across batches only by chance.
+- **A composite key is distinct within a batch, not across batches.** A
+  `unique=True` column is a permutation of its value space, unique across a
+  whole frame however it is batched. A `__unique_together__` group and a
+  foreign key sampled without replacement are drawn afresh per batch of
+  `generate_batches`, a `scan()` or a `sink_*`, so they collide across
+  batches only by chance; generate the frame whole when that matters.
+- **A unique string favours its longest lengths.** It is drawn uniformly
+  from every string its lengths allow, and the longest lengths hold nearly
+  all of them.
 - **A unique column's space must hold every row, nulls included.** Its
   value at a row comes from that row's place in a permutation, and a null
   row spends its place; so a nullable unique column of a thousand rows
