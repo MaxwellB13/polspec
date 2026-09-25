@@ -31,6 +31,7 @@ owns only the inner loop that fills arrays with values.
 | `hierarchy` | `Hierarchy` -- a self-referencing link table, and the pass that builds one |
 | `drift` | `diff` and `drift`: what changed between two specs, or between a spec and data. `fields.py` holds one comparator per `ColSpec` field, `data.py` measures a frame in the declaration's terms |
 | `sizing` | `estimated_size`: a frame's memory, read off the declaration |
+| `reading` | `read`: a data file in a spec's terms -- the reader chosen by extension, a declared date or time that arrived as text parsed. The CLI reads through the same table |
 | `catspec` | `CatSpec` — a shared registry of enums and categoricals, as a value, plus the metaclass that builds one from a class body (the same split as `tablespec`/`framespec`) |
 | `registry` | `Registry` — a declared set of specs: resolving cross-spec keys, ordering parents before children, `generate_all`/`validate_all`, one file and one diagram for the set |
 | `serialization` | Spec files: a field registry (`fields.py`) that YAML, generated Python and the `import datetime` decision all derive from; the dtype codec table (`dtypes.py`); format versions and migrations (`migrations.py`) |

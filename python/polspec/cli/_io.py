@@ -21,32 +21,12 @@ import polars as pl
 
 from polspec import FrameSpec
 from polspec.errors import CliError
+from polspec.reading import _DELIMITED, _parse_declared_temporals
+from polspec.reading import _READERS as _DATA_READERS
 from polspec.registry import Registry
 
 if TYPE_CHECKING:
     from polspec.tablespec import TableSpec
-
-_DATA_READERS = {
-    ".csv": pl.read_csv,
-    ".tsv": lambda p: pl.read_csv(p, separator="\t"),
-    ".parquet": pl.read_parquet,
-    ".pq": pl.read_parquet,
-    ".ndjson": pl.read_ndjson,
-    ".jsonl": pl.read_ndjson,
-    ".json": pl.read_json,
-    ".arrow": pl.read_ipc,
-    ".ipc": pl.read_ipc,
-    ".feather": pl.read_ipc,
-}
-
-
-# A text format has no date type, so a reader with no spec to go by -- only
-# `schema infer` -- asks Polars to recognise dates itself.
-_DATE_INFERRING_READERS = {
-    ".csv": lambda p: pl.read_csv(p, try_parse_dates=True),
-    ".tsv": lambda p: pl.read_csv(p, separator="\t", try_parse_dates=True),
-}
-
 
 _DATA_WRITERS = {
     ".csv": pl.DataFrame.write_csv,
@@ -78,69 +58,24 @@ def _read_data_file(
 ) -> pl.DataFrame:
     """A data file as a frame, read in `spec`'s terms when there is one.
 
-    With a spec, a column it declares as a date or time that arrived as
-    text is parsed as what it declares (`_parse_declared_temporals`).
-    Without one, `infer_dates` has Polars recognise dates in a CSV itself.
+    With a spec, this is `polspec.read`. Without one, `infer_dates` has
+    Polars recognise dates in a CSV itself -- `schema infer`'s case, where
+    there is no declaration to go by.
     """
     suffix = path.suffix.lower()
-    reader = _DATA_READERS.get(suffix)
-    if reader is None:
+    if suffix not in _DATA_READERS:
         raise CliError(
             f"don't know how to read {path.suffix!r} files ({path}). "
             f"Supported: {', '.join(sorted(_DATA_READERS))}"
         )
-    if infer_dates:
-        reader = _DATE_INFERRING_READERS.get(suffix, reader)
+    options = {"try_parse_dates": True} if infer_dates and suffix in _DELIMITED else {}
     try:
-        df = reader(path)
+        df = _DATA_READERS[suffix](path, **options)
     except Exception as exc:
         raise CliError(f"could not read {path}: {exc}") from exc
     if sample is not None:
         df = df.head(sample)
     return _parse_declared_temporals(df, spec) if spec is not None else df
-
-
-def _parse_declared_temporals(df: pl.DataFrame, spec: TableSpec) -> pl.DataFrame:
-    """Each column `spec` declares as a `Date`, `Datetime` or `Time` that
-    arrived as text, parsed as what it declares -- when every value parses.
-
-    A CSV or JSON file has no date type, so a date column arrives as
-    `String`, and validation would report its dtype and check nothing else
-    about it. Only declared columns are touched, so a `String` column of
-    date-shaped text stays text. A column holding a value that does not
-    parse is left as it was read: validation then reports the dtype, which
-    is true, rather than a null that was never in the file.
-    """
-    parsed = []
-    for name, column in spec.columns.items():
-        if name not in df.columns or df.schema[name] != pl.String:
-            continue
-        values = _parse_temporal(df[name], column.dtype)
-        if values is not None and values.null_count() == df[name].null_count():
-            parsed.append(values)
-    return df.with_columns(parsed) if parsed else df
-
-
-def _parse_temporal(text: pl.Series, dtype: pl.DataType) -> pl.Series | None:
-    """`text` as `dtype`, with a value that does not parse as a null; None
-    for a dtype that is not a date or time, or text Polars cannot read as
-    one at all. Parsed as a Series rather than an expression, which is how
-    Polars allows an offset-aware value to be read into a naive column."""
-    try:
-        if dtype == pl.Date:
-            return text.str.to_date(strict=False)
-        if dtype == pl.Time:
-            return text.str.to_time(strict=False)
-        if dtype == pl.Datetime:
-            declared = dtype if isinstance(dtype, pl.Datetime) else pl.Datetime()
-            return text.str.to_datetime(
-                time_unit=declared.time_unit,
-                time_zone=declared.time_zone,
-                strict=False,
-            )
-    except pl.exceptions.PolarsError:
-        return None
-    return None
 
 
 def _write_data_file(df: pl.DataFrame, path: Path) -> None:

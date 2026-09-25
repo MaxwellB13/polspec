@@ -1848,15 +1848,23 @@ Path("customers.csv").write_text(          # the file you were handed
 **1. Read it without forcing the spec's types.**
 
 ```python
-given = pl.read_csv("customers.csv", try_parse_dates=True)
+given = Customers.read("customers.csv")
 ```
 
-`try_parse_dates=True` matters: a CSV has no date type, so without it
-`signed_up` arrives as `String`, the report says only *expected Date, got
-String*, and none of the column's own checks run. The other gaps between a
-CSV and a spec take care of themselves -- a `String` column is accepted
-where an `Enum` or `Categorical` is declared, an integer where a float or
-`Decimal` is, and the values are checked either way.
+`read()` picks the reader from the extension (`.csv`, `.tsv`, `.parquet`,
+`.ndjson`, `.json`, `.arrow` -- the set `polspec validate` reads, with any
+Polars reader option passed through, such as `separator=";"`) and does one
+thing in the spec's name. A CSV has no date type, so `signed_up` arrives as
+text; `read()` parses each column the spec declares as a date or time, when
+every value in it parses. Without that, the report would say only *expected
+Date, got String*, and none of the column's own checks would run. The other
+gaps between a CSV and a spec take care of themselves -- a `String` column
+is accepted where an `Enum` or `Categorical` is declared, an integer where a
+float or `Decimal` is, and the values are checked either way.
+
+In plain Polars, `pl.read_csv("customers.csv", try_parse_dates=True)` comes
+close; the difference is that Polars parses every column that looks like a
+date, where `read()` parses only the ones the spec says are dates.
 
 Reading with the spec's schema is the tempting alternative, and the wrong
 first step: Polars stops at the first value that does not fit, so one
@@ -3638,6 +3646,7 @@ cannot describe a signature the code does not have.
 | [`sink_ipc`][polspec.sink_ipc] | [Generation](https://maxwellb13.github.io/polspec/reference/api/generation/) |
 | [`sink_csv`][polspec.sink_csv] | [Generation](https://maxwellb13.github.io/polspec/reference/api/generation/) |
 | [`sink_ndjson`][polspec.sink_ndjson] | [Generation](https://maxwellb13.github.io/polspec/reference/api/generation/) |
+| [`read`][polspec.read] | [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/) |
 | [`inspect`][polspec.inspect] | [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/) |
 | [`validate`][polspec.validate] | [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/) |
 | [`ValidationOptions`][polspec.ValidationOptions] | [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/) |
@@ -4021,6 +4030,8 @@ data -- go through `__columns__`:
 
 - `FrameSpec.inspect(cls, df: 'pl.DataFrame | pl.LazyFrame', *, options: 'ValidationOptions | None' = None, references: 'References' = None, extra_cols: "Literal['drop', 'allow', 'raise'] | None" = None, missing_cols: "Literal['add', 'allow', 'raise'] | None" = None, strict_dtypes: 'bool | None' = None, validate_rules: 'bool | None' = None, validate_validators: 'bool | None' = None, validate_unique: 'bool | None' = None, validate_checks: 'bool | None' = None, validate_foreign_keys: 'bool | None' = None, validate_hierarchy: 'bool | None' = None, validate_pattern: 'bool | None' = None, validate_bounds: 'bool | None' = None, cast: 'bool | None' = None, streaming: 'bool | None' = None) -> 'validation.ValidationReport'` -- Everything this spec has to say about `df`, as a `ValidationReport`.
 
+- `FrameSpec.read(cls, path: 'str | os.PathLike[str]', **reader_options: 'Any') -> 'pl.DataFrame'` -- A data file as a frame, in the terms this spec declares -- read, not validated. See `polspec.read`: the extension picks the reader, a declared date or time that arrived as text is parsed, and nothing else is cast.
+
 - `FrameSpec.scan(cls, n: 'int', *, seed: 'int | None' = None, batch_size: 'int | None' = None, method: "Literal['random', 'cartesian']" = 'random', references: 'References' = None) -> 'pl.LazyFrame'` -- A `LazyFrame` of `n` rows, generated as they are collected.
 
 - `FrameSpec.schema(cls) -> 'pl.Schema'` -- The Polars schema this spec declares: column name to dtype.
@@ -4402,9 +4413,43 @@ Source: https://maxwellb13.github.io/polspec/reference/api/validation/
 
 # Validation
 
-`inspect()` returns a report; `validate()` raises one. Both carry the same
-findings as data -- see [Validating data](https://maxwellb13.github.io/polspec/how-to/validating/).
+`read()` brings a file in, in a spec's terms; `inspect()` returns a
+report on it and `validate()` raises one. Both carry the same findings as
+data -- see [Validating data](https://maxwellb13.github.io/polspec/how-to/validating/).
 
+## read
+
+### read(spec: 'TableSpec | type', path: 'str | os.PathLike[str]', **reader_options: 'Any') -> 'pl.DataFrame'
+
+A data file as a frame, in the terms `spec` declares -- read, not
+validated.
+
+Parameters
+----------
+spec : TableSpec | FrameSpec class
+    The declaration the file should meet.
+path : str | PathLike
+    The file. Its extension picks the reader: `.csv`, `.tsv`,
+    `.parquet`/`.pq`, `.ndjson`/`.jsonl`, `.json` or
+    `.arrow`/`.ipc`/`.feather` -- the set `polspec validate` reads.
+**reader_options
+    Passed to the Polars reader, e.g. `separator=";"` for a CSV.
+
+Returns
+-------
+pl.DataFrame
+    The file as Polars reads it, with one change: each column the spec
+    declares as a `Date`, `Datetime` or `Time` that arrived as text is
+    parsed as what it declares, when every value in it parses. A column
+    holding a value that does not stays text, so validation reports its
+    dtype rather than a null that was never in the file. Nothing else is
+    cast -- pass the frame to `inspect()` for every problem at once, or to
+    `validate(cast=True)` for the typed frame.
+
+Raises
+------
+ValueError
+    For an extension polspec does not know.
 ## inspect
 
 ### inspect(spec: 'TableSpec', df: 'pl.DataFrame | pl.LazyFrame', *, options: 'ValidationOptions | None' = None, references: 'References' = None, **option_kwargs: 'Any') -> 'ValidationReport'
@@ -4868,6 +4913,7 @@ owns only the inner loop that fills arrays with values.
 | `hierarchy` | `Hierarchy` -- a self-referencing link table, and the pass that builds one |
 | `drift` | `diff` and `drift`: what changed between two specs, or between a spec and data. `fields.py` holds one comparator per `ColSpec` field, `data.py` measures a frame in the declaration's terms |
 | `sizing` | `estimated_size`: a frame's memory, read off the declaration |
+| `reading` | `read`: a data file in a spec's terms -- the reader chosen by extension, a declared date or time that arrived as text parsed. The CLI reads through the same table |
 | `catspec` | `CatSpec` — a shared registry of enums and categoricals, as a value, plus the metaclass that builds one from a class body (the same split as `tablespec`/`framespec`) |
 | `registry` | `Registry` — a declared set of specs: resolving cross-spec keys, ordering parents before children, `generate_all`/`validate_all`, one file and one diagram for the set |
 | `serialization` | Spec files: a field registry (`fields.py`) that YAML, generated Python and the `import datetime` decision all derive from; the dtype codec table (`dtypes.py`); format versions and migrations (`migrations.py`) |

@@ -30,6 +30,7 @@ from polspec.generation import (
 )
 from polspec.hierarchy import Hierarchy
 from polspec.profiler import profile_dataframe
+from polspec.reading import read
 from polspec.registry import Registry
 from polspec.rules import ColRule
 from polspec.spec import ColSpec
@@ -75,6 +76,7 @@ __all__ = [
     "generate_batches",
     "inspect",
     "profile_dataframe",
+    "read",
     "scan",
     "sink_csv",
     "sink_ipc",

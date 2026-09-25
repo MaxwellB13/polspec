@@ -143,6 +143,7 @@ def test_the_facade_names_exactly_the_options_the_function_accepts():
         "sink_csv",
         "sink_ipc",
         "sink_ndjson",
+        "read",
     ],
 )
 def test_the_facade_spells_out_the_signature_it_forwards_to(verb):
@@ -153,10 +154,10 @@ def test_the_facade_spells_out_the_signature_it_forwards_to(verb):
     """
     from inspect import signature
 
-    from polspec import generation
+    import polspec
 
     facade = signature(getattr(FrameSpec, verb)).parameters
-    function = signature(getattr(generation, verb)).parameters
+    function = signature(getattr(polspec, verb)).parameters
     assert next(iter(function)) == "spec"
     expected = {name: p for name, p in function.items() if name != "spec"}
     assert {n: p.default for n, p in facade.items()} == {
