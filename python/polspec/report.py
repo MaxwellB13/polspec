@@ -72,6 +72,13 @@ def _describe_domain(cs) -> str:
     return _describe_choices(cs.choices)
 
 
+def _describe_nullable(cs) -> str:
+    """The Nullable column: the cell, and -- for a list -- its elements."""
+    cell = "Yes" if cs.nullable else "No"
+    rate = getattr(cs, "element_null_probability", 0.0)
+    return f"{cell} (elements {rate:.0%})" if rate else cell
+
+
 def _describe_choices(choices) -> str:
     if choices is None:
         return "-"
@@ -122,7 +129,7 @@ def _column_rows(name: str, cs) -> list[str]:
     rows = [
         f"| `{name}` "
         f"| `{_describe_dtype(cs.dtype)}` "
-        f"| {'Yes' if cs.nullable else 'No'} "
+        f"| {_describe_nullable(cs)} "
         f"| {str(cs.bounds) if cs.bounds else '-'} "
         f"| {_describe_domain(cs)} "
         f"| {length} "
@@ -326,6 +333,8 @@ def _entity_lines(spec: TableSpec, entity_name: str) -> list[str]:
         comments: list[str] = []
         if cs.nullable:
             comments.append("nullable")
+        if cs.element_null_probability:
+            comments.append(f"element nulls: {cs.element_null_probability:.0%}")
         if cs.bounds is not None:
             comments.append(f"bounds: {cs.bounds}")
         elif cs.choices is not None:

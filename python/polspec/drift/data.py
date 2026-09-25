@@ -52,6 +52,10 @@ class Observed:
         The observed `[min, max]` number of elements, for a List column
         whose declaration carries `list_length`. Every other measurement
         of a List column is over its elements.
+    element_count, element_null_count : int
+        For a List or Array column, how many elements its present lists
+        hold, and how many of those are null; `element_null_rate` is the
+        fraction.
     outside : tuple[int, tuple]
         Rows holding a value outside the declared finite domain, and up to
         `max_samples` of those values.
@@ -73,6 +77,8 @@ class Observed:
     extent: Bound | None = None
     length_extent: Bound | None = None
     list_length_extent: Bound | None = None
+    element_count: int = 0
+    element_null_count: int = 0
     outside: tuple[int, tuple[Any, ...]] = (0, ())
     unseen: tuple[Any, ...] = ()
     format_failures: tuple[int, tuple[Any, ...]] = (0, ())
@@ -85,6 +91,12 @@ class Observed:
     @property
     def has_nulls(self) -> bool:
         return self.null_count > 0
+
+    @property
+    def element_null_rate(self) -> float | None:
+        if not self.element_count:
+            return None
+        return self.element_null_count / self.element_count
 
     @classmethod
     def of(
@@ -108,7 +120,10 @@ class Observed:
                 measured["list_length_extent"] = Bound(
                     int(cast("int", lengths.min())), int(cast("int", lengths.max()))
                 )
-            values = values.explode(empty_as_null=False).drop_nulls()
+            elements = values.explode(empty_as_null=False)
+            measured["element_count"] = len(elements)
+            measured["element_null_count"] = elements.null_count()
+            values = elements.drop_nulls()
             if len(values) == 0:
                 return cls(**measured)
 

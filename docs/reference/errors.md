@@ -72,14 +72,14 @@ otherwise. See [Schema and data drift](../how-to/drift.md).
 | `column_removed` | both | breaking | the old spec declares a column the new lacks, or the data lacks a declared column |
 | `column_renamed` | `diff` | compatible | a rename given through `renames=` |
 | `dtype_changed` | both | as validation decides | the dtypes differ; compatible when the old values would still validate |
-| `nullability_changed` | both | off → on compatible; on → off breaking; nulls in a non-nullable column breaking | |
+| `nullability_changed` | both | off → on compatible; on → off breaking; nulls in a non-nullable column breaking | `nullable`, or a list's `element_null_probability` between 0 and not |
 | `domain_widened` | `diff` | compatible | bounds, choices, format or string length accept more than before |
 | `domain_narrowed` | `diff` | breaking | they accept less |
 | `domain_changed` | `diff` | breaking | neither is inside the other |
 | `bounds_exceeded` | `drift` | breaking | values escape `bounds`, `string_length` or `list_length`; `details` say which and by how much |
 | `new_values` | `drift` | breaking | values outside `choices`, an `Enum` or a finite format |
 | `format_violated` | `drift` | breaking | values that do not match the declared `format` |
-| `null_rate_moved` | `drift` | compatible | the null rate sits further from `null_probability` than the tolerance |
+| `null_rate_moved` | `drift` | compatible | the null rate sits further from `null_probability` -- or the element null rate from `element_null_probability` -- than the tolerance |
 | `cardinality_moved` | `drift` | compatible | declared values the data never holds |
 | `constraint_added` | `diff` | breaking | `unique`, a validator, rule, check, composite key, foreign key or hierarchy present only in the new spec |
 | `constraint_removed` | `diff` | compatible | the reverse |

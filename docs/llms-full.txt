@@ -658,9 +658,20 @@ ColSpec(pl.Array(pl.Float64, 3), bounds=(0.0, 1.0))               # exactly thre
 required; without it generation makes 0 to 5. An `Array` takes its length
 from the dtype and refuses `list_length`.
 
-`nullable` and `null_probability` describe the list: a null cell, never a
-null element. Generation never puts a null inside a list, and validation
-reports one under `nullability` like a null in a non-nullable column.
+`nullable` and `null_probability` describe the list: a null *cell*.
+`element_null_probability` describes what is inside it -- how often an
+element is null:
+
+```python
+ColSpec(pl.List(pl.Int64), element_null_probability=0.1)   # about one element in ten is null
+```
+
+It defaults to 0, which says elements are never null: generation puts none
+inside a list, and validation reports one under `nullability` like a null in
+a non-nullable column. Any other rate accepts them, and every other element
+claim still applies to the elements that are present. The rate applies to a
+`List` and an `Array` alike, and to an element that is itself a struct or a
+list, which is then null as a whole.
 
 Validation runs every element claim inside the list, and a list fails where
 *any* element does — the finding's samples and `rows()` are the offending
@@ -2545,7 +2556,7 @@ as its default is the worst outcome -- pass `strict=False` to
 | | Round-trips |
 |:--|:--:|
 | dtypes, including parametrized `Enum` / `Datetime` / `Duration` / named `Categorical` | yes |
-| `nullable`, `null_probability`, `bounds`, `string_length`, `list_length`, `fields`, `format`, `pattern`, `seed_name`, `unique`, `tags` | yes |
+| `nullable`, `null_probability`, `bounds`, `string_length`, `list_length`, `element_null_probability`, `fields`, `format`, `pattern`, `seed_name`, `unique`, `tags` | yes |
 | `choices`, `weights`, `distribution`, `distribution_params` | yes |
 | `rules` (`ColRule`) | yes |
 | `__unique_together__` | yes |
@@ -3711,7 +3722,7 @@ What one column declares, and the pieces that make up a declaration.
 
 ## ColSpec
 
-### ColSpec(dtype: pl.DataType | type[pl.DataType], col_name: str | None=None, seed_name: str | None=None, nullable: bool=False, bounds: Bound[Any] | tuple[Any, Any] | list[Any] | None=None, tags: str | Sequence[str] | None=(), unique: bool=False, null_probability: float=_DEFAULT_NULL_PROBABILITY, string_length: Bound[int] | tuple[int, int] | list[int] | None=None, list_length: Bound[int] | tuple[int, int] | list[int] | None=None, fields: Mapping[str, ColSpec] | None=None, format: str | None=None, pattern: str | None=None, distribution: str | None=None, distribution_params: dict[str, float] | None=None, choices: Sequence[Any] | dict[Any, float] | None=None, weights: Sequence[float] | None=None, rules: Sequence[ColRule]=(), validators: Check | pl.Expr | Pred | Sequence[Check | pl.Expr | Pred] | None=())
+### ColSpec(dtype: pl.DataType | type[pl.DataType], col_name: str | None=None, seed_name: str | None=None, nullable: bool=False, bounds: Bound[Any] | tuple[Any, Any] | list[Any] | None=None, tags: str | Sequence[str] | None=(), unique: bool=False, null_probability: float=_DEFAULT_NULL_PROBABILITY, string_length: Bound[int] | tuple[int, int] | list[int] | None=None, list_length: Bound[int] | tuple[int, int] | list[int] | None=None, element_null_probability: float=0.0, fields: Mapping[str, ColSpec] | None=None, format: str | None=None, pattern: str | None=None, distribution: str | None=None, distribution_params: dict[str, float] | None=None, choices: Sequence[Any] | dict[Any, float] | None=None, weights: Sequence[float] | None=None, rules: Sequence[ColRule]=(), validators: Check | pl.Expr | Pred | Sequence[Check | pl.Expr | Pred] | None=())
 
 One column's declaration: its type, and every claim made about its values.
 
@@ -3777,8 +3788,13 @@ list_length : Bound | tuple[int, int] | list[int] | None, optional
     other field that describes a value -- `bounds`, `choices`, `weights`,
     `format`, `pattern`, `string_length`, `distribution` -- describes
     each *element*; `nullable` and `null_probability` describe the list
-    itself, and generation never puts a null inside one. An `Array`
-    takes its length from the dtype and refuses `list_length`.
+    itself. An `Array` takes its length from the dtype and refuses
+    `list_length`.
+element_null_probability : float, optional
+    For a `List` or `Array` column, how often an element is null, from 0
+    (the default: elements are never null, and validation reports one)
+    to 1. The list's own `nullable` is a null cell; this is a null
+    inside a present one.
 fields : Mapping[str, ColSpec] | None, optional
     For a `Struct` column, what is claimed about each field's values:
     a `ColSpec` per field, keyed by name. The dtype is the schema --
@@ -4892,14 +4908,14 @@ otherwise. See [Schema and data drift](https://maxwellb13.github.io/polspec/how-
 | `column_removed` | both | breaking | the old spec declares a column the new lacks, or the data lacks a declared column |
 | `column_renamed` | `diff` | compatible | a rename given through `renames=` |
 | `dtype_changed` | both | as validation decides | the dtypes differ; compatible when the old values would still validate |
-| `nullability_changed` | both | off → on compatible; on → off breaking; nulls in a non-nullable column breaking | |
+| `nullability_changed` | both | off → on compatible; on → off breaking; nulls in a non-nullable column breaking | `nullable`, or a list's `element_null_probability` between 0 and not |
 | `domain_widened` | `diff` | compatible | bounds, choices, format or string length accept more than before |
 | `domain_narrowed` | `diff` | breaking | they accept less |
 | `domain_changed` | `diff` | breaking | neither is inside the other |
 | `bounds_exceeded` | `drift` | breaking | values escape `bounds`, `string_length` or `list_length`; `details` say which and by how much |
 | `new_values` | `drift` | breaking | values outside `choices`, an `Enum` or a finite format |
 | `format_violated` | `drift` | breaking | values that do not match the declared `format` |
-| `null_rate_moved` | `drift` | compatible | the null rate sits further from `null_probability` than the tolerance |
+| `null_rate_moved` | `drift` | compatible | the null rate sits further from `null_probability` -- or the element null rate from `element_null_probability` -- than the tolerance |
 | `cardinality_moved` | `drift` | compatible | declared values the data never holds |
 | `constraint_added` | `diff` | breaking | `unique`, a validator, rule, check, composite key, foreign key or hierarchy present only in the new spec |
 | `constraint_removed` | `diff` | compatible | the reverse |
@@ -5275,9 +5291,6 @@ them. See [String formats](https://maxwellb13.github.io/polspec/how-to/formats/)
 
 ## Smaller sharp edges
 
-- **A list's elements are never null.** Generation fills a `List` column's
-  cells with non-null elements, and no field can ask otherwise; validation
-  reports a null element as a `nullability` finding.
 - **A `Decimal`, `Int128` or `UInt128` is drawn through 64 bits.**
   Generation fills a Decimal as its physical integer and a 128-bit integer
   as a 64-bit one, so bounds past what 64 bits hold -- eighteen significant

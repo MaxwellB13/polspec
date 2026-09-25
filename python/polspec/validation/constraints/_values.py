@@ -152,9 +152,9 @@ class _ListLength(_ColumnConstraint):
 
 @dataclass(kw_only=True)
 class _ListElementNull(_ColumnConstraint):
-    """A null *inside* a list. Generation never makes one, and no field on
-    a ColSpec can ask for one, so it is reported under the nullability code
-    like a null in a non-nullable column."""
+    """A null *inside* a list whose `element_null_probability` is 0 -- the
+    default, which says elements are never null -- reported under the
+    nullability code like a null in a non-nullable column."""
 
     code: FindingCode = "nullability"
 
@@ -532,15 +532,17 @@ def _list_constraints(
         )
 
     elements = column.arr if is_array else column.list
-    constraints.append(
-        _ListElementNull(
-            key=f"{where}__element_null",
-            mask=present & any_element(pl.element().is_null()),
-            sample_expr=column,
-            column=name,
-            where=where,
+    if not spec.element_null_probability:
+        # A declared element null rate says nulls belong inside the list.
+        constraints.append(
+            _ListElementNull(
+                key=f"{where}__element_null",
+                mask=present & any_element(pl.element().is_null()),
+                sample_expr=column,
+                column=name,
+                where=where,
+            )
         )
-    )
 
     inner = element_dtype(actual_dtype)
     # A list of lists has two levels of list claims under one name; `[]`

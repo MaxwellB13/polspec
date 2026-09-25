@@ -484,6 +484,64 @@ def _compare_null_rate(pair: Pair) -> list[DriftFinding]:
     ]
 
 
+def _compare_element_nulls(pair: Pair) -> list[DriftFinding]:
+    """Nulls inside a list. A rate of 0 claims there are none, so allowing
+    them widens what validates and forbidding them narrows it, as
+    `nullable` does for the cell."""
+    declared = pair.declared.element_null_probability
+    if pair.mode == "diff":
+        new = pair.new.element_null_probability
+        if declared == new:
+            return []
+        if not declared or not new:
+            allowed = bool(new)
+            return [
+                pair.finding(
+                    "nullability_changed",
+                    "compatible" if allowed else "breaking",
+                    "list elements may now be null; lists holding one that failed "
+                    "before are accepted"
+                    if allowed
+                    else "list elements may no longer be null; any list holding "
+                    "one that validated before now fails",
+                    suffix="element_nulls",
+                    old=declared,
+                    new=new,
+                )
+            ]
+        return [_field_changed(pair, "element_null_probability", declared, new)]
+    observed = pair.observed
+    if not declared:
+        if not observed.element_null_count:
+            return []
+        return [
+            pair.finding(
+                "nullability_changed",
+                "breaking",
+                f"elements are never null, but {observed.element_null_count} "
+                "are. Declare element_null_probability, or fix the source",
+                suffix="element_nulls",
+                null_count=observed.element_null_count,
+            )
+        ]
+    rate = observed.element_null_rate
+    if rate is None or abs(rate - declared) <= pair.options.null_rate_tolerance:
+        return []
+    return [
+        pair.finding(
+            "null_rate_moved",
+            "compatible",
+            f"{rate:.1%} of elements null, declared element_null_probability="
+            f"{declared}; beyond the {pair.options.null_rate_tolerance:.0%} "
+            "tolerance",
+            suffix="element_null_rate",
+            declared=declared,
+            observed=rate,
+            tolerance=pair.options.null_rate_tolerance,
+        )
+    ]
+
+
 def _constraint(pair: Pair, kind: str, added: bool, what: str) -> DriftFinding:
     return pair.finding(
         "constraint_added" if added else "constraint_removed",
@@ -627,6 +685,7 @@ FIELD_COMPARATORS: dict[str, Comparator] = {
     "format": _compare_domain,
     "string_length": _compare_length("string_length", "length_extent"),
     "list_length": _compare_length("list_length", "list_length_extent"),
+    "element_null_probability": _compare_element_nulls,
     # A pattern is not part of `Domain`: whether one regex contains another
     # is not a decision worth guessing, so a change is reported as a change.
     "pattern": _compare_field("pattern"),

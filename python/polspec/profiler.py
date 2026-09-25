@@ -103,8 +103,10 @@ def _profile_column(
         # Described as its elements: profile the exploded values as a column
         # of the inner dtype, then put the list's own nullability and length
         # back on top. An element that is a struct brings its fields along.
+        exploded = non_null.explode(empty_as_null=False)
+        element_nulls = exploded.null_count() / len(exploded) if len(exploded) else 0.0
         elements = _profile_column(
-            non_null.explode(empty_as_null=False).drop_nulls(),
+            exploded.drop_nulls(),
             name,
             total_rows=0,
             with_weights=with_weights,
@@ -122,6 +124,7 @@ def _profile_column(
             nullable=nullable,
             null_probability=null_probability,
             list_length=list_length,
+            element_null_probability=element_nulls,
         )
 
     if dtype in (pl.String, pl.Utf8) or _is_categorical_dtype(dtype):

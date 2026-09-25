@@ -222,9 +222,20 @@ ColSpec(pl.Array(pl.Float64, 3), bounds=(0.0, 1.0))               # exactly thre
 required; without it generation makes 0 to 5. An `Array` takes its length
 from the dtype and refuses `list_length`.
 
-`nullable` and `null_probability` describe the list: a null cell, never a
-null element. Generation never puts a null inside a list, and validation
-reports one under `nullability` like a null in a non-nullable column.
+`nullable` and `null_probability` describe the list: a null *cell*.
+`element_null_probability` describes what is inside it -- how often an
+element is null:
+
+```python
+ColSpec(pl.List(pl.Int64), element_null_probability=0.1)   # about one element in ten is null
+```
+
+It defaults to 0, which says elements are never null: generation puts none
+inside a list, and validation reports one under `nullability` like a null in
+a non-nullable column. Any other rate accepts them, and every other element
+claim still applies to the elements that are present. The rate applies to a
+`List` and an `Array` alike, and to an element that is itself a struct or a
+list, which is then null as a whole.
 
 Validation runs every element claim inside the list, and a list fails where
 *any* element does — the finding's samples and `rows()` are the offending

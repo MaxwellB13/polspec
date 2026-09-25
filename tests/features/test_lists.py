@@ -274,3 +274,136 @@ def test_from_dataframe_declares_a_list_by_its_elements():
 def test_reports_show_the_list_length():
     spec_cls = spec_for(ColSpec(pl.List(pl.Int64), list_length=(1, 3)))
     assert "1..3 elements" in spec_cls.to_markdown()
+
+
+# ---------------------------------------------------------------------------
+# element_null_probability: a null inside a present list
+# ---------------------------------------------------------------------------
+
+
+def _elements(series: pl.Series) -> pl.Series:
+    return series.drop_nulls().explode(empty_as_null=False)
+
+
+def test_element_nulls_are_drawn_at_their_rate_inside_present_lists():
+    spec_cls = spec_for(
+        ColSpec(
+            pl.List(pl.Int64),
+            list_length=(3, 3),
+            element_null_probability=0.25,
+            nullable=True,
+            null_probability=0.1,
+        )
+    )
+    df = spec_cls.generate(4_000, seed=1)
+    elements = _elements(df["c"])
+    assert 0.2 < elements.null_count() / len(elements) < 0.3
+    assert 300 < df["c"].null_count() < 500, "the cell's own rate is separate"
+    spec_cls.validate(df)
+
+
+def test_elements_are_never_null_unless_a_rate_says_so():
+    spec_cls = spec_for(ColSpec(pl.List(pl.Int64), list_length=(3, 3)))
+    assert spec_cls.col("c").element_null_probability == 0.0
+    assert _elements(spec_cls.generate(2_000, seed=1)["c"]).null_count() == 0
+    holed = pl.DataFrame({"c": [[1, None, 3]]})
+    (finding,) = spec_cls.inspect(holed).findings
+    assert finding.key == "c__element_null"
+
+
+def test_a_declared_rate_accepts_nulls_and_still_checks_the_rest():
+    spec_cls = spec_for(
+        ColSpec(pl.List(pl.Int64), bounds=(0, 9), element_null_probability=0.5)
+    )
+    assert spec_cls.inspect(pl.DataFrame({"c": [[1, None], [None]]})).passed
+    (finding,) = spec_cls.inspect(pl.DataFrame({"c": [[None, 50]]})).findings
+    assert finding.key == "c__bounds"
+
+
+def test_an_element_that_is_a_struct_or_an_array_slot_can_be_null():
+    point = pl.Struct({"x": pl.Int64})
+    for column in (
+        ColSpec(pl.List(point), list_length=(4, 4), element_null_probability=0.5),
+        ColSpec(pl.Array(pl.Float64, 4), element_null_probability=0.5),
+    ):
+        spec_cls = spec_for(column)
+        df = spec_cls.generate(500, seed=2)
+        assert _elements(df["c"]).null_count() > 0, column.dtype
+        spec_cls.validate(df)
+
+
+def test_a_rate_belongs_to_a_list_and_between_0_and_1():
+    with pytest.raises(SpecError, match=r"only supported for pl\.List and pl\.Array"):
+        ColSpec(pl.Int64, element_null_probability=0.1)
+    with pytest.raises(SpecError, match="between 0 and 1"):
+        ColSpec(pl.List(pl.Int64), element_null_probability=1.5)
+
+
+def test_element_nulls_hold_their_rate_when_batched():
+    """A list's elements are drawn per batch -- only its lengths are a window
+    -- so what batching keeps is the rate, not the positions."""
+    spec_cls = spec_for(ColSpec(pl.List(pl.Int64), element_null_probability=0.3))
+    batched = pl.concat(
+        list(spec_cls.generate_batches(5_000, batch_size=1_111, seed=3))
+    )
+    elements = _elements(batched["c"])
+    assert 0.27 < elements.null_count() / len(elements) < 0.33
+    spec_cls.validate(batched)
+
+
+def test_the_rate_round_trips_and_is_described(tmp_path):
+    spec_cls = spec_for(ColSpec(pl.List(pl.Int64), element_null_probability=0.2))
+    spec_cls.to_yaml(tmp_path / "s.yaml")
+    assert "element_null_probability: 0.2" in (tmp_path / "s.yaml").read_text("utf-8")
+    assert FrameSpec.from_yaml(tmp_path / "s.yaml").spec == spec_cls.spec
+    spec_cls.to_python(tmp_path / "s.py")
+    namespace: dict = {}
+    exec((tmp_path / "s.py").read_text(encoding="utf-8"), namespace)
+    assert namespace[spec_cls.__name__].spec == spec_cls.spec
+    assert "No (elements 20%)" in spec_cls.to_markdown()
+
+
+def test_diff_reads_element_nulls_as_nullability():
+    def spec(rate: float) -> TableSpec:
+        return TableSpec(
+            "T", {"c": ColSpec(pl.List(pl.Int64), element_null_probability=rate)}
+        )
+
+    (allowed,) = diff(spec(0.0), spec(0.1)).findings
+    assert allowed.code == "nullability_changed" and not allowed.breaking
+    assert allowed.key == "c__element_nulls"
+    (forbidden,) = diff(spec(0.1), spec(0.0)).findings
+    assert forbidden.breaking
+    (moved,) = diff(spec(0.1), spec(0.2)).findings
+    assert moved.code == "field_changed"
+
+
+def test_drift_measures_element_nulls_against_the_rate():
+    holed = pl.DataFrame({"c": [[1, None], [None, None], [3, 4]]})  # 3 of 6 null
+
+    def spec(rate: float) -> TableSpec:
+        return TableSpec(
+            "T", {"c": ColSpec(pl.List(pl.Int64), element_null_probability=rate)}
+        )
+
+    (never,) = drift(spec(0.0), holed).breaking
+    assert never.key == "c__element_nulls"
+    assert drift(spec(0.5), holed).unchanged
+    (moved,) = drift(spec(0.1), holed).findings
+    assert moved.code == "null_rate_moved" and moved.details["observed"] == 0.5
+
+
+def test_from_dataframe_records_the_rate_it_finds():
+    holed = pl.DataFrame({"c": [[1, None], [2, 3], [None, 4]]})  # 2 of 6
+    profiled = FrameSpec.from_dataframe(holed).spec.columns["c"]
+    assert profiled.element_null_probability == pytest.approx(1 / 3)
+    FrameSpec.from_spec(TableSpec("P", {"c": profiled})).validate(holed)
+
+
+def test_an_element_null_is_sized_as_a_slot_and_a_validity_bit():
+    column = ColSpec(
+        pl.List(pl.Int64), list_length=(4, 4), element_null_probability=0.3
+    )
+    spec = TableSpec("S", {"c": column})
+    df = spec_for(column).generate(100_000, seed=1)
+    assert spec.estimated_size(100_000) == pytest.approx(df.estimated_size(), rel=0.02)
