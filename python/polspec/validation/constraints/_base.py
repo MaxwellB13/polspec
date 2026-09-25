@@ -14,7 +14,7 @@ from typing import Any
 
 import polars as pl
 
-from polspec.dtypes import _typed_values, element_dtype, field_dtypes
+from polspec.dtypes import _typed_values, element_dtype, field_dtypes, map_entries
 from polspec.validation.report import Finding, FindingCode
 
 MAX_SAMPLES = 5
@@ -135,6 +135,13 @@ def _is_dtype_compatible(
             and _is_dtype_compatible(
                 element_dtype(expected), element_dtype(actual), strict=strict
             )
+        )
+    if (want_entries := map_entries(expected)) is not None:
+        # A map as the list of entries it is: its key and value each
+        # compatible, as a list of structs' fields would be.
+        got_entries = map_entries(actual)
+        return got_entries is not None and _is_dtype_compatible(
+            want_entries, got_entries, strict=strict
         )
     if isinstance(expected, pl.Struct):
         # The fields by name, each compatible: order is how the data was

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 
 from polspec.constraints import is_textual as _is_textual
-from polspec.dtypes import _typed_values, element_dtype, field_dtypes
+from polspec.dtypes import _typed_values, element_dtype, field_dtypes, map_entries
 from polspec.formats import lookup as _lookup_format
 from polspec.validation.report import FindingCode
 
@@ -225,6 +225,21 @@ class _UniqueValues(_ColumnConstraint):
 
 
 @dataclass(kw_only=True)
+class _MapKeyRepeats(_ColumnConstraint):
+    """A map holding one key twice. Polars folds a repeat away when it casts
+    to a `Map`, but not when one arrives from Arrow, so a map read in can
+    carry one."""
+
+    code: FindingCode = "unique"
+
+    def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
+        return (
+            f"Column '{self.where}': found {count} map(s) holding a key more "
+            f"than once. Samples: {samples}"
+        )
+
+
+@dataclass(kw_only=True)
 class _CompositeUnique(_Constraint):
     columns: tuple[str, ...] = ()
     code: FindingCode = "unique_together"
@@ -343,6 +358,8 @@ def _value_tree(
     """
     if isinstance(actual_dtype, (pl.List, pl.Array)):
         return _list_constraints(name, where, spec, actual_dtype, column, options)
+    if (entries := map_entries(actual_dtype)) is not None:
+        return _map_constraints(name, where, spec, entries, column, options)
     if isinstance(actual_dtype, pl.Struct):
         return _struct_constraints(name, where, spec, actual_dtype, column, options)
     return _value_constraints(name, where, spec, actual_dtype, column, options)
@@ -543,10 +560,12 @@ def _list_constraints(
         )
 
     inner = element_dtype(actual_dtype)
-    # A list of lists has two levels of list claims under one name; `[]`
-    # tells the inner one's apart. Every other element keeps its list's name,
-    # so a List column's findings read as they always have.
-    inner_where = f"{where}[]" if isinstance(inner, (pl.List, pl.Array)) else where
+    # A list of lists -- or of maps, which are lists of entries -- has two
+    # levels of list claims under one name; `[]` tells the inner one's apart.
+    # Every other element keeps its list's name, so a List column's findings
+    # read as they always have.
+    nested = isinstance(inner, (pl.List, pl.Array)) or map_entries(inner) is not None
+    inner_where = f"{where}[]" if nested else where
     for constraint in _value_tree(
         name, inner_where, spec._element(), inner, pl.element(), options
     ):
@@ -559,6 +578,38 @@ def _list_constraints(
                 empty_as_null=False
             )
         constraints.append(dataclasses.replace(constraint, **lifted))
+    return constraints
+
+
+def _map_constraints(
+    name: str,
+    where: str,
+    spec: ColSpec,
+    entries: pl.List,
+    column: pl.Expr,
+    options: ValidationOptions,
+) -> list[_Constraint]:
+    """A Map's constraints: those of the list of entries it is -- its
+    length, and each entry's key and value, found under `m.key` and
+    `m.value` -- and no key twice in one map.
+
+    The map is cast to that list, which Polars does both ways, so every
+    claim is checked by the code that checks a list of structs.
+    """
+    as_list = column.cast(entries)
+    constraints = _list_constraints(
+        name, where, spec._as_list(), entries, as_list, options
+    )
+    keys = as_list.list.eval(pl.element().struct.field("key"))
+    constraints.append(
+        _MapKeyRepeats(
+            key=f"{where}.key__unique",
+            mask=column.is_not_null() & (as_list.list.len() != keys.list.n_unique()),
+            sample_expr=column,
+            column=name,
+            where=f"{where}.key",
+        )
+    )
     return constraints
 
 

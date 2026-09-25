@@ -479,13 +479,11 @@ for you, so `pl.Int64` and `pl.Int64()` mean the same thing.
 | Temporal | `Date` `Time` `Datetime` `Duration` |
 | Categorical | `Enum` `Categorical` |
 | Nested | `List(inner)` `Array(inner, width)` `Struct({name: dtype})` — nested to any depth; see [Nested columns](#nested-columns) |
+| Map (Polars 2) | `Map(key, value)` — see [`Map`: a list of entries](#map-a-list-of-entries) |
 
-That is every dtype that holds data, and Polars 2's `Map(key, value)` too:
-a `Map` is the list of `{key, value}` entries it is, so `list_length` and
-`fields` describe it as they would a `List(Struct)`, and every map
-generates with its keys present and distinct. `Null`, `Object`, `Unknown`
-and extension types declare and validate by dtype, but hold nothing
-polspec can draw, so `generate()` refuses each by name. A 128-bit integer is drawn
+That is every dtype that holds data. `Null`, `Object`, `Unknown` and
+extension types declare and validate by dtype, but hold nothing polspec
+can draw, so `generate()` refuses each by name. A 128-bit integer is drawn
 through 64 bits and a `Float16` as a `Float32` rounded to the nearest half,
 so bounds past 64 bits are refused at `generate()` and bounds too close to
 hold a half at declaration; see
@@ -742,6 +740,50 @@ offending structs. Inside a list the samples are the offending lists, as
 for any list. A struct in the data matches a declared one by field name,
 not order, each field compatible by the usual rules; a field missing or
 added is a `dtype` finding.
+
+### `Map`: a list of entries
+
+Polars 2's `Map(key, value)` is physically a list of `{key, value}`
+structs, and Polars casts one to the other and back. polspec describes a
+map as that list, so it takes what a `List(Struct)` takes: `list_length`
+is how many entries a map holds, and `fields` says what its `key` and its
+`value` are.
+
+<!-- docs: polars2 -->
+```python
+ColSpec(
+    pl.Map(pl.String, pl.Int64),
+    list_length=(1, 4),                          # entries per map
+    fields={
+        "key": ColSpec(pl.String, choices=["cpu", "mem", "disk", "net"]),
+        "value": ColSpec(pl.Int64, bounds=(0, 100), nullable=True),
+    },
+    nullable=True,                               # a null map, not an empty one
+)
+```
+
+A map adds two rules of its own: **a key is never null**, and **no key
+repeats within a map**. So a nullable key is refused, and so is a
+`list_length` longer than the keys can fill — a map of up to five entries
+from three possible keys is refused where it is written. With no
+`list_length`, a map is as long as a list (0 to 5 entries) or as its keys
+allow, if fewer: a map of `Boolean` keys holds at most two.
+
+Generation draws the entries as a list of structs, redraws any key that
+repeats within its map — only the repeats, so the key's declared shape
+survives — and casts the result to the `Map`. Validation casts the map to
+its entries and checks them as a list of structs: a finding about a key or
+a value is named `m.key` or `m.value`, the length `m__list_len`, and a map
+holding one key twice — which Polars folds away when it casts, but not
+when a map arrives from Arrow — is `m.key__unique`. A map in the data
+stands in for a declared one when its key and value are each compatible by
+the usual rules; a `List(Struct)` does not, since it is not a map. Drift,
+`from_dataframe` and `estimated_size` read a map as its entries too.
+
+`choices`, `weights` and `element_null_probability` have no meaning on the
+map itself (an entry is never null) and are refused; say what a key or
+a value may be in `fields`. Polars 1 has no `Map`: a spec file that
+declares one says which Polars it needs.
 
 ## String formats
 

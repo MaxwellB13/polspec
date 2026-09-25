@@ -701,7 +701,7 @@ def _generate_map_column(
     into one -- so a map drawn with one would come out shorter than its
     `list_length`. The repeats are separated first, and only they move.
     """
-    entries = spec._as_list()
+    entries = spec._as_drawn_list()
     lengths, elements = _list_parts(name, entries, n, seed, row_offset)
     elements = _separate_repeated_keys(
         name, entries, lengths, elements, seed, row_offset
