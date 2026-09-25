@@ -496,7 +496,7 @@ def _generate_random(
     scalars = {
         n_: s
         for n_, s in columns.items()
-        if _column_kind(s.dtype) not in ("list", "struct")
+        if _column_kind(s.dtype) not in ("list", "struct", "map")
     }
     plans: list[ColumnPlan] = []
     domains: dict[str, pl.Series | None] = {}
@@ -522,14 +522,16 @@ def _generate_column(
     """One column of `n` values, whatever its dtype nests.
 
     The scalar path is a plan handed to the engine; a `List` wraps the
-    column its elements make, and a `Struct` gathers the columns its fields
-    make -- each by calling back here, so a dtype nests as deeply as it
+    column its elements make, a `Map` is the list of entries it is, and a
+    `Struct` gathers the columns its fields make -- each by calling back here, so a dtype nests as deeply as it
     likes and every value is drawn by the code that draws a column of its
     own type.
     """
     kind = _column_kind(spec.dtype)
     if kind == "list":
         return _generate_list_column(name, spec, n, seed, row_offset)
+    if kind == "map":
+        return _generate_map_column(name, spec, n, seed, row_offset)
     if kind == "struct":
         return _generate_struct_column(name, spec, n, seed, row_offset)
     plan, domain = _plan_column(name, spec)
@@ -605,6 +607,15 @@ def _generate_list_column(
     its data across a rename like any other, and its elements are drawn by
     the same code as a scalar column of the inner dtype would be.
     """
+    lengths, elements = _list_parts(name, spec, n, seed, row_offset)
+    return _wrap_list(name, spec, lengths, elements)
+
+
+def _list_parts(
+    name: str, spec: ColSpec, n: int, seed: int | None, row_offset: int
+) -> tuple[pl.Series, pl.Series]:
+    """A `List` column before it is wrapped: each cell's length, null for a
+    null cell, and every element of every cell in one flat column."""
     assert isinstance(spec.dtype, (pl.List, pl.Array))  # noqa: S101 - the caller checked
     seed_key = spec.seed_name or name
 
@@ -627,17 +638,31 @@ def _generate_list_column(
         seed_name=f"{seed_key}\x00len",
     )
     lengths = _generate_dataframe([lengths_plan], n, seed, row_offset)[name]
-    counts = lengths.fill_null(0)
-    total = int(counts.sum())
+    total = int(lengths.fill_null(0).sum())
 
     element_spec = dataclasses.replace(spec._element(), seed_name=seed_key)
     # The element is a column in its own right, so a list of structs -- or
     # of lists -- is the same recursion one level down.
-    elements = _generate_column(name, element_spec, total, seed)
+    return lengths, _generate_column(name, element_spec, total, seed)
 
-    row_of_element = (
-        pl.int_range(0, n, eager=True).repeat_by(counts).explode(empty_as_null=False)
+
+def _row_of_element(lengths: pl.Series) -> pl.Series:
+    """The cell each element of a flat list column belongs to."""
+    counts = lengths.fill_null(0)
+    return (
+        pl.int_range(0, len(lengths), eager=True)
+        .repeat_by(counts)
+        .explode(empty_as_null=False)
     )
+
+
+def _wrap_list(
+    name: str, spec: ColSpec, lengths: pl.Series, elements: pl.Series
+) -> pl.Series:
+    """The `List` (or `Array`) column `_list_parts` describes: the flat
+    elements, cut into cells by the lengths; a null length is a null cell."""
+    n = len(lengths)
+    row_of_element = _row_of_element(lengths)
     grouped = (
         pl.DataFrame({"__row": row_of_element, name: elements})
         .group_by("__row", maintain_order=True)
@@ -658,6 +683,78 @@ def _generate_list_column(
     if isinstance(spec.dtype, pl.Array):
         return cells.list.to_array(spec.dtype.size)
     return cells
+
+
+# A map whose keys still repeat after this many rounds of redrawing the
+# repeats has keys too few for its length -- the same bound, and the same
+# reasoning, as a composite key's (`generation.composite.MAX_ROUNDS`).
+_MAX_KEY_ROUNDS = 50
+
+
+def _generate_map_column(
+    name: str, spec: ColSpec, n: int, seed: int | None, row_offset: int = 0
+) -> pl.Series:
+    """A `Map` column: the list of `{key, value}` entries it is, drawn as a
+    list of structs, its repeated keys redrawn, and cast to the map.
+
+    The cast would not refuse a repeated key -- Polars folds the two entries
+    into one -- so a map drawn with one would come out shorter than its
+    `list_length`. The repeats are separated first, and only they move.
+    """
+    entries = spec._as_list()
+    lengths, elements = _list_parts(name, entries, n, seed, row_offset)
+    elements = _separate_repeated_keys(
+        name, entries, lengths, elements, seed, row_offset
+    )
+    return _wrap_list(name, entries, lengths, elements).cast(spec.dtype)
+
+
+def _separate_repeated_keys(
+    name: str,
+    entries: ColSpec,
+    lengths: pl.Series,
+    elements: pl.Series,
+    seed: int | None,
+    row_offset: int,
+) -> pl.Series:
+    """The flat entries of a map column with no key repeated within a map.
+
+    As `generation.composite.apply_unique_together` separates a composite
+    key: the first entry to use a key keeps it, every later one in the same
+    map draws a fresh key from the key's declaration, and that repeats until
+    none are left. Its value stays -- only the key was the problem.
+    """
+    if elements.len() == 0:
+        return elements
+    frame = pl.DataFrame(
+        {"__row": _row_of_element(lengths), "key": elements.struct.field("key")}
+    )
+    repeats = ~pl.struct("__row", "key").is_first_distinct()
+
+    def repeated(frame: pl.DataFrame) -> pl.Series:
+        return frame.select(repeats).to_series().arg_true()
+
+    rows = repeated(frame)
+    if rows.len() == 0:
+        return elements
+    seed_key = entries.seed_name or name
+    key_spec = dataclasses.replace(
+        entries._field("key"), seed_name=f"{seed_key}\x00key"
+    )
+    rng = random.Random(None if seed is None else f"{seed}:{row_offset}:{seed_key}")
+    for _ in range(_MAX_KEY_ROUNDS):
+        fresh = _generate_column(name, key_spec, rows.len(), rng.randrange(2**63))
+        frame = frame.with_columns(frame["key"].scatter(rows, fresh))
+        rows = repeated(frame)
+        if rows.len() == 0:
+            value = elements.struct.field("value")
+            return pl.DataFrame([frame["key"], value]).to_struct(name)
+    raise GenerationError(
+        f"Map column '{name}' still repeats a key within a map on {rows.len()} "
+        f"entr{'y' if rows.len() == 1 else 'ies'} after {_MAX_KEY_ROUNDS} rounds "
+        "of redrawing them. Its keys are too few for its length -- widen the "
+        "key's domain, or lower list_length."
+    )
 
 
 def _generate_cartesian(

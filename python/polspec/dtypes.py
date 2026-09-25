@@ -12,6 +12,7 @@ from __future__ import annotations
 import datetime as dt
 import decimal
 import struct
+from typing import Any
 
 import polars as pl
 from polars.datatypes import DataTypeClass
@@ -28,6 +29,40 @@ def element_dtype(dtype: pl.List | pl.Array) -> pl.DataType:
     `inner` as class-or-instance, and a ColSpec instantiates it."""
     inner = dtype.inner
     return inner() if isinstance(inner, type) else inner
+
+
+# Polars 2's `Map(key, value)`; None on Polars 1, which has no such dtype.
+# Reached through getattr so the module imports, and type-checks, on both.
+_MAP: Any = getattr(pl, "Map", None)
+
+
+def map_parts(dtype: object) -> tuple[pl.DataType, pl.DataType] | None:
+    """A `Map`'s key and value dtypes, each as an instance -- or None for any
+    other dtype, and for every dtype on Polars 1."""
+    if _MAP is None or not isinstance(dtype, _MAP):
+        return None
+    map_dtype: Any = dtype
+    key, value = map_dtype.key, map_dtype.value
+    return (
+        key() if isinstance(key, type) else key,
+        value() if isinstance(value, type) else value,
+    )
+
+
+def map_entries(dtype: object) -> pl.List | None:
+    """The list a `Map` is: `List(Struct({"key": K, "value": V}))`, which
+    Polars casts to and from the `Map` itself. None for any other dtype.
+
+    polspec describes, generates and checks a map *as* that list, so a map
+    has everything a list of structs has -- `list_length`, `fields` -- and
+    only its own two rules on top: a key is never null, and no key repeats
+    within one map.
+    """
+    parts = map_parts(dtype)
+    if parts is None:
+        return None
+    key, value = parts
+    return pl.List(pl.Struct({"key": key, "value": value}))
 
 
 def field_dtypes(dtype: pl.Struct) -> dict[str, pl.DataType]:

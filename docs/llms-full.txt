@@ -480,12 +480,12 @@ for you, so `pl.Int64` and `pl.Int64()` mean the same thing.
 | Categorical | `Enum` `Categorical` |
 | Nested | `List(inner)` `Array(inner, width)` `Struct({name: dtype})` — nested to any depth; see [Nested columns](#nested-columns) |
 
-That is every dtype that holds data, with one exception so far: Polars 2's
-`Map(key, value)`. A `Map` column declares, validates, profiles and is
-written to a spec file by its dtype, and `generate()` refuses it by name --
-drawing its values is planned. `Null`, `Object`, `Unknown` and extension
-types declare and validate by dtype, but hold nothing polspec can draw, so
-`generate()` refuses each by name too. A 128-bit integer is drawn
+That is every dtype that holds data, and Polars 2's `Map(key, value)` too:
+a `Map` is the list of `{key, value}` entries it is, so `list_length` and
+`fields` describe it as they would a `List(Struct)`, and every map
+generates with its keys present and distinct. `Null`, `Object`, `Unknown`
+and extension types declare and validate by dtype, but hold nothing
+polspec can draw, so `generate()` refuses each by name. A 128-bit integer is drawn
 through 64 bits and a `Float16` as a `Float32` rounded to the nearest half,
 so bounds past 64 bits are refused at `generate()` and bounds too close to
 hold a half at declaration; see
@@ -3802,7 +3802,8 @@ list_length : Bound | tuple[int, int] | list[int] | None, optional
     `format`, `pattern`, `string_length`, `distribution` -- describes
     each *element*; `nullable` and `null_probability` describe the list
     itself. An `Array` takes its length from the dtype and refuses
-    `list_length`.
+    `list_length`. For a `Map`, it is the range of entries a map holds;
+    undeclared, 0..5 or as many as its keys can take, if fewer.
 element_null_probability : float, optional
     For a `List` or `Array` column, how often an element is null, from 0
     (the default: elements are never null, and validation reports one)
@@ -3825,7 +3826,11 @@ fields : Mapping[str, ColSpec] | None, optional
     names it: `point.lat`.
 
     A `List` or `Array` of a `Struct` takes `fields` too: it describes
-    the element, as `bounds` and `format` already do.
+    the element, as `bounds` and `format` already do. So does a `Map`,
+    which is a list of `{key, value}` entries: `fields` may say what
+    its `key` and its `value` are. A key is never null and never
+    repeats within a map, so a nullable key is refused, and so is a
+    `list_length` longer than the keys can fill.
 format : str | None, optional
     The shape a `String` column's values take, by name: `"uuid4"`,
     `"email"`, `"ipv4"`, `"ipv6"`, `"mac"`, `"hostname"`,
@@ -5575,10 +5580,9 @@ polspec generates every Polars dtype that holds data — integers to 128
 bits, floats from half to double precision,
 `Decimal`, booleans, strings, binary, `Date`/`Time`/`Datetime`/`Duration`,
 `Enum`, `Categorical`, and `List`, `Array` and `Struct` of any of them,
-nested to any depth. The exception is Polars 2's new `Map(key, value)`,
-which polspec declares, validates, profiles and writes to a spec file but
-does not generate yet -- the next dtype on this list, and the reason the
-dtype census in the tests names it rather than covers it. A `Datetime` carrying a `time_zone` is included: the
+nested to any depth -- and, on Polars 2, `Map(key, value)`, generated as
+the list of `{key, value}` entries it is, with every key present and
+distinct within its map. A `Datetime` carrying a `time_zone` is included: the
 physical value is an offset from the naive epoch whatever the zone, so the
 zone rides along and `generate()` hands back a column of the dtype you
 declared. A `Decimal` is the same idea: an integer and a scale, drawn as

@@ -14,7 +14,7 @@ import polars as pl
 
 from polspec.bound import Bound
 from polspec.check import Check
-from polspec.constants import _DEFAULT_NULL_PROBABILITY
+from polspec.constants import _DEFAULT_LIST_LEN, _DEFAULT_NULL_PROBABILITY
 from polspec.distributions import (
     canonicalize_params,
     normalize_distribution,
@@ -26,6 +26,8 @@ from polspec.dtypes import (
     element_dtype,
     field_dtypes,
     float16_inside,
+    map_entries,
+    map_parts,
 )
 from polspec.errors import SpecError
 from polspec.expr import Pred
@@ -56,15 +58,43 @@ def _column_kind(dtype: pl.DataType) -> str:
         return "list"
     if isinstance(dtype, pl.Struct):
         return "struct"
+    if map_parts(dtype) is not None:
+        return "map"
     raise SpecError(f"polspec cannot generate data for dtype {dtype!r}")
 
 
 def _value_dtype(dtype: pl.DataType) -> pl.DataType:
     """The dtype a column's *values* have: the element's, for a `List` or
-    `Array`; the column's own otherwise."""
+    `Array`; an entry's `{key, value}` struct, for a `Map`; the column's own
+    otherwise."""
     if isinstance(dtype, (pl.List, pl.Array)):
         return element_dtype(dtype)
+    if (entries := map_entries(dtype)) is not None:
+        return element_dtype(entries)
     return dtype
+
+
+def _distinct_values(spec: ColSpec) -> int | None:
+    """How many distinct values `spec` can generate, when that is a small,
+    knowable number: a finite domain, a Boolean, an integer range. None
+    otherwise -- a range of floats, a string of any text."""
+    from polspec.constraints.domain import Domain
+
+    if spec.value_dtype == pl.Boolean:
+        return 2
+    values = Domain.of(spec).values
+    if values is not None:
+        return len(set(values))
+    if spec.value_dtype.is_integer():
+        limits = _dtype_value_limits(spec.value_dtype)
+        if limits is None:
+            return None
+        lo, hi = limits
+        if spec.bounds is not None:
+            lo = spec.bounds.min if spec.bounds.min is not None else lo
+            hi = spec.bounds.max if spec.bounds.max is not None else hi
+        return max(0, int(hi) - int(lo) + 1)
+    return None
 
 
 def _is_categorical_dtype(dtype: pl.DataType) -> bool:
@@ -142,7 +172,8 @@ class ColSpec:
         `format`, `pattern`, `string_length`, `distribution` -- describes
         each *element*; `nullable` and `null_probability` describe the list
         itself. An `Array` takes its length from the dtype and refuses
-        `list_length`.
+        `list_length`. For a `Map`, it is the range of entries a map holds;
+        undeclared, 0..5 or as many as its keys can take, if fewer.
     element_null_probability : float, optional
         For a `List` or `Array` column, how often an element is null, from 0
         (the default: elements are never null, and validation reports one)
@@ -165,7 +196,11 @@ class ColSpec:
         names it: `point.lat`.
 
         A `List` or `Array` of a `Struct` takes `fields` too: it describes
-        the element, as `bounds` and `format` already do.
+        the element, as `bounds` and `format` already do. So does a `Map`,
+        which is a list of `{key, value}` entries: `fields` may say what
+        its `key` and its `value` are. A key is never null and never
+        repeats within a map, so a nullable key is refused, and so is a
+        `list_length` longer than the keys can fill.
     format : str | None, optional
         The shape a `String` column's values take, by name: `"uuid4"`,
         `"email"`, `"ipv4"`, `"ipv6"`, `"mac"`, `"hostname"`,
@@ -294,6 +329,7 @@ class ColSpec:
         self._validate_unique_is_generatable()
         self._validate_list_fields()
         self._validate_struct_fields()
+        self._validate_map()
 
     @property
     def value_dtype(self) -> pl.DataType:
@@ -316,6 +352,24 @@ class ColSpec:
             null_probability=self.element_null_probability,
             element_null_probability=0.0,
         )
+
+    def _as_list(self) -> ColSpec:
+        """A `Map` column as the list it is: this declaration with the dtype
+        `List(Struct({"key": K, "value": V}))`, which Polars casts to and from
+        the map. Everything a list of structs has -- its length, its entries'
+        `fields` -- is then read by the code that reads a list of structs.
+
+        A map with no `list_length` of its own is as long as a list, unless
+        its keys run out first: a map of `Boolean` keys holds at most two
+        entries, without having to be told."""
+        entries = map_entries(self.dtype)
+        assert entries is not None  # noqa: S101 - only a map is a list of entries
+        length = self.list_length
+        if length is None:
+            lo, hi = _DEFAULT_LIST_LEN
+            keys = _distinct_values(self._field("key"))
+            length = Bound(lo, hi if keys is None else min(hi, keys))
+        return dataclasses.replace(self, dtype=entries, list_length=length)
 
     def _field(self, name: str) -> ColSpec:
         """What one field of a struct value is claimed to be: what `fields`
@@ -381,10 +435,18 @@ class ColSpec:
                     )
 
     def _validate_list_fields(self) -> None:
-        """What a `List` column takes, and what only a scalar one can."""
+        """What a `List` column takes, and what only a scalar one can. A
+        `Map` is a list of entries, so it takes what a list takes."""
         if not 0.0 <= self.element_null_probability <= 1.0:
             raise SpecError("element_null_probability must be between 0 and 1")
-        if not isinstance(self.dtype, (pl.List, pl.Array)):
+        is_map = map_parts(self.dtype) is not None
+        if is_map and self.element_null_probability:
+            raise SpecError(
+                f"ColSpec.element_null_probability has no meaning on {self.dtype!r}: "
+                "a map holds entries, never a null one. A value may be null -- "
+                'declare fields={"value": ColSpec(..., nullable=True)}.'
+            )
+        if not isinstance(self.dtype, (pl.List, pl.Array)) and not is_map:
             if self.element_null_probability:
                 raise SpecError(
                     "ColSpec.element_null_probability is only supported for pl.List "
@@ -415,6 +477,39 @@ class ColSpec:
             raise SpecError(
                 f"ColSpec cannot carry rules on {self.dtype!r}: a rule's choices "
                 "are values, and a list value would be a list of lists."
+            )
+
+    def _validate_map(self) -> None:
+        """What only a `Map` promises: a key is never null, and no key repeats
+        within one map -- so a map declared to hold up to `n` entries needs
+        `n` keys to choose from. Checked here, where it is a sentence, rather
+        than as a generator redrawing keys that are not there."""
+        if map_parts(self.dtype) is None:
+            return
+        for claim in ("choices", "weights"):
+            if getattr(self, claim) is not None:
+                raise SpecError(
+                    f"ColSpec.{claim} has no meaning on {self.dtype!r}: a map's "
+                    "entries are drawn key and value apart. Declare them on the "
+                    'key or the value, in fields={"key": ..., "value": ...}.'
+                )
+        key = self._field("key")
+        if key.nullable:
+            raise SpecError(
+                f"ColSpec.fields['key'] is nullable, but a key of {self.dtype!r} "
+                "is never null: Polars refuses a map with one. A value may be "
+                "null; a key may not."
+            )
+        if self.list_length is None:
+            return
+        longest = self.list_length.closed()[1]
+        keys = _distinct_values(key)
+        if keys is not None and keys < longest:
+            raise SpecError(
+                f"ColSpec declares a map of up to {longest} entries, which needs "
+                f"{longest} distinct keys, but its keys can take {keys}: no key "
+                "repeats within a map. Widen the key's domain, or lower "
+                "list_length."
             )
 
     def _validate_unique_is_generatable(self) -> None:
