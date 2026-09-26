@@ -28,10 +28,15 @@ import polars as pl
 
 from polspec import generation, serialization, validation
 from polspec.catspec import CatSpec, _declared_categories_from, as_catspec
-from polspec.engine import _stable_seed
-from polspec.errors import MultiValidationError, RegistryError, SpecError
+from polspec.errors import (
+    MultiValidationError,
+    PolspecError,
+    RegistryError,
+    SpecError,
+)
 from polspec.frames import to_eager
-from polspec.report import registry_to_mermaid
+from polspec.generation.seeds import stable_seed
+from polspec.render import registry_to_mermaid
 from polspec.tablespec import TableSpec, as_spec_name, as_table_spec, resolve_references
 
 if TYPE_CHECKING:
@@ -57,17 +62,28 @@ def _spec_of(value: Any) -> TableSpec | None:
     return None
 
 
-def _load_module(path: Path) -> ModuleType:
-    """Imports a Python file as a throwaway module."""
-    module_name = f"_polspec_registry_{path.stem}"
+def load_module(
+    path: Path,
+    *,
+    error: type[PolspecError] = RegistryError,
+    prefix: str = "registry",
+) -> ModuleType:
+    """Imports a Python file as a throwaway module, named `_polspec_<prefix>_`
+    and the file's stem.
+
+    Anything that goes wrong importing it is `error`: a `RegistryError` for
+    `Registry.discover`, a `CliError` for the command line, which reports it
+    without a traceback.
+    """
+    module_name = f"_polspec_{prefix}_{path.stem}"
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
-        raise RegistryError(f"could not load {path} as a Python module")
+        raise error(f"could not load {path} as a Python module")
     module = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(module)
     except Exception as exc:
-        raise RegistryError(f"error importing {path}: {exc}") from exc
+        raise error(f"error importing {path}: {exc}") from exc
     return module
 
 
@@ -209,7 +225,7 @@ class Registry:
         registry = cls(categories=categories)
         for path in _spec_files(paths):
             if path.suffix == ".py":
-                found = cls.from_module(_load_module(path))
+                found = cls.from_module(load_module(path))
             elif _is_registry_file(path):
                 found = serialization.registry_from_yaml(path, strict=strict)
             else:
@@ -422,7 +438,7 @@ class Registry:
             if name in supplied:
                 frames[name] = supplied[name]
                 continue
-            spec_seed = None if seed is None else _stable_seed(str(seed), name)
+            spec_seed = None if seed is None else stable_seed(str(seed), name)
             frames[name] = generation.generate(
                 specs[name],
                 counts[name],
@@ -473,7 +489,7 @@ class Registry:
             name: generation.scan(
                 specs[name],
                 counts[name],
-                seed=None if seed is None else _stable_seed(str(seed), name),
+                seed=None if seed is None else stable_seed(str(seed), name),
                 batch_size=batch_size,
                 references={k: v for k, v in supplied.items() if k != name} or None,
             )

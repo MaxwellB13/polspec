@@ -32,6 +32,46 @@ seed produces; see
   passes. Samples of an `Array` are now taken as the lists they are; they
   come back as the same values. Polars 2 was not affected.
 
+- **`TableSpec.rename` renames checks and validators too.** It rewrote
+  rules, keys and the hierarchy but left `checks` alone, so a check naming
+  a renamed column kept naming the old one, and validating the renamed spec
+  failed inside Polars with a `ColumnNotFoundError`. A check or validator
+  written with `col()` is now renamed with its column -- its name following
+  if it was the default -- and one written as a raw `pl.Expr` that names a
+  renamed column is refused at `rename()` with a `SpecError` saying why. A
+  validator written with `col()` no longer stops its column being renamed.
+
+### Internal
+
+- The round-trip contract covers the streaming verbs and drawn specs:
+  `tests/contracts/test_streaming.py` runs the case catalogue
+  (`tests/cases.py`) through `generate_batches` and `scan`, and
+  `tests/contracts/test_properties.py` holds specs Hypothesis draws to the
+  round trip, whole, batched and through a spec file.
+- Spec files from every older format version are pinned as golden fixtures
+  under `tests/serialization/fixtures/`, each read against the spec it has
+  to become.
+- CI: a required job on a pinned Polars 2 release candidate, so `Map` is
+  tested where it gates a merge; a job on the lowest version of every
+  direct dependency; a coverage floor of 90% (branch) on one leg of the
+  matrix; and each release wheel installed alone and smoke-tested before
+  it is published. The docs rebuild when `CHANGELOG.md` changes.
+- The `dev` group's `pyarrow` floor rises to 16, the first that imports
+  beside numpy 2.
+- The package is laid out by side. Declarations (`ColRule`, `ForeignKey`,
+  `Hierarchy`) no longer carry the generation passes that apply them, which
+  live in `polspec.generation.passes`; the engine, the pipeline and the
+  passes are all under `polspec.generation`. `polspec.constraints` is
+  `polspec.domain` and `polspec.pass_order`, and `polspec.report` --
+  rendering -- is `polspec.render`, so no two modules share a name with a
+  different meaning. Helpers used across modules lose their leading
+  underscore, and a handful of duplicates are one copy. None of these
+  modules is public API, and no seeded output changes.
+- An import-linter contract (`lint-imports`, in CI) holds the layering:
+  declarations import no verb, file format or engine; generation and
+  validation import nothing of each other; only generation reaches the
+  Rust extension.
+
 ## [0.11.0] - 2026-09-26
 
 **One seeded change, once: a `unique=True` column filled by a foreign key

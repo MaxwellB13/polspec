@@ -34,9 +34,9 @@ from polspec.foreign_key import ForeignKey
 from polspec.frames import Method, References
 from polspec.hierarchy import Hierarchy
 from polspec.profiler import profile_dataframe
-from polspec.report import framespec_to_markdown, framespec_to_mermaid
+from polspec.render import framespec_to_markdown, framespec_to_mermaid
 from polspec.spec import ColSpec
-from polspec.tablespec import TableSpec, _parse_unique_together
+from polspec.tablespec import TableSpec, parse_unique_together
 from polspec.validation import ValidationOptions
 
 if TYPE_CHECKING:
@@ -193,7 +193,7 @@ def _build_table_spec(
     for fk in foreign_keys:
         if fk not in all_fks:
             all_fks.append(fk)
-    for group in _parse_unique_together(unique_together):
+    for group in parse_unique_together(unique_together):
         if group not in all_unique:
             all_unique.append(group)
 

@@ -17,7 +17,8 @@ from polspec import (
     SpecError,
     col,
 )
-from polspec.constraints import Domain, Pass, order, ordered_passes, passes_of
+from polspec.domain import Domain
+from polspec.pass_order import Pass, order, ordered_passes, passes_of
 
 # ---------------------------------------------------------------------------
 # Domain: what a column is declared to hold

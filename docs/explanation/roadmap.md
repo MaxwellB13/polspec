@@ -165,7 +165,7 @@ though — not core.
 ## Deferred on purpose
 
 **`ColSpec` holding a `Domain` instead of `bounds`/`choices`/`format`.**
-`polspec.constraints.Domain` is already the one definition generation,
+`polspec.domain.Domain` is already the one definition generation,
 validation, foreign keys and drift read; `ColSpec` still stores the three
 fields it is derived from, and every module re-derives it. Folding the fields
 into the domain would remove that repetition and nothing a user can see, at

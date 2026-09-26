@@ -28,20 +28,18 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import polars as pl
 
-from polspec.constraints import Domain
+from polspec.domain import Domain, describe_values
 from polspec.drift.data import Observed
 from polspec.drift.report import DriftFinding, Severity
-from polspec.dtypes import _bound_endpoint_to_physical, field_dtypes
+from polspec.dtypes import bound_endpoint_to_physical, field_dtypes
 from polspec.formats import lookup as _lookup_format
-from polspec.validation.constraints import _is_dtype_compatible
+from polspec.validation.constraints import is_dtype_compatible
 
 if TYPE_CHECKING:
     from polspec.bound import Bound
     from polspec.drift import DriftOptions
     from polspec.spec import ColSpec
     from polspec.tablespec import TableSpec
-
-MAX_LISTED = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,13 +102,6 @@ class Pair:
 Comparator = Callable[[Pair], list[DriftFinding]]
 
 
-def _listed(values: Sequence[Any]) -> str:
-    shown = [repr(v) for v in values[:MAX_LISTED]]
-    if len(values) > MAX_LISTED:
-        shown.append(f"... {len(values) - MAX_LISTED} more")
-    return f"[{', '.join(shown)}]"
-
-
 def _ignore(pair: Pair) -> list[DriftFinding]:
     return []
 
@@ -136,7 +127,7 @@ def _compare_dtype(pair: Pair) -> list[DriftFinding]:
         actual, expected = pair.observed.dtype, pair.declared.dtype
     if _same_dtype(actual, expected):
         return []
-    compatible = _is_dtype_compatible(
+    compatible = is_dtype_compatible(
         expected, actual, strict=pair.options.strict_dtypes
     )
     if pair.mode == "diff":
@@ -275,7 +266,7 @@ def _exceeded(
 
     def physical(value: Any) -> Any:
         return (
-            _bound_endpoint_to_physical(value, dtype) if dtype.is_temporal() else value
+            bound_endpoint_to_physical(value, dtype) if dtype.is_temporal() else value
         )
 
     facts: dict[str, Any] = {}
@@ -349,7 +340,7 @@ def _observed_values(pair: Pair) -> list[DriftFinding]:
             pair.finding(
                 "new_values",
                 "breaking",
-                f"{count} row(s) hold values outside {domain}: {_listed(samples)}. "
+                f"{count} row(s) hold values outside {domain}: {describe_values(samples)}. "
                 "Add them to the declaration, or fix the source",
                 suffix="values",
                 count=count,
@@ -363,7 +354,7 @@ def _observed_values(pair: Pair) -> list[DriftFinding]:
                 "cardinality_moved",
                 "compatible",
                 f"{len(unseen)} of {len(domain.values)} declared value(s) never "
-                f"appear: {_listed(unseen)}",
+                f"appear: {describe_values(unseen)}",
                 suffix="unseen",
                 unseen=list(unseen),
                 declared=len(domain.values),
@@ -382,7 +373,7 @@ def _observed_format(pair: Pair) -> list[DriftFinding]:
             "format_violated",
             "breaking",
             f"{count} row(s) are not {_lookup_format(pair.declared.format or '')}: "
-            f"{_listed(samples)}. "
+            f"{describe_values(samples)}. "
             "Change the format, or fix the source",
             suffix="format",
             format=pair.declared.format,

@@ -9,6 +9,7 @@ batch, and passes drawn per batch.
 
 from __future__ import annotations
 
+import importlib
 import itertools
 
 import polars as pl
@@ -122,7 +123,9 @@ def test_a_foreign_key_column_scans_against_its_parent():
 
 def _spy(monkeypatch) -> list[tuple[tuple[str, ...], int, int | None]]:
     """Records (columns, rows, batch_size) for each call the reader makes."""
-    import polspec.generation as generation
+    # By import_module: `polspec.generation.scan` as an attribute is the
+    # `scan` function the package exports, not the module of that name.
+    generation = importlib.import_module("polspec.generation.scan")
 
     seen: list[tuple[tuple[str, ...], int, int | None]] = []
     real = generation.generate_batches

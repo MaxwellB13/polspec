@@ -35,8 +35,15 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from polspec.constraints import passes_of
 from polspec.frames import Method, References
+from polspec.generation.pipeline import (
+    check_counts,
+    check_method,
+    generate_batches,
+    requires_whole_frame,
+)
+from polspec.pass_order import passes_of
+from polspec.tablespec import require_columns
 
 if TYPE_CHECKING:
     from polspec.tablespec import TableSpec
@@ -93,18 +100,10 @@ def scan(
     column is unique across the whole scan -- a foreign-keyed one too -- and
     a composite key only within each batch.
     """
-    from polspec.generation import (
-        _check_counts,
-        _requires_whole_frame,
-        generate_batches,
-    )
-    from polspec.tablespec import require_columns
-
     require_columns(spec)
-    _requires_whole_frame(spec, "scan")
-    _check_counts(n, batch_size)
-    if method not in ("random", "cartesian"):
-        raise ValueError(f"Unknown method {method!r}; expected 'random' or 'cartesian'")
+    requires_whole_frame(spec, "scan")
+    check_counts(n, batch_size)
+    check_method(method)
 
     def io_source(
         with_columns: list[str] | None,

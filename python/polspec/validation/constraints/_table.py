@@ -3,24 +3,59 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
 if TYPE_CHECKING:
     from polspec.check import Check
 
-from polspec.validation.constraints._base import _Constraint, _struct_of
-from polspec.validation.constraints._values import _CompositeUnique, _FrameCheck
+from polspec.validation.constraints._base import Constraint, struct_of
+from polspec.validation.report import FindingCode
 
 
-def _frame_constraints(
+@dataclass(kw_only=True)
+class _CompositeUnique(Constraint):
+    columns: tuple[str, ...] = ()
+    code: FindingCode = "unique_together"
+
+    def involved(self) -> tuple[str, ...]:
+        return self.columns
+
+    def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
+        return (
+            f"Composite unique key {list(self.columns)} violated: found {count} "
+            f"duplicate row(s). Duplicate samples: {samples}"
+        )
+
+
+@dataclass(kw_only=True)
+class _FrameCheck(Constraint):
+    check: Check
+    code: FindingCode = "check"
+
+    def involved(self) -> tuple[str, ...]:
+        return tuple(self.check.expr.meta.root_names())
+
+    def details(self, stats: dict[str, list]) -> dict[str, Any]:
+        return {"check": self.check.name, "condition": str(self.check.expr)}
+
+    def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
+        described = f" ({self.check.description})" if self.check.description else ""
+        return (
+            f"Check '{self.check.name}' failed: found {count} row(s) violating "
+            f"condition {self.check.expr}{described}"
+        )
+
+
+def frame_constraints(
     unique_together: Sequence[Sequence[str]] | None,
     checks: Sequence[Check] | None,
     df_col_names: Sequence[str],
-) -> list[_Constraint]:
+) -> list[Constraint]:
     """Constraints spanning several columns rather than belonging to one."""
-    constraints: list[_Constraint] = []
+    constraints: list[Constraint] = []
 
     for index, group in enumerate(unique_together or ()):
         columns = tuple(group)
@@ -43,7 +78,7 @@ def _frame_constraints(
             _FrameCheck(
                 key=f"check:{check.name}",
                 mask=check._failure_mask(),
-                sample_expr=_struct_of(involved),
+                sample_expr=struct_of(involved),
                 check=check,
             )
         )

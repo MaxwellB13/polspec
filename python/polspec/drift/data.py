@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, cast
 import polars as pl
 
 from polspec.bound import Bound
-from polspec.constraints import Domain, is_textual
+from polspec.domain import Domain, is_textual
 from polspec.dtypes import field_dtypes, map_entries
 from polspec.formats import lookup as _lookup_format
 

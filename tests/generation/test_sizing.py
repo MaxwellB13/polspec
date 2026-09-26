@@ -148,9 +148,9 @@ def test_max_bytes_refuses_rather_than_warning():
 
 
 def test_max_bytes_zero_says_nothing(monkeypatch):
-    import polspec.generation as generation
+    import polspec.generation.pipeline as generation
 
-    monkeypatch.setattr(generation, "_LARGE_FRAME_BYTES", 10)
+    monkeypatch.setattr(generation, "LARGE_FRAME_BYTES", 10)
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         Wide.generate(1_000, seed=1, max_bytes=0)
@@ -159,9 +159,9 @@ def test_max_bytes_zero_says_nothing(monkeypatch):
 def test_the_warning_names_the_estimate_and_what_to_do_instead(monkeypatch):
     """Rather than allocating five gibibytes to see the warning, the size is
     lowered to what the test frame actually is."""
-    import polspec.generation as generation
+    import polspec.generation.pipeline as generation
 
-    monkeypatch.setattr(generation, "_LARGE_FRAME_BYTES", 100)
+    monkeypatch.setattr(generation, "LARGE_FRAME_BYTES", 100)
     with pytest.warns(UserWarning) as caught:
         Wide.generate(1_000, seed=1)
     message = str(caught[0].message)

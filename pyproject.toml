@@ -54,11 +54,13 @@ dev = [
     "pytest>=9.1.1",
     "maturin>=1.7",
     "numpy>=2.5.2",
-    "pyarrow>=14.0.0",
+    "pyarrow>=16.0.0",
     "ty>=0.0.75",
     "ruff>=0.16.5",
     "griffelib>=2.3",
     "hypothesis>=6.100",
+    "pytest-cov>=6.0",
+    "import-linter>=2.1",
 ]
 docs = [
     "mkdocstrings-python>=1.11",
@@ -120,6 +122,91 @@ pythonpath = ["tests"]
 # `docs: warns` marker -- or a bug; none is printed and forgotten.
 filterwarnings = ["error"]
 xfail_strict = true
+
+# `pytest --cov` in CI measures the suite on the locked Polars; the floor
+# sits a little under what it reaches, so a change that lands untested code
+# fails rather than quietly lowering it.
+[tool.coverage.run]
+branch = true
+source = ["polspec"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = true
+
+# The package's layering, checked in CI by `lint-imports`. Only direct imports
+# count (`allow_indirect_imports`), and not those under `TYPE_CHECKING`: a
+# declaration reaching the renderer through `CatSpec.to_markdown` is a
+# convenience method, not a dependency of the declaration on how it is drawn.
+[tool.importlinter]
+root_package = "polspec"
+exclude_type_checking_imports = true
+
+[[tool.importlinter.contracts]]
+name = "A declaration is data: no verb, file format or engine behind it"
+type = "forbidden"
+source_modules = [
+    "polspec.bound",
+    "polspec.check",
+    "polspec.domain",
+    "polspec.expr",
+    "polspec.foreign_key",
+    "polspec.hierarchy",
+    "polspec.pass_order",
+    "polspec.rules",
+    "polspec.spec",
+    "polspec.tablespec",
+]
+forbidden_modules = [
+    "polspec._ffi",
+    "polspec.cli",
+    "polspec.drift",
+    "polspec.framespec",
+    "polspec.generation",
+    "polspec.registry",
+    "polspec.render",
+    "polspec.serialization",
+    "polspec.validation",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Generation knows nothing of validation"
+type = "forbidden"
+source_modules = ["polspec.generation"]
+forbidden_modules = ["polspec.validation"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Validation knows nothing of generation"
+type = "forbidden"
+source_modules = ["polspec.validation"]
+forbidden_modules = ["polspec._ffi", "polspec.generation"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Only generation reaches the Rust extension"
+type = "forbidden"
+source_modules = [
+    "polspec.catspec",
+    "polspec.drift",
+    "polspec.profiler",
+    "polspec.reading",
+    "polspec.render",
+    "polspec.serialization",
+    "polspec.sizing",
+    "polspec.validation",
+]
+forbidden_modules = ["polspec._ffi", "polspec._polspec"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Rendering is reachable from neither generation nor validation"
+type = "forbidden"
+source_modules = ["polspec.generation", "polspec.validation"]
+forbidden_modules = ["polspec.render"]
+allow_indirect_imports = true
 
 [tool.ty.src]
 include = ["python/polspec"]

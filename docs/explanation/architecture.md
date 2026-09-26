@@ -14,21 +14,21 @@ owns only the inner loop that fills arrays with values.
 | `dtypes` | What each dtype can actually hold |
 | `distributions` | The distributions available, and each one's parameter aliases |
 | `spec` | `ColSpec` — one column's declaration, and everything it validates about itself |
-| `rules` | `ColRule` — conditional values, and the pass that applies them |
-| `foreign_key` | `ForeignKey` — declaration, and the pass that makes generated keys consistent |
-| `engine` | Turning a spec into the `ColumnPlan` the Rust extension takes, and finishing the result: gathering typed choices, casting temporal columns back. A `List` wraps the column its elements make and a `Struct` gathers the columns its fields make, each by calling back into one-column generation |
+| `rules` | `ColRule` — conditional values, declared |
+| `foreign_key` | `ForeignKey` — referential integrity, declared |
 | `_ffi` | The only module that imports the Rust extension (lazily), building plans and re-raising its errors as `GenerationError` |
 | `errors` | The `PolspecError` hierarchy |
-| `constraints` | What both sides read: `Domain` (the values a column may hold) and `Pass`/`order` (which rewrite of a generated frame runs first) |
-| `validation` | `inspect` and `validate` over a `TableSpec`: every claim becomes a `_Constraint` that produces a `Finding`. The `constraints/` package holds them by kind: `_values` (one value's domain, bounds, length, format, pattern, recursing into a struct's fields and lifted over a list's elements), `_rules`, `_table` (composite keys, checks), `_relations` (foreign keys, hierarchy); `report.py` holds `Finding` and `ValidationReport` |
+| `domain` | `Domain` — the values a column may hold, read by generation, validation, foreign keys and drift alike |
+| `pass_order` | `Pass`/`order` — which rewrite of a generated frame runs first, from what each reads and writes; checked at declaration, followed at generation |
+| `validation` | `inspect` and `validate` over a `TableSpec`: every claim becomes a `Constraint` that produces a `Finding`. The `constraints/` package holds them by kind: `_values` (one value's domain, bounds, length, format, pattern, recursing into a struct's fields and lifted over a list's elements), `_rules`, `_table` (composite keys, checks), `_relations` (foreign keys, hierarchy); `report.py` holds `Finding` and `ValidationReport` |
 | `tablespec` | `TableSpec` — a spec as an immutable value, with its declaration-time checks and structural operations |
 | `framespec` | `FrameSpec` — the metaclass that builds a `TableSpec` from a class body, and the facade forwarding every verb to it |
-| `generation` | `generate`, `generate_batches`, `scan` and the file sinks, as functions over a `TableSpec`; `composite.py` separates a `__unique_together__` group; `seeds.py` keys every pass's seed by name, as the engine keys columns; `scan.py` is the lazy source every sink writes out |
+| `generation` | `generate`, `generate_batches`, `scan` and the file sinks, as functions over a `TableSpec`. `pipeline.py` runs the engine then the passes, window by window; `engine.py` turns a spec into the `ColumnPlan`s the Rust extension takes and finishes the result -- gathering typed choices, casting temporal columns back, wrapping a `List` around the column its elements make and gathering a `Struct` from its fields'; `passes/` holds one pass per kind of cross-column claim (`rules`, `foreign_keys`, `hierarchy`, `unique_together`); `seeds.py` keys every pass's seed by name, as the engine keys columns; `scan.py` is the lazy source every sink writes out |
 | `frames` | The frame plumbing every verb shares: accepting a `DataFrame` or `LazyFrame`, and resolving `references=` to parent frames |
 | `_options` | One way to take options -- an options object, keywords, or neither -- shared by `validate`, `inspect` and `drift` |
 | `expr` | `col()`: a small predicate language that evaluates like Polars and survives a trip through a file |
 | `formats` | Named string formats -- what each looks like, said once for generation and validation |
-| `hierarchy` | `Hierarchy` -- a self-referencing link table, and the pass that builds one |
+| `hierarchy` | `Hierarchy` -- a self-referencing link table, declared |
 | `drift` | `diff` and `drift`: what changed between two specs, or between a spec and data. `fields.py` holds one comparator per `ColSpec` field, `data.py` measures a frame in the declaration's terms |
 | `sizing` | `estimated_size`: a frame's memory, read off the declaration |
 | `reading` | `read`: a data file in a spec's terms -- the reader chosen by extension, a declared date or time that arrived as text parsed. The CLI reads through the same table |
@@ -36,18 +36,22 @@ owns only the inner loop that fills arrays with values.
 | `registry` | `Registry` — a declared set of specs: resolving cross-spec keys, ordering parents before children, `generate_all`/`validate_all`, one file and one diagram for the set |
 | `serialization` | Spec files: a field registry (`fields.py`) that YAML, generated Python and the `import datetime` decision all derive from; the dtype codec table (`dtypes.py`); format versions and migrations (`migrations.py`) |
 | `profiler` | Inferring a spec from an existing DataFrame |
-| `report` | Rendering a spec, or a registry of them, as Markdown or Mermaid |
+| `render` | Rendering a spec, a registry, a category registry or a drift report as Markdown or Mermaid |
 | `cli` | The `polspec` command, one module per verb: `_schema` (infer, new), `_data` (validate, generate), `_drift` (diff, drift), `_test`; `_io` holds the readers, writers and spec loaders they share |
 
-The dependency direction is one-way: `spec` and `tablespec` know nothing about `framespec`,
-and `report` is not reachable from either the generation or validation path.
+The dependency direction is one-way. The declarations -- `spec`, `rules`,
+`check`, `foreign_key`, `hierarchy`, `tablespec` -- import none of
+`generation`, `validation`, `drift`, `serialization` or the Rust extension, so
+a spec is data that every verb reads and none owns; generation and validation
+import nothing of each other; and `render` is reachable from neither. An
+import-linter contract in `pyproject.toml` holds all three.
 
 ## Generating
 
 ```mermaid
 flowchart LR
-    A["FrameSpec.generate(n, seed)"] --> B["_generate_random<br/>or _generate_cartesian"]
-    B --> C["_plan_column: one<br/>ColumnPlan per column"]
+    A["FrameSpec.generate(n, seed)"] --> B["generate_random<br/>or generate_cartesian"]
+    B --> C["plan_column: one<br/>ColumnPlan per column"]
     C --> D["Rust: generate_dataframe<br/>columns in parallel"]
     D --> E["_finish: gather typed choices,<br/>cast temporal columns back"]
     E --> F["order the passes<br/>by reads and writes"]
@@ -76,7 +80,7 @@ column stays chunked.
 
 Rules and foreign keys are applied afterwards as vectorised passes over the
 finished frame, not row by row. Each pass declares the columns it reads and
-the ones it writes, and `constraints.order` runs them so no pass reads a
+the ones it writes, and `pass_order.order` runs them so no pass reads a
 column a later one rewrites: a rule keyed on a foreign-keyed column sees the
 parent's values, and a self-referencing key drawing from a foreign-keyed
 column draws from values that are actually there. That ordering is what makes
@@ -84,8 +88,10 @@ generated data satisfy the same claims validation checks it against — which
 is why a spec whose passes cannot be ordered is refused at declaration rather
 than generated and then failed by its own spec.
 
-Seeds are drawn per pass in declaration order, so which order they end up
-running in does not change the values any one of them samples.
+Each pass is seeded by what it is for -- a rules column's seed name, a
+foreign key's name, a composite key's members (`generation/seeds.py`) -- so
+neither the order the passes run in nor the columns declared around them
+change the values any one of them samples.
 
 A `unique=True` column never reaches a pass: the engine draws it without
 replacement in the first place (`src/unique.rs`), shuffling a materialised
@@ -100,7 +106,7 @@ after the rules and keys that settle them.
 ```mermaid
 flowchart LR
     A["FrameSpec.inspect(df) / validate(df)"] --> B[Structural checks]
-    B --> C["Build one _Constraint<br/>per declared claim"]
+    B --> C["Build one Constraint<br/>per declared claim"]
     C --> D["One Polars aggregation<br/>over the whole frame"]
     D --> E["Each constraint turns its<br/>result into a Finding"]
     E --> F["ValidationReport<br/>(what inspect returns)"]
@@ -108,7 +114,7 @@ flowchart LR
     F -->|validate: none| H["Drop / add / cast / reorder"]
 ```
 
-Every claim a spec makes becomes a `_Constraint` that contributes aggregation
+Every claim a spec makes becomes a `Constraint` that contributes aggregation
 expressions and turns the results back into a `Finding`: a code, a count,
 samples, code-specific details, and a lazy filter that locates the rows. They are collected
 first and evaluated together, so validating a wide table costs one scan rather

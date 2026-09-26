@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 
 from polspec.frames import Method, References
+from polspec.generation.pipeline import requires_whole_frame
+from polspec.generation.scan import scan
 from polspec.tablespec import require_columns
 
 if TYPE_CHECKING:
@@ -40,10 +42,8 @@ def _scan(
     directory is created here, which polars' sinks do not do. A hierarchy is
     refused by name here too, so the message says which verb refused.
     """
-    from polspec.generation import _requires_whole_frame, scan
-
     require_columns(spec)
-    _requires_whole_frame(spec, "a sink")
+    requires_whole_frame(spec, "a sink")
     target = Path(path)
     lf = scan(
         spec,

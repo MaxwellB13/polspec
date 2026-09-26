@@ -43,7 +43,7 @@ import polars as pl
 from polspec.dtypes import DtypeLike
 from polspec.errors import SpecError
 from polspec.serialization.dtypes import categories_from_data, physical_from_name
-from polspec.spec import _is_categorical_dtype
+from polspec.spec import is_categorical_dtype
 from polspec.tablespec import TableSpec, as_table_spec
 
 if TYPE_CHECKING:
@@ -505,7 +505,7 @@ class CatSpec(metaclass=_CatSpecMeta):
         for col_name, dtype in frame.schema.items():
             if isinstance(dtype, pl.Enum):
                 enums[col_name] = dtype.categories.to_list()
-            elif _is_categorical_dtype(dtype):
+            elif is_categorical_dtype(dtype):
                 categoricals[col_name] = _categories_of(dtype, col_name)
                 non_null = frame[col_name].drop_nulls()
                 if len(non_null) > 0:
@@ -525,7 +525,7 @@ class CatSpec(metaclass=_CatSpecMeta):
             dtype = col_spec.dtype
             if isinstance(dtype, pl.Enum):
                 enums[col_name] = dtype.categories.to_list()
-            elif _is_categorical_dtype(dtype):
+            elif is_categorical_dtype(dtype):
                 categoricals[col_name] = _categories_of(dtype, col_name)
                 if col_spec.choices:
                     choices[col_name] = list(col_spec.choices)
@@ -631,7 +631,7 @@ class CatSpec(metaclass=_CatSpecMeta):
         self, path: str | Path | None = None, *, title: str | None = None
     ) -> str:
         """A Markdown table of every entry; written to `path` when given."""
-        from polspec.report import catspec_to_markdown
+        from polspec.render import catspec_to_markdown
 
         return catspec_to_markdown(self, path, title=title)
 
@@ -639,7 +639,7 @@ class CatSpec(metaclass=_CatSpecMeta):
         self, path: str | Path | None = None, *, title: str | None = None
     ) -> str:
         """A Mermaid class diagram of every entry; written to `path` when given."""
-        from polspec.report import catspec_to_mermaid
+        from polspec.render import catspec_to_mermaid
 
         return catspec_to_mermaid(self, path, title=title)
 
@@ -718,7 +718,7 @@ def _infer_from_frame(
             enums[col_name] = dtype.categories.to_list()
             continue
 
-        if _is_categorical_dtype(dtype):
+        if is_categorical_dtype(dtype):
             non_null = df[col_name].drop_nulls()
             physical = default_physical or _auto_physical(non_null.n_unique())
             categoricals[col_name] = _categories_of(dtype, col_name, physical)
@@ -777,7 +777,7 @@ def _infer_from_spec(
             enums[col_name] = dtype.categories.to_list()
             continue
 
-        if _is_categorical_dtype(dtype):
+        if is_categorical_dtype(dtype):
             categoricals[col_name] = _categories_of(
                 dtype, col_name, default_physical or pl.UInt8
             )

@@ -14,9 +14,9 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from polspec.dtypes import _MAP, DtypeLike, element_dtype, field_dtypes, map_parts
+from polspec.dtypes import MAP, DtypeLike, element_dtype, field_dtypes, map_parts
 from polspec.errors import SerializationError
-from polspec.spec import _is_categorical_dtype
+from polspec.spec import is_categorical_dtype
 
 if TYPE_CHECKING:
     from polspec.catspec import CatSpec
@@ -114,7 +114,7 @@ def dtype_to_data(dtype: pl.DataType) -> str | dict[str, Any]:
     if (parts := map_parts(dtype)) is not None:
         key, value = parts
         return {"Map": {"key": dtype_to_data(key), "value": dtype_to_data(value)}}
-    if _is_categorical_dtype(dtype):
+    if is_categorical_dtype(dtype):
         if isinstance(dtype, pl.Categorical) and dtype.categories.name():
             return {"Categorical": _categories_info(dtype.categories)}
         return "Categorical"
@@ -149,7 +149,7 @@ def dtype_to_source(dtype: pl.DataType) -> str:
     if (parts := map_parts(dtype)) is not None:
         key, value = parts
         return f"pl.Map({dtype_to_source(key)}, {dtype_to_source(value)})"
-    if _is_categorical_dtype(dtype):
+    if is_categorical_dtype(dtype):
         if isinstance(dtype, pl.Categorical) and dtype.categories.name():
             cats = dtype.categories
             parts = [repr(cats.name())]
@@ -226,12 +226,12 @@ def _map_from_data(payload: Any, categories: CatSpec | None) -> pl.DataType:
             "A Map dtype is written as {Map: {key: <dtype>, value: <dtype>}}, "
             f"got {payload!r}"
         )
-    if _MAP is None:
+    if MAP is None:
         raise SerializationError(
             f"This spec declares a Map column, a dtype Polars 2 introduced; "
             f"this is Polars {pl.__version__}. Upgrade Polars to read it."
         )
-    return _MAP(
+    return MAP(
         dtype_from_data(payload["key"], categories),
         dtype_from_data(payload["value"], categories),
     )

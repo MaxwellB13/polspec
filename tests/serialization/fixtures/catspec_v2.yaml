@@ -1,0 +1,10 @@
+version: 2
+enums:
+  STATUS: [A, B]
+categoricals:
+  CURRENCY:
+    name: CURRENCY
+    physical: UInt8
+    categories: [GBP, USD]
+choices:
+  plain: [x, y]

@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 MAX_LISTED = 8
 
 
-def _listed(values: Sequence[Any]) -> str:
+def describe_values(values: Sequence[Any]) -> str:
     """`values` for an error message, with a long domain cut short.
 
     A domain of two is worth spelling out; one of two hundred would bury the
@@ -106,7 +106,7 @@ class Domain:
 
     def __str__(self) -> str:
         if self.values is not None:
-            return f"one of {_listed(self.values)}"
+            return f"one of {describe_values(self.values)}"
         if self.bounds is not None:
             return f"bounds {self.bounds}"
         if self.format is not None:
@@ -166,7 +166,7 @@ class Domain:
                 if not ok
             ]
             if outside:
-                return f"{_listed(outside)} is not {self}"
+                return f"{describe_values(outside)} is not {self}"
             return None
 
         if self.values is not None:
@@ -183,7 +183,7 @@ class Domain:
                 if cmp not in mine
             ]
             if outside:
-                return f"{_listed(outside)} is not {self}"
+                return f"{describe_values(outside)} is not {self}"
             return None
 
         bounds = self.bounds
@@ -197,7 +197,7 @@ class Domain:
         if other.values is not None:
             escaping = [v for v in other.values if outside(v)]
             if escaping:
-                return f"{_listed(escaping)} falls outside {self}"
+                return f"{describe_values(escaping)} falls outside {self}"
             return None
         if other.bounds is None:
             return f"an unbounded {other.dtype} does not fit {self}"

@@ -11,9 +11,9 @@ import dataclasses
 import polars as pl
 
 from polspec.bound import Bound
-from polspec.constants import _DEFAULT_NULL_PROBABILITY
-from polspec.dtypes import _MAP, field_dtypes, map_entries
-from polspec.spec import ColSpec, _is_categorical_dtype
+from polspec.constants import DEFAULT_NULL_PROBABILITY
+from polspec.dtypes import MAP, field_dtypes, map_entries
+from polspec.spec import ColSpec, is_categorical_dtype
 
 
 def profile_dataframe(
@@ -84,7 +84,7 @@ def _profile_column(
             return spec(dtype=dtype)
         return dataclasses.replace(
             as_list,
-            dtype=_MAP(parts["key"].dtype, parts["value"].dtype),
+            dtype=MAP(parts["key"].dtype, parts["value"].dtype),
             element_null_probability=0.0,
         )
 
@@ -149,7 +149,7 @@ def _profile_column(
             element_null_probability=element_nulls,
         )
 
-    if dtype in (pl.String, pl.Utf8) or _is_categorical_dtype(dtype):
+    if dtype in (pl.String, pl.Utf8) or is_categorical_dtype(dtype):
         return _profile_textual(
             non_null,
             name,
@@ -220,7 +220,7 @@ def _profile_textual(
             else None,
         )
 
-    if _is_categorical_dtype(dtype):
+    if is_categorical_dtype(dtype):
         return spec(dtype=pl.Categorical())
 
     return spec(
@@ -240,7 +240,7 @@ def _nullability(series: pl.Series, total_rows: int) -> tuple[bool, float]:
         return False, 0.0
     if total_rows > 0:
         return True, float(null_count / total_rows)
-    return True, _DEFAULT_NULL_PROBABILITY
+    return True, DEFAULT_NULL_PROBABILITY
 
 
 def _extent(values: pl.Series, cast, calculate_bounds: bool) -> Bound | None:

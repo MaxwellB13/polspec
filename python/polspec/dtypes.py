@@ -33,13 +33,13 @@ def element_dtype(dtype: pl.List | pl.Array) -> pl.DataType:
 
 # Polars 2's `Map(key, value)`; None on Polars 1, which has no such dtype.
 # Reached through getattr so the module imports, and type-checks, on both.
-_MAP: Any = getattr(pl, "Map", None)
+MAP: Any = getattr(pl, "Map", None)
 
 
 def map_parts(dtype: object) -> tuple[pl.DataType, pl.DataType] | None:
     """A `Map`'s key and value dtypes, each as an instance -- or None for any
     other dtype, and for every dtype on Polars 1."""
-    if _MAP is None or not isinstance(dtype, _MAP):
+    if MAP is None or not isinstance(dtype, MAP):
         return None
     map_dtype: Any = dtype
     key, value = map_dtype.key, map_dtype.value
@@ -80,9 +80,9 @@ def field_dtypes(dtype: pl.Struct) -> dict[str, pl.DataType]:
 
 # Factor to scale a day/second-denominated range into a Datetime's or
 # Duration's own physical time_unit.
-_TIME_UNIT_FACTORS = {"ms": 1_000, "us": 1_000_000, "ns": 1_000_000_000}
+TIME_UNIT_FACTORS = {"ms": 1_000, "us": 1_000_000, "ns": 1_000_000_000}
 
-_I64_MIN, _I64_MAX = -(2**63), 2**63 - 1
+_I64_MIN, I64_MAX = -(2**63), 2**63 - 1
 
 # The full representable range of each fixed-width integer dtype: the limits a
 # user-supplied bound may not exceed. `engine._default_numeric_bounds` reads
@@ -93,7 +93,7 @@ _INT_DTYPE_LIMITS: dict[DtypeLike, tuple[int, int]] = {
     pl.Int8: (-128, 127),
     pl.Int16: (-32_768, 32_767),
     pl.Int32: (-2_147_483_648, 2_147_483_647),
-    pl.Int64: (_I64_MIN, _I64_MAX),
+    pl.Int64: (_I64_MIN, I64_MAX),
     pl.UInt8: (0, 255),
     pl.UInt16: (0, 65_535),
     pl.UInt32: (0, 4_294_967_295),
@@ -145,10 +145,10 @@ def _delta_to_unit(delta: dt.timedelta, factor: int) -> int:
     # Truncate toward zero so the result never lands outside the true range.
     magnitude = abs(scaled) // 10**6
     value = magnitude if scaled >= 0 else -magnitude
-    return max(_I64_MIN, min(_I64_MAX, value))
+    return max(_I64_MIN, min(I64_MAX, value))
 
 
-def _dtype_value_limits(dtype: pl.DataType) -> tuple[float, float] | None:
+def dtype_value_limits(dtype: pl.DataType) -> tuple[float, float] | None:
     """The widest physical range `dtype` holds and still round-trips to Python.
 
     Returns None for dtypes with no numeric domain (String, Enum, ...), whose
@@ -167,17 +167,17 @@ def _dtype_value_limits(dtype: pl.DataType) -> tuple[float, float] | None:
         widest = 10**dtype.precision - 1
         return -widest, widest
     if isinstance(dtype, pl.Datetime) or dtype == pl.Datetime:
-        factor = _TIME_UNIT_FACTORS[getattr(dtype, "time_unit", None) or "us"]
+        factor = TIME_UNIT_FACTORS[getattr(dtype, "time_unit", None) or "us"]
         lo, hi = (_delta_to_unit(d, factor) for d in _DATETIME_LIMIT_DELTAS)
         return lo, hi
     if isinstance(dtype, pl.Duration) or dtype == pl.Duration:
-        factor = _TIME_UNIT_FACTORS[getattr(dtype, "time_unit", None) or "us"]
+        factor = TIME_UNIT_FACTORS[getattr(dtype, "time_unit", None) or "us"]
         lo, hi = (_delta_to_unit(d, factor) for d in _TIMEDELTA_LIMIT_DELTAS)
         return lo, hi
     return None
 
 
-def _bound_endpoint_to_physical(value: object, dtype: pl.DataType) -> float | int:
+def bound_endpoint_to_physical(value: object, dtype: pl.DataType) -> float | int:
     """Coerces a Bound endpoint to the physical (int) representation `dtype`
     stores internally, so real `date`/`datetime`/`time`/`timedelta` objects
     can be used as bounds on temporal ColSpecs, matching what `validate()`
@@ -194,7 +194,7 @@ def _bound_endpoint_to_physical(value: object, dtype: pl.DataType) -> float | in
     return pl.Series([value], dtype=dtype).to_physical().item()
 
 
-def _typed_values(values, dtype: pl.DataType) -> pl.Series:
+def typed_values(values, dtype: pl.DataType) -> pl.Series:
     """`values` as a Series of `dtype`, so a domain of choices is held in the
     column's own type -- `[1, 2]` on a `String` column is `["1", "2"]`, a
     `datetime` on a `Datetime` column stays a datetime.

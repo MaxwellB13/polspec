@@ -35,7 +35,7 @@ class Orders(FrameSpec):
     )
     total = ColSpec(pl.Float64, bounds=(0.0, None))
     __unique_together__ = [["customer_id", "order_id"]]
-    __checks__ = [Check(pl.col("total") >= 0, name="non_negative")]
+    __checks__ = [Check(col("total") >= 0, name="non_negative")]
     __foreign_keys__ = [
         ForeignKey("customer_id", references=Customers, ref_columns="id")
     ]
@@ -219,14 +219,62 @@ def test_rename_rewrites_every_constraint():
     assert FrameSpec.from_spec(spec).generate(5, seed=1).columns == list(spec)
 
 
-def test_rename_rejects_collisions_and_validators():
+def test_rename_rejects_collisions():
     with pytest.raises(SpecError, match="that name is taken"):
         Orders.spec.rename({"region": "total"})
-    with_validator = Orders.spec.with_columns(
-        total=ColSpec(pl.Float64, validators=[pl.col("total") >= 0])
+
+
+def test_rename_rewrites_validators_and_checks_written_with_col():
+    """A predicate renames like a rule's condition does; a defaulted name
+    follows it, and a given one stays."""
+    spec = Orders.spec.with_columns(
+        total=ColSpec(
+            pl.Float64,
+            bounds=(0.0, 1_000.0),
+            validators=[col("total") >= 0, Check(col("total") < 1e6, name="cap")],
+        )
+    ).with_checks(Check(col("total") > col("order_id"), name="big"))
+    renamed = spec.rename({"total": "amount", "order_id": "oid"})
+    first, cap = renamed["amount"].validators
+    assert first.pred is not None and first.pred.equals(col("amount") >= 0)
+    assert first.name == repr(col("amount") >= 0)
+    assert cap.name == "cap" and cap.pred is not None
+    assert cap.pred.equals(col("amount") < 1e6)
+    checks = {c.name: c for c in renamed.checks}
+    assert checks["non_negative"].pred is not None
+    assert checks["non_negative"].pred.equals(col("amount") >= 0)
+    big = checks["big"]
+    assert big.pred is not None
+    assert big.pred.equals(col("amount") > col("oid"))
+    derived = FrameSpec.from_spec(renamed)
+    derived.validate(
+        derived.generate(50, seed=1),
+        validate_checks=False,  # `big` compares two independent columns
+        validate_foreign_keys=False,
     )
-    with pytest.raises(SpecError, match="carries validators"):
-        with_validator.rename({"total": "amount"})
+
+
+def test_rename_leaves_what_it_does_not_rename_alone():
+    check = Check(pl.col("carrier").is_not_null(), name="raw")
+    spec = Orders.spec.with_checks(check)
+    assert check in spec.rename({"total": "amount"}).checks
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        Orders.spec.with_columns(
+            total=ColSpec(pl.Float64, validators=[pl.col("total") >= 0])
+        ),
+        Orders.spec.with_checks(Check(pl.col("total") >= 0, name="raw")),
+    ],
+    ids=["validator", "check"],
+)
+def test_rename_refuses_a_raw_expression_naming_the_column(spec):
+    """It would keep naming a column the spec no longer has -- which used to
+    surface only at validation, as a Polars `ColumnNotFoundError`."""
+    with pytest.raises(SpecError, match="raw polars expression naming it"):
+        spec.rename({"total": "amount"})
 
 
 def test_rename_a_self_referencing_key_rewrites_both_sides():
@@ -259,7 +307,8 @@ def test_structural_ops_round_trip_through_generate_and_validate():
     Derived = FrameSpec.from_spec(spec, name="Derived")
     df = Derived.generate(50, seed=3)
     assert df.columns == ["order_id", "region", "carrier", "amount"]
-    Derived.validate(df, validate_unique=False, validate_checks=False)
+    # The check renamed with its column: it is validated, not switched off.
+    Derived.validate(df, validate_unique=False)
 
 
 # ---------------------------------------------------------------------------

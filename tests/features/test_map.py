@@ -241,7 +241,7 @@ def test_a_profiled_map_column_can_be_saved_and_checked(tmp_path):
 
 
 def test_polars_1_names_the_version_a_map_needs(monkeypatch):
-    monkeypatch.setattr(dtype_codec, "_MAP", None)
+    monkeypatch.setattr(dtype_codec, "MAP", None)
     with pytest.raises(SerializationError, match="a dtype Polars 2 introduced"):
         dtype_codec.dtype_from_data({"Map": {"key": "String", "value": "Int64"}})
     with pytest.raises(SerializationError, match=r"written as \{Map"):
