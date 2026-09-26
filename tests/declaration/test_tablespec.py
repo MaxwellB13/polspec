@@ -382,3 +382,50 @@ def test_equal_specs_hash_equal_even_with_an_unhashable_field():
     assert priced == copy
     assert hash(priced) == hash(copy)
     assert {priced: "one", copy: "two"} == {priced: "two"}
+
+
+# ---------------------------------------------------------------------------
+# A check names only columns the spec declares
+# ---------------------------------------------------------------------------
+
+
+def test_a_check_on_an_undeclared_column_is_refused():
+    """It is a claim about nothing the spec generates, and a column
+    validation will not find -- which used to surface as Polars'
+    `ColumnNotFoundError` at validation, not here."""
+    with pytest.raises(SpecError, match=r"references unknown column\(s\) \['zz'\]"):
+        TableSpec(
+            "T", {"a": ColSpec(pl.Int64)}, checks=[Check(col("zz") > 0, name="zz")]
+        )
+    with pytest.raises(SpecError, match="unknown column"):
+        TableSpec(
+            "T", {"a": ColSpec(pl.Int64)}, checks=[Check(pl.col("zz") > 0, name="z")]
+        )
+
+
+def test_a_check_over_a_selector_names_no_column_and_passes():
+    """`pl.all()` and a regex selector name no column to look up."""
+    spec = TableSpec(
+        "T",
+        {"a_1": ColSpec(pl.Int64), "a_2": ColSpec(pl.Int64)},
+        checks=[
+            Check(pl.all_horizontal(pl.all() >= 0), name="non_negative"),
+            Check(pl.all_horizontal(pl.col("^a_.*$") < 10), name="small"),
+        ],
+    )
+    assert [c.name for c in spec.checks] == ["non_negative", "small"]
+
+
+def test_drop_and_select_remove_the_checks_they_strand():
+    """As they remove a composite or foreign key that loses a member: a check
+    says nothing once a column it compares is gone."""
+    spec = Orders.spec.with_checks(
+        Check(col("customer_id") > 0, name="cust"),
+        Check(col("total") < 1e6, name="cap"),
+    )
+    assert [c.name for c in spec.drop("customer_id").checks] == ["non_negative", "cap"]
+    assert [c.name for c in spec.select("order_id", "total").checks] == [
+        "non_negative",
+        "cap",
+    ]
+    assert [c.name for c in spec.select("customer_id").checks] == ["cust"]

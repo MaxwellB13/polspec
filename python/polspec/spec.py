@@ -28,6 +28,7 @@ from polspec.dtypes import (
     float16_inside,
     map_entries,
     map_parts,
+    unholdable,
 )
 from polspec.errors import SpecError
 from polspec.expr import Pred
@@ -696,10 +697,43 @@ class ColSpec:
                     self, "weights", tuple(float(w) for w in self.weights)
                 )
 
+        if self.choices is not None and not self.choices:
+            raise SpecError("ColSpec.choices must not be empty")
+        # Before the duplicate check, which reads the choices through the
+        # dtype and would otherwise report a truncated `1.5` as a repeated `1`.
+        self._validate_choices_fit_dtype()
         if self.choices is not None:
-            if not self.choices:
-                raise SpecError("ColSpec.choices must not be empty")
             reject_duplicate_choices(self.choices, "ColSpec.choices", self.value_dtype)
+
+    def _validate_choices_fit_dtype(self) -> None:
+        """Refuses a choice -- the column's or a rule's -- that the column's
+        dtype cannot hold as written.
+
+        Generation gathers choices from a Series of the column's own dtype,
+        cast leniently, so a choice the dtype cannot hold does not fail: it
+        arrives as a null, in a column that may not allow one, or as a
+        different value -- `1000` on an `Int8` is a null, `1.5` is `1`. The
+        spec would then fail its own validation, or generate a domain it
+        never declared. An `Enum`'s choices are held to its categories by
+        `_validate_choices_against_domain`, in words about categories.
+        """
+        if isinstance(self.value_dtype, pl.Enum):
+            return
+        dtype = self.value_dtype
+        for label, choices in (
+            ("ColSpec.choices", self.choices),
+            *(("ColRule.choices", rule.choices) for rule in self.rules),
+        ):
+            if choices is None:
+                continue
+            offending = unholdable(choices, dtype)
+            if offending:
+                raise SpecError(
+                    f"{label} {offending} cannot be held by {dtype!r}: generated, "
+                    "each would come out as a null or as a different value. "
+                    f"Declare choices a {dtype!r} column holds exactly, or widen "
+                    "the dtype."
+                )
 
     def _normalize_distribution(self) -> None:
         """Canonicalizes the distribution name and floats its parameters."""

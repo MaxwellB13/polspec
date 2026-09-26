@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import datetime as dt
 import decimal
+import math
 import struct
+from collections.abc import Sequence
 from typing import Any
 
 import polars as pl
@@ -200,6 +202,60 @@ def typed_values(values, dtype: pl.DataType) -> pl.Series:
     `datetime` on a `Datetime` column stays a datetime.
     """
     return pl.Series(list(values), dtype=dtype, strict=False)
+
+
+def unholdable(values: Sequence[Any], dtype: pl.DataType) -> list[Any]:
+    """The `values` a column of `dtype` cannot hold as written.
+
+    One is unholdable when `typed_values` -- the cast generation gathers
+    choices through -- turns it into a null, or into a different value: an
+    integer or decimal rounded or wrapped, a time or datetime cut to a
+    coarser unit. On a float column the nearest float *is* the value -- `0.1`
+    on a `Float32` -- so only a null or an overflow to infinity counts. Text
+    written for a textual column is its own string form, and a date widened
+    to a datetime is the same day, so neither counts; a value the cast
+    refuses outright does.
+    """
+    if dtype in (pl.String, pl.Utf8, pl.Categorical) or isinstance(
+        dtype, pl.Categorical
+    ):
+        return []
+    try:
+        held = typed_values(values, dtype).to_list()
+    except Exception:  # noqa: BLE001 - one at a time, to name the offenders
+        return [v for v in values if v is not None and not _holds(v, dtype)]
+    return [
+        value
+        for value, cast in zip(values, held, strict=True)
+        if value is not None and not _same(value, cast, dtype)
+    ]
+
+
+def _holds(value: Any, dtype: pl.DataType) -> bool:
+    try:
+        (cast,) = typed_values([value], dtype).to_list()
+    except Exception:  # noqa: BLE001 - a value the cast refuses is not held
+        return False
+    return _same(value, cast, dtype)
+
+
+def _same(value: Any, cast: Any, dtype: pl.DataType) -> bool:
+    """Whether `cast` is `value`, held: not a null, and -- for a number, a
+    datetime, a time or a duration -- equal to it, or on a float column the
+    nearest float to it."""
+    if cast is None:
+        return False
+    if isinstance(value, bool):
+        return True
+    if dtype.is_float():
+        return not isinstance(value, (int, float, decimal.Decimal)) or (
+            math.isfinite(cast) or not math.isfinite(float(value))
+        )
+    if isinstance(
+        value, (int, float, decimal.Decimal, dt.datetime, dt.time, dt.timedelta)
+    ):
+        return cast == value
+    return True
 
 
 def float16_inside(value: float, *, up: bool) -> float:
