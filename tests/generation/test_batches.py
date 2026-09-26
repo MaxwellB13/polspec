@@ -321,6 +321,35 @@ def test_what_is_drawn_per_batch_is_deterministic_but_not_the_whole_frames():
     assert not first["score"].equals(second["score"])
 
 
+@pytest.mark.parametrize(
+    "dtype",
+    [
+        pl.List(pl.Int64),
+        pl.Array(pl.Int64, 3),
+        pl.List(pl.Struct({"a": pl.Int64, "b": pl.String})),
+        pl.List(pl.List(pl.Int64)),
+    ],
+    ids=str,
+)
+def test_no_batch_repeats_anothers_elements(dtype):
+    """A nested column's elements are drawn per batch, from a seed of the
+    batch's own: every batch used to draw them from the first batch's, so a
+    stream repeated its opening rows' elements over and over. The first
+    batch still draws exactly what `generate()` does."""
+    fixed = {} if isinstance(dtype, pl.Array) else {"list_length": (3, 3)}
+    spec = TableSpec("Nested", {"xs": ColSpec(dtype, **fixed)})
+    batches = list(generate_batches(spec, 40, batch_size=10, seed=1))
+    elements = [b["xs"].to_list() for b in batches]
+    assert all(
+        elements[i] != elements[j]
+        for i in range(len(elements))
+        for j in range(i + 1, len(elements))
+    )
+    assert batches[0].equals(generate(spec, 10, seed=1))
+    rerun = list(generate_batches(spec, 40, batch_size=10, seed=1))
+    assert all(a.equals(b) for a, b in zip(batches, rerun, strict=True))
+
+
 def test_a_batch_seed_no_longer_depends_on_how_many_came_before():
     n, b = 200_000, 65_536
     batches = list(PlainSource.generate_batches(n, batch_size=b, seed=8))

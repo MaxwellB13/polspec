@@ -112,6 +112,12 @@ them. See [String formats](../how-to/formats.md).
   batch of `generate_batches`, a `scan()` or a `sink_*`, so they collide
   across batches only by chance; generate the frame whole when that
   matters.
+- **A nested column's elements are drawn per batch.** A `List`'s lengths
+  are a window onto the whole frame, but which element a row starts at
+  depends on every earlier row's length, so the elements of a `List`,
+  `Array` or `Map` column are drawn afresh in each batch of
+  `generate_batches`, a `scan()` or a `sink_*` -- deterministic for a seed,
+  but not the values `generate()` would put there past the first batch.
 - **A unique string favours its longest lengths.** It is drawn uniformly
   from every string its lengths allow, and the longest lengths hold nearly
   all of them.

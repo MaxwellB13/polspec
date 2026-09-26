@@ -167,6 +167,18 @@ def _as_strings(values: Sequence[Any], dtype: pl.DataType) -> list[str]:
         return [str(v) for v in values]
 
 
+def _sampled(column: pl.Expr, dtype: pl.DataType) -> pl.Expr:
+    """`column` as the expression its samples are drawn from.
+
+    An `Array` is sampled as the `List` it holds the values of: Polars 1
+    panics on `unique(maintain_order=True)` over an `Array` column of more
+    than one chunk when the filter before it keeps no row -- which is every
+    passing frame read from a file in row groups, or concatenated. Python
+    reads both as a list, so the samples are the same values either way.
+    """
+    return column.arr.to_list() if isinstance(dtype, pl.Array) else column
+
+
 def _struct_of(names: Sequence[str]) -> pl.Expr | None:
     """A struct of the named columns, for sampling multi-column claims."""
     return pl.struct([pl.col(n) for n in names]) if names else None

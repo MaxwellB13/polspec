@@ -8,6 +8,30 @@ seed produces; see
 
 ## [Unreleased]
 
+### Fixed
+
+- **A nested column no longer repeats itself batch after batch.** The
+  elements of a `List`, `Array` or `Map` column were drawn from the same
+  seed in every batch of `generate_batches`, `scan()` and the sinks, so a
+  stream of any size repeated its first batch's elements over and over.
+  Each batch after the first now draws them from a seed of its own. This
+  changes the seeded output of those batches; `generate()`, and the first
+  batch, are unchanged.
+
+- **Projecting a `method="cartesian"` scan no longer changes its values.**
+  A scan generated only the columns a projection asked for, but a coverage
+  set is the product of every column, so dropping one changed the rows of
+  the others: `scan(..., method="cartesian").select("c")` was not the full
+  scan's `c`. A cartesian scan now generates every column and projects
+  afterwards.
+
+- **Validating an `Array` column in several chunks no longer panics on
+  Polars 1.** Taking distinct samples of an `Array` column that arrived in
+  more than one chunk -- concatenated, or read from a file in row groups --
+  panicked inside Polars 1 whenever no row failed, which is every frame that
+  passes. Samples of an `Array` are now taken as the lists they are; they
+  come back as the same values. Polars 2 was not affected.
+
 ## [0.11.0] - 2026-09-26
 
 **One seeded change, once: a `unique=True` column filled by a foreign key

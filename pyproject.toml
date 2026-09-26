@@ -58,6 +58,7 @@ dev = [
     "ty>=0.0.75",
     "ruff>=0.16.5",
     "griffelib>=2.3",
+    "hypothesis>=6.100",
 ]
 docs = [
     "mkdocstrings-python>=1.11",

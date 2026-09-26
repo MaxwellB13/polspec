@@ -88,7 +88,11 @@ uv run --group docs zensical build --strict  # what the docs workflow runs
 
 - **Generate and validate must agree.** Anything `generate()` produces,
   `validate()` must accept. `tests/contracts/test_roundtrip.py` pins that
-  property. A known gap is recorded once in
+  property over the case catalogue in `tests/cases.py`,
+  `tests/contracts/test_streaming.py` pins it through `generate_batches()`
+  and `scan()`, and `tests/contracts/test_properties.py` pins it over specs
+  Hypothesis draws. A new field or dtype belongs in `tests/cases.py`, and in
+  the strategy in `test_properties.py`. A known gap is recorded once in
   [`docs/explanation/limitations.md`](docs/explanation/limitations.md) and once as
   an `xfail(strict=True)` test, so fixing it forces the docs to be updated.
 - **Error messages name the fix.** Say what was declared, what was expected,
@@ -103,11 +107,11 @@ uv run --group docs zensical build --strict  # what the docs workflow runs
   facade signature. `tests/contracts/test_parity.py` holds a test for each,
   and fails naming what is missing.
 - **Tests live in a folder by what they cover**: `contracts/` (the
-  round trip, the parity tests), `declaration/`, `generation/`,
+  round trip, whole, streamed and drawn; the parity tests), `declaration/`, `generation/`,
   `validation/`, `drift/`, `serialization/`, `features/` (one file per
   feature across every verb), `cli/`, `docs/`. Every module opens with a
   docstring saying what it covers; `tests/helpers.py` holds what several
-  share.
+  share, and `tests/cases.py` the case catalogue the contracts share.
 - **What the constructor accepts is not what the instance holds.** `ColSpec`,
   `Check` and `ForeignKey` annotate their fields with the normalised form
   (`pl.DataType`, `Bound`, tuples) and declare the accepted forms in an
