@@ -34,7 +34,12 @@ jobs:
         run: uv run --no-sync ty check
 
       # The package's layering: see [tool.importlinter] in pyproject.toml.
+      # The project is not installed in this job, so the source is put on
+      # the path; import-linter reads it and never imports it, so the Rust
+      # extension is not needed.
       - name: import-linter
+        env:
+          PYTHONPATH: python
         run: uv run --no-sync lint-imports
 
   rust:
