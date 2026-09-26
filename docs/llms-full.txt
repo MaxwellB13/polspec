@@ -1609,7 +1609,9 @@ its name and every pass by what it is for, so dropping a column's
 neighbours leaves it alone — `lf.select(cols).collect()` is always
 `lf.collect().select(cols)`. Where a column depends on others (a rule reads
 the columns its `when` names, a composite key is repaired as a group), those
-are generated too and dropped again on the way out.
+are generated too and dropped again on the way out. Under
+`method="cartesian"` every column is generated whatever the projection, since
+the coverage set is the product of all of them.
 
 A predicate filters rows that were drawn; it never narrows the draw. `n`
 rows are generated and the matching ones kept, because drawing only matching
@@ -1700,8 +1702,9 @@ no pass rewrites holds, batch by batch, exactly the rows
 written at one batch size and re-read at another is the same data, and the
 third batch can be checked against `generate(n).slice(...)`. What is drawn
 per batch instead, deterministic but not row for row the whole frame's, is
-a column with rules, a foreign key, a composite key, and a `List` column's
-elements (its lengths are a window). A `unique=True` column is a window
+a column with rules, a foreign key, a composite key, and the elements of a
+`List`, `Array` or `Map` column (a `List`'s lengths are a window) -- each
+batch drawing its elements from a seed of its own. A `unique=True` column is a window
 too: its values are a permutation of its value space, unique across every
 batch.
 
@@ -5151,7 +5154,10 @@ covers, and a test holds the suite to both rules.
 
 `contracts/` holds what keeps the design together rather than any one
 feature: `test_roundtrip.py`, the property that anything `generate()`
-produces `validate()` accepts, across every dtype; and `test_parity.py`,
+produces `validate()` accepts, across every dtype; `test_streaming.py`, the
+same property through `generate_batches()` and `scan()`, with what batching
+promises on top; `test_properties.py`, the same again over specs Hypothesis
+draws rather than ones anybody wrote; and `test_parity.py`,
 which fails when a field is added without its serialization entry, its drift
 comparator, its typed constructor parameter or its place in the facade's
 signatures. Warnings are errors in the suite, so a warning is asserted where
@@ -5380,6 +5386,12 @@ them. See [String formats](https://maxwellb13.github.io/polspec/how-to/formats/)
   batch of `generate_batches`, a `scan()` or a `sink_*`, so they collide
   across batches only by chance; generate the frame whole when that
   matters.
+- **A nested column's elements are drawn per batch.** A `List`'s lengths
+  are a window onto the whole frame, but which element a row starts at
+  depends on every earlier row's length, so the elements of a `List`,
+  `Array` or `Map` column are drawn afresh in each batch of
+  `generate_batches`, a `scan()` or a `sink_*` -- deterministic for a seed,
+  but not the values `generate()` would put there past the first batch.
 - **A unique string favours its longest lengths.** It is drawn uniformly
   from every string its lengths allow, and the longest lengths hold nearly
   all of them.
@@ -5798,6 +5810,30 @@ seed produces; see
 [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/).
 
 ## [Unreleased]
+
+### Fixed
+
+- **A nested column no longer repeats itself batch after batch.** The
+  elements of a `List`, `Array` or `Map` column were drawn from the same
+  seed in every batch of `generate_batches`, `scan()` and the sinks, so a
+  stream of any size repeated its first batch's elements over and over.
+  Each batch after the first now draws them from a seed of its own. This
+  changes the seeded output of those batches; `generate()`, and the first
+  batch, are unchanged.
+
+- **Projecting a `method="cartesian"` scan no longer changes its values.**
+  A scan generated only the columns a projection asked for, but a coverage
+  set is the product of every column, so dropping one changed the rows of
+  the others: `scan(..., method="cartesian").select("c")` was not the full
+  scan's `c`. A cartesian scan now generates every column and projects
+  afterwards.
+
+- **Validating an `Array` column in several chunks no longer panics on
+  Polars 1.** Taking distinct samples of an `Array` column that arrived in
+  more than one chunk -- concatenated, or read from a file in row groups --
+  panicked inside Polars 1 whenever no row failed, which is every frame that
+  passes. Samples of an `Array` are now taken as the lists they are; they
+  come back as the same values. Polars 2 was not affected.
 
 ## [0.11.0] - 2026-09-26
 

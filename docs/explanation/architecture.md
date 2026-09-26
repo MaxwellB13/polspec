@@ -157,7 +157,10 @@ covers, and a test holds the suite to both rules.
 
 `contracts/` holds what keeps the design together rather than any one
 feature: `test_roundtrip.py`, the property that anything `generate()`
-produces `validate()` accepts, across every dtype; and `test_parity.py`,
+produces `validate()` accepts, across every dtype; `test_streaming.py`, the
+same property through `generate_batches()` and `scan()`, with what batching
+promises on top; `test_properties.py`, the same again over specs Hypothesis
+draws rather than ones anybody wrote; and `test_parity.py`,
 which fails when a field is added without its serialization entry, its drift
 comparator, its typed constructor parameter or its place in the facade's
 signatures. Warnings are errors in the suite, so a warning is asserted where

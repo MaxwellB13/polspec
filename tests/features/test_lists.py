@@ -407,3 +407,25 @@ def test_an_element_null_is_sized_as_a_slot_and_a_validity_bit():
     spec = TableSpec("S", {"c": column})
     df = spec_for(column).generate(100_000, seed=1)
     assert spec.estimated_size(100_000) == pytest.approx(df.estimated_size(), rel=0.02)
+
+
+@pytest.mark.parametrize(
+    "dtype",
+    [pl.Array(pl.Int64, 2), pl.Array(pl.Enum(["a", "b"]), 2)],
+    ids=str,
+)
+def test_an_array_of_several_chunks_validates(dtype):
+    """Polars 1 panics taking distinct samples of an `Array` column in more
+    than one chunk when no row fails -- every passing frame concatenated, or
+    read from a file in row groups -- so an `Array` is sampled as a `List`.
+    Samples come back as the lists they always were."""
+    values = [[1, 2], [2, 1]] if dtype.inner == pl.Int64 else [["a", "b"], ["b", "a"]]
+    part = pl.DataFrame({"c": pl.Series(values, dtype=dtype)})
+    chunked = pl.concat([part, part], rechunk=False)
+    assert chunked.n_chunks() == 2
+    column = ColSpec(dtype, choices=[1] if dtype.inner == pl.Int64 else ["a"])
+    report = spec_for(ColSpec(dtype)).inspect(chunked)
+    assert report.passed
+    (finding,) = spec_for(column).inspect(chunked)
+    assert finding.code == "choices"
+    assert finding.samples == (values[0], values[1])

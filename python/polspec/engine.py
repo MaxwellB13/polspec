@@ -641,9 +641,19 @@ def _list_parts(
     total = int(lengths.fill_null(0).sum())
 
     element_spec = dataclasses.replace(spec._element(), seed_name=seed_key)
+    # The elements are drawn per window, not as a window: which element a
+    # row starts at depends on every earlier row's length. Each window after
+    # the first draws them from a seed of its own, so two batches never
+    # repeat each other's elements, and the first -- the whole frame, for
+    # `generate()` -- draws exactly what it always did.
+    element_seed = (
+        seed
+        if seed is None or row_offset == 0
+        else pass_seed(seed, f"elements:{seed_key}:{row_offset}")
+    )
     # The element is a column in its own right, so a list of structs -- or
     # of lists -- is the same recursion one level down.
-    return lengths, _generate_column(name, element_spec, total, seed)
+    return lengths, _generate_column(name, element_spec, total, element_seed)
 
 
 def _row_of_element(lengths: pl.Series) -> pl.Series:

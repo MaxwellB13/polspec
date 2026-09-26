@@ -16,7 +16,9 @@ Projecting cannot change what a column holds. Every column is seeded by its
 name and every pass by what it is for, so dropping a column's neighbours
 leaves it alone: `scan(n, seed=s).select(cols).collect()` is
 `scan(n, seed=s).collect().select(cols)`, for every subset. That is what
-makes the pushdown free rather than a trade.
+makes the pushdown free rather than a trade -- except under
+`method="cartesian"`, where the coverage set is the product of every column
+and so every column is generated, then projected.
 
 Rows come in batches, so a scan carries `generate_batches`' terms: a
 `Hierarchy` is refused, uniqueness holds within a batch rather than across
@@ -112,7 +114,14 @@ def scan(
     ) -> Iterator[pl.DataFrame]:
         wanted = list(spec.columns) if with_columns is None else with_columns
         needed = frozenset(wanted) | _predicate_columns(predicate)
-        source = spec.select(*needed_columns(spec, needed))
+        # A coverage set is the product of every dimension the spec has, so
+        # under `cartesian` a dropped column would change the rows of every
+        # other: the whole spec is generated and only then projected.
+        source = (
+            spec
+            if method == "cartesian"
+            else spec.select(*needed_columns(spec, needed))
+        )
         rows = n if n_rows is None else min(n, n_rows)
         size = batch_size or polars_batch_size or DEFAULT_BATCH_SIZE
         for batch in generate_batches(

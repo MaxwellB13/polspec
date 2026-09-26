@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 from polspec.validation.constraints._base import (
     _as_strings,
     _Constraint,
+    _sampled,
 )
 from polspec.validation.constraints._rules import _rule_constraints
 
@@ -320,7 +321,7 @@ def _column_constraints(
             _ColumnValidator(
                 key=f"{name}__validator_{index}",
                 mask=validator._failure_mask(),
-                sample_expr=column,
+                sample_expr=_sampled(column, actual_dtype),
                 column=name,
                 validator=validator,
             )
@@ -520,6 +521,7 @@ def _list_constraints(
     does. The samples are the offending lists.
     """
     present = column.is_not_null()
+    sample_expr = _sampled(column, actual_dtype)
     constraints: list[_Constraint] = []
 
     if spec.list_length is not None and isinstance(actual_dtype, pl.List):
@@ -553,7 +555,7 @@ def _list_constraints(
             _ListElementNull(
                 key=f"{where}__element_null",
                 mask=present & any_element(pl.element().is_null()),
-                sample_expr=column,
+                sample_expr=sample_expr,
                 column=name,
                 where=where,
             )
@@ -571,7 +573,7 @@ def _list_constraints(
     ):
         lifted: dict[str, Any] = {
             "mask": present & any_element(constraint.mask),
-            "sample_expr": column,
+            "sample_expr": sample_expr,
         }
         if isinstance(constraint, _Bounds):
             lifted["values"] = elements.eval(constraint.values).explode(

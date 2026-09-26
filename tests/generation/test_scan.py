@@ -60,6 +60,28 @@ def test_projecting_cannot_change_what_a_column_holds():
             assert lf.select(subset).collect().equals(whole.select(subset)), subset
 
 
+class Covered(FrameSpec):
+    """Three coverage dimensions and a filler, so dropping any of them would
+    change the product the others are laid out in."""
+
+    kind = ColSpec(pl.Enum(["x", "y", "z"]))
+    flag = ColSpec(pl.Boolean)
+    amount = ColSpec(pl.Int64, bounds=(-5, 5))
+    note = ColSpec(pl.String, string_length=(3, 6))
+
+
+def test_projecting_a_cartesian_scan_cannot_change_what_a_column_holds():
+    """The coverage set is the product of every dimension, so a projected
+    cartesian scan is the whole one, projected -- across batches, and past
+    the coverage set into the padding."""
+    lf = Covered.scan(200, seed=SEED, method="cartesian", batch_size=7)
+    whole = lf.collect()
+    names = whole.columns
+    for size in range(1, len(names) + 1):
+        for subset in itertools.combinations(names, size):
+            assert lf.select(subset).collect().equals(whole.select(subset)), subset
+
+
 def test_a_column_no_pass_rewrites_is_the_frame_generate_would_make():
     lf = Source.scan(ROWS, seed=SEED)
     eager = Source.generate(ROWS, seed=SEED)

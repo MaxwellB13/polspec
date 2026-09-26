@@ -155,6 +155,17 @@ def test_a_batched_map_column_has_the_shape_of_a_whole_one():
 
 
 @needs_map
+def test_no_batch_repeats_anothers_entries():
+    """Entries are drawn per batch, each from a seed of its own -- not from
+    the first batch's, over and over."""
+    spec = TableSpec("T", {"m": ColSpec(_map(pl.Int64, pl.Int64), list_length=(3, 3))})
+    batches = [
+        b["m"].to_list() for b in generate_batches(spec, 30, batch_size=10, seed=5)
+    ]
+    assert batches[0] != batches[1] != batches[2] != batches[0]
+
+
+@needs_map
 @pytest.mark.parametrize(
     ("column", "complaint"),
     [

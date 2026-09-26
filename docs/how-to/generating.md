@@ -78,7 +78,9 @@ its name and every pass by what it is for, so dropping a column's
 neighbours leaves it alone — `lf.select(cols).collect()` is always
 `lf.collect().select(cols)`. Where a column depends on others (a rule reads
 the columns its `when` names, a composite key is repaired as a group), those
-are generated too and dropped again on the way out.
+are generated too and dropped again on the way out. Under
+`method="cartesian"` every column is generated whatever the projection, since
+the coverage set is the product of all of them.
 
 A predicate filters rows that were drawn; it never narrows the draw. `n`
 rows are generated and the matching ones kept, because drawing only matching
@@ -169,8 +171,9 @@ no pass rewrites holds, batch by batch, exactly the rows
 written at one batch size and re-read at another is the same data, and the
 third batch can be checked against `generate(n).slice(...)`. What is drawn
 per batch instead, deterministic but not row for row the whole frame's, is
-a column with rules, a foreign key, a composite key, and a `List` column's
-elements (its lengths are a window). A `unique=True` column is a window
+a column with rules, a foreign key, a composite key, and the elements of a
+`List`, `Array` or `Map` column (a `List`'s lengths are a window) -- each
+batch drawing its elements from a seed of its own. A `unique=True` column is a window
 too: its values are a permutation of its value space, unique across every
 batch.
 
