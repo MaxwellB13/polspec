@@ -73,7 +73,13 @@ def frame_constraints(
         )
 
     for check in checks or ():
-        involved = [c for c in check.expr.meta.root_names() if c in df_col_names]
+        named = check.expr.meta.root_names()
+        if not all(c in df_col_names for c in named):
+            # Its mask cannot be evaluated -- Polars would raise, and inspect()
+            # never does for a frame that fails. The missing columns are a
+            # `missing_columns` finding already, or were allowed to be absent.
+            continue
+        involved = [c for c in named if c in df_col_names]
         constraints.append(
             _FrameCheck(
                 key=f"check:{check.name}",

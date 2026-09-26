@@ -235,6 +235,16 @@ class TableSpec:
     def _validate_checks(self) -> None:
         seen: dict[str, Check] = {}
         for check in self.checks:
+            # A regex selector or `pl.all()` names no column here, and passes;
+            # a column the spec does not declare is a claim about nothing it
+            # can generate, and a column validation will not find.
+            unknown = sorted(set(check.expr.meta.root_names()) - set(self.columns))
+            if unknown:
+                raise SpecError(
+                    f"Check {check.name!r} on {self.name} references unknown "
+                    f"column(s) {unknown}. A check may only name columns the "
+                    "spec declares."
+                )
             prior = seen.get(check.name)
             if prior is not None:
                 raise SpecError(
@@ -510,12 +520,16 @@ class TableSpec:
     def _without(self, dropped: set[str]) -> dict[str, Any]:
         """Constraint fields with every mention of `dropped` columns removed.
 
-        A composite key or foreign key that loses a member is removed whole.
-        A rule on a surviving column that points at a dropped one is left for
+        A composite key, foreign key or check that loses a member is removed
+        whole -- a check says nothing once a column it compares is gone. A
+        rule on a surviving column that points at a dropped one is left for
         validation to reject: silently dropping a rule would change what the
         surviving column generates.
         """
         return {
+            "checks": tuple(
+                c for c in self.checks if not dropped & set(c.expr.meta.root_names())
+            ),
             "unique_together": tuple(
                 g for g in self.unique_together if not dropped & set(g)
             ),
@@ -530,7 +544,8 @@ class TableSpec:
         }
 
     def drop(self, *names: str) -> TableSpec:
-        """Removes columns, and any composite or foreign key that used them."""
+        """Removes columns, and any composite key, foreign key or check that
+        used them."""
         self._require_columns(names, "drop")
         dropped = set(names)
         columns = {k: v for k, v in self.columns.items() if k not in dropped}

@@ -12,7 +12,9 @@ from polspec import (
     ColRule,
     ColSpec,
     FrameSpec,
+    TableSpec,
     col,
+    inspect,
 )
 
 # ---------------------------------------------------------------------------
@@ -256,3 +258,32 @@ def test_a_rule_leaves_a_null_a_null():
     matched = df.filter(pl.col("flag") & pl.col("ruled").is_not_null())["ruled"]
     assert matched.min() >= 50, "the rule still holds on every matched value"
     S.validate(df)
+
+
+def test_a_rule_that_cannot_be_evaluated_stops_the_rules_after_it():
+    """First match wins, so each rule governs only the rows no earlier rule
+    claimed. With the first rule's column absent, which rows it claimed is
+    unknown -- and checking the second anyway reported a row the first had
+    rewritten as the second's failure."""
+    spec = TableSpec(
+        "Carriers",
+        {
+            "region": ColSpec(pl.String),
+            "qty": ColSpec(pl.Int64),
+            "carrier": ColSpec(
+                pl.String,
+                rules=[
+                    ColRule(when=col("region") == "UK", choices=["RM"]),
+                    ColRule(when=col("qty") > 0, choices=["UPS"]),
+                ],
+            ),
+        },
+    )
+    # Row 0 is a UK row the first rule rewrote; `region` did not arrive.
+    frame = pl.DataFrame({"qty": [1, 1], "carrier": ["RM", "UPS"]})
+    assert inspect(spec, frame, missing_cols="allow").passed
+    # With every column present, both rules are checked as before.
+    full = frame.with_columns(region=pl.Series(["UK", "US"]))
+    assert inspect(spec, full).passed
+    wrong = full.with_columns(carrier=pl.Series(["RM", "RM"]))
+    assert [f.code for f in inspect(spec, wrong)] == ["rule"]

@@ -8,6 +8,7 @@ the caller declared without saying so.
 """
 
 import datetime as dt
+from decimal import Decimal
 
 import polars as pl
 import pytest
@@ -174,6 +175,76 @@ def test_choices_distinct_in_their_dtype_are_accepted():
     assert ColSpec(pl.String, choices=[1, 2, 3]).choices == (1, 2, 3)
     assert ColSpec(pl.String, choices=[True, "True"]).choices == (True, "True")
     assert ColSpec(pl.Int64, choices=[1, 2]).choices == (1, 2)
+
+
+@pytest.mark.parametrize(
+    ("dtype", "choices", "offending"),
+    [
+        (pl.Int8, [1, 1000], [1000]),  # out of range: a null
+        (pl.Int8, [1, 1.5], [1.5]),  # truncated: a different value
+        (pl.UInt8, [-1], [-1]),
+        (pl.Date, ["not a date"], ["not a date"]),  # refused by the cast
+        (pl.Decimal(4, 1), [Decimal("0.55")], [Decimal("0.55")]),
+        (pl.Datetime("ms"), [dt.datetime(2024, 1, 1, 0, 0, 0, 1)], None),
+        (pl.Float32, [1e40], [1e40]),  # overflows to infinity
+        (pl.List(pl.Int8), [1000], [1000]),  # an element's choices
+    ],
+    ids=[
+        "int8_overflow",
+        "int8_truncation",
+        "uint8_negative",
+        "date_text",
+        "decimal_scale",
+        "datetime_unit",
+        "float32_overflow",
+        "list_element",
+    ],
+)
+def test_a_choice_the_dtype_cannot_hold_is_refused(dtype, choices, offending):
+    """Generation gathers choices through a lenient cast, so one the dtype
+    cannot hold used to come out as a null -- in a column that may not
+    allow one -- or as a different value, and the spec failed its own
+    validation."""
+    with pytest.raises(SpecError, match="cannot be held by") as caught:
+        ColSpec(dtype, choices=choices)
+    if offending is not None:
+        assert repr(offending) in str(caught.value)
+
+
+def test_a_rule_choice_the_dtype_cannot_hold_is_refused():
+    with pytest.raises(SpecError, match=r"ColRule.choices \[1000\] cannot be held"):
+        ColSpec(pl.Int8, rules=[ColRule(when=col("g") == "x", choices=[1000])])
+
+
+@pytest.mark.parametrize(
+    ("dtype", "choices"),
+    [
+        (pl.String, [1, "a"]),  # text is written as it reads
+        (pl.Int64, [1.0, 2]),  # a float that is an integer
+        (pl.Float32, [0.1, 0.2]),  # the nearest float is the value
+        (pl.Datetime("us"), [dt.date(2024, 1, 1)]),  # the same day
+        (pl.Decimal(4, 1), [Decimal("0.5")]),
+        (pl.Int8, [1, None]),
+    ],
+    ids=[
+        "number_as_text",
+        "integral_float",
+        "float32",
+        "date_as_datetime",
+        "decimal",
+        "with_none",
+    ],
+)
+def test_a_choice_the_dtype_holds_is_accepted(dtype, choices):
+    assert ColSpec(dtype, choices=choices, nullable=True).choices == tuple(choices)
+
+
+def test_a_held_choice_generates_as_itself():
+    """What the refusal protects: every generated value is a declared
+    choice, never a null the column does not allow."""
+    df = spec_for(ColSpec(pl.Int8, choices=[1, 100, -128])).generate(500, seed=1)
+    assert df["c"].null_count() == 0
+    assert set(df["c"].to_list()) <= {1, 100, -128}
 
 
 def test_duplicate_choices_would_have_misapplied_weights():

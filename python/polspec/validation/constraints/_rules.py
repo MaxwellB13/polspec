@@ -59,6 +59,9 @@ def rule_constraints(
     accumulating it into `claimed`. Doing anything else here lets a null
     propagate through `~claimed` and silently excuse every later rule on that
     row, which is a row generation did rewrite and validation would not check.
+
+    A rule whose `when` names a column the frame lacks ends the list: the
+    rows it would have claimed are unknown, so no later rule can be checked.
     """
     column = pl.col(name)
     constraints: list[Constraint] = []
@@ -66,7 +69,12 @@ def rule_constraints(
 
     for index, rule in enumerate(spec.rules):
         if not rule.when.root_names() <= set(df_col_names):
-            continue  # reported through missing_cols instead
+            # Reported through missing_cols. Which rows this rule claimed
+            # cannot be known, so neither can the rows every later rule on
+            # the column governs: checking them anyway reports a row this
+            # rule rewrote as a failure of the next. No finding beats a
+            # false one.
+            break
         matches = rule._expr().fill_null(False)
         applies = matches & ~claimed
         claimed = claimed | matches

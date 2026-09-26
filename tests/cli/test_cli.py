@@ -1021,3 +1021,26 @@ def test_output_is_refused_before_reading_what_it_cannot_write(tmp_path, capsys)
         == 1
     )
     assert "do not combine with --all" in capsys.readouterr().err
+
+
+def test_validate_reports_a_column_a_check_needs_rather_than_a_traceback(
+    tmp_path, capsys
+):
+    """The check cannot run without its column; it used to take the command
+    down with Polars' `ColumnNotFoundError`."""
+    spec = tmp_path / "totals.yaml"
+    spec.write_text(
+        "version: 3\n"
+        "name: Totals\n"
+        "columns:\n"
+        "  subtotal: {dtype: Float64}\n"
+        "  total: {dtype: Float64}\n"
+        "checks:\n"
+        "- expr: {ge: [{col: total}, {col: subtotal}]}\n"
+        "  name: total_covers_subtotal\n",
+        encoding="utf-8",
+    )
+    data = tmp_path / "totals.csv"
+    data.write_text("total\n1.0\n", encoding="utf-8")
+    assert run_cli("validate", spec, data) == 1
+    assert "Missing required columns" in capsys.readouterr().out

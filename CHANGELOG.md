@@ -8,6 +8,48 @@ seed produces; see
 
 ## [Unreleased]
 
+### Changed
+
+- **A choice its dtype cannot hold is refused at declaration.**
+  `ColSpec(pl.Int8, choices=[1000])` constructed, and generation gathered
+  the choice through a lenient cast: it came out as a null, in a column
+  that need not allow one, and the spec failed its own validation. `1.5`
+  on an `Int8` came out as `1`, a domain nobody declared, and text on a
+  `Date` column failed inside Polars at generation. A column's choices and
+  each rule's are now held to the column's dtype and refused, naming them,
+  when it cannot hold them as written. Text on a `String` column, an
+  integral float on an integer one, a date on a `Datetime` and the nearest
+  float on a float column are all held, as before.
+
+- **A check naming a column the spec does not declare is refused.** It
+  constructed, and failed only when validated. `pl.all()` and a regex
+  selector name no column, and pass.
+
+### Fixed
+
+- **Validating a frame that lacks a column a check needs no longer
+  crashes.** The check's mask was built regardless, and Polars raised
+  `ColumnNotFoundError` out of `inspect()` and `validate()` -- and out of
+  `polspec validate` as a traceback. The check is now skipped, as a rule
+  or composite key already was: the absent column is the
+  `missing_columns` finding, or was allowed to be absent.
+
+- **`drop()` and `select()` remove the checks they strand**, as they
+  remove a composite or foreign key that loses a member.
+
+- **A rule that cannot be evaluated no longer hands its rows to the next.**
+  Rules are first-match-wins; with an earlier rule's column absent
+  (`missing_cols="allow"`), a later rule was checked against rows the
+  earlier one had rewritten, and reported them as failing. Once a rule
+  cannot be evaluated, the rules after it on that column are not checked
+  either.
+
+### Documentation
+
+- *Specs as files* showed a check comparing against `subtotal`, a column
+  its `Orders` does not declare -- the new refusal found it -- and quoted
+  the unrepresentable-check warning as polspec worded it before `col()`.
+
 ## [0.12.0] - 2026-09-26
 
 **One seeded change, once, and a fix rather than a choice: the elements of

@@ -253,3 +253,38 @@ def test_validation_column_validators_combine_with_other_errors():
     err_str = str(err)
     assert "out of bounds" in err_str
     assert "validator" in err_str
+
+
+# =====================================================================
+# A check whose columns the frame lacks
+# =====================================================================
+
+
+class _TotalsSpec(FrameSpec):
+    subtotal = ColSpec(pl.Float64, bounds=(0.0, 100.0))
+    total = ColSpec(pl.Float64, bounds=(0.0, 200.0))
+    __checks__ = [
+        Check(pl.col("total") >= pl.col("subtotal"), name="total_covers_subtotal")
+    ]
+
+
+def test_a_check_on_a_missing_column_is_a_missing_column_not_a_crash():
+    """The check cannot be evaluated, and Polars used to raise
+    `ColumnNotFoundError` out of `inspect()` -- which never raises for a frame
+    that fails. The missing column is the finding."""
+    report = _TotalsSpec.inspect(pl.DataFrame({"total": [1.0]}))
+    assert [f.code for f in report] == ["missing_columns"]
+    with pytest.raises(ValidationError, match="Missing required columns"):
+        _TotalsSpec.validate(pl.DataFrame({"total": [1.0]}))
+
+
+def test_a_check_on_a_column_allowed_to_be_missing_is_skipped():
+    frame = pl.DataFrame({"total": [1.0]})
+    assert _TotalsSpec.inspect(frame, missing_cols="allow").passed
+    assert _TotalsSpec.validate(frame, missing_cols="allow").height == 1
+
+
+def test_a_check_whose_columns_are_present_still_runs():
+    frame = pl.DataFrame({"subtotal": [5.0], "total": [1.0]})
+    (finding,) = _TotalsSpec.inspect(frame)
+    assert finding.code == "check" and finding.key == "check:total_covers_subtotal"

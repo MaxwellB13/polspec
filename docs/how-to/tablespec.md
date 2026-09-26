@@ -76,8 +76,8 @@ Each operation returns a new `TableSpec`; the original is never changed.
 | Operation | Effect |
 |:--|:--|
 | `with_columns({...}, **cols)` | Add columns, or replace existing ones in place |
-| `drop(*names)` | Remove columns, and any composite or foreign key that used them |
-| `select(*names)` | Keep only the named columns, in that order |
+| `drop(*names)` | Remove columns, and any composite key, foreign key or check that used them |
+| `select(*names)` | Keep only the named columns, in that order, and the constraints that still apply |
 | `rename({old: new})` | Rename columns, rewriting rules, validators, checks, composite keys, foreign keys and the hierarchy |
 | `with_checks(*checks)`, `with_foreign_keys(*fks)`, `with_unique_together(*groups)` | Append constraints |
 | `with_name(name)` | Change the name |

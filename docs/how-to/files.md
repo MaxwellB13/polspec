@@ -64,10 +64,11 @@ checks it until a spec of that name is supplied, through `references=` on
 each, naming exactly what will be lost:
 
 ```text
-UserWarning: Orders declares 1 __checks__ ('total_covers_subtotal') that cannot
-be represented in YAML (a Check wraps an arbitrary polars.Expr) and will NOT be
-written to orders.yaml. They will be lost on FrameSpec.from_yaml() unless
-re-declared on a subclass of the loaded spec.
+UserWarning: Orders declares 1 __checks__ ('under_the_cap') that cannot be
+represented in YAML (a Check over a raw polars.Expr; write it with
+polspec.col() to persist it) and will NOT be written to orders.yaml. They will
+be lost on FrameSpec.from_yaml() unless re-declared on a subclass of the
+loaded spec.
 ```
 
 The suggested recovery is to subclass what you loaded:
@@ -76,7 +77,7 @@ The suggested recovery is to subclass what you loaded:
 Loaded = FrameSpec.from_yaml("orders.yaml")
 
 class Orders(Loaded):
-    __checks__ = [Check(pl.col("total") >= pl.col("subtotal"), name="total_covers_subtotal")]
+    __checks__ = [Check(pl.col("total") < 5_000, name="under_the_cap")]
 ```
 
 Columns, rules, unique keys, foreign keys, and any check or validator
@@ -87,10 +88,10 @@ A check in YAML is its predicate in data form:
 ```yaml
 checks:
 - expr:
-    ge:
+    lt:
     - col: total
-    - col: subtotal
-  name: total_covers_subtotal
+    - 5000
+  name: under_the_cap
 ```
 
 ## Sharing categories between files
