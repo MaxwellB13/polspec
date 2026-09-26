@@ -3,7 +3,6 @@ from __future__ import annotations
 import dataclasses
 import decimal
 import functools
-import hashlib
 import random
 import struct
 from typing import TYPE_CHECKING
@@ -14,38 +13,30 @@ from polspec._ffi import column_plan
 from polspec._ffi import generate_dataframe as _generate_dataframe
 from polspec.bound import Bound
 from polspec.constants import (
-    _CATEGORICAL_PHYSICAL_CAPACITY,
-    _DEFAULT_FLOAT_BOUND,
-    _DEFAULT_LIST_LEN,
-    _DEFAULT_STRING_LEN,
-    _DEFAULT_WIDE_INT_BOUND,
-    _I64_MAX,
-    _MAX_CARTESIAN_ROWS,
+    CATEGORICAL_PHYSICAL_CAPACITY,
+    DEFAULT_FLOAT_BOUND,
+    DEFAULT_LIST_LEN,
+    DEFAULT_STRING_LEN,
+    DEFAULT_WIDE_INT_BOUND,
+    I64_MAX,
+    MAX_CARTESIAN_ROWS,
 )
 from polspec.dtypes import (
-    _TIME_UNIT_FACTORS,
+    TIME_UNIT_FACTORS,
     DtypeLike,
-    _bound_endpoint_to_physical,
-    _dtype_value_limits,
-    _typed_values,
+    bound_endpoint_to_physical,
+    dtype_value_limits,
     field_dtypes,
     float16_inside,
+    typed_values,
 )
 from polspec.errors import GenerationError
 from polspec.formats import lookup as _lookup_format
-from polspec.generation.seeds import pass_seed
-from polspec.spec import ColSpec, _column_kind
+from polspec.generation.seeds import pass_seed, stable_seed
+from polspec.spec import ColSpec, column_kind
 
 if TYPE_CHECKING:
     from polspec._polspec import ColumnPlan
-
-
-def _stable_seed(*parts: str) -> int:
-    """A seed derived only from `parts`, stable across processes and runs
-    (unlike `hash()`, which is salted per-process for strings).
-    """
-    digest = hashlib.sha256("\0".join(parts).encode()).digest()
-    return int.from_bytes(digest[:8], "big")
 
 
 def _resolve_bounded_categorical(name: str, spec: ColSpec, frame_seed: int) -> ColSpec:
@@ -62,11 +53,11 @@ def _resolve_bounded_categorical(name: str, spec: ColSpec, frame_seed: int) -> C
     """
     if spec.choices is not None or not isinstance(spec.dtype, pl.Categorical):
         return spec
-    capacity = _CATEGORICAL_PHYSICAL_CAPACITY.get(spec.dtype.categories.physical())
+    capacity = CATEGORICAL_PHYSICAL_CAPACITY.get(spec.dtype.categories.physical())
     if capacity is None:
         return spec
     seed = pass_seed(frame_seed, f"categorical:{spec.seed_name or name}")
-    length = spec.string_length or Bound(*_DEFAULT_STRING_LEN)
+    length = spec.string_length or Bound(*DEFAULT_STRING_LEN)
     cat_name = spec.dtype.categories.name()
     if cat_name:
         # A named pl.Categories() registry is meant to be shared across
@@ -76,7 +67,7 @@ def _resolve_bounded_categorical(name: str, spec: ColSpec, frame_seed: int) -> C
         # seed -- otherwise their independently-chosen pools could still
         # jointly exceed the registry's capacity even though each one alone
         # stayed within it.
-        pool_seed = _stable_seed(
+        pool_seed = stable_seed(
             cat_name,
             spec.dtype.categories.namespace(),
             str(length.min),
@@ -110,16 +101,16 @@ def _resolve_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
         return _representable(spec, lo, hi)
 
     if spec.bounds.min is not None:
-        lo = _bound_endpoint_to_physical(spec.bounds.min, spec.dtype)
+        lo = bound_endpoint_to_physical(spec.bounds.min, spec.dtype)
     if spec.bounds.max is not None:
-        hi = _bound_endpoint_to_physical(spec.bounds.max, spec.dtype)
+        hi = bound_endpoint_to_physical(spec.bounds.max, spec.dtype)
 
     # A closed end can sit outside the default range -- bounds=(2_000_000, None)
     # on Int64 leaves lo above the default hi of 1_000_000. Widen the open end
     # to the dtype's own limit rather than hand the engine an inverted range,
     # which it would silently swap.
     if lo > hi:
-        limits = _dtype_value_limits(_DRAWN_AS.get(spec.dtype, spec.dtype))
+        limits = dtype_value_limits(_DRAWN_AS.get(spec.dtype, spec.dtype))
         if limits is not None:
             if spec.bounds.max is None:
                 hi = limits[1]
@@ -177,31 +168,31 @@ def _default_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
     A fixed-width int dtype defaults to its own range, temporal dtypes to a
     reasonable era or span, and anything else to the wide/default constants.
 
-    "Its own range" is read from `_dtype_value_limits` rather than kept as a
+    "Its own range" is read from `dtype_value_limits` rather than kept as a
     second table here: what an Int16 may hold and what an Int16 generates
     within are the same nine words, and two copies of them is one copy that
     can go stale. The 64-bit types are the exception -- their full range is
     not a useful default -- so they fall through to the wide bound below.
     """
-    kind = _column_kind(spec.dtype)
+    kind = column_kind(spec.dtype)
     if kind == "int":
         if spec.dtype not in (pl.Int64, pl.UInt64, pl.Int128, pl.UInt128):
-            limits = _dtype_value_limits(spec.dtype)
+            limits = dtype_value_limits(spec.dtype)
             if limits is not None:
                 return limits
         if spec.dtype.is_unsigned_integer():
-            return 0, _DEFAULT_WIDE_INT_BOUND
-        return -_DEFAULT_WIDE_INT_BOUND, _DEFAULT_WIDE_INT_BOUND
+            return 0, DEFAULT_WIDE_INT_BOUND
+        return -DEFAULT_WIDE_INT_BOUND, DEFAULT_WIDE_INT_BOUND
     if kind == "float":
-        return -_DEFAULT_FLOAT_BOUND, _DEFAULT_FLOAT_BOUND
+        return -DEFAULT_FLOAT_BOUND, DEFAULT_FLOAT_BOUND
     if kind == "decimal":
         # The float default, in physical units, unless the precision is
         # narrower -- and never past what the engine's 64-bit draw can hold.
         assert isinstance(spec.dtype, pl.Decimal)  # noqa: S101 - kind says so
         widest = min(
             10**spec.dtype.precision - 1,
-            int(_DEFAULT_FLOAT_BOUND) * 10**spec.dtype.scale,
-            _I64_MAX,
+            int(DEFAULT_FLOAT_BOUND) * 10**spec.dtype.scale,
+            I64_MAX,
         )
         return -widest, widest
     if kind == "temporal":
@@ -210,17 +201,17 @@ def _default_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
         if spec.dtype == pl.Time:
             return 0, 86_399_999_999_999
         if isinstance(spec.dtype, pl.Datetime) or spec.dtype == pl.Datetime:
-            factor = _TIME_UNIT_FACTORS[getattr(spec.dtype, "time_unit", None) or "us"]
+            factor = TIME_UNIT_FACTORS[getattr(spec.dtype, "time_unit", None) or "us"]
             return 0, 36525 * 86400 * factor
         if isinstance(spec.dtype, pl.Duration) or spec.dtype == pl.Duration:
-            factor = _TIME_UNIT_FACTORS[getattr(spec.dtype, "time_unit", None) or "us"]
+            factor = TIME_UNIT_FACTORS[getattr(spec.dtype, "time_unit", None) or "us"]
             return 0, 365 * 86400 * factor
-        return 0, _DEFAULT_WIDE_INT_BOUND
+        return 0, DEFAULT_WIDE_INT_BOUND
     raise TypeError(f"{spec.dtype!r} is not a numeric or temporal dtype")
 
 
 # The name the Rust engine knows each fixed-width dtype by. Anything absent --
-# String, Binary, Boolean, Enum, Categorical -- keeps the kind `_column_kind`
+# String, Binary, Boolean, Enum, Categorical -- keeps the kind `column_kind`
 # already worked out.
 _ENGINE_KINDS: dict[DtypeLike, str] = {
     pl.Int8: "int8",
@@ -246,7 +237,7 @@ def _domain(spec: ColSpec) -> pl.Series | None:
     """
     dtype = spec.value_dtype
     if spec.choices is not None:
-        return _typed_values(spec.choices, dtype)
+        return typed_values(spec.choices, dtype)
     if spec.unique and dtype == pl.Float16:
         # Distinct singles can round to the same half, so a unique half is
         # drawn from the halves themselves: the finite set between the
@@ -259,15 +250,15 @@ def _domain(spec: ColSpec) -> pl.Series | None:
     if spec.format is not None:
         fmt = _lookup_format(spec.format)
         if fmt.is_finite:
-            return _typed_values(fmt.values, dtype)
+            return typed_values(fmt.values, dtype)
     return None
 
 
-def _plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None]:
+def plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None]:
     """The engine's instructions for one column, and the domain to gather
     from when it samples indices.
     """
-    kind = _column_kind(spec.dtype)
+    kind = column_kind(spec.dtype)
     weights = [float(w) for w in spec.weights] if spec.weights is not None else None
     options: dict = {
         "nullable": spec.nullable,
@@ -320,7 +311,7 @@ def _plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None
             # range -- but a temporal dtype's own domain is not optional:
             # it reaches the engine as a bare integer kind, and without this
             # clamp could produce values the dtype cannot represent.
-            limits = _dtype_value_limits(spec.dtype)
+            limits = dtype_value_limits(spec.dtype)
             if limits is None:  # pragma: no cover - every temporal dtype has limits
                 raise GenerationError(f"no value limits for {spec.dtype!r}")
             options["min"], options["max"] = limits
@@ -344,7 +335,7 @@ def _plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None
         return column_plan(name, "template", template=template, **options), None
 
     # Free strings: String, Binary, and a Categorical with no pinned domain.
-    length = spec.string_length or Bound(*_DEFAULT_STRING_LEN)
+    length = spec.string_length or Bound(*DEFAULT_STRING_LEN)
     shortest, longest = length.closed()
     options["str_min_len"], options["str_max_len"] = int(shortest), int(longest)
     return column_plan(name, "string", **options), None
@@ -371,7 +362,7 @@ _ENGINE_NATIVE: frozenset = frozenset(
 def _check_decimal_fits_the_draw(
     name: str, spec: ColSpec, lo: float | int, hi: float | int
 ) -> None:
-    if lo >= -_I64_MAX - 1 and hi <= _I64_MAX:
+    if lo >= -I64_MAX - 1 and hi <= I64_MAX:
         return
     raise GenerationError(
         f"Column {name!r}: bounds {spec.bounds} on {spec.dtype!r} need more "
@@ -384,7 +375,7 @@ def _check_wide_int_fits_the_draw(
     name: str, spec: ColSpec, lo: float | int, hi: float | int
 ) -> None:
     drawn = _DRAWN_AS[spec.dtype]
-    limits = _dtype_value_limits(drawn)
+    limits = dtype_value_limits(drawn)
     assert limits is not None  # noqa: S101 - a 64-bit integer has limits
     if limits[0] <= lo and hi <= limits[1]:
         return
@@ -438,7 +429,7 @@ def _coverage_values(spec: ColSpec, seed: int) -> list | None:
             values.append(None)
         return values
 
-    kind = _column_kind(spec.dtype)
+    kind = column_kind(spec.dtype)
     values: list = []
     rng = random.Random(seed)
 
@@ -476,7 +467,7 @@ def _coverage_values(spec: ColSpec, seed: int) -> list | None:
     return values
 
 
-def _generate_random(
+def generate_random(
     columns: dict[str, ColSpec], n: int, seed: int | None, row_offset: int = 0
 ) -> pl.DataFrame:
     """`n` rows drawn per column -- rows `[row_offset, row_offset + n)` of the
@@ -490,18 +481,18 @@ def _generate_random(
         name: _resolve_bounded_categorical(name, spec, frame_seed)
         for name, spec in columns.items()
     }
-    # `_column_kind` refuses what the engine cannot fill, so every column is
+    # `column_kind` refuses what the engine cannot fill, so every column is
     # classified before any is generated. The scalar ones share a single
     # engine call; a nested one is built from the columns it contains.
     scalars = {
         n_: s
         for n_, s in columns.items()
-        if _column_kind(s.dtype) not in ("list", "struct", "map")
+        if column_kind(s.dtype) not in ("list", "struct", "map")
     }
     plans: list[ColumnPlan] = []
     domains: dict[str, pl.Series | None] = {}
     for name, spec in scalars.items():
-        plan, domain = _plan_column(name, spec)
+        plan, domain = plan_column(name, spec)
         plans.append(plan)
         domains[name] = domain
     # Each raw column is dropped as it is finished, so a column the finish
@@ -527,14 +518,14 @@ def _generate_column(
     likes and every value is drawn by the code that draws a column of its
     own type.
     """
-    kind = _column_kind(spec.dtype)
+    kind = column_kind(spec.dtype)
     if kind == "list":
         return _generate_list_column(name, spec, n, seed, row_offset)
     if kind == "map":
         return _generate_map_column(name, spec, n, seed, row_offset)
     if kind == "struct":
         return _generate_struct_column(name, spec, n, seed, row_offset)
-    plan, domain = _plan_column(name, spec)
+    plan, domain = plan_column(name, spec)
     return _finish(_generate_dataframe([plan], n, seed, row_offset)[name], spec, domain)
 
 
@@ -624,7 +615,7 @@ def _list_parts(
         length_bounds: tuple[int, int] = (width, width)
     else:
         length_bounds = (
-            spec.list_length.closed() if spec.list_length else _DEFAULT_LIST_LEN
+            spec.list_length.closed() if spec.list_length else DEFAULT_LIST_LEN
         )
 
     # The lengths carry the list's own nullability: a null length is a null cell.
@@ -697,7 +688,7 @@ def _wrap_list(
 
 # A map whose keys still repeat after this many rounds of redrawing the
 # repeats has keys too few for its length -- the same bound, and the same
-# reasoning, as a composite key's (`generation.composite.MAX_ROUNDS`).
+# reasoning, as a composite key's (`generation.passes.unique_together.MAX_ROUNDS`).
 _MAX_KEY_ROUNDS = 50
 
 
@@ -729,7 +720,7 @@ def _separate_repeated_keys(
 ) -> pl.Series:
     """The flat entries of a map column with no key repeated within a map.
 
-    As `generation.composite.apply_unique_together` separates a composite
+    As `generation.passes.unique_together.apply_unique_together` separates a composite
     key: the first entry to use a key keeps it, every later one in the same
     map draws a fresh key from the key's declaration, and that repeats until
     none are left. Its value stays -- only the key was the problem.
@@ -767,7 +758,7 @@ def _separate_repeated_keys(
     )
 
 
-def _generate_cartesian(
+def generate_cartesian(
     columns: dict[str, ColSpec], n: int, seed: int | None
 ) -> pl.DataFrame:
     """Guarantees coverage: the cartesian product of every Enum/Boolean's
@@ -783,7 +774,7 @@ def _generate_cartesian(
     if n == 0:
         # Nothing was asked for, so nothing is covered: the same empty, typed
         # frame `generate(0)` and the sinks produce.
-        return _generate_random(columns, 0, seed)
+        return generate_random(columns, 0, seed)
 
     frame_seed = seed if seed is not None else random.randrange(2**63)
     rng = random.Random(frame_seed)
@@ -814,11 +805,11 @@ def _generate_cartesian(
     coverage_size = 1
     for values in coverage_values.values():
         coverage_size *= len(values)
-    if coverage_size > _MAX_CARTESIAN_ROWS:
+    if coverage_size > MAX_CARTESIAN_ROWS:
         breakdown = ", ".join(f"{name}={len(v)}" for name, v in coverage_values.items())
         raise GenerationError(
             f"cartesian coverage would need {coverage_size:,} rows ({breakdown}), "
-            f"which exceeds the {_MAX_CARTESIAN_ROWS:,}-row safety cap"
+            f"which exceeds the {MAX_CARTESIAN_ROWS:,}-row safety cap"
         )
 
     dims = [
@@ -832,14 +823,14 @@ def _generate_cartesian(
     coverage_n = coverage_df.height
 
     if filler_columns:
-        filler_df = _generate_random(filler_columns, coverage_n, rng.randrange(2**63))
+        filler_df = generate_random(filler_columns, coverage_n, rng.randrange(2**63))
         coverage_df = pl.concat([coverage_df, filler_df], how="horizontal_extend")
 
     spread = [name for name in columns if name not in unique_columns]
     coverage_df = coverage_df.select(spread)
 
     if coverage_n < n:
-        topup_df = _generate_random(
+        topup_df = generate_random(
             {name: columns[name] for name in spread},
             n - coverage_n,
             rng.randrange(2**63),
@@ -849,7 +840,7 @@ def _generate_cartesian(
     if unique_columns:
         # One draw over the whole frame, after any padding: a unique column
         # is only distinct if nothing else ever appends to it.
-        distinct_df = _generate_random(
+        distinct_df = generate_random(
             unique_columns, coverage_df.height, rng.randrange(2**63)
         )
         coverage_df = pl.concat([coverage_df, distinct_df], how="horizontal_extend")

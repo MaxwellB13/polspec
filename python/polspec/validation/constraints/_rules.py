@@ -10,19 +10,19 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from polspec.constraints import is_textual as _is_textual
+from polspec.domain import is_textual
 from polspec.validation.report import FindingCode
 
 if TYPE_CHECKING:
     from polspec.rules import ColRule
     from polspec.spec import ColSpec
 
-from polspec.dtypes import _typed_values
-from polspec.validation.constraints._base import _as_strings, _Constraint
+from polspec.dtypes import typed_values
+from polspec.validation.constraints._base import Constraint, as_strings
 
 
 @dataclass(kw_only=True)
-class _RuleHolds(_Constraint):
+class _RuleHolds(Constraint):
     column: str
     rule: ColRule
     code: FindingCode = "rule"
@@ -44,16 +44,16 @@ class _RuleHolds(_Constraint):
         )
 
 
-def _rule_constraints(
+def rule_constraints(
     name: str,
     spec: ColSpec,
     actual_dtype: pl.DataType,
     df_col_names: Sequence[str],
-) -> list[_Constraint]:
+) -> list[Constraint]:
     """One constraint per ColRule, respecting first-match-wins ordering.
 
     Each rule only governs the rows no earlier rule already claimed, matching
-    how `_apply_column_rules` assigns them at generation time -- including how
+    how `apply_column_rules` assigns them at generation time -- including how
     it reads a null condition. A `when` that evaluates to null on a row does
     not match there, so generation folds it to False before both testing it and
     accumulating it into `claimed`. Doing anything else here lets a null
@@ -61,7 +61,7 @@ def _rule_constraints(
     row, which is a row generation did rewrite and validation would not check.
     """
     column = pl.col(name)
-    constraints: list[_Constraint] = []
+    constraints: list[Constraint] = []
     claimed = pl.lit(False)
 
     for index, rule in enumerate(spec.rules):
@@ -71,16 +71,16 @@ def _rule_constraints(
         applies = matches & ~claimed
         claimed = claimed | matches
 
-        if _is_textual(actual_dtype):
+        if is_textual(actual_dtype):
             in_choices = column.cast(pl.String).is_in(
-                _as_strings(rule.choices, spec.dtype)
+                as_strings(rule.choices, spec.dtype)
             )
             sample_expr = column.cast(pl.String)
         else:
             # In the column's own dtype, for the reason `_value_constraints`
             # gives for choices.
             in_choices = column.is_in(
-                _typed_values(rule.choices, actual_dtype).implode()
+                typed_values(rule.choices, actual_dtype).implode()
             )
             sample_expr = column
 

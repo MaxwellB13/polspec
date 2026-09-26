@@ -174,7 +174,7 @@ class DriftReport:
 
     def to_markdown(self, path: str | Path | None = None) -> str:
         """This report as Markdown, written to `path` if given."""
-        from polspec.report import drift_to_markdown  # rendering lives in one module
+        from polspec.render import drift_to_markdown  # rendering lives in one module
 
         return drift_to_markdown(self, path)
 

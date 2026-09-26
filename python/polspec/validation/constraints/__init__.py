@@ -1,4 +1,4 @@
-"""Every claim a spec makes, as a `_Constraint` that produces a `Finding`.
+"""Every claim a spec makes, as a `Constraint` that produces a `Finding`.
 
 A constraint contributes aggregation expressions to one pass over the frame,
 then turns the results back into a `Finding`: a count, a few samples, the
@@ -10,24 +10,24 @@ the exception: each needs its own anti-join.
 
 from polspec.validation.constraints._base import (
     MAX_SAMPLES,
-    _Constraint,
-    _is_dtype_compatible,
+    Constraint,
+    is_dtype_compatible,
 )
 from polspec.validation.constraints._relations import (
-    _foreign_key_findings,
-    _hierarchy_constraints,
-    _hierarchy_findings,
+    foreign_key_findings,
+    hierarchy_constraints,
+    hierarchy_findings,
 )
-from polspec.validation.constraints._table import _frame_constraints
-from polspec.validation.constraints._values import _column_constraints
+from polspec.validation.constraints._table import frame_constraints
+from polspec.validation.constraints._values import column_constraints
 
 __all__ = [
     "MAX_SAMPLES",
-    "_Constraint",
-    "_column_constraints",
-    "_foreign_key_findings",
-    "_frame_constraints",
-    "_hierarchy_constraints",
-    "_hierarchy_findings",
-    "_is_dtype_compatible",
+    "Constraint",
+    "column_constraints",
+    "foreign_key_findings",
+    "frame_constraints",
+    "hierarchy_constraints",
+    "hierarchy_findings",
+    "is_dtype_compatible",
 ]

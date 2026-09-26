@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from polspec.constraints import is_textual as _is_textual
-from polspec.dtypes import _typed_values, element_dtype, field_dtypes, map_entries
+from polspec.domain import is_textual
+from polspec.dtypes import element_dtype, field_dtypes, map_entries, typed_values
 from polspec.formats import lookup as _lookup_format
 from polspec.validation.report import FindingCode
 
@@ -26,15 +26,15 @@ if TYPE_CHECKING:
     from polspec.validation import ValidationOptions
 
 from polspec.validation.constraints._base import (
-    _as_strings,
-    _Constraint,
-    _sampled,
+    Constraint,
+    as_strings,
+    sample_source,
 )
-from polspec.validation.constraints._rules import _rule_constraints
+from polspec.validation.constraints._rules import rule_constraints
 
 
 @dataclass(kw_only=True)
-class _ColumnConstraint(_Constraint):
+class _ColumnConstraint(Constraint):
     """A claim about one column's values -- or about a field inside them.
 
     `where` names the value the claim is about: the column, or a path into
@@ -240,46 +240,12 @@ class _MapKeyRepeats(_ColumnConstraint):
         )
 
 
-@dataclass(kw_only=True)
-class _CompositeUnique(_Constraint):
-    columns: tuple[str, ...] = ()
-    code: FindingCode = "unique_together"
-
-    def involved(self) -> tuple[str, ...]:
-        return self.columns
-
-    def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
-        return (
-            f"Composite unique key {list(self.columns)} violated: found {count} "
-            f"duplicate row(s). Duplicate samples: {samples}"
-        )
-
-
-@dataclass(kw_only=True)
-class _FrameCheck(_Constraint):
-    check: Check
-    code: FindingCode = "check"
-
-    def involved(self) -> tuple[str, ...]:
-        return tuple(self.check.expr.meta.root_names())
-
-    def details(self, stats: dict[str, list]) -> dict[str, Any]:
-        return {"check": self.check.name, "condition": str(self.check.expr)}
-
-    def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
-        described = f" ({self.check.description})" if self.check.description else ""
-        return (
-            f"Check '{self.check.name}' failed: found {count} row(s) violating "
-            f"condition {self.check.expr}{described}"
-        )
-
-
 # ---------------------------------------------------------------------------
 # Building constraints from a spec
 # ---------------------------------------------------------------------------
 
 
-def _column_constraints(
+def column_constraints(
     name: str,
     spec: ColSpec,
     actual_dtype: pl.DataType,
@@ -287,7 +253,7 @@ def _column_constraints(
     compatible: bool,
     options: ValidationOptions,
     df_col_names: Sequence[str],
-) -> list[_Constraint]:
+) -> list[Constraint]:
     """The constraints one declared column contributes to the single pass.
 
     Only nullability survives an incompatible dtype. Everything else compares
@@ -297,7 +263,7 @@ def _column_constraints(
     compile at all.
     """
     column = pl.col(name)
-    constraints: list[_Constraint] = []
+    constraints: list[Constraint] = []
 
     if not spec.nullable:
         constraints.append(
@@ -314,14 +280,14 @@ def _column_constraints(
     constraints.extend(_value_tree(name, name, spec, actual_dtype, column, options))
 
     if options.rules and spec.rules:
-        constraints.extend(_rule_constraints(name, spec, actual_dtype, df_col_names))
+        constraints.extend(rule_constraints(name, spec, actual_dtype, df_col_names))
 
     if options.validators and spec.validators:
         constraints.extend(
             _ColumnValidator(
                 key=f"{name}__validator_{index}",
                 mask=validator._failure_mask(),
-                sample_expr=_sampled(column, actual_dtype),
+                sample_expr=sample_source(column, actual_dtype),
                 column=name,
                 validator=validator,
             )
@@ -348,7 +314,7 @@ def _value_tree(
     actual_dtype: pl.DataType,
     column: pl.Expr,
     options: ValidationOptions,
-) -> list[_Constraint]:
+) -> list[Constraint]:
     """Every constraint on the values `column` holds, recursing on kind.
 
     `column` is the expression for the value at this depth -- the column,
@@ -373,18 +339,18 @@ def _value_constraints(
     actual_dtype: pl.DataType,
     column: pl.Expr,
     options: ValidationOptions,
-) -> list[_Constraint]:
+) -> list[Constraint]:
     """The constraints on one scalar *value* -- its domain, bounds, length,
     format, pattern -- with masks over `column`.
     """
     present = column.is_not_null()
     dtype = spec.value_dtype
-    constraints: list[_Constraint] = []
+    constraints: list[Constraint] = []
 
     allowed = _allowed_values(spec)
     if allowed is not None:
-        if _is_textual(actual_dtype):
-            in_domain = column.cast(pl.String).is_in(_as_strings(allowed, dtype))
+        if is_textual(actual_dtype):
+            in_domain = column.cast(pl.String).is_in(as_strings(allowed, dtype))
             sample_expr = column.cast(pl.String)
         else:
             # The choices as a Series of the column's own dtype: `is_in` compares
@@ -392,7 +358,7 @@ def _value_constraints(
             # reaches it at its widest type, a datetime at microseconds or a
             # Decimal at full precision, which the column's own may not be.
             # Imploded, so Polars reads the Series as one set, not row by row.
-            in_domain = column.is_in(_typed_values(allowed, actual_dtype).implode())
+            in_domain = column.is_in(typed_values(allowed, actual_dtype).implode())
             sample_expr = column
         constraints.append(
             _AllowedValues(
@@ -469,7 +435,7 @@ def _struct_constraints(
     actual_dtype: pl.Struct,
     column: pl.Expr,
     options: ValidationOptions,
-) -> list[_Constraint]:
+) -> list[Constraint]:
     """A Struct's constraints: each field's, read in place.
 
     A field is addressable, so its constraints are built with
@@ -482,7 +448,7 @@ def _struct_constraints(
     assert isinstance(declared_dtype, pl.Struct)  # noqa: S101 - compatible with one
     present = column.is_not_null()
     actual_fields = field_dtypes(actual_dtype)
-    constraints: list[_Constraint] = []
+    constraints: list[Constraint] = []
     for field in field_dtypes(declared_dtype):
         if field not in actual_fields:
             continue  # a dtype finding already says so
@@ -511,7 +477,7 @@ def _list_constraints(
     actual_dtype: pl.List | pl.Array,
     column: pl.Expr,
     options: ValidationOptions,
-) -> list[_Constraint]:
+) -> list[Constraint]:
     """A List's constraints: its length, no null elements, and every
     constraint its elements carry, lifted.
 
@@ -521,8 +487,8 @@ def _list_constraints(
     does. The samples are the offending lists.
     """
     present = column.is_not_null()
-    sample_expr = _sampled(column, actual_dtype)
-    constraints: list[_Constraint] = []
+    sample_expr = sample_source(column, actual_dtype)
+    constraints: list[Constraint] = []
 
     if spec.list_length is not None and isinstance(actual_dtype, pl.List):
         length = column.list.len()
@@ -590,7 +556,7 @@ def _map_constraints(
     entries: pl.List,
     column: pl.Expr,
     options: ValidationOptions,
-) -> list[_Constraint]:
+) -> list[Constraint]:
     """A Map's constraints: those of the list of entries it is -- its
     length, and each entry's key and value, found under `m.key` and
     `m.value` -- and no key twice in one map.

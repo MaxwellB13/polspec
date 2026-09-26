@@ -78,7 +78,7 @@ Each operation returns a new `TableSpec`; the original is never changed.
 | `with_columns({...}, **cols)` | Add columns, or replace existing ones in place |
 | `drop(*names)` | Remove columns, and any composite or foreign key that used them |
 | `select(*names)` | Keep only the named columns, in that order |
-| `rename({old: new})` | Rename columns, rewriting rules, composite keys and foreign keys |
+| `rename({old: new})` | Rename columns, rewriting rules, validators, checks, composite keys, foreign keys and the hierarchy |
 | `with_checks(*checks)`, `with_foreign_keys(*fks)`, `with_unique_together(*groups)` | Append constraints |
 | `with_name(name)` | Change the name |
 | `with_catspec(registry)` | Re-type columns against a `CatSpec`; see [Shared categories](categories.md) |
@@ -90,9 +90,12 @@ Staging = FrameSpec.from_spec(staging, name="StagingOrders")
 
 Two deliberate limits. `drop` leaves a rule on a surviving column that points
 at a dropped one for validation to reject, since silently dropping a rule
-would change what the surviving column generates. `rename` refuses a column
-carrying `validators`, because a validator is a Polars expression naming the
-column, and rewriting expressions is not something this library does.
+would change what the surviving column generates. `rename` rewrites a
+validator or check written with [`col()`](constraints.md#writing-conditions-col)
+like everything else, but refuses to rename a column that one written as a
+raw `pl.Expr` names: rewriting Polars expressions is not something this
+library does, and leaving it would keep a check naming a column the spec no
+longer has.
 
 ## Column names and method names
 

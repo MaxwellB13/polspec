@@ -47,10 +47,10 @@ def test_modular_subpackage_imports():
         profile_dataframe,
     )
     from polspec.bound import Bound as BoundDirect
-    from polspec.engine import _generate_cartesian, _generate_random
     from polspec.framespec import (
         FrameSpec as FrameSpecDirect,
     )
+    from polspec.generation.engine import generate_cartesian, generate_random
     from polspec.profiler import profile_dataframe as profile_dataframe_direct
     from polspec.rules import ColRule as ColRuleDirect
     from polspec.serialization.fields import colspec_from_data
@@ -70,8 +70,8 @@ def test_modular_subpackage_imports():
     assert profile_dataframe is profile_dataframe_direct
     assert callable(colspec_to_data)
     assert callable(colspec_from_data)
-    assert callable(_generate_random)
-    assert callable(_generate_cartesian)
+    assert callable(generate_random)
+    assert callable(generate_cartesian)
     assert callable(inspect_direct)
 
 

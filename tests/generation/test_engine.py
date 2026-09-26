@@ -17,7 +17,7 @@ import polars as pl
 import pytest
 from polspec import ColRule, ColSpec, FrameSpec, GenerationError, _ffi, col
 from polspec.distributions import DISTRIBUTIONS
-from polspec.engine import _plan_column
+from polspec.generation.engine import plan_column
 
 # ---------------------------------------------------------------------------
 # ColumnPlan
@@ -103,7 +103,7 @@ def test_the_package_imports_without_the_extension(monkeypatch):
 
 
 def test_finite_domains_cross_as_indices_and_come_back_typed():
-    plan, domain = _plan_column(
+    plan, domain = plan_column(
         "when",
         ColSpec(
             pl.Datetime("us"),
@@ -113,16 +113,16 @@ def test_finite_domains_cross_as_indices_and_come_back_typed():
     assert plan.kind == "index" and plan.n_categories == 2
     assert domain.dtype == pl.Datetime("us")
 
-    plan, domain = _plan_column(
+    plan, domain = plan_column(
         "status", ColSpec(pl.Enum(["NEW", "PAID"]), weights=[1.0, 3.0])
     )
     assert plan.kind == "index" and plan.weights == [1.0, 3.0]
     assert domain.dtype == pl.Enum(["NEW", "PAID"])
 
-    plan, domain = _plan_column("flag", ColSpec(pl.Boolean, weights=[0.25, 0.75]))
+    plan, domain = plan_column("flag", ColSpec(pl.Boolean, weights=[0.25, 0.75]))
     assert plan.kind == "bool" and domain is None and plan.p_true == 0.75
 
-    plan, domain = _plan_column(
+    plan, domain = plan_column(
         "day", ColSpec(pl.Date, bounds=(dt.date(2024, 1, 1), dt.date(2024, 1, 31)))
     )
     assert plan.kind == "int32" and (plan.min, plan.max) == (19723, 19753)

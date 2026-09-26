@@ -1,0 +1,39 @@
+# A version 2 spec file: `version:` recorded, predicates in data form,
+# checks and validators written, foreign keys naming their target. No
+# `hierarchy:`, which version 3 added.
+version: 2
+name: Orders
+columns:
+  id:
+    dtype: Int64
+    unique: true
+    bounds: [1, 1000000]
+  customer_id:
+    dtype: Int64
+    tags: [key]
+  total:
+    dtype: {Decimal: {precision: 10, scale: 2}}
+    bounds: ['0.00', '999.99']
+    validators:
+      - expr:
+          ge:
+            - col: total
+            - 0
+        name: total_non_negative
+  status:
+    dtype:
+      Enum: [NEW, PAID]
+    choices: [NEW, PAID]
+    weights: [3.0, 1.0]
+foreign_keys:
+  - columns: [customer_id]
+    references: Customers
+    ref_columns: [id]
+checks:
+  - expr:
+      or:
+        - eq: [{col: status}, NEW]
+        - gt: [{col: total}, 0]
+    name: paid_orders_cost_something
+unique_together:
+  - [customer_id, status]

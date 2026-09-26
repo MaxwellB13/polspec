@@ -94,9 +94,17 @@ def test_a_declared_rename_is_one_compatible_finding():
 
 
 def test_a_rename_goes_through_tablespec_rename():
-    old = _spec(a=ColSpec(pl.Int64, validators=[col("a") > 0]))
-    with pytest.raises(SpecError, match="carries validators"):
-        diff(old, old, renames={"a": "b"})
+    """So it renames what `rename` renames, and refuses what it refuses."""
+    raw = _spec(a=ColSpec(pl.Int64, validators=[pl.col("a") > 0]))
+    with pytest.raises(SpecError, match="raw polars expression naming it"):
+        diff(raw, raw, renames={"a": "b"})
+    written = _spec(a=ColSpec(pl.Int64, validators=[col("a") > 0]))
+    report = diff(
+        written,
+        _spec(b=ColSpec(pl.Int64, validators=[col("b") > 0])),
+        renames={"a": "b"},
+    )
+    assert [f.code for f in report] == ["column_renamed"]
 
 
 # ---------------------------------------------------------------------------

@@ -226,7 +226,7 @@ def test_a_lazy_parent_is_collected_once_not_once_per_batch(monkeypatch):
     batch. On a scan-backed parent that is the whole file re-read, however
     many batches there are.
     """
-    from polspec import generation
+    from polspec.generation import pipeline as generation
 
     class Parent(FrameSpec):
         id = ColSpec(pl.Int64, bounds=(1, 1_000), unique=True)

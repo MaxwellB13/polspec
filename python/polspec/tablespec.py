@@ -21,17 +21,18 @@ from typing import TYPE_CHECKING, Any, Literal
 import polars as pl
 
 from polspec.check import Check
-from polspec.constraints import Domain, ordered_passes
+from polspec.domain import Domain
 from polspec.errors import SpecError
-from polspec.foreign_key import ForeignKey, _default_fk_name
+from polspec.foreign_key import ForeignKey, default_fk_name
 from polspec.hierarchy import Hierarchy
-from polspec.spec import ColSpec, _column_kind
+from polspec.pass_order import ordered_passes
+from polspec.spec import ColSpec, column_kind
 
 if TYPE_CHECKING:
     from polspec.catspec import CatSpec
 
 
-def _parse_unique_together(val: Any) -> tuple[tuple[str, ...], ...]:
+def parse_unique_together(val: Any) -> tuple[tuple[str, ...], ...]:
     """Normalises the loose forms `__unique_together__` accepts.
 
     A single group may be written as a list of names; several groups as a list
@@ -150,7 +151,7 @@ class TableSpec:
         object.__setattr__(self, "columns", MappingProxyType(columns))
         object.__setattr__(self, "checks", _dedupe(tuple(self.checks), Check, "checks"))
         object.__setattr__(
-            self, "unique_together", _parse_unique_together(self.unique_together)
+            self, "unique_together", parse_unique_together(self.unique_together)
         )
         object.__setattr__(
             self,
@@ -276,8 +277,8 @@ class TableSpec:
                         f"unknown column {ref_col!r} on {target_name!r}"
                     )
             for col, ref_col in zip(fk.columns, fk.ref_columns, strict=True):
-                local_kind = _fk_kind_bucket(_column_kind(self.columns[col].dtype))
-                ref_kind = _fk_kind_bucket(_column_kind(target.columns[ref_col].dtype))
+                local_kind = _fk_kind_bucket(column_kind(self.columns[col].dtype))
+                ref_kind = _fk_kind_bucket(column_kind(target.columns[ref_col].dtype))
                 if local_kind != ref_kind:
                     raise SpecError(
                         f"ForeignKey {fk.name!r} on {self.name!r}: column "
@@ -317,8 +318,8 @@ class TableSpec:
                     f"Hierarchy.{label} references unknown column {name!r} on "
                     f"{self.name}"
                 )
-        child_kind = _fk_kind_bucket(_column_kind(self.columns[h.child].dtype))
-        parent_kind = _fk_kind_bucket(_column_kind(self.columns[h.parent].dtype))
+        child_kind = _fk_kind_bucket(column_kind(self.columns[h.child].dtype))
+        parent_kind = _fk_kind_bucket(column_kind(self.columns[h.parent].dtype))
         if child_kind != parent_kind:
             raise SpecError(
                 f"Hierarchy on {self.name!r}: {h.child!r} "
@@ -545,19 +546,13 @@ class TableSpec:
     def rename(self, mapping: Mapping[str, str]) -> TableSpec:
         """Renames columns, rewriting every constraint that names them.
 
-        Rules, composite keys and foreign keys are rewritten. A column
-        carrying `validators` cannot be renamed: a validator is a Polars
-        expression that names the column, and rewriting expressions is not
-        something this library does.
+        Rules, validators, checks, composite keys, foreign keys and the
+        hierarchy are rewritten. A validator or check written as a raw
+        `pl.Expr` cannot be: rewriting Polars expressions is not something
+        this library does, so renaming a column one names is refused. Write it
+        with `col()`, whose predicates rename like everything else.
         """
         self._require_columns(list(mapping), "rename")
-        for old in mapping:
-            if self.columns[old].validators:
-                raise SpecError(
-                    f"Cannot rename {old!r}: it carries validators, and a validator "
-                    "is an expression naming the column. Drop the validators, "
-                    "rename, then re-declare them against the new name."
-                )
         taken = set(self.columns) - set(mapping)
         targets = list(mapping.values())
         for old, new in mapping.items():
@@ -572,6 +567,12 @@ class TableSpec:
             updates: dict[str, Any] = {}
             if spec.col_name is not None:
                 updates["col_name"] = None
+            validators = tuple(
+                _renamed_check(v, mapping, f"validator {v.name!r} on {key!r}")
+                for v in spec.validators
+            )
+            if validators != spec.validators:
+                updates["validators"] = validators
             if any(r.when.root_names() & set(mapping) for r in spec.rules):
                 updates["rules"] = tuple(
                     dataclasses.replace(r, when=r.when.rename(mapping))
@@ -589,7 +590,7 @@ class TableSpec:
                 if fk.references == "self"
                 else fk.ref_columns
             )
-            keep_name = fk.name != _default_fk_name(fk.columns, fk.references)
+            keep_name = fk.name != default_fk_name(fk.columns, fk.references)
             foreign_keys.append(
                 ForeignKey(
                     cols,
@@ -608,6 +609,9 @@ class TableSpec:
         return dataclasses.replace(
             self,
             columns=columns,
+            checks=tuple(
+                _renamed_check(c, mapping, f"check {c.name!r}") for c in self.checks
+            ),
             unique_together=tuple(
                 tuple(new_name(c) for c in g) for g in self.unique_together
             ),
@@ -647,6 +651,33 @@ class TableSpec:
                     choices=catspec.get_choices(key) or spec.choices,
                 )
         return dataclasses.replace(self, columns=new_columns)
+
+
+def _renamed_check(check: Check, mapping: Mapping[str, str], what: str) -> Check:
+    """`check` with the columns `mapping` renames renamed in it.
+
+    One written with `col()` is its predicate renamed; its name follows the
+    predicate if it was the default, and stays if it was given. One over a
+    raw `pl.Expr` that names a renamed column is refused -- it would keep
+    naming a column the spec no longer has, and fail only when validated.
+    """
+    renamed = sorted(set(check.expr.meta.root_names()) & set(mapping))
+    if not renamed:
+        return check
+    if check.pred is None:
+        raise SpecError(
+            f"Cannot rename {renamed}: the {what} is a raw polars expression "
+            "naming it, which polspec cannot rewrite. Write it with polspec.col() "
+            "so it renames with the column, or drop it, rename, and re-declare "
+            "it against the new name."
+        )
+    keep_name = check.name != repr(check.pred)
+    return Check(
+        check.pred.rename(mapping),
+        name=check.name if keep_name else None,
+        description=check.description,
+        ignore_nulls=check.ignore_nulls,
+    )
 
 
 def _retype_column(

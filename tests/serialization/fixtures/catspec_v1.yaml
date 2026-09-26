@@ -1,0 +1,5 @@
+# A version 1 category registry: the flat form, a list for an Enum and a
+# mapping for a Categorical, with no `enums:`/`categoricals:` sections.
+STATUS: [A, B]
+CURRENCY:
+  physical: UInt8

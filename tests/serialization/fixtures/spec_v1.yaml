@@ -1,0 +1,45 @@
+# A version 1 spec file, as polspec before 0.2 wrote them: no `version:` key,
+# tags spelt `category`/`categories`, a distribution under an alias with its
+# parameters under aliases, and every rule condition in the one-column dict
+# form, one rule per operator.
+name: Legacy
+columns:
+  g:
+    dtype:
+      Enum: [a, b, c]
+    categories: [geo, dim]
+  n:
+    dtype: Int64
+    nullable: true
+    bounds: [0, 100]
+    category: num
+  x:
+    dtype: Float64
+    bounds: [0.0, 50.0]
+    distribution: exp
+    distribution_params:
+      lambda: 2
+  y:
+    dtype: Float64
+    bounds: [0.0, 10.0]
+    distribution: Normal
+    distribution_params: {mu: 5, sigma: 1}
+  v:
+    dtype: String
+    rules:
+      - {when: {column: g, equals: a}, choices: [eq]}
+      - {when: {column: g, not_equals: b}, choices: [ne]}
+      - {when: {column: g, in: [a, b]}, choices: [in]}
+      - {when: {column: g, not_in: [c]}, choices: [not_in]}
+      - {when: {column: n, lt: 10}, choices: [lt]}
+      - {when: {column: n, lte: 20}, choices: [le]}
+      - {when: {column: n, gt: 90}, choices: [gt]}
+      - {when: {column: n, gte: 80}, choices: [ge]}
+      - {when: {column: n, between: [30, 40]}, choices: [between]}
+      - {when: {column: n, is_null: true}, choices: ['null']}
+      - {when: {column: n, is_null: false}, choices: [present]}
+      - {when: {column: n, is_not_null: true}, choices: [not_null]}
+      - {when: {column: n, is_not_null: false}, choices: [absent]}
+foreign_keys:
+  - columns: [n]
+    references: self

@@ -52,8 +52,10 @@ Run everything CI runs before opening a pull request:
 
 ```bash
 uv run pytest                                # Python test suite
+uv run pytest --cov                          # with coverage; fails under the floor
 uv run ruff check . && uv run ruff format --check .
 uv run ty check                              # type checker; nothing is suppressed
+uv run lint-imports                          # the package's layering, [tool.importlinter]
 cargo test --release                         # Rust unit tests
 cargo clippy --release
 uv run python examples/related_specs.py      # worked example, doubles as a smoke test

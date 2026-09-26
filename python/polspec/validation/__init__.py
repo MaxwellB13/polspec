@@ -22,13 +22,13 @@ from polspec.errors import ValidationError
 from polspec.frames import References, to_lazy
 from polspec.tablespec import TableSpec, require_columns, resolve_references
 from polspec.validation.constraints import (
-    _column_constraints,
-    _Constraint,
-    _foreign_key_findings,
-    _frame_constraints,
-    _hierarchy_constraints,
-    _hierarchy_findings,
-    _is_dtype_compatible,
+    Constraint,
+    column_constraints,
+    foreign_key_findings,
+    frame_constraints,
+    hierarchy_constraints,
+    hierarchy_findings,
+    is_dtype_compatible,
 )
 from polspec.validation.report import (
     FINDING_COLUMN,
@@ -192,11 +192,11 @@ def inspect(
             )
         )
 
-    constraints: list[_Constraint] = []
+    constraints: list[Constraint] = []
     for name in (c for c in columns if c in df_col_names):
         cs = columns[name]
         actual_dtype = df_schema[name]
-        compatible = _is_dtype_compatible(
+        compatible = is_dtype_compatible(
             cs.dtype, actual_dtype, strict=opts.strict_dtypes
         )
         if not compatible:
@@ -210,7 +210,7 @@ def inspect(
                 )
             )
         constraints.extend(
-            _column_constraints(
+            column_constraints(
                 name,
                 cs,
                 actual_dtype,
@@ -220,9 +220,9 @@ def inspect(
             )
         )
     if opts.hierarchy and spec.hierarchy is not None:
-        constraints.extend(_hierarchy_constraints(spec.hierarchy, df_col_names))
+        constraints.extend(hierarchy_constraints(spec.hierarchy, df_col_names))
     constraints.extend(
-        _frame_constraints(
+        frame_constraints(
             spec.unique_together if opts.unique else None,
             spec.checks if opts.checks else None,
             df_col_names,
@@ -244,12 +244,12 @@ def inspect(
         resolved, unresolved = _resolve_foreign_keys(spec, references)
         findings.extend(unresolved)
         findings.extend(
-            _foreign_key_findings(lf, spec.name, resolved, df_col_names, collect_kwargs)
+            foreign_key_findings(lf, spec.name, resolved, df_col_names, collect_kwargs)
         )
 
     if opts.hierarchy and spec.hierarchy is not None:
         findings.extend(
-            _hierarchy_findings(
+            hierarchy_findings(
                 lf, spec.name, spec.hierarchy, df_col_names, collect_kwargs
             )
         )

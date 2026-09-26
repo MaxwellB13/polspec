@@ -1,0 +1,19 @@
+# A version 2 registry file: several specs keyed by name, and their shared
+# categories inline.
+version: 2
+categories:
+  enums:
+    STATUS: [A, B]
+specs:
+  Customers:
+    columns:
+      id: {dtype: Int64, unique: true, bounds: [1, 100000]}
+  Orders:
+    columns:
+      id: {dtype: Int64, unique: true}
+      customer_id: {dtype: Int64}
+      status: {dtype: STATUS}
+    foreign_keys:
+      - columns: [customer_id]
+        references: Customers
+        ref_columns: [id]

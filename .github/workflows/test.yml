@@ -33,6 +33,10 @@ jobs:
       - name: ty
         run: uv run --no-sync ty check
 
+      # The package's layering: see [tool.importlinter] in pyproject.toml.
+      - name: import-linter
+        run: uv run --no-sync lint-imports
+
   rust:
     name: Rust (fmt, clippy, test)
     runs-on: ubuntu-latest
@@ -91,7 +95,14 @@ jobs:
         run: uv run maturin develop --release
 
       - name: Run tests
+        if: ${{ !(matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13') }}
         run: uv run pytest
+
+      # One leg measures coverage, and fails under the floor set in
+      # `[tool.coverage.report]`; the rest only run the suite.
+      - name: Run tests with coverage
+        if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13' }}
+        run: uv run pytest --cov
 
       - name: Run the worked example as a smoke test
         run: uv run python examples/related_specs.py
@@ -130,13 +141,85 @@ jobs:
       - name: Run tests
         run: uv run pytest
 
+  polars-2:
+    # The pinned Polars 2 release candidate, required: `Map` exists only on
+    # Polars 2, so without this job its tests skip everywhere that gates a
+    # merge. The pin moves by hand, to a candidate this job is green on.
+    # When 2.0 is final and the bound widens to <3, `polars-latest` covers
+    # 2.x and this job goes.
+    name: Test (ubuntu, py3.13, polars 2.0.0rc2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+
+      - name: Sync dependencies
+        run: uv sync --all-extras
+
+      - name: Install the pinned Polars 2 release candidate over the lock
+        run: uv pip install "polars==2.0.0rc2"
+
+      - name: Report polars version
+        run: uv run --no-sync python -c "import polars; print(polars.__version__)"
+
+      - name: Build extension (maturin develop)
+        run: uv run --no-sync maturin develop --release
+
+      - name: Run tests
+        run: uv run --no-sync pytest
+
+  lowest-direct:
+    # The oldest release of every direct dependency the bounds allow:
+    # `polars>=1.44.1` and the rest are promises about releases the lock
+    # never installs.
+    name: Test (ubuntu, py3.12, lowest direct dependencies)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+
+      - name: Resolve the lowest direct dependencies
+        run: uv lock --resolution lowest-direct
+
+      - name: Sync dependencies
+        run: uv sync --all-extras
+
+      - name: Report versions
+        run: uv run python -c "import polars, yaml; print(polars.__version__, yaml.__version__)"
+
+      - name: Build extension (maturin develop)
+        run: uv run maturin develop --release
+
+      - name: Run tests
+        run: uv run pytest
+
   polars-next:
     # The next major Polars, ahead of its release: pip installs the newest 2.x
     # release candidate over the lock, outside the bound pyproject.toml
     # declares. Informational until 2.0 is final -- a regression in a release
-    # candidate should show here without blocking unrelated work. When the
-    # bound widens to <3, polars-latest tests 2.x within it; this job goes
-    # and that one becomes the required 2.x run.
+    # candidate should show here without blocking unrelated work; `polars-2`
+    # is the required run, on a pinned candidate. When the bound widens to
+    # <3, polars-latest tests 2.x within it and both jobs go.
     name: Test (ubuntu, py3.13, polars 2 pre-release)
     runs-on: ubuntu-latest
     continue-on-error: true

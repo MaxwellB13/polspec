@@ -20,10 +20,10 @@ from typing import TYPE_CHECKING, Any
 
 from polspec.bound import Bound
 from polspec.check import Check
-from polspec.constants import _DEFAULT_NULL_PROBABILITY
+from polspec.constants import DEFAULT_NULL_PROBABILITY
 from polspec.errors import SerializationError
 from polspec.expr import from_data as pred_from_data
-from polspec.foreign_key import ForeignKey, _default_fk_name
+from polspec.foreign_key import ForeignKey, default_fk_name
 from polspec.hierarchy import Hierarchy
 from polspec.rules import ColRule
 from polspec.serialization.dtypes import dtype_from_data, dtype_to_data, dtype_to_source
@@ -310,7 +310,7 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
     Field("unique", omit_if=_if_false),
     Field(
         "null_probability",
-        omit_if=lambda v, obj: v == _DEFAULT_NULL_PROBABILITY,
+        omit_if=lambda v, obj: v == DEFAULT_NULL_PROBABILITY,
     ),
     Field(
         "element_null_probability",
@@ -405,7 +405,7 @@ def _same_as_columns(value: Any, fk: ForeignKey) -> bool:
 
 
 def _default_fk(value: Any, fk: ForeignKey) -> bool:
-    return value == _default_fk_name(fk.columns, fk.references)
+    return value == default_fk_name(fk.columns, fk.references)
 
 
 FK_FIELDS: tuple[Field, ...] = (

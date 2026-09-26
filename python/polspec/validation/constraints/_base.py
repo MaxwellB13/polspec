@@ -14,14 +14,14 @@ from typing import Any
 
 import polars as pl
 
-from polspec.dtypes import _typed_values, element_dtype, field_dtypes, map_entries
+from polspec.dtypes import element_dtype, field_dtypes, map_entries, typed_values
 from polspec.validation.report import Finding, FindingCode
 
 MAX_SAMPLES = 5
 
 
 @dataclass(kw_only=True)
-class _Constraint:
+class Constraint:
     """One checkable claim, measured by counting the rows that violate a mask.
 
     Subclasses supply the mask, the wording and the details; the aliases
@@ -86,7 +86,7 @@ class _Constraint:
 # ---------------------------------------------------------------------------
 
 
-def _is_dtype_compatible(
+def is_dtype_compatible(
     expected: pl.DataType, actual: pl.DataType, *, strict: bool
 ) -> bool:
     """Whether `actual` can stand in for the declared `expected` dtype.
@@ -125,14 +125,14 @@ def _is_dtype_compatible(
     if expected.is_temporal():
         return actual.is_temporal()
     if isinstance(expected, pl.List):
-        return isinstance(actual, pl.List) and _is_dtype_compatible(
+        return isinstance(actual, pl.List) and is_dtype_compatible(
             element_dtype(expected), element_dtype(actual), strict=strict
         )
     if isinstance(expected, pl.Array):
         return (
             isinstance(actual, pl.Array)
             and actual.size == expected.size
-            and _is_dtype_compatible(
+            and is_dtype_compatible(
                 element_dtype(expected), element_dtype(actual), strict=strict
             )
         )
@@ -140,7 +140,7 @@ def _is_dtype_compatible(
         # A map as the list of entries it is: its key and value each
         # compatible, as a list of structs' fields would be.
         got_entries = map_entries(actual)
-        return got_entries is not None and _is_dtype_compatible(
+        return got_entries is not None and is_dtype_compatible(
             want_entries, got_entries, strict=strict
         )
     if isinstance(expected, pl.Struct):
@@ -151,23 +151,23 @@ def _is_dtype_compatible(
             return False
         want, got = field_dtypes(expected), field_dtypes(actual)
         return want.keys() == got.keys() and all(
-            _is_dtype_compatible(want[f], got[f], strict=strict) for f in want
+            is_dtype_compatible(want[f], got[f], strict=strict) for f in want
         )
     return actual == expected
 
 
-def _as_strings(values: Sequence[Any], dtype: pl.DataType) -> list[str]:
+def as_strings(values: Sequence[Any], dtype: pl.DataType) -> list[str]:
     """`values` as the strings a column of `dtype` holds them as, so a choice
     of `True` on a String column compares as `"true"` -- the same form
     generation produces -- rather than as Python's `str(True)`.
     """
     try:
-        return _typed_values(values, dtype).cast(pl.String).to_list()
+        return typed_values(values, dtype).cast(pl.String).to_list()
     except Exception:  # noqa: BLE001 - values the dtype cannot hold fall back to str()
         return [str(v) for v in values]
 
 
-def _sampled(column: pl.Expr, dtype: pl.DataType) -> pl.Expr:
+def sample_source(column: pl.Expr, dtype: pl.DataType) -> pl.Expr:
     """`column` as the expression its samples are drawn from.
 
     An `Array` is sampled as the `List` it holds the values of: Polars 1
@@ -179,6 +179,6 @@ def _sampled(column: pl.Expr, dtype: pl.DataType) -> pl.Expr:
     return column.arr.to_list() if isinstance(dtype, pl.Array) else column
 
 
-def _struct_of(names: Sequence[str]) -> pl.Expr | None:
+def struct_of(names: Sequence[str]) -> pl.Expr | None:
     """A struct of the named columns, for sampling multi-column claims."""
     return pl.struct([pl.col(n) for n in names]) if names else None

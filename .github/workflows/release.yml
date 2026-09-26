@@ -73,6 +73,31 @@ jobs:
           args: --release --out dist
           sccache: "true"
 
+      # The suite ran against an editable build; this is the wheel itself,
+      # installed alone into a fresh environment, as a user would get it.
+      # The macOS runner is Apple silicon, so its x86_64 wheel cannot run
+      # here; every other target runs on its own architecture.
+      - name: Install Python for the smoke test
+        if: ${{ !(matrix.os == 'macos-latest' && matrix.target == 'x86_64') }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Smoke-test the wheel
+        if: ${{ !(matrix.os == 'macos-latest' && matrix.target == 'x86_64') }}
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/smoke"
+          if [ -x "$RUNNER_TEMP/smoke/bin/python" ]; then
+            smoke="$RUNNER_TEMP/smoke/bin/python"
+          else
+            smoke="$RUNNER_TEMP/smoke/Scripts/python.exe"
+          fi
+          "$smoke" -m pip install --quiet dist/*.whl
+          # From outside the checkout, so `import polspec` finds the wheel.
+          cp scripts/smoke_wheel.py "$RUNNER_TEMP/"
+          cd "$RUNNER_TEMP" && "$smoke" smoke_wheel.py
+
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v7
         with:

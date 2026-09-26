@@ -13,6 +13,8 @@ ported here so the two never disagree about what "keyed by name" means.
 
 from __future__ import annotations
 
+import hashlib
+
 _MASK = (1 << 64) - 1
 _FNV_OFFSET = 0xCBF29CE484222325
 _FNV_PRIME = 0x100000001B3
@@ -32,3 +34,18 @@ def pass_seed(frame_seed: int, key: str) -> int:
     z = ((z ^ (z >> 30)) * 0xBF58476D1CE4E5B9) & _MASK
     z = ((z ^ (z >> 27)) * 0x94D049BB133111EB) & _MASK
     return z ^ (z >> 31)
+
+
+def stable_seed(*parts: str) -> int:
+    """A seed derived only from `parts`, stable across processes and runs
+    (unlike `hash()`, which is salted per-process for strings).
+
+    A second construction beside `pass_seed`, and not interchangeable with
+    it: this one seeds what has no frame seed to mix into -- a named
+    `Categories` pool, shared across specs whatever seed each is generated
+    with, and a registry spec's own seed from the registry's -- and changing
+    either would change seeded output. SHA-256 rather than FNV, because it
+    is Python's alone; nothing in the engine has to agree with it.
+    """
+    digest = hashlib.sha256("\0".join(parts).encode()).digest()
+    return int.from_bytes(digest[:8], "big")

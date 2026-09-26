@@ -8,7 +8,6 @@ and `drift` read back; a suffix in one map and not the other is a red test.
 from __future__ import annotations
 
 import contextlib
-import importlib.util
 import os
 import re
 import subprocess
@@ -23,7 +22,7 @@ from polspec import FrameSpec
 from polspec.errors import CliError
 from polspec.reading import _DELIMITED, _parse_declared_temporals
 from polspec.reading import _READERS as _DATA_READERS
-from polspec.registry import Registry
+from polspec.registry import Registry, load_module
 
 if TYPE_CHECKING:
     from polspec.tablespec import TableSpec
@@ -189,16 +188,7 @@ def _require_identifier(name: str, *, what: str) -> None:
 
 
 def _load_module_from_path(path: Path) -> types.ModuleType:
-    module_name = f"_polspec_cli_{path.stem}"
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec is None or spec.loader is None:
-        raise CliError(f"could not load {path} as a Python module")
-    module = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(module)
-    except Exception as exc:
-        raise CliError(f"error importing {path}: {exc}") from exc
-    return module
+    return load_module(path, error=CliError, prefix="cli")
 
 
 def _frame_specs_in_module(module: types.ModuleType) -> dict[str, type[FrameSpec]]:

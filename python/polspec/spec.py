@@ -14,15 +14,15 @@ import polars as pl
 
 from polspec.bound import Bound
 from polspec.check import Check
-from polspec.constants import _DEFAULT_LIST_LEN, _DEFAULT_NULL_PROBABILITY
+from polspec.constants import DEFAULT_LIST_LEN, DEFAULT_NULL_PROBABILITY
 from polspec.distributions import (
     canonicalize_params,
     normalize_distribution,
     validate_distribution_params,
 )
 from polspec.dtypes import (
-    _bound_endpoint_to_physical,
-    _dtype_value_limits,
+    bound_endpoint_to_physical,
+    dtype_value_limits,
     element_dtype,
     field_dtypes,
     float16_inside,
@@ -32,10 +32,10 @@ from polspec.dtypes import (
 from polspec.errors import SpecError
 from polspec.expr import Pred
 from polspec.formats import lookup as _lookup_format
-from polspec.rules import ColRule, _reject_duplicate_choices
+from polspec.rules import ColRule, reject_duplicate_choices
 
 
-def _column_kind(dtype: pl.DataType) -> str:
+def column_kind(dtype: pl.DataType) -> str:
     if dtype.is_integer():
         return "int"
     if dtype.is_float():
@@ -52,7 +52,7 @@ def _column_kind(dtype: pl.DataType) -> str:
         return "binary"
     if isinstance(dtype, pl.Enum):
         return "enum"
-    if _is_categorical_dtype(dtype):
+    if is_categorical_dtype(dtype):
         return "categorical"
     if isinstance(dtype, (pl.List, pl.Array)):
         return "list"
@@ -78,7 +78,7 @@ def _distinct_values(spec: ColSpec) -> int | None:
     """How many distinct values `spec` can generate, when that is a small,
     knowable number: a finite domain, a Boolean, an integer range. None
     otherwise -- a range of floats, a string of any text."""
-    from polspec.constraints.domain import Domain
+    from polspec.domain import Domain
 
     if spec.value_dtype == pl.Boolean:
         return 2
@@ -86,7 +86,7 @@ def _distinct_values(spec: ColSpec) -> int | None:
     if values is not None:
         return len(set(values))
     if spec.value_dtype.is_integer():
-        limits = _dtype_value_limits(spec.value_dtype)
+        limits = dtype_value_limits(spec.value_dtype)
         if limits is None:
             return None
         lo, hi = limits
@@ -97,7 +97,7 @@ def _distinct_values(spec: ColSpec) -> int | None:
     return None
 
 
-def _is_categorical_dtype(dtype: pl.DataType) -> bool:
+def is_categorical_dtype(dtype: pl.DataType) -> bool:
     return (
         isinstance(dtype, pl.Categorical)
         or dtype == pl.Categorical
@@ -260,7 +260,7 @@ class ColSpec:
     bounds: Bound[Any] | None = None
     tags: tuple[str, ...] = ()
     unique: bool = False
-    null_probability: float = _DEFAULT_NULL_PROBABILITY
+    null_probability: float = DEFAULT_NULL_PROBABILITY
     string_length: Bound[int] | None = None
     list_length: Bound[int] | None = None
     element_null_probability: float = 0.0
@@ -285,7 +285,7 @@ class ColSpec:
             bounds: Bound[Any] | tuple[Any, Any] | list[Any] | None = None,
             tags: str | Sequence[str] | None = (),
             unique: bool = False,
-            null_probability: float = _DEFAULT_NULL_PROBABILITY,
+            null_probability: float = DEFAULT_NULL_PROBABILITY,
             string_length: Bound[int] | tuple[int, int] | list[int] | None = None,
             list_length: Bound[int] | tuple[int, int] | list[int] | None = None,
             element_null_probability: float = 0.0,
@@ -372,7 +372,7 @@ class ColSpec:
         entries = self._as_list()
         if entries.list_length is not None:
             return entries
-        lo, hi = _DEFAULT_LIST_LEN
+        lo, hi = DEFAULT_LIST_LEN
         keys = _distinct_values(self._field("key"))
         length = Bound(lo, hi if keys is None else min(hi, keys))
         return dataclasses.replace(entries, list_length=length)
@@ -699,7 +699,7 @@ class ColSpec:
         if self.choices is not None:
             if not self.choices:
                 raise SpecError("ColSpec.choices must not be empty")
-            _reject_duplicate_choices(self.choices, "ColSpec.choices", self.value_dtype)
+            reject_duplicate_choices(self.choices, "ColSpec.choices", self.value_dtype)
 
     def _normalize_distribution(self) -> None:
         """Canonicalizes the distribution name and floats its parameters."""
@@ -755,7 +755,7 @@ class ColSpec:
         """
         if self.nullable or self.null_probability in (
             0.0,
-            _DEFAULT_NULL_PROBABILITY,
+            DEFAULT_NULL_PROBABILITY,
         ):
             return
         warnings.warn(
@@ -925,14 +925,14 @@ class ColSpec:
         """
         if self.bounds is None:
             return
-        limits = _dtype_value_limits(self.value_dtype)
+        limits = dtype_value_limits(self.value_dtype)
         if limits is None:
             return
         lo_limit, hi_limit = limits
         for label, endpoint in (("min", self.bounds.min), ("max", self.bounds.max)):
             if endpoint is None:
                 continue  # unconstrained on this side; nothing to fit
-            physical = _bound_endpoint_to_physical(endpoint, self.value_dtype)
+            physical = bound_endpoint_to_physical(endpoint, self.value_dtype)
             if not math.isfinite(physical):
                 raise SpecError(
                     f"ColSpec.bounds {label} must be a finite value, got {endpoint!r}"

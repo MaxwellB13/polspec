@@ -2,8 +2,8 @@
 
 polspec generates data and validates it from one declaration. Where both
 sides read the same definition they cannot drift: what values a column may
-hold, and the order the passes that rewrite a generated frame run in, both
-live in `polspec.constraints`. What is left below is what generation does not
+hold, and the order the passes that rewrite a generated frame run in, live
+in `polspec.domain` and `polspec.pass_order`. What is left below is what generation does not
 attempt at all, plus a few edges worth knowing about.
 
 Each is pinned by a test in `tests/contracts/test_roundtrip.py`. A gap meant to close

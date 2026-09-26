@@ -20,9 +20,9 @@ from polspec.cli._io import (
     _write_data_file,
     frames_named_after_specs,
 )
-from polspec.constants import _LARGE_FRAME_BYTES
+from polspec.constants import LARGE_FRAME_BYTES
 from polspec.errors import CliError
-from polspec.generation import _describe_bytes
+from polspec.generation.pipeline import describe_bytes
 from polspec.tablespec import TableSpec
 from polspec.validation import validate
 
@@ -164,10 +164,10 @@ def _say_if_large(spec: TableSpec, rows: int) -> None:
     saying. `generate` builds the whole frame, so a shell caller who did not
     expect gigabytes should hear it before the machine starts swapping."""
     estimate = spec.estimated_size(rows)
-    if estimate > _LARGE_FRAME_BYTES:
+    if estimate > LARGE_FRAME_BYTES:
         print(
             f"note: {spec.name} at {rows:,} rows is an estimated "
-            f"{_describe_bytes(estimate)}, held in memory before it is written",
+            f"{describe_bytes(estimate)}, held in memory before it is written",
             file=sys.stderr,
         )
 

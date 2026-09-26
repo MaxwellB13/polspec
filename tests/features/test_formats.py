@@ -25,9 +25,9 @@ from polspec import (
     TableSpec,
     generate_batches,
 )
-from polspec.constraints import Domain
-from polspec.engine import _plan_column
+from polspec.domain import Domain
 from polspec.formats import FORMATS, Format, lookup, names
+from polspec.generation.engine import plan_column
 
 # ---------------------------------------------------------------------------
 # The registry
@@ -305,12 +305,12 @@ def test_a_foreign_key_into_a_formatted_parent_is_checked_at_declaration():
 
 
 def test_a_template_format_reaches_the_engine_as_a_template():
-    plan, domain = _plan_column("c", ColSpec(pl.String, format="email"))
+    plan, domain = plan_column("c", ColSpec(pl.String, format="email"))
     assert plan.kind == "template" and domain is None
 
 
 def test_a_finite_format_reaches_the_engine_as_an_index():
-    plan, domain = _plan_column("c", ColSpec(pl.String, format="iso_currency"))
+    plan, domain = plan_column("c", ColSpec(pl.String, format="iso_currency"))
     assert plan.kind == "index"
     assert domain.dtype == pl.String and domain.len() == plan.n_categories
 

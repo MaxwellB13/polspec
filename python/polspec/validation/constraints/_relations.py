@@ -18,14 +18,14 @@ if TYPE_CHECKING:
     from polspec.foreign_key import ForeignKey
     from polspec.hierarchy import Hierarchy
 
-from polspec.validation.constraints._base import MAX_SAMPLES, _Constraint
+from polspec.validation.constraints._base import MAX_SAMPLES, Constraint
 
 # ---------------------------------------------------------------------------
 # Foreign keys -- each needs its own join, so they cannot share the pass above
 # ---------------------------------------------------------------------------
 
 
-def _foreign_key_findings(
+def foreign_key_findings(
     lf: pl.LazyFrame,
     schema_name: str,
     foreign_keys: Sequence[tuple[ForeignKey, pl.LazyFrame | None]],
@@ -138,7 +138,7 @@ def _foreign_key_findings(
 
 
 @dataclass(kw_only=True)
-class _SingleParent(_Constraint):
+class _SingleParent(Constraint):
     """Every reference points at one parent, which is what makes the walk
     terminate at a single ultimate parent."""
 
@@ -156,9 +156,9 @@ class _SingleParent(_Constraint):
         )
 
 
-def _hierarchy_constraints(
+def hierarchy_constraints(
     hierarchy: Hierarchy, df_col_names: Sequence[str]
-) -> list[_Constraint]:
+) -> list[Constraint]:
     """The part of a hierarchy that fits the single aggregation pass."""
     if hierarchy.child not in df_col_names:
         return []
@@ -221,7 +221,7 @@ def _endless(edges: pl.DataFrame, rounds: int) -> pl.Series:
     return ptr["node"].unique()
 
 
-def _hierarchy_findings(
+def hierarchy_findings(
     lf: pl.LazyFrame,
     schema_name: str,
     hierarchy: Hierarchy,

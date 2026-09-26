@@ -42,14 +42,14 @@ SpecCls.validate(SpecCls.generate(n, seed=...))   # must not raise
 
 ## What is shared, and what is only tested
 
-The structural answer is to give both sides one definition to read. That is
-what `polspec.constraints` holds:
+The structural answer is to give both sides one definition to read. Two
+modules hold one each:
 
-- **`Domain`** — the values a column may hold: its `choices`, an `Enum`'s
+- **`Domain`** (`polspec.domain`) — the values a column may hold: its `choices`, an `Enum`'s
   categories, its `bounds`. Generation samples from it, validation checks
   against it, and a foreign key asks whether a parent's domain fits inside a
   child's. One definition, three readers.
-- **`Pass` and `order`** — which rewrite of a generated frame runs first,
+- **`Pass` and `order`** (`polspec.pass_order`) — which rewrite of a generated frame runs first,
   derived from the columns each pass reads and writes. This is what lets a
   rule keyed on a foreign-keyed column see the parent's values, which is the
   same thing validation will check the rule against.

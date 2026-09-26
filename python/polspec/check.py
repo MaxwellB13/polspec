@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from polspec.constants import _FILLED_IN
+from polspec.constants import FILLED_IN
 from polspec.errors import SpecError
 from polspec.expr import Pred
 
@@ -38,7 +38,7 @@ class Check:
     # name -- while the constructor also accepts a predicate and no name; see
     # the `__init__` below, which exists only for type checkers.
     expr: pl.Expr
-    name: str = _FILLED_IN
+    name: str = FILLED_IN
     description: str | None = None
     ignore_nulls: bool = True
     pred: Pred | None = None

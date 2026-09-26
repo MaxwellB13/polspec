@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from polspec.constants import _DEFAULT_LIST_LEN, _DEFAULT_STRING_LEN
+from polspec.constants import DEFAULT_LIST_LEN, DEFAULT_STRING_LEN
 from polspec.dtypes import field_dtypes, map_entries
 from polspec.formats import lookup as _lookup_format
 
@@ -97,7 +97,7 @@ def _value_bytes(spec: ColSpec, dtype: pl.DataType) -> float:
         # An offset per row, plus however many elements the row holds, each
         # read through the declaration generation draws it from. A null list
         # holds none.
-        lengths = spec.list_length.closed() if spec.list_length else _DEFAULT_LIST_LEN
+        lengths = spec.list_length.closed() if spec.list_length else DEFAULT_LIST_LEN
         mean_len = (lengths[0] + lengths[1]) / 2
         # An element is a column of its own: a nullable one carries a
         # validity bit, and its content only where it is present.
@@ -148,7 +148,7 @@ def _bytes_past_inline(spec: ColSpec) -> float:
     if spec.format is not None:
         return _format_length(_lookup_format(spec.format))
     low, high = (
-        spec.string_length.closed() if spec.string_length else _DEFAULT_STRING_LEN
+        spec.string_length.closed() if spec.string_length else DEFAULT_STRING_LEN
     )
     return _mean_over_inline(range(low, high + 1))
 

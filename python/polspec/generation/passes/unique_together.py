@@ -22,8 +22,9 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from polspec.constraints import Domain
+from polspec.domain import Domain
 from polspec.errors import GenerationError
+from polspec.generation.engine import generate_random
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -68,8 +69,6 @@ def apply_unique_together(
     foreign-keyed member is excluded, since replacing its value would undo
     the referential integrity its key just established.
     """
-    from polspec.engine import _generate_random
-
     members = list(members)
     if df.height == 0:
         return df
@@ -106,7 +105,7 @@ def apply_unique_together(
     resampled = {name: columns[name] for name in members if name in rewritable}
     rng = random.Random(seed)
     for _ in range(MAX_ROUNDS):
-        fresh = _generate_random(resampled, rows.len(), rng.randrange(2**63))
+        fresh = generate_random(resampled, rows.len(), rng.randrange(2**63))
         df = df.with_columns(
             [df[name].scatter(rows, fresh[name]) for name in resampled]
         )
