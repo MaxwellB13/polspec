@@ -117,7 +117,10 @@ Two things this project has made no compatibility promise about yet:
   its value space, unique across a whole frame however it is batched, so
   every seeded unique column changed, once. 0.11.0 finished the job for a
   unique column a foreign key fills -- a permutation of its parent's keys
-  -- so that column's seeded values changed, once.
+  -- so that column's seeded values changed, once. 0.12.0 fixed a nested
+  column repeating its first batch's elements in every batch after it, so
+  the elements of a `List`, `Array` or `Map` column past the first batch
+  changed, once; `generate()` did not.
 
 The first of those is easier to live with than it sounds, because a spec file
 now says which format wrote it. Every file `to_yaml()` writes carries

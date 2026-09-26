@@ -8,6 +8,24 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-26
+
+**One seeded change, once, and a fix rather than a choice: the elements of
+a `List`, `Array` or `Map` column in every batch after the first** of
+`generate_batches`, `scan()` or a sink. Every batch used to draw them from
+the first batch's seed, so a stream repeated its opening elements over and
+over; each batch now draws its own. `generate()`, and a stream's first
+batch, produce exactly what 0.11.0 did, and no spec file needs migrating.
+
+**One breaking change: a report is falsy when it is empty.** `if report:`
+now means *something was found*; write `report.passed` or
+`report.unchanged` for the opposite.
+
+Alongside them, three more fixes -- a projected cartesian scan, a chunked
+`Array` on Polars 1, `TableSpec.rename` and checks -- reference pages for
+`ColSpec`'s fields, the spec-file format and the command line, and CI that
+tests `Map`, the lowest dependency versions and every release wheel.
+
 ### Changed
 
 - **A report is falsy when it is empty.** `ValidationReport` and
@@ -1573,7 +1591,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/MaxwellB13/polspec/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/MaxwellB13/polspec/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/MaxwellB13/polspec/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/MaxwellB13/polspec/compare/v0.9.2...v0.10.0
