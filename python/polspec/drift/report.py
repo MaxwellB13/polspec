@@ -109,8 +109,9 @@ class DriftReport:
 
     `kind` says which: `"diff"` compares `old` to `new`, both declarations;
     `"drift"` compares the declaration `old` to data, and `new` is what the
-    data was called. `bool(report)` is `report.unchanged`, the way
-    `bool(ValidationReport)` is `passed`.
+    data was called. Like any collection it is falsy when empty, so
+    `if report:` means "something changed"; `report.unchanged` says the
+    opposite in words.
     """
 
     kind: Kind
@@ -135,9 +136,6 @@ class DriftReport:
     @property
     def compatible(self) -> tuple[DriftFinding, ...]:
         return tuple(f for f in self.findings if not f.breaking)
-
-    def __bool__(self) -> bool:
-        return self.unchanged
 
     def __len__(self) -> int:
         return len(self.findings)

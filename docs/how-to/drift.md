@@ -156,8 +156,10 @@ OrdersV1.drift(good, null_rate_tolerance=0.2)   # or one keyword at a time, not 
 
 A `DriftReport` is data first. `report.breaking` and `report.compatible`
 are the two halves; `by_column()` and `by_code()` slice it; `to_dict()` and
-`to_json()` serialise it; `bool(report)` is `report.unchanged`, the way
-`bool(ValidationReport)` is `passed`.
+`to_json()` serialise it. Like a `ValidationReport` it is a collection of
+findings, so `len(report)` counts them and an empty report is falsy:
+`if report:` means something changed, and `report.unchanged` says the
+opposite in words.
 
 `to_markdown()` renders the shape of a pull-request comment, breaking
 findings first:

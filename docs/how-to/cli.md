@@ -5,6 +5,8 @@ turn one into a test, generate data from one, check data against one, and
 say what moved. Every verb is a thin wrapper over a `FrameSpec` method that
 already exists — `from_dataframe`, `to_yaml`, `generate`, `validate`, `diff`,
 `drift` — so the CLI is argument parsing and templating, not new behaviour.
+This page walks through what each command is for; the
+[command-line reference](../reference/cli.md) lists every argument.
 
 ```bash
 polspec schema infer orders.parquet -o orders.yaml

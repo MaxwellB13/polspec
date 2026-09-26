@@ -272,3 +272,107 @@ def test_every_test_file_lives_in_a_folder_and_says_what_it_covers():
         if not ast.get_docstring(ast.parse(path.read_text(encoding="utf-8")))
     ]
     assert undocumented == []
+
+
+# ---------------------------------------------------------------------------
+# The reference pages that describe the code rather than render it
+# ---------------------------------------------------------------------------
+
+REFERENCE = DOCS / "reference"
+TABLE_KEY = re.compile(r"^\| `([^`]+)` \|(?: `([^`]+)` \|)?", re.M)
+
+
+def _section(page: Path, heading: str) -> str:
+    """The text under `heading`, up to the next heading of any level."""
+    text = page.read_text(encoding="utf-8")
+    start = text.index(f"\n{heading}\n") + len(heading) + 2
+    following = re.search(r"^#{1,6} ", text[start:], re.M)
+    return text[start : start + following.start()] if following else text[start:]
+
+
+def _first_column(page: Path, heading: str) -> list[str]:
+    return [m.group(1) for m in TABLE_KEY.finditer(_section(page, heading))]
+
+
+def test_the_colspec_field_reference_has_a_row_per_field():
+    """One row per `ColSpec` field, in declaration order, each with the key
+    a spec file writes it under."""
+    import dataclasses
+
+    from polspec import ColSpec
+    from polspec.serialization import COLSPEC_FIELDS
+
+    rows = TABLE_KEY.findall(
+        (REFERENCE / "colspec-fields.md").read_text(encoding="utf-8")
+    )
+    assert [field for field, _ in rows] == [f.name for f in dataclasses.fields(ColSpec)]
+    file_key = {f.attribute: f.name for f in COLSPEC_FIELDS}
+    assert dict(rows) == file_key
+
+
+def test_the_spec_file_reference_names_every_key_the_reader_takes():
+    """Each table on the page is the reader's own list of keys for that
+    kind of mapping -- no more, no fewer."""
+    from polspec.serialization import (
+        CHECK_FIELDS,
+        COLRULE_FIELDS,
+        COLSPEC_FIELDS,
+        FK_FIELDS,
+        TABLESPEC_FIELDS,
+        fields,
+    )
+    from polspec.serialization import __dict__ as serialization
+
+    page = REFERENCE / "spec-files.md"
+    written = {f.name for f in FK_FIELDS} - {"target"}  # never written to a file
+    expected = {
+        "## A spec file": {f.name for f in TABLESPEC_FIELDS} | set(fields.FILE_KEYS),
+        "### A column": {f.name for f in COLSPEC_FIELDS},
+        "### A rule": {f.name for f in COLRULE_FIELDS},
+        "### A check or validator": {f.name for f in CHECK_FIELDS},
+        "### A foreign key": written,
+        "### A hierarchy": {f.name for f in fields.HIERARCHY_FIELDS},
+        "## A category registry": set(serialization["_CATSPEC_KEYS"]),
+        "## A registry of specs": set(serialization["_REGISTRY_KEYS"]),
+    }
+    for heading, keys in expected.items():
+        assert set(_first_column(page, heading)) == keys, heading
+
+
+def test_the_spec_file_reference_names_every_dtype_operation_and_version():
+    from polspec.expr import KNOWN_OPS
+    from polspec.serialization.dtypes import _BUILDERS, DTYPE_NAMES
+
+    page = REFERENCE / "spec-files.md"
+    dtypes = _section(page, "## Dtypes")
+    for name in set(DTYPE_NAMES.values()) | set(_BUILDERS):
+        assert f"`{name}`" in dtypes, name
+    operations = {
+        op.strip("` ")
+        for cell in _first_column(page, "## Predicates")
+        for op in cell.split(",")
+    }
+    written_out = {
+        op.strip("` ")
+        for row in re.findall(
+            r"^\| (`[^|]+`) \|", _section(page, "## Predicates"), re.M
+        )
+        for op in row.split(",")
+    }
+    assert operations | written_out == set(KNOWN_OPS)
+    assert f"`version: {FORMAT_VERSION}`" in page.read_text(encoding="utf-8")
+    assert _first_column(page, "## Versions") == [] and re.findall(
+        r"^\| (\d+) \|", _section(page, "## Versions"), re.M
+    ) == [str(v) for v in range(1, FORMAT_VERSION + 1)]
+
+
+def test_the_cli_reference_is_current():
+    """`docs/reference/cli.md` is generated from the parser, so a flag added
+    or reworded without regenerating it is a failure here."""
+    path = ROOT / "scripts" / "generate_cli_reference.py"
+    spec = importlib.util.spec_from_file_location("generate_cli_reference", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert (REFERENCE / "cli.md").read_text(encoding="utf-8") == module.build(), (
+        "docs/reference/cli.md is stale: run `uv run python scripts/generate_llms_txt.py`"
+    )

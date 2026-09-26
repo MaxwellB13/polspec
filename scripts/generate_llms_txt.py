@@ -14,8 +14,9 @@ directives that mkdocstrings fills in at build time, so their *source* is
 empty -- and the signatures are exactly what a model reading this needs. So
 the directives are expanded here from the live objects.
 
-Run with `uv run python scripts/generate_llms_txt.py`;
-`tests/test_docs.py` fails if the committed files are out of date.
+Run with `uv run python scripts/generate_llms_txt.py`, which regenerates
+`docs/reference/cli.md` first; `tests/docs/test_docs.py` fails if any of
+the committed files is out of date.
 """
 
 from __future__ import annotations
@@ -240,6 +241,11 @@ def build() -> tuple[str, str]:
 
 
 def main() -> None:
+    # The CLI reference is a page like any other, generated from the parser;
+    # regenerate it first so the files below carry the current one.
+    import generate_cli_reference
+
+    generate_cli_reference.main()
     index, full = build()
     INDEX.write_text(index, encoding="utf-8")
     FULL.write_text(full, encoding="utf-8")

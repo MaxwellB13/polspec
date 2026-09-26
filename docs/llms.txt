@@ -21,17 +21,17 @@ https://maxwellb13.github.io/polspec/llms-full.txt
 
 - [Declare columns](https://maxwellb13.github.io/polspec/how-to/columns/): A `ColSpec` describes one column.
 - [String formats](https://maxwellb13.github.io/polspec/how-to/formats/): A `String` column can say how long its values are.
-- [Specs as values](https://maxwellb13.github.io/polspec/how-to/tablespec/): A `FrameSpec` class body is the convenient way to *write* a spec.
 - [Constraints](https://maxwellb13.github.io/polspec/how-to/constraints/): Beyond the shape of a single value, a spec can assert relationships.
+- [Shared categories](https://maxwellb13.github.io/polspec/how-to/categories/): A `CatSpec` is a registry of `Enum` and `Categorical` definitions shared across specs, so several tables agree on a domain instead of each restating it.
+- [Hierarchies](https://maxwellb13.github.io/polspec/how-to/hierarchies/): A link table is an edge list: one column holds a reference, the other holds the reference it points at, and both draw on the same set of values.
 - [Generate data](https://maxwellb13.github.io/polspec/how-to/generating/): Columns are generated independently and in parallel by the Rust extension, then cast to their declared dtypes in one Polars pass.
 - [Validate data](https://maxwellb13.github.io/polspec/how-to/validating/): `validate()` accepts a `DataFrame` or a `LazyFrame` and returns the same kind, so it drops into a pipeline.
 - [Schema and data drift](https://maxwellb13.github.io/polspec/how-to/drift/): `validate()` says whether data meets its spec.
-- [Shared categories](https://maxwellb13.github.io/polspec/how-to/categories/): A `CatSpec` is a registry of `Enum` and `Categorical` definitions shared across specs, so several tables agree on a domain instead of each restating it.
+- [Test pipelines](https://maxwellb13.github.io/polspec/how-to/testing/): A spec is a schema and a data source at once, which makes it a natural fit for the tests around a data pipeline: declare what a stage of the pipeline expects, generate data that matches, and validate what it produces.
+- [Specs as values](https://maxwellb13.github.io/polspec/how-to/tablespec/): A `FrameSpec` class body is the convenient way to *write* a spec.
 - [Specs as files](https://maxwellb13.github.io/polspec/how-to/files/): A spec can live in a file instead of a class body, so tooling outside Python can read it and so it can be reviewed as a document.
 - [Multiple specs](https://maxwellb13.github.io/polspec/how-to/registry/): A `ForeignKey` names the spec it points at, and a single spec knows nothing beyond that name.
-- [Hierarchies](https://maxwellb13.github.io/polspec/how-to/hierarchies/): A link table is an edge list: one column holds a reference, the other holds the reference it points at, and both draw on the same set of values.
 - [Generated documentation](https://maxwellb13.github.io/polspec/how-to/documenting/): A spec already holds everything a data dictionary needs, so polspec renders one rather than asking you to keep a second copy in step.
-- [Test pipelines](https://maxwellb13.github.io/polspec/how-to/testing/): A spec is a schema and a data source at once, which makes it a natural fit for the tests around a data pipeline: declare what a stage of the pipeline expects, generate data that matches, and validate what it produces.
 - [Command line](https://maxwellb13.github.io/polspec/how-to/cli/): `polspec` does at the shell what a spec does in Python: create one from data, turn one into a test, generate data from one, check data against one, and say what moved.
 
 ## Reference
@@ -46,6 +46,9 @@ https://maxwellb13.github.io/polspec/llms-full.txt
 - [Drift](https://maxwellb13.github.io/polspec/reference/api/drift/): `polspec.drift.diff()` compares two declarations; `polspec.drift.drift()` compares a declaration to a frame.
 - [Profiling](https://maxwellb13.github.io/polspec/reference/api/profiling/): Inferring a spec from data you already have.
 - [Exceptions](https://maxwellb13.github.io/polspec/reference/api/errors/): Every error polspec raises descends from `PolspecError`, so one `except` clause catches the lot.
+- [ColSpec fields](https://maxwellb13.github.io/polspec/reference/colspec-fields/): Every field a `ColSpec` takes, what it applies to, and what each side of the spec does with it.
+- [Spec files](https://maxwellb13.github.io/polspec/reference/spec-files/): The YAML a spec, a category registry or a registry of specs is written as, key by key.
+- [Command line](https://maxwellb13.github.io/polspec/reference/cli/): Every `polspec` command and argument, generated from the command's own parser -- `polspec <command> --help` prints the same.
 - [Errors and findings](https://maxwellb13.github.io/polspec/reference/errors/): Everything polspec raises on its own behalf derives from one base class, so a caller can separate "polspec objected" from "something else went wrong" with a single clause
 
 ## Explanation

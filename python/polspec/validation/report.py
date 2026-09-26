@@ -146,7 +146,12 @@ class Finding:
 
 @dataclass(frozen=True, slots=True)
 class ValidationReport:
-    """Every finding for one frame against one spec."""
+    """Every finding for one frame against one spec.
+
+    A collection of findings: `len()` counts them, iterating yields them, and
+    like any collection it is falsy when empty -- so `if report:` means
+    "something was found". `report.passed` says the opposite in words.
+    """
 
     spec_name: str
     findings: tuple[Finding, ...]
@@ -158,10 +163,8 @@ class ValidationReport:
 
     @property
     def passed(self) -> bool:
+        """True when nothing was found."""
         return not self.findings
-
-    def __bool__(self) -> bool:
-        return self.passed
 
     def __len__(self) -> int:
         return len(self.findings)

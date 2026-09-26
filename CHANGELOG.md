@@ -8,6 +8,16 @@ seed produces; see
 
 ## [Unreleased]
 
+### Changed
+
+- **A report is falsy when it is empty.** `ValidationReport` and
+  `DriftReport` defined `bool()` as "passed" or "unchanged" while `len()`
+  counted their findings, so an empty report was truthy -- the reverse of
+  every other collection. `__bool__` is gone: a report is truthy exactly
+  when it holds findings, so `if report:` now means *something was found*.
+  Code that wrote `if report:` for "passed" must write `if report.passed:`
+  (or `report.unchanged`), which has always worked.
+
 ### Fixed
 
 - **A nested column no longer repeats itself batch after batch.** The
@@ -40,6 +50,20 @@ seed produces; see
   if it was the default -- and one written as a raw `pl.Expr` that names a
   renamed column is refused at `rename()` with a `SpecError` saying why. A
   validator written with `col()` no longer stops its column being renamed.
+
+### Documentation
+
+- Three reference pages, each held to the code by a test: *ColSpec
+  fields* (every field, what it applies to, and what generation and
+  validation do with it), *Spec files* (the YAML format key by key, the
+  dtype forms, the predicate operations and the format versions), and
+  *Command line* (every command and argument, generated from the parser).
+- The how-to guides are grouped -- declaring a spec, using one, specs as
+  values and files, the command line -- rather than listed as fourteen.
+- The home page names `Map`, patterns, hierarchies, the `Registry` and
+  `read()`, and no longer says Polars is the only runtime dependency. The
+  README points into the docs instead of copying part of their nav, and
+  CONTRIBUTING's checks match what CI runs.
 
 ### Internal
 
