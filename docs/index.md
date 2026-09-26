@@ -42,8 +42,9 @@ production will reject.
     Every dtype, generated and validated — integers, floats, `Decimal`,
     booleans, strings, binary, all four temporal types, `Enum`,
     `Categorical`, and a `List`, `Array` or `Struct` of any of them, nested
-    to any depth — plus nullability, bounds, string lengths, value domains
-    and named string formats such as `uuid4` and `email`.
+    to any depth, and on Polars 2 a `Map` — plus nullability, bounds, string
+    lengths, value domains, named string formats such as `uuid4` and
+    `email`, and regex patterns.
 
     [Declaring columns](how-to/columns.md) ·
     [String formats](how-to/formats.md)
@@ -51,9 +52,19 @@ production will reject.
 - **Rules and invariants**
 
     Conditional values, single-column validators, multi-column checks,
-    composite uniqueness and foreign keys between specs.
+    composite uniqueness, foreign keys between specs, and parent/child
+    hierarchies with a bounded depth.
 
-    [Constraints](how-to/constraints.md)
+    [Constraints](how-to/constraints.md) ·
+    [Hierarchies](how-to/hierarchies.md)
+
+- **Checking data**
+
+    `validate()` raises on any breach; `inspect()` returns every finding as
+    data, with the offending rows a filter away. `read()` loads a data file
+    in the spec's terms first, parsing dates that arrived as text.
+
+    [Validating data](how-to/validating.md)
 
 - **Data on demand**
 
@@ -65,10 +76,11 @@ production will reject.
 
 - **Specs from elsewhere**
 
-    Infer a spec by profiling an existing DataFrame, or load one from YAML so
-    non-Python tooling can read it too.
+    Infer a spec by profiling an existing DataFrame, load one from YAML so
+    non-Python tooling can read it too, and keep a set of related specs in
+    one `Registry` that generates and validates them together.
 
-    [YAML specs](how-to/files.md)
+    [Specs as files](how-to/files.md) · [Multiple specs](how-to/registry.md)
 
 - **What changed**
 
@@ -96,8 +108,8 @@ pip install polspec      # alternative
 
 The generator is a compiled Rust extension, but wheels are published for Linux
 (x86_64, aarch64), macOS (Intel and Apple silicon) and Windows (x86_64), so
-installing needs no Rust toolchain.
-Nothing beyond Polars is needed at runtime.
+installing needs no Rust toolchain. At runtime polspec needs Polars and
+PyYAML, and on Windows `tzdata` for time-zone data.
 
 Building from a checkout — which does need Rust and
 [maturin](https://www.maturin.rs) — is covered in

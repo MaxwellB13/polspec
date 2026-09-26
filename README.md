@@ -49,37 +49,16 @@ Building from a checkout is covered in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Documentation
 
-Full docs: **[maxwellb13.github.io/polspec](https://maxwellb13.github.io/polspec/)**
-
-- **Tutorial** — [Getting started](https://maxwellb13.github.io/polspec/tutorial/getting-started/) ·
-  [Related tables](https://maxwellb13.github.io/polspec/tutorial/related-tables/)
-- **How-to** — [Declare columns](https://maxwellb13.github.io/polspec/how-to/columns/) ·
-  [String formats](https://maxwellb13.github.io/polspec/how-to/formats/) ·
-  [Constraints](https://maxwellb13.github.io/polspec/how-to/constraints/) ·
-  [Generate](https://maxwellb13.github.io/polspec/how-to/generating/) ·
-  [Validate](https://maxwellb13.github.io/polspec/how-to/validating/) ·
-  [Specs as files](https://maxwellb13.github.io/polspec/how-to/files/) ·
-  [Command line](https://maxwellb13.github.io/polspec/how-to/cli/)
-- **Reference** — [API](https://maxwellb13.github.io/polspec/reference/api/) ·
-  [Errors and findings](https://maxwellb13.github.io/polspec/reference/errors/)
-- **Explanation** — [Architecture](https://maxwellb13.github.io/polspec/explanation/architecture/) ·
-  [Generation and validation](https://maxwellb13.github.io/polspec/explanation/two-sides/) ·
-  [Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/) ·
-  [Roadmap](https://maxwellb13.github.io/polspec/explanation/roadmap/)
+Full docs: **[maxwellb13.github.io/polspec](https://maxwellb13.github.io/polspec/)**.
+Start with [Getting started](https://maxwellb13.github.io/polspec/tutorial/getting-started/),
+find a task among the [how-to guides](https://maxwellb13.github.io/polspec/how-to/columns/),
+or look a name up in the [API reference](https://maxwellb13.github.io/polspec/reference/api/).
 
 ## Development
 
-```bash
-uv run pytest
-uv run ruff check . && uv run ruff format --check .
-cargo test && cargo clippy --all-targets -- -D warnings
-uv run --group docs zensical build --strict
-uv run python examples/related_specs.py
-```
-
-`uv run --group bench python benchmarks/bench.py compare` runs the generator
-benchmark; `record` then `check` guard a change against a local baseline. See [CONTRIBUTING.md](CONTRIBUTING.md) for conventions and the
-release process, and [CHANGELOG.md](CHANGELOG.md) for what changed.
+Setting up a checkout, the checks CI runs, the conventions and the release
+process are in [CONTRIBUTING.md](CONTRIBUTING.md); what changed is in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

@@ -30,8 +30,8 @@ case at once. When that happens, re-run `maturin develop --release`, or use
 
 ## Generated files
 
-Two files under `docs/` are generated and committed, and a test fails if
-either is stale:
+Three files under `docs/` are generated and committed, and a test fails if
+any is stale:
 
 ```bash
 uv run python scripts/generate_llms_txt.py
@@ -46,6 +46,10 @@ source is `:::` directives -- the live docstrings. Regenerate after changing
 any page, the nav, or a public docstring -- and after editing `CHANGELOG.md`,
 which `docs/changelog.md` pulls in whole.
 
+The same command regenerates `docs/reference/cli.md` first, from the
+`polspec` command's own parser (`scripts/generate_cli_reference.py`), so a
+flag added, removed or reworded needs it too.
+
 ## Check your change
 
 Run everything CI runs before opening a pull request:
@@ -56,10 +60,16 @@ uv run pytest --cov                          # with coverage; fails under the fl
 uv run ruff check . && uv run ruff format --check .
 uv run ty check                              # type checker; nothing is suppressed
 uv run lint-imports                          # the package's layering, [tool.importlinter]
+cargo fmt --check
+cargo clippy --release -- -D warnings
 cargo test --release                         # Rust unit tests
-cargo clippy --release
+uv run --group docs zensical build --strict  # the docs, as the docs workflow builds them
 uv run python examples/related_specs.py      # worked example, doubles as a smoke test
 ```
+
+A change to the generator is worth a benchmark as well:
+`uv run --group bench python benchmarks/bench.py compare` runs it, and
+`record` then `check` guard a change against a local baseline.
 
 On Windows, the `cargo test` binary links against the Python DLL, so the
 interpreter's directory has to be on `PATH` — without it the tests fail to

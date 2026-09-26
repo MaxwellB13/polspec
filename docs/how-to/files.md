@@ -1,7 +1,8 @@
 # YAML specs
 
 A spec can live in a file instead of a class body, so tooling outside Python
-can read it and so it can be reviewed as a document.
+can read it and so it can be reviewed as a document. [Spec files](../reference/spec-files.md)
+is the format, key by key.
 
 ```python
 Orders.to_yaml("orders.yaml")

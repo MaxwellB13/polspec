@@ -47,7 +47,7 @@ def test_a_spec_does_not_drift_from_itself():
         c=ColSpec(pl.String, format="email", validators=[col("c").str.contains("@")]),
     )
     report = diff(spec, spec)
-    assert report.unchanged and bool(report) and len(report) == 0
+    assert report.unchanged and not report and len(report) == 0
     assert str(report) == "No drift: 'T' and 'T'"
 
 
@@ -371,7 +371,7 @@ def test_the_report_is_data():
     old = _spec(a=ColSpec(pl.Int64, bounds=(0, 10)), b=ColSpec(pl.Int64))
     new = _spec(a=ColSpec(pl.Int64), b=ColSpec(pl.Int64, unique=True))
     report = diff(old, new)
-    assert not report and not report.unchanged
+    assert report and not report.unchanged
     assert {f.key for f in report.breaking} == {"b__unique"}
     assert {f.key for f in report.compatible} == {"a__domain"}
     assert set(report.by_column()) == {"a", "b"}

@@ -73,7 +73,8 @@ BAD = pl.DataFrame(
 def test_inspect_returns_a_report_and_never_raises():
     report = Orders.inspect(BAD, references={Customers: CUSTOMERS})
     assert isinstance(report, ValidationReport)
-    assert not report.passed and not report
+    # A collection of findings: truthy when it holds some.
+    assert not report.passed and report
     assert report.spec_name == "Orders"
     codes = sorted(f.code for f in report)
     assert codes == sorted(
@@ -178,7 +179,7 @@ def test_report_serialises_to_json():
     }
 
 
-def test_passing_report_is_truthy_and_empty():
+def test_a_passing_report_is_empty_and_so_falsy():
     good = Orders.generate(50, seed=1, references={Customers: CUSTOMERS})
     report = Orders.inspect(
         good,
@@ -187,7 +188,7 @@ def test_passing_report_is_truthy_and_empty():
         validate_validators=False,
         validate_checks=False,
     )
-    assert report.passed and bool(report) and len(report) == 0
+    assert report.passed and not report and len(report) == 0
     assert report.failing_rows().collect().height == 0
     assert str(report) == "Validation passed for DataFrame against 'Orders'"
     report.raise_if_failed()  # no-op

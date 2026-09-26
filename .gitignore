@@ -175,3 +175,6 @@ benchmarks/baseline.json
 *.parquet
 *.ipc
 *.feather
+
+# Release plans, kept locally and never committed
+PLAN-*.md

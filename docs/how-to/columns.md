@@ -1,6 +1,9 @@
 # Declaring columns
 
-A `ColSpec` describes one column. Only `dtype` is required.
+A `ColSpec` describes one column. Only `dtype` is required. This page shows
+the fields in use; [ColSpec fields](../reference/colspec-fields.md) is the
+table of all of them -- what each applies to, and what generation and
+validation do with it.
 
 <!-- docs: skip -->
 ```python
