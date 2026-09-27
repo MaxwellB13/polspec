@@ -8,6 +8,28 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-27
+
+**Two features: a fake dataset from a real one, and a format with values of
+your own beside it.** `polspec.synthesize` turns a `DataFrame`, a
+`LazyFrame` or a data file into a stand-in with the same schema, shapes,
+frequencies and keys, none of its rows, and no value of a column named in
+`replace=`; `extra_values` widens a format -- ISO countries plus `UK (ISO)`,
+IPv4 or `NOT AVAILABLE` -- for validation and generation alike.
+
+**Three breaking changes, each a refusal of something that already did
+not work:** a choice its dtype cannot hold, and a check naming a column the
+spec does not declare, are refused at declaration -- both used to fail at
+generation or validation -- and `TableSpec ==` compares columns in order.
+
+**No seeded output changes.** Every spec that constructs under 0.12.0 and
+still constructs generates what it did -- checked against the published
+0.12.0 across 519 cases -- and no spec file needs migrating.
+
+Alongside them, a round of fixes found by fuzzing specs nobody wrote down:
+`Time`, `Duration` and `Decimal` values in spec files, checks Polars
+refused to evaluate, a skipped rule's claims, and `to_python` imports.
+
 ### Added
 
 - **`polspec.synthesize`: a fake dataset from a real one.** From a
@@ -61,6 +83,11 @@ seed produces; see
 - **A check naming a column the spec does not declare is refused.** It
   constructed, and failed only when validated. `pl.all()` and a regex
   selector name no column, and pass.
+
+- **`TableSpec ==` compares columns in order.** `columns` was compared as a
+  mapping, so two specs holding the same columns in a different order were
+  equal though their `schema()`s -- and every frame generated or validated
+  against them -- differ. They are now two specs.
 
 ### Fixed
 
@@ -129,6 +156,10 @@ seed produces; see
 - *Specs as files* showed a check comparing against `subtotal`, a column
   its `Orders` does not declare -- the new refusal found it -- and quoted
   the unrepresentable-check warning as polspec worded it before `col()`.
+
+- *Roadmap and stability* no longer says `drift` takes one spec:
+  `polspec drift --all` runs over a directory, as `generate` and
+  `validate` do.
 
 ## [0.12.0] - 2026-09-26
 
@@ -1713,7 +1744,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/MaxwellB13/polspec/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/MaxwellB13/polspec/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/MaxwellB13/polspec/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/MaxwellB13/polspec/compare/v0.10.0...v0.10.1

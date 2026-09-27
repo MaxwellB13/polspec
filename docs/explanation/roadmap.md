@@ -78,9 +78,6 @@ which specs exist unless they are put in a
 [`Registry`](../how-to/registry.md). That is deliberate — two test modules may
 each define an `Orders` — but it leaves edges:
 
-- **`drift` takes one spec.** `polspec generate --all` and `validate --all`
-  run over every spec in a directory with the keys between them bound;
-  `drift` still takes one spec and its parents as `--references NAME=PATH`.
 - **Discovery imports code.** `Registry.discover("specs/")` runs every `.py`
   file it finds. A declared `Registry(...)` in a module of your own is the
   safer shape, and `discover` is a convenience over it.
@@ -120,7 +117,8 @@ Two things this project has made no compatibility promise about yet:
   -- so that column's seeded values changed, once. 0.12.0 fixed a nested
   column repeating its first batch's elements in every batch after it, so
   the elements of a `List`, `Array` or `Map` column past the first batch
-  changed, once; `generate()` did not.
+  changed, once; `generate()` did not. 0.13.0 changed nothing that
+  constructed under 0.12.0.
 
 The first of those is easier to live with than it sounds, because a spec file
 now says which format wrote it. Every file `to_yaml()` writes carries

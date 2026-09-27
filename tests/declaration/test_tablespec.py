@@ -429,3 +429,46 @@ def test_drop_and_select_remove_the_checks_they_strand():
         "cap",
     ]
     assert [c.name for c in spec.select("customer_id").checks] == ["cust"]
+
+
+# ---------------------------------------------------------------------------
+# Equality
+# ---------------------------------------------------------------------------
+
+
+def test_the_same_columns_in_another_order_are_another_spec():
+    """A spec's order is part of it -- `schema()`, generated frames and
+    validated ones follow it -- so equality follows it too. Compared as a
+    mapping, two specs whose schemas differ used to be equal."""
+    a = TableSpec("T", {"x": ColSpec(pl.Int64), "y": ColSpec(pl.String)})
+    b = TableSpec("T", {"y": ColSpec(pl.String), "x": ColSpec(pl.Int64)})
+    assert a.schema() != b.schema()
+    assert a != b
+    assert a == TableSpec("T", {"x": ColSpec(pl.Int64), "y": ColSpec(pl.String)})
+
+
+def test_equality_reads_every_field():
+    """`TableSpec.__eq__` is written by hand, so a field added to the
+    dataclass and not to it would be ignored. Each field, changed alone,
+    makes a different spec."""
+    import dataclasses
+
+    from polspec import Hierarchy
+
+    base = TableSpec(
+        "T",
+        {"child": ColSpec(pl.Int64), "parent": ColSpec(pl.Int64)},
+    )
+    changed = {
+        "name": base.with_name("U"),
+        "columns": base.with_columns(extra=ColSpec(pl.Int64)),
+        "checks": base.with_checks(Check(col("child") > 0, name="positive")),
+        "unique_together": base.with_unique_together(["child", "parent"]),
+        "foreign_keys": base.with_foreign_keys(
+            ForeignKey("parent", references="self", ref_columns="child")
+        ),
+        "hierarchy": base.with_hierarchy(Hierarchy(child="child", parent="parent")),
+    }
+    assert set(changed) == {f.name for f in dataclasses.fields(TableSpec)}
+    for field, other in changed.items():
+        assert base != other, field
