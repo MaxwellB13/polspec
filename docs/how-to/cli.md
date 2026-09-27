@@ -16,6 +16,7 @@ polspec generate orders.yaml -n 1000 -o orders.parquet --seed 1
 polspec validate orders.yaml orders.parquet
 polspec diff orders_v1.yaml orders_v2.yaml --markdown
 polspec drift orders.yaml orders.parquet
+polspec synthesize orders.parquet -o fake_orders.parquet --replace customer_name
 ```
 
 ## `schema infer` — profile data into a spec
@@ -71,6 +72,9 @@ new`.
 | `--max-unique-enum N` | Max distinct values for a string column to become an `Enum` (default 50) |
 | `--no-bounds` | Skip computing numeric/temporal bounds and string lengths |
 | `--sample N` | Profile only the first N rows |
+| `--shape` | Fit the distribution each numeric or temporal column follows |
+| `--keys` | Declare an all-distinct integer or text column unique |
+| `--replace COL...` | Columns whose values must not be carried into the spec |
 
 Treat the output as a draft. It describes the sample it saw — edit bounds,
 add rules, tighten a domain — before trusting it as a contract.
@@ -211,6 +215,19 @@ first with their keys threaded into their children** as
 written as `<name>.<format>` (Parquet by default). No `--references` are
 needed for keys between the discovered specs; supply them for a parent
 outside the directory.
+
+## `synthesize` — fake data from real data
+
+```bash
+polspec synthesize customers.parquet -o fake_customers.parquet     -n 1000000 --seed 1 --replace name email --spec fake_customers.yaml
+```
+
+Profiles the file -- shapes, keys, category frequencies, null rates -- and
+writes a fake one with the same schema, `-n` rows (as many as the source,
+by default). `--replace` names the columns whose values must not be carried
+over; `--sample N` profiles a random sample of N rows; `--spec` writes the
+profiled spec beside the data, to review or to regenerate from. See
+[Fake data from real data](synthesizing.md) for what carries over.
 
 ## `validate` — check data against a schema
 

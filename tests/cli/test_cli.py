@@ -1044,3 +1044,80 @@ def test_validate_reports_a_column_a_check_needs_rather_than_a_traceback(
     data.write_text("total\n1.0\n", encoding="utf-8")
     assert run_cli("validate", spec, data) == 1
     assert "Missing required columns" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# synthesize, and schema infer's opt-in profiling
+# ---------------------------------------------------------------------------
+
+
+def _customers_csv(tmp_path, rows: int = 500):
+    path = tmp_path / "customers.csv"
+    pl.DataFrame(
+        {
+            "id": list(range(1, rows + 1)),
+            "amount": [round(1.0 + (i * 7919 % 1000) / 10, 2) for i in range(rows)],
+            "name": [f"person_{i % 30}" for i in range(rows)],
+        }
+    ).write_csv(path)
+    return path
+
+
+def test_synthesize_writes_a_fake_file_like_the_real_one(tmp_path, capsys):
+    source = _customers_csv(tmp_path)
+    output = tmp_path / "fake.parquet"
+    spec = tmp_path / "fake.yaml"
+    code = run_cli(
+        "synthesize",
+        source,
+        "-o",
+        output,
+        "-n",
+        2000,
+        "--seed",
+        1,
+        "--replace",
+        "name",
+        "--spec",
+        spec,
+    )
+    assert code == 0
+    fake = pl.read_parquet(output)
+    real = pl.read_csv(source)
+    assert fake.height == 2000 and fake.schema == real.schema
+    assert fake["id"].is_unique().all()
+    assert not set(fake["name"]) & set(real["name"])
+    loaded = FrameSpec.from_yaml(spec)
+    assert loaded.col("id").unique and loaded.col("name").dtype == pl.String
+    assert "synthesized row(s)" in capsys.readouterr().out
+
+
+def test_synthesize_refuses_a_replaced_column_the_file_lacks(tmp_path, capsys):
+    source = _customers_csv(tmp_path)
+    code = run_cli("synthesize", source, "-o", tmp_path / "f.csv", "--replace", "nope")
+    assert code == 1
+    assert "replace= names ['nope']" in capsys.readouterr().err
+
+
+def test_schema_infer_profiles_shape_keys_and_replaced_columns_when_asked(tmp_path):
+    source = _customers_csv(tmp_path)
+    plain, full = tmp_path / "plain.yaml", tmp_path / "full.yaml"
+    assert run_cli("schema", "infer", source, "-o", plain) == 0
+    assert (
+        run_cli(
+            "schema",
+            "infer",
+            source,
+            "-o",
+            full,
+            "--shape",
+            "--keys",
+            "--replace",
+            "name",
+        )
+        == 0
+    )
+    before, after = FrameSpec.from_yaml(plain), FrameSpec.from_yaml(full)
+    assert not before.col("id").unique and after.col("id").unique
+    assert isinstance(before.col("name").dtype, pl.Enum)
+    assert after.col("name").dtype == pl.String

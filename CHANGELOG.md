@@ -8,6 +8,31 @@ seed produces; see
 
 ## [Unreleased]
 
+### Added
+
+- **`polspec.synthesize`: a fake dataset from a real one.** From a
+  `DataFrame`, a `LazyFrame` or a data file, a frame with the same schema
+  whose columns follow the source's shapes, category frequencies and null
+  rates, whose keys stay distinct, and which holds none of its rows.
+  `replace=` names columns whose values must not be carried over; text in
+  them is generated from its lengths, never as an `Enum` of the values the
+  source holds. `sample=` profiles a random sample of a large source.
+  `polspec synthesize` does the same from the shell, and `--spec` writes
+  the spec the data was generated from. Columns are profiled one at a
+  time, so relationships between them are not kept -- see *Fake data from
+  real data*.
+
+- **`polspec.profile`**, the half of `synthesize` that describes the
+  source as a `TableSpec`, to review, edit or keep before generating.
+
+- **Profiling can fit a shape, find keys, and leave values behind.**
+  `from_dataframe()` and `profile_dataframe()` take `shape=True` -- each
+  numeric or temporal column's distribution, fitted against every one the
+  engine draws and kept if it beats drawing evenly (`polspec.shape`) --
+  `detect_unique=True`, and `replace=`; `polspec schema infer` takes
+  `--shape`, `--keys` and `--replace`. All three are off by default: a
+  profile with none of them is exactly what it was.
+
 ### Changed
 
 - **A choice its dtype cannot hold is refused at declaration.**

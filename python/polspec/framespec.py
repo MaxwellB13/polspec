@@ -342,6 +342,9 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         weights: bool = False,
         max_unique_enum: int = 50,
         calculate_bounds: bool = True,
+        shape: bool = False,
+        detect_unique: bool = False,
+        replace: Sequence[str] = (),
     ) -> type[FrameSpec]:
         """Infers a spec by profiling an existing DataFrame.
 
@@ -349,13 +352,19 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         boolean columns. A string or categorical column with at most
         `max_unique_enum` distinct values becomes an `Enum`. `calculate_bounds`
         records observed `(min, max)` for numeric and temporal columns and
-        `(min_len, max_len)` for strings and binary.
+        `(min_len, max_len)` for strings and binary. `shape`, `detect_unique`
+        and `replace` describe more, for a spec that will generate a stand-in
+        for the data: see `polspec.profile_dataframe`, and `polspec.profile`
+        for all of them at once.
         """
         columns = profile_dataframe(
             df,
             weights=weights,
             max_unique_enum=max_unique_enum,
             calculate_bounds=calculate_bounds,
+            shape=shape,
+            detect_unique=detect_unique,
+            replace=replace,
         )
         return cls.from_spec(TableSpec(name, columns))
 

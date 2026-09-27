@@ -82,6 +82,14 @@ production will reject.
 
     [Specs as files](how-to/files.md) · [Multiple specs](how-to/registry.md)
 
+- **Fake data from real data**
+
+    `polspec.synthesize` turns a real dataset -- a frame, a lazy scan or a
+    file -- into a fake one with the same schema, shapes, frequencies and
+    keys, and none of its rows or sensitive values.
+
+    [Fake data from real data](how-to/synthesizing.md)
+
 - **What changed**
 
     Diff two versions of a spec, or a spec against data, into a report that

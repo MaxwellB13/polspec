@@ -36,7 +36,9 @@ owns only the inner loop that fills arrays with values.
 | `catspec` | `CatSpec` — a shared registry of enums and categoricals, as a value, plus the metaclass that builds one from a class body (the same split as `tablespec`/`framespec`) |
 | `registry` | `Registry` — a declared set of specs: resolving cross-spec keys, ordering parents before children, `generate_all`/`validate_all`, one file and one diagram for the set |
 | `serialization` | Spec files: a field registry (`fields.py`) that YAML, generated Python and the `import datetime` decision all derive from; the dtype codec table (`dtypes.py`); format versions and migrations (`migrations.py`) |
-| `profiler` | Inferring a spec from an existing DataFrame |
+| `profiler` | Inferring a spec from an existing DataFrame; opt-in, a column's fitted shape, whether it is a key, and which columns' values not to carry over |
+| `shape` | Fitting the distribution a numeric or temporal column follows: each candidate the engine draws is fitted by moments, drawn through `generate()` with the column's bounds, and scored by its Kolmogorov-Smirnov distance to the data |
+| `synthesis` | `profile` and `synthesize`: a spec, and a fake frame, from a `DataFrame`, a `LazyFrame` or a data file |
 | `render` | Rendering a spec, a registry, a category registry or a drift report as Markdown or Mermaid |
 | `cli` | The `polspec` command, one module per verb: `_schema` (infer, new), `_data` (validate, generate), `_drift` (diff, drift), `_test`; `_io` holds the readers, writers and spec loaders they share |
 

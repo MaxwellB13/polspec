@@ -29,13 +29,19 @@ def _cmd_schema_infer(args: argparse.Namespace) -> int:
     name = args.name or _class_name_from(source.stem)
     _require_identifier(name, what="--name")
 
-    spec_cls = FrameSpec.from_dataframe(
-        df,
-        name=name,
-        weights=args.weights,
-        max_unique_enum=args.max_unique_enum,
-        calculate_bounds=not args.no_bounds,
-    )
+    try:
+        spec_cls = FrameSpec.from_dataframe(
+            df,
+            name=name,
+            weights=args.weights,
+            max_unique_enum=args.max_unique_enum,
+            calculate_bounds=not args.no_bounds,
+            shape=args.shape,
+            detect_unique=args.keys,
+            replace=args.replace or (),
+        )
+    except ValueError as exc:  # a name in --replace the file lacks
+        raise CliError(str(exc)) from exc
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
