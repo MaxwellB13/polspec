@@ -99,6 +99,23 @@ COLUMN_CASES: dict[str, ColSpec] = {
     "format_nullable": ColSpec(
         pl.String, format="email", nullable=True, null_probability=0.3
     ),
+    # a format widened with the values a column holds beside it
+    "format_extended_finite": ColSpec(
+        pl.String, format="iso_country", extra_values=["UK (ISO)", "UK (ISLANDS)"]
+    ),
+    "format_extended_template": ColSpec(
+        pl.String, format="ipv4", extra_values={"NOT AVAILABLE": 0.05, "INVALID": 0.01}
+    ),
+    "format_extended_nullable": ColSpec(
+        pl.String,
+        format="email",
+        extra_values=["n/a"],
+        nullable=True,
+        null_probability=0.3,
+    ),
+    "list_format_extended": ColSpec(
+        pl.List(pl.String), format="uuid4", extra_values=["none"], list_length=(1, 3)
+    ),
     "format_with_validator": ColSpec(
         pl.String, format="email", validators=[col("c").str.contains("@")]
     ),

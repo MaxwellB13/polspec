@@ -52,6 +52,51 @@ accepted and no generated address is deliverable. `hostname` accepts
 `localhost`; `ipv4` accepts `0.0.0.0`. See
 [Known limitations](../explanation/limitations.md).
 
+## Extending a format with extra values
+
+Real columns rarely hold a clean format. A country column is ISO 3166 *plus*
+a few codes of the organisation's own; an address column is IPv4 *or* a
+sentinel for a value nobody captured. `extra_values` names them:
+
+```python
+country = ColSpec(pl.String, format="iso_country", extra_values=["UK (ISO)", "UK (ISLANDS)"])
+ip = ColSpec(pl.String, format="ipv4", extra_values={"NOT AVAILABLE": 0.05, "INVALID": 0.01})
+
+class Sessions(FrameSpec):
+    __columns__ = {"country": country, "ip": ip}
+
+sessions = Sessions.generate(100_000, seed=1)
+Sessions.validate(sessions)
+assert (sessions["ip"] == "NOT AVAILABLE").mean() > 0.04  # about 5% of the rows
+```
+
+Validation accepts a value that has the format *or* is one of the extras;
+anything else -- `uk (iso)`, `NA` -- is still a `format` finding, and the
+finding's details name the extras beside the format. Generation draws each
+extra on its share of the present rows: a list gives every extra 1%, a
+mapping sets each share. The format's own values fill the rest, so test data
+reaches the code that handles `NOT AVAILABLE` as well as the code that
+parses an address.
+
+In a spec file:
+
+```yaml
+country:
+  dtype: String
+  format: iso_country
+  extra_values: [UK (ISO), UK (ISLANDS)]
+ip:
+  dtype: String
+  format: ipv4
+  extra_values: {NOT AVAILABLE: 0.05, INVALID: 0.01}
+```
+
+It is refused where it could not mean anything, each with a message saying
+why: without a `format` (a plain `String` column lists its values as
+`choices`), for a value the format already accepts (`"GB"` on
+`iso_country` would be counted twice), for a repeated or empty extra, for
+shares summing past 1, and beside `unique=True`.
+
 ## What a format combines with
 
 A format owns the column's whole domain, so it refuses anything that says
@@ -62,6 +107,8 @@ what the values are a second time:
 ColSpec(pl.String, format="email", choices=["a@b.co"])
 # SpecError: ColSpec cannot carry both format='email' and choices: each is a
 # complete description of the column's domain, and they cannot both hold.
+# ... or, for values the column holds beside the format's own, declare them
+# as extra_values.
 
 ColSpec(pl.String, format="uuid4", string_length=(36, 36))
 # SpecError: ... the format already fixes how long a value is.

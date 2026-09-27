@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 from polspec.bound import Bound
 from polspec.check import Check
-from polspec.constants import DEFAULT_NULL_PROBABILITY
+from polspec.constants import DEFAULT_EXTRA_SHARE, DEFAULT_NULL_PROBABILITY
 from polspec.errors import SerializationError
 from polspec.expr import from_data as pred_from_data
 from polspec.foreign_key import ForeignKey, default_fk_name
@@ -178,6 +178,14 @@ def _bound_from_data(value: Any, ctx: Ctx, path: str) -> tuple[Any, Any]:
         raise SerializationError(f"{path} must be a two-element list, got {value!r}")
     low, high = _values_from_data(value, path)
     return (low, high)
+
+
+def _extras_to_data(extras: Mapping[str, float]) -> list[str] | dict[str, float]:
+    """A format's extras as they were most likely written: a list when every
+    share is the default, a mapping of value to share otherwise."""
+    if all(share == DEFAULT_EXTRA_SHARE for share in extras.values()):
+        return list(extras)
+    return dict(extras)
 
 
 def _values_to_data(values: Sequence[Any]) -> list[Any]:
@@ -374,6 +382,12 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
         ),
     ),
     Field("format", since=3),
+    Field(
+        "extra_values",
+        since=3,
+        to_data=_extras_to_data,
+        to_source=lambda v: repr(_extras_to_data(v)),
+    ),
     Field("pattern", since=3),
     Field("seed_name", since=3),
     Field("distribution"),

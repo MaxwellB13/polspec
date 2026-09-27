@@ -14,7 +14,11 @@ import polars as pl
 
 from polspec.bound import Bound
 from polspec.check import Check
-from polspec.constants import DEFAULT_LIST_LEN, DEFAULT_NULL_PROBABILITY
+from polspec.constants import (
+    DEFAULT_EXTRA_SHARE,
+    DEFAULT_LIST_LEN,
+    DEFAULT_NULL_PROBABILITY,
+)
 from polspec.distributions import (
     canonicalize_params,
     normalize_distribution,
@@ -212,6 +216,15 @@ class ColSpec:
         it cannot be combined with `choices` or `string_length`, and only a
         `String` column can carry one. What it promises is syntax -- an
         address that is well-formed, not one that is deliverable.
+    extra_values : Sequence[str] | Mapping[str, float] | None, optional
+        Values a `format` column holds beside the format's own: ISO
+        countries plus `"UK (ISO)"`, IPv4 addresses or `"NOT AVAILABLE"`.
+        Validation accepts a value that has the format or is one of these.
+        Generation draws each on its share of the present rows -- a list
+        gives each 1%, a mapping sets each share -- and the format's own
+        values on the rest. Only a column with a `format` takes them; a
+        value the format already accepts, a repeated one, and shares
+        summing past 1 are refused, and so is `unique=True`.
     pattern : str | None, optional
         A regular expression every value of a `String` column must match,
         checked by validation only. Generation does not read it: a `String`
@@ -267,6 +280,7 @@ class ColSpec:
     element_null_probability: float = 0.0
     fields: Mapping[str, ColSpec] | None = None
     format: str | None = None
+    extra_values: Mapping[str, float] | None = None
     pattern: str | None = None
     distribution: str | None = None
     distribution_params: dict[str, float] | None = None
@@ -292,6 +306,7 @@ class ColSpec:
             element_null_probability: float = 0.0,
             fields: Mapping[str, ColSpec] | None = None,
             format: str | None = None,
+            extra_values: Sequence[str] | Mapping[str, float] | None = None,
             pattern: str | None = None,
             distribution: str | None = None,
             distribution_params: dict[str, float] | None = None,
@@ -322,6 +337,7 @@ class ColSpec:
 
         self._validate_probabilities()
         self._validate_format()
+        self._validate_extra_values()
         self._validate_pattern()
         self._validate_bounds_dtype_support()
         self._validate_bounds_fit_dtype()
@@ -858,7 +874,9 @@ class ColSpec:
             raise SpecError(
                 f"ColSpec cannot carry both format={fmt.name!r} and choices: "
                 "each is a complete description of the column's domain, and "
-                "they cannot both hold. Drop the choices, or the format."
+                "they cannot both hold. Drop the choices, or the format -- or, "
+                "for values the column holds beside the format's own, declare "
+                "them as extra_values."
             )
         if self.string_length is not None:
             raise SpecError(
@@ -866,6 +884,82 @@ class ColSpec:
                 "string_length: the format already fixes how long a value is. "
                 "Drop the string_length, or the format."
             )
+
+    def _validate_extra_values(self) -> None:
+        """Normalises `extra_values` to a read-only mapping of value to
+        share, and refuses what cannot mean anything.
+
+        The extras widen a format's domain, so they need a format to widen,
+        must each add something the format does not already accept -- else
+        its share would be counted twice -- and cannot claim more than every
+        row. A unique column cannot hold an extra twice, and a share of a
+        large frame is many rows of it.
+        """
+        given: Any = self.extra_values
+        if given is None:
+            return
+        if self.format is None:
+            raise SpecError(
+                "ColSpec.extra_values needs a format to extend. A String column "
+                "without one lists its values as choices."
+            )
+        if isinstance(given, str) or not isinstance(given, (Sequence, Mapping)):
+            raise SpecError(
+                "ColSpec.extra_values must be a list of values, or a mapping of "
+                f"value to share, got {given!r}"
+            )
+        if isinstance(given, Mapping):
+            pairs = list(given.items())
+        else:
+            pairs = [(value, DEFAULT_EXTRA_SHARE) for value in given]
+            repeated = sorted({v for v in given if list(given).count(v) > 1})
+            if repeated:
+                raise SpecError(f"ColSpec.extra_values repeats {repeated}")
+        if not pairs:
+            raise SpecError("ColSpec.extra_values must not be empty")
+        shares: dict[str, float] = {}
+        for value, share in pairs:
+            if not isinstance(value, str) or not value:
+                raise SpecError(
+                    f"ColSpec.extra_values holds {value!r}: an extra is a "
+                    "non-empty string, as a format's own values are"
+                )
+            share = float(share)
+            if not 0.0 < share <= 1.0:
+                raise SpecError(
+                    f"ColSpec.extra_values gives {value!r} a share of {share}; "
+                    "a share is a fraction of the present rows, above 0 and at "
+                    "most 1"
+                )
+            shares[value] = share
+        total = sum(shares.values())
+        if total > 1.0 + 1e-9:
+            raise SpecError(
+                f"ColSpec.extra_values shares sum to {total:g}, past every row. "
+                "Lower them so they sum to 1 at most."
+            )
+        fmt = _lookup_format(self.format)
+        accepted = (
+            pl.Series(list(shares), dtype=pl.String)
+            .to_frame("v")
+            .select(fmt.check(pl.col("v")))
+            .to_series()
+            .to_list()
+        )
+        already = [v for v, ok in zip(shares, accepted, strict=True) if ok]
+        if already:
+            raise SpecError(
+                f"ColSpec.extra_values {already} already have format "
+                f"{fmt.name!r}, so each would be counted twice. Drop them: "
+                "the format's own values are generated and accepted already."
+            )
+        if self.unique:
+            raise SpecError(
+                "ColSpec cannot be unique=True and carry extra_values: an "
+                "extra drawn on a share of the rows repeats. Drop the extras, "
+                "or the uniqueness."
+            )
+        object.__setattr__(self, "extra_values", MappingProxyType(shares))
 
     def _validate_pattern(self) -> None:
         """Refuses a pattern on a column it cannot describe, beside a format,

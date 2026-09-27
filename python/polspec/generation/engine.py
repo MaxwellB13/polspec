@@ -250,8 +250,31 @@ def _domain(spec: ColSpec) -> pl.Series | None:
     if spec.format is not None:
         fmt = _lookup_format(spec.format)
         if fmt.is_finite:
-            return typed_values(fmt.values, dtype)
+            # A finite format's extras join its list, weighted by
+            # `_extended_weights`.
+            return typed_values(
+                (*(fmt.values or ()), *(spec.extra_values or ())), dtype
+            )
     return None
+
+
+def _extended_weights(listed: int, shares: tuple[float, ...]) -> list[float]:
+    """Index weights for a finite format of `listed` values with extras of
+    these `shares` after it: each extra its share, and the format's own
+    values an even split of what the extras leave."""
+    rest = max(0.0, 1.0 - sum(shares))
+    return [rest / listed] * listed + list(shares)
+
+
+def _overlays_extras(spec: ColSpec) -> bool:
+    """Whether `spec` is a template format with extra values, which the
+    engine cannot draw in one column: the template's values, and a pick of
+    which rows take an extra instead."""
+    return (
+        spec.extra_values is not None
+        and spec.format is not None
+        and not _lookup_format(spec.format).is_finite
+    )
 
 
 def plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None]:
@@ -273,6 +296,10 @@ def plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None]
     }
 
     domain = _domain(spec)
+    if domain is not None and spec.format is not None and spec.extra_values:
+        weights = _extended_weights(
+            len(domain) - len(spec.extra_values), tuple(spec.extra_values.values())
+        )
     if domain is not None:
         plan = column_plan(
             name, "index", n_categories=len(domain), weights=weights, **options
@@ -488,6 +515,7 @@ def generate_random(
         n_: s
         for n_, s in columns.items()
         if column_kind(s.dtype) not in ("list", "struct", "map")
+        and not _overlays_extras(s)
     }
     plans: list[ColumnPlan] = []
     domains: dict[str, pl.Series | None] = {}
@@ -525,8 +553,45 @@ def _generate_column(
         return _generate_map_column(name, spec, n, seed, row_offset)
     if kind == "struct":
         return _generate_struct_column(name, spec, n, seed, row_offset)
+    if _overlays_extras(spec):
+        return _generate_with_extras(name, spec, n, seed, row_offset)
     plan, domain = plan_column(name, spec)
     return _finish(_generate_dataframe([plan], n, seed, row_offset)[name], spec, domain)
+
+
+def _generate_with_extras(
+    name: str, spec: ColSpec, n: int, seed: int | None, row_offset: int = 0
+) -> pl.Series:
+    """A template format with extra values: the template's values, and on
+    each extra's share of the present rows that extra instead.
+
+    Two engine columns, both windows onto the frame: the template's, drawn
+    as the column always was, and one pick per row among the extras and
+    "keep the template", seeded as a name no user column can carry. A null
+    row stays null -- the shares are of the present rows.
+    """
+    assert spec.extra_values is not None  # noqa: S101 - the caller checked
+    base_spec = dataclasses.replace(spec, extra_values=None)
+    plan, domain = plan_column(name, base_spec)
+    base = _finish(
+        _generate_dataframe([plan], n, seed, row_offset)[name], base_spec, domain
+    )
+    extras = list(spec.extra_values)
+    shares = list(spec.extra_values.values())
+    pick_plan = column_plan(
+        name,
+        "index",
+        n_categories=len(extras) + 1,
+        weights=[*shares, max(0.0, 1.0 - sum(shares))],
+        seed_name=f"{spec.seed_name or name}\x00extra",
+    )
+    pick = _generate_dataframe([pick_plan], n, seed, row_offset)[name]
+    last = len(extras) - 1
+    replacement = pl.Series(name, extras, dtype=pl.String).gather(
+        pick.clip(upper_bound=last)
+    )
+    keep = (pick > last) | base.is_null()
+    return base.zip_with(keep, replacement)
 
 
 def _field_spec(spec: ColSpec, name: str, seed_key: str) -> ColSpec:

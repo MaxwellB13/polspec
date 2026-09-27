@@ -22,6 +22,18 @@ seed produces; see
   time, so relationships between them are not kept -- see *Fake data from
   real data*.
 
+- **`ColSpec.extra_values`: a format with values of your own beside it.**
+  `ColSpec(pl.String, format="iso_country", extra_values=["UK (ISO)",
+  "UK (ISLANDS)"])`, or `format="ipv4"` with `extra_values={"NOT
+  AVAILABLE": 0.05, "INVALID": 0.01}`. Validation accepts a value that has
+  the format or is an extra; generation draws each extra on its share of
+  the present rows -- 1% each for a list, the given share for a mapping --
+  for a finite format and a template one alike, whole and batched. It is
+  written to spec files (a list, or a mapping when a share is not the
+  default), drifts as a domain (an extra removed is breaking), and takes
+  part in a foreign key's domain check. `format` beside `choices` is still
+  refused, and the message now points here.
+
 - **`polspec.profile`**, the half of `synthesize` that describes the
   source as a `TableSpec`, to review, edit or keep before generating.
 

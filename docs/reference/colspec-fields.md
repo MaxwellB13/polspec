@@ -27,6 +27,7 @@ and `null_probability` describe the cell itself.
 | `element_null_probability` | `element_null_probability` | `List` and `Array` columns | the rate an element inside a present list is null | a null element is a `nullability` finding while this is `0` |
 | `fields` | `fields` | `Struct` values, and a `Map`'s `key`/`value` | draws each field from its own `ColSpec` | checks each field as a value, named `column.field` |
 | `format` | `format` | `String` values | fills each value from the format's template | a value not in the format is a `format` finding |
+| `extra_values` | `extra_values` | a `format` column | draws each extra on its share of the present rows -- 1% each by default -- and the format's own values on the rest | a value that is neither the format nor an extra is a `format` finding |
 | `pattern` | `pattern` | `String` values | -- (not read; values are ordinary random text) | a value not matching is a `pattern` finding |
 | `distribution` | `distribution` | numeric and temporal values | shapes the draw | -- |
 | `distribution_params` | `distribution_params` | a `distribution`, or a `Boolean`'s `p` | the distribution's parameters | -- |

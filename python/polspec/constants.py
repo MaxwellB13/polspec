@@ -18,6 +18,9 @@ DEFAULT_FLOAT_BOUND = 1_000_000.0
 DEFAULT_STRING_LEN = (5, 15)
 DEFAULT_LIST_LEN = (0, 5)
 DEFAULT_NULL_PROBABILITY = 0.1
+# The share of present rows each of a format's `extra_values` is drawn on,
+# when they are listed without shares.
+DEFAULT_EXTRA_SHARE = 0.01
 
 # A frame this size is worth a word before it is allocated. Not a refusal:
 # ten gigabytes on a machine with sixty-four is a reasonable thing to ask

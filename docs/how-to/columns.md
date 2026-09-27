@@ -369,6 +369,10 @@ cannot sit beside `choices` or `string_length`, and only a `String` column
 can carry one. See [String formats](formats.md) for what each generates,
 what each accepts, and what none of them promises.
 
+A format can be widened with the values a column holds beside it -- ISO
+countries plus `UK (ISO)`, IPv4 or `NOT AVAILABLE` -- with
+[`extra_values`](formats.md#extending-a-format-with-extra-values).
+
 ## String patterns
 
 `pattern=` is a regular expression every value must match -- **checked by

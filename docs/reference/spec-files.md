@@ -47,6 +47,7 @@ Each key is the `ColSpec` field of the same name; see
 | `list_length` | `[min, max]` |
 | `fields` | Field name to column, for a `Struct` -- or `key` and `value`, for a `Map` |
 | `format` | A format's name, such as `email` |
+| `extra_values` | A list of values beside the format's own, each on 1% of the rows; or a mapping of value to share |
 | `pattern` | A regular expression |
 | `seed_name` | A string |
 | `distribution` | A distribution's name, such as `normal` |

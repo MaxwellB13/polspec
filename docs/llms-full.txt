@@ -825,6 +825,10 @@ cannot sit beside `choices` or `string_length`, and only a `String` column
 can carry one. See [String formats](https://maxwellb13.github.io/polspec/how-to/formats/) for what each generates,
 what each accepts, and what none of them promises.
 
+A format can be widened with the values a column holds beside it -- ISO
+countries plus `UK (ISO)`, IPv4 or `NOT AVAILABLE` -- with
+[`extra_values`](https://maxwellb13.github.io/polspec/how-to/formats/#extending-a-format-with-extra-values).
+
 ## String patterns
 
 `pattern=` is a regular expression every value must match -- **checked by
@@ -1046,6 +1050,51 @@ accepted and no generated address is deliverable. `hostname` accepts
 `localhost`; `ipv4` accepts `0.0.0.0`. See
 [Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/).
 
+## Extending a format with extra values
+
+Real columns rarely hold a clean format. A country column is ISO 3166 *plus*
+a few codes of the organisation's own; an address column is IPv4 *or* a
+sentinel for a value nobody captured. `extra_values` names them:
+
+```python
+country = ColSpec(pl.String, format="iso_country", extra_values=["UK (ISO)", "UK (ISLANDS)"])
+ip = ColSpec(pl.String, format="ipv4", extra_values={"NOT AVAILABLE": 0.05, "INVALID": 0.01})
+
+class Sessions(FrameSpec):
+    __columns__ = {"country": country, "ip": ip}
+
+sessions = Sessions.generate(100_000, seed=1)
+Sessions.validate(sessions)
+assert (sessions["ip"] == "NOT AVAILABLE").mean() > 0.04  # about 5% of the rows
+```
+
+Validation accepts a value that has the format *or* is one of the extras;
+anything else -- `uk (iso)`, `NA` -- is still a `format` finding, and the
+finding's details name the extras beside the format. Generation draws each
+extra on its share of the present rows: a list gives every extra 1%, a
+mapping sets each share. The format's own values fill the rest, so test data
+reaches the code that handles `NOT AVAILABLE` as well as the code that
+parses an address.
+
+In a spec file:
+
+```yaml
+country:
+  dtype: String
+  format: iso_country
+  extra_values: [UK (ISO), UK (ISLANDS)]
+ip:
+  dtype: String
+  format: ipv4
+  extra_values: {NOT AVAILABLE: 0.05, INVALID: 0.01}
+```
+
+It is refused where it could not mean anything, each with a message saying
+why: without a `format` (a plain `String` column lists its values as
+`choices`), for a value the format already accepts (`"GB"` on
+`iso_country` would be counted twice), for a repeated or empty extra, for
+shares summing past 1, and beside `unique=True`.
+
 ## What a format combines with
 
 A format owns the column's whole domain, so it refuses anything that says
@@ -1056,6 +1105,8 @@ what the values are a second time:
 ColSpec(pl.String, format="email", choices=["a@b.co"])
 # SpecError: ColSpec cannot carry both format='email' and choices: each is a
 # complete description of the column's domain, and they cannot both hold.
+# ... or, for values the column holds beside the format's own, declare them
+# as extra_values.
 
 ColSpec(pl.String, format="uuid4", string_length=(36, 36))
 # SpecError: ... the format already fixes how long a value is.
@@ -3968,7 +4019,7 @@ What one column declares, and the pieces that make up a declaration.
 
 ## ColSpec
 
-### ColSpec(dtype: pl.DataType | type[pl.DataType], col_name: str | None=None, seed_name: str | None=None, nullable: bool=False, bounds: Bound[Any] | tuple[Any, Any] | list[Any] | None=None, tags: str | Sequence[str] | None=(), unique: bool=False, null_probability: float=DEFAULT_NULL_PROBABILITY, string_length: Bound[int] | tuple[int, int] | list[int] | None=None, list_length: Bound[int] | tuple[int, int] | list[int] | None=None, element_null_probability: float=0.0, fields: Mapping[str, ColSpec] | None=None, format: str | None=None, pattern: str | None=None, distribution: str | None=None, distribution_params: dict[str, float] | None=None, choices: Sequence[Any] | dict[Any, float] | None=None, weights: Sequence[float] | None=None, rules: Sequence[ColRule]=(), validators: Check | pl.Expr | Pred | Sequence[Check | pl.Expr | Pred] | None=())
+### ColSpec(dtype: pl.DataType | type[pl.DataType], col_name: str | None=None, seed_name: str | None=None, nullable: bool=False, bounds: Bound[Any] | tuple[Any, Any] | list[Any] | None=None, tags: str | Sequence[str] | None=(), unique: bool=False, null_probability: float=DEFAULT_NULL_PROBABILITY, string_length: Bound[int] | tuple[int, int] | list[int] | None=None, list_length: Bound[int] | tuple[int, int] | list[int] | None=None, element_null_probability: float=0.0, fields: Mapping[str, ColSpec] | None=None, format: str | None=None, extra_values: Sequence[str] | Mapping[str, float] | None=None, pattern: str | None=None, distribution: str | None=None, distribution_params: dict[str, float] | None=None, choices: Sequence[Any] | dict[Any, float] | None=None, weights: Sequence[float] | None=None, rules: Sequence[ColRule]=(), validators: Check | pl.Expr | Pred | Sequence[Check | pl.Expr | Pred] | None=())
 
 One column's declaration: its type, and every claim made about its values.
 
@@ -4074,6 +4125,15 @@ format : str | None, optional
     it cannot be combined with `choices` or `string_length`, and only a
     `String` column can carry one. What it promises is syntax -- an
     address that is well-formed, not one that is deliverable.
+extra_values : Sequence[str] | Mapping[str, float] | None, optional
+    Values a `format` column holds beside the format's own: ISO
+    countries plus `"UK (ISO)"`, IPv4 addresses or `"NOT AVAILABLE"`.
+    Validation accepts a value that has the format or is one of these.
+    Generation draws each on its share of the present rows -- a list
+    gives each 1%, a mapping sets each share -- and the format's own
+    values on the rest. Only a column with a `format` takes them; a
+    value the format already accepts, a repeated one, and shares
+    summing past 1 are refused, and so is `unique=True`.
 pattern : str | None, optional
     A regular expression every value of a `String` column must match,
     checked by validation only. Generation does not read it: a `String`
@@ -5198,6 +5258,7 @@ and `null_probability` describe the cell itself.
 | `element_null_probability` | `element_null_probability` | `List` and `Array` columns | the rate an element inside a present list is null | a null element is a `nullability` finding while this is `0` |
 | `fields` | `fields` | `Struct` values, and a `Map`'s `key`/`value` | draws each field from its own `ColSpec` | checks each field as a value, named `column.field` |
 | `format` | `format` | `String` values | fills each value from the format's template | a value not in the format is a `format` finding |
+| `extra_values` | `extra_values` | a `format` column | draws each extra on its share of the present rows -- 1% each by default -- and the format's own values on the rest | a value that is neither the format nor an extra is a `format` finding |
 | `pattern` | `pattern` | `String` values | -- (not read; values are ordinary random text) | a value not matching is a `pattern` finding |
 | `distribution` | `distribution` | numeric and temporal values | shapes the draw | -- |
 | `distribution_params` | `distribution_params` | a `distribution`, or a `Boolean`'s `p` | the distribution's parameters | -- |
@@ -5265,6 +5326,7 @@ Each key is the `ColSpec` field of the same name; see
 | `list_length` | `[min, max]` |
 | `fields` | Field name to column, for a `Struct` -- or `key` and `value`, for a `Map` |
 | `format` | A format's name, such as `email` |
+| `extra_values` | A list of values beside the format's own, each on 1% of the rows; or a mapping of value to share |
 | `pattern` | A regular expression |
 | `seed_name` | A string |
 | `distribution` | A distribution's name, such as `normal` |
@@ -6571,6 +6633,18 @@ seed produces; see
   the spec the data was generated from. Columns are profiled one at a
   time, so relationships between them are not kept -- see *Fake data from
   real data*.
+
+- **`ColSpec.extra_values`: a format with values of your own beside it.**
+  `ColSpec(pl.String, format="iso_country", extra_values=["UK (ISO)",
+  "UK (ISLANDS)"])`, or `format="ipv4"` with `extra_values={"NOT
+  AVAILABLE": 0.05, "INVALID": 0.01}`. Validation accepts a value that has
+  the format or is an extra; generation draws each extra on its share of
+  the present rows -- 1% each for a list, the given share for a mapping --
+  for a finite format and a template one alike, whole and batched. It is
+  written to spec files (a list, or a mapping when a share is not the
+  default), drifts as a domain (an extra removed is breaking), and takes
+  part in a foreign key's domain check. `format` beside `choices` is still
+  refused, and the message now points here.
 
 - **`polspec.profile`**, the half of `synthesize` that describes the
   source as a `TableSpec`, to review, edit or keep before generating.

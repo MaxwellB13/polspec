@@ -710,14 +710,14 @@ def _retype_column(
     Four fields a dtype change can genuinely invalidate are handled
     explicitly: `choices`, which may name values outside the new dtype's
     domain; `weights`, which is positional over a domain that just changed
-    size; and `format` and `pattern`, which only a `String` column can
-    carry. Each is
+    size; and `format` (with its `extra_values`) and `pattern`, which only
+    a `String` column can carry. Each is
     dropped with a warning rather than carried into a confusing ColSpec
     error further down.
     """
     updates: dict[str, Any] = {"dtype": dtype}
 
-    for field_name in ("format", "pattern"):
+    for field_name in ("format", "extra_values", "pattern"):
         value = getattr(spec, field_name)
         if value is not None:
             warnings.warn(

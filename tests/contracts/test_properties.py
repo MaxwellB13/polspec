@@ -200,6 +200,18 @@ def _text(draw: st.DrawFn) -> dict[str, Any]:
             fields["weights"] = draw(_weights(len(choices)))
     elif shape == "format":
         fields["format"] = draw(st.sampled_from(sorted(FORMATS)))
+        if draw(st.booleans()):
+            # `~` is in no format, so an extra is never one of its values.
+            extras = draw(
+                st.lists(
+                    _TEXT.map(lambda s: f"~{s}"), min_size=1, max_size=3, unique=True
+                )
+            )
+            fields["extra_values"] = (
+                extras
+                if draw(st.booleans())
+                else {e: draw(st.floats(0.01, 0.3)) for e in extras}
+            )
     return fields
 
 
@@ -417,7 +429,14 @@ def test_the_strategy_reaches_every_kind_of_column():
         )
         seen.update(
             name
-            for name in ("unique", "nullable", "format", "choices", "weights")
+            for name in (
+                "unique",
+                "nullable",
+                "format",
+                "extra_values",
+                "choices",
+                "weights",
+            )
             if getattr(column, name)
         )
         family = "integer" if dtype.is_integer() else type(dtype).__name__
@@ -441,6 +460,7 @@ def test_the_strategy_reaches_every_kind_of_column():
         "unique",
         "nullable",
         "format",
+        "extra_values",
         "choices",
         "weights",
         "integer choices",

@@ -169,15 +169,20 @@ class _ListElementNull(_ColumnConstraint):
 @dataclass(kw_only=True)
 class _Format(_ColumnConstraint):
     format: Format
+    extras: tuple[str, ...] = ()
     code: FindingCode = "format"
 
     def details(self, stats: dict[str, list]) -> dict[str, Any]:
-        return {"format": self.format.name}
+        found: dict[str, Any] = {"format": self.format.name}
+        if self.extras:
+            found["extra_values"] = list(self.extras)
+        return found
 
     def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
+        also = f" or one of its extra values {list(self.extras)}" if self.extras else ""
         return (
             f"Column '{self.where}': found {count} value(s) that are not "
-            f"{self.format}. Invalid samples: {samples}"
+            f"{self.format}{also}. Invalid samples: {samples}"
         )
 
 
@@ -402,14 +407,19 @@ def _value_constraints(
 
     if spec.format is not None:
         fmt = _lookup_format(spec.format)
+        extras = tuple(spec.extra_values or ())
+        accepted = fmt.check(column)
+        if extras:
+            accepted = accepted | column.is_in(list(extras))
         constraints.append(
             _Format(
                 key=f"{where}__format",
-                mask=present & ~fmt.check(column),
+                mask=present & ~accepted,
                 sample_expr=column,
                 column=name,
                 where=where,
                 format=fmt,
+                extras=extras,
             )
         )
 
