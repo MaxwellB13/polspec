@@ -170,9 +170,10 @@ class Observed:
         if declared.format is not None and values.dtype in (pl.String, pl.Utf8):
             fmt = _lookup_format(declared.format)
             if not fmt.is_finite:  # a finite format is a domain, measured above
-                failing = values.filter(
-                    ~values.to_frame("v").select(fmt.check(pl.col("v")))["v"]
-                )
+                accepted = fmt.check(pl.col("v"))
+                if declared.extra_values:
+                    accepted = accepted | pl.col("v").is_in(list(declared.extra_values))
+                failing = values.filter(~values.to_frame("v").select(accepted)["v"])
                 measured["format_failures"] = (
                     len(failing),
                     tuple(

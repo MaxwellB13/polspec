@@ -385,3 +385,164 @@ def test_renaming_keeps_the_format():
         warnings.simplefilter("error")
         renamed = spec.rename({"a": "b"})
     assert renamed.columns["b"].format == "email"
+
+
+# ---------------------------------------------------------------------------
+# extra_values: a format, and the values a column holds beside it
+# ---------------------------------------------------------------------------
+
+COUNTRY = ColSpec(
+    pl.String, format="iso_country", extra_values=["UK (ISO)", "UK (ISLANDS)"]
+)
+IP = ColSpec(
+    pl.String,
+    format="ipv4",
+    extra_values={"NOT AVAILABLE": 0.05, "INVALID": 0.01},
+    nullable=True,
+    null_probability=0.2,
+)
+
+
+@pytest.mark.parametrize(
+    ("column", "shares"),
+    [
+        (COUNTRY, {"UK (ISO)": 0.01, "UK (ISLANDS)": 0.01}),
+        (IP, {"NOT AVAILABLE": 0.05, "INVALID": 0.01}),
+    ],
+    ids=["finite_format_default_shares", "template_format_set_shares"],
+)
+def test_each_extra_is_drawn_on_its_share_of_the_present_rows(column, shares):
+    values = spec_for(column).generate(200_000, seed=1)["c"]
+    present = values.drop_nulls()
+    for extra, share in shares.items():
+        assert (present == extra).mean() == pytest.approx(share, abs=0.003), extra
+    # The format's own values fill the rest.
+    own = present.filter(~present.is_in(list(shares)))
+    assert (
+        own.to_frame("v")
+        .select(lookup(column.format).check(pl.col("v")))
+        .to_series()
+        .all()
+    )
+    if column.nullable:
+        assert values.null_count() / len(values) == pytest.approx(0.2, abs=0.005)
+
+
+def test_a_finite_format_draws_every_value_and_every_extra():
+    values = spec_for(COUNTRY).generate(100_000, seed=1)["c"]
+    assert values.n_unique() == len(FORMATS["iso_country"].values) + 2
+
+
+def test_an_extended_template_column_is_batch_stable():
+    spec = spec_for(IP)
+    whole = spec.generate(3_000, seed=4)
+    batched = pl.concat(list(spec.generate_batches(3_000, batch_size=700, seed=4)))
+    assert batched.equals(whole)
+
+
+def test_validation_accepts_the_format_or_an_extra_and_nothing_else():
+    spec = spec_for(COUNTRY)
+    assert spec.inspect(pl.DataFrame({"c": ["GB", "UK (ISO)", "UK (ISLANDS)"]})).passed
+    (finding,) = spec.inspect(pl.DataFrame({"c": ["GB", "uk (iso)", "XX"]}))
+    assert finding.code == "format"
+    assert finding.count == 2
+    assert finding.details["extra_values"] == ["UK (ISO)", "UK (ISLANDS)"]
+    assert "or one of its extra values" in finding.message
+
+
+@pytest.mark.parametrize(
+    ("fields", "complaint"),
+    [
+        ({"extra_values": ["x"]}, "needs a format to extend"),
+        (
+            {"format": "ipv4", "extra_values": ["1.2.3.4"]},
+            r"already have format 'ipv4'",
+        ),
+        ({"format": "iso_country", "extra_values": ["GB"]}, "counted twice"),
+        ({"format": "ipv4", "extra_values": ["a", "a"]}, r"repeats \['a'\]"),
+        ({"format": "ipv4", "extra_values": []}, "must not be empty"),
+        ({"format": "ipv4", "extra_values": [""]}, "non-empty string"),
+        ({"format": "ipv4", "extra_values": "NA"}, "a list of values"),
+        ({"format": "ipv4", "extra_values": {"a": 0.0}}, "above 0 and at most 1"),
+        ({"format": "ipv4", "extra_values": {"a": 0.7, "b": 0.6}}, "sum to 1.3"),
+        ({"format": "ipv4", "extra_values": ["a"], "unique": True}, "unique=True"),
+    ],
+    ids=[
+        "no_format",
+        "template_already_accepts",
+        "finite_already_accepts",
+        "repeated",
+        "empty",
+        "empty_value",
+        "a_string",
+        "zero_share",
+        "shares_past_one",
+        "unique",
+    ],
+)
+def test_extra_values_that_cannot_mean_anything_are_refused(fields, complaint):
+    with pytest.raises(SpecError, match=complaint):
+        ColSpec(pl.String, **fields)
+
+
+def test_format_beside_choices_points_at_extra_values():
+    with pytest.raises(SpecError, match="declare them as extra_values"):
+        ColSpec(pl.String, format="ipv4", choices=["NOT AVAILABLE"])
+
+
+def test_extra_values_survive_a_spec_file(tmp_path):
+    spec = TableSpec("Sessions", {"country": COUNTRY, "ip": IP})
+    path = tmp_path / "sessions.yaml"
+    FrameSpec.from_spec(spec).to_yaml(path)
+    text = path.read_text(encoding="utf-8")
+    assert "- UK (ISO)" in text  # every share the default: written as a list
+    assert "NOT AVAILABLE: 0.05" in text  # shares of its own: a mapping
+    assert FrameSpec.from_yaml(path).spec == spec
+
+
+def test_removing_an_extra_is_breaking_and_adding_one_is_not():
+    from polspec.drift import diff
+
+    wide = TableSpec("T", {"c": COUNTRY})
+    narrow = TableSpec(
+        "T", {"c": ColSpec(pl.String, format="iso_country", extra_values=["UK (ISO)"])}
+    )
+    assert [(f.code, f.breaking) for f in diff(wide, narrow)] == [
+        ("domain_narrowed", True)
+    ]
+    assert [(f.code, f.breaking) for f in diff(narrow, wide)] == [
+        ("domain_widened", False)
+    ]
+
+
+def test_a_foreign_key_holds_the_parents_extras_to_the_child():
+    parent = TableSpec(
+        "P", {"ip": ColSpec(pl.String, format="ipv4", extra_values=["NOT AVAILABLE"])}
+    )
+    with pytest.raises(SpecError, match="format 'ipv4'"):
+        TableSpec(
+            "C",
+            {"ip": ColSpec(pl.String, format="ipv4")},
+            foreign_keys=[ForeignKey("ip", references=parent)],
+        )
+    TableSpec(
+        "C",
+        {"ip": ColSpec(pl.String, format="ipv4", extra_values=["NOT AVAILABLE", "X"])},
+        foreign_keys=[ForeignKey("ip", references=parent)],
+    )
+    assert Domain.of(COUNTRY).values[-2:] == ("UK (ISO)", "UK (ISLANDS)")
+
+
+def test_retyping_away_from_string_drops_the_extras_with_the_format():
+    catspec = CatSpec(enums={"c": ["A", "B"]})
+    with pytest.warns(UserWarning) as caught:
+        retyped = TableSpec("T", {"c": COUNTRY}).with_catspec(catspec)
+    messages = [str(w.message) for w in caught]
+    assert any("dropping format='iso_country'" in m for m in messages)
+    assert any("dropping extra_values=" in m for m in messages)
+    assert retyped["c"].extra_values is None and retyped["c"].format is None
+
+
+def test_the_data_dictionary_names_the_extras():
+    markdown = FrameSpec.from_spec(TableSpec("T", {"c": COUNTRY})).to_markdown()
+    assert "plus UK (ISO), UK (ISLANDS)" in markdown

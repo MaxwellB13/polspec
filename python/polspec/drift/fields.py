@@ -674,6 +674,10 @@ FIELD_COMPARATORS: dict[str, Comparator] = {
     "bounds": _compare_domain,
     "choices": _compare_domain,
     "format": _compare_domain,
+    # The extras widen the format's domain: one removed narrows it, one
+    # added widens it, as a choice would. A share is a claim about
+    # generation alone, which drift does not judge.
+    "extra_values": _compare_domain,
     "string_length": _compare_length("string_length", "length_extent"),
     "list_length": _compare_length("list_length", "list_length_extent"),
     "element_null_probability": _compare_element_nulls,

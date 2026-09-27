@@ -69,7 +69,9 @@ def _describe_domain(cs) -> str:
             return f"{cs.list_length.min}..{cs.list_length.max} elements, {described}"
         return described
     if cs.format is not None:
-        return f"format `{cs.format}`"
+        extras = cs.extra_values or {}
+        also = f", plus {', '.join(extras)}" if extras else ""
+        return f"format `{cs.format}`{also}"
     if cs.pattern is not None:
         return f"pattern `{cs.pattern}`"
     if cs.list_length is not None:
@@ -349,7 +351,8 @@ def _entity_lines(spec: TableSpec, entity_name: str) -> list[str]:
             else:
                 comments.append(f"choices: [{len(ch)} items]")
         elif cs.format is not None:
-            comments.append(f"format: {cs.format}")
+            also = f" + {len(cs.extra_values)} extra" if cs.extra_values else ""
+            comments.append(f"format: {cs.format}{also}")
         elif cs.pattern is not None:
             comments.append(f"pattern: {cs.pattern}")
         if cs.tags:

@@ -66,13 +66,16 @@ class Domain:
     against each other -- and is None for a column with no finite domain.
     `bounds` is the inclusive range, None when unconstrained on both sides.
     `format` is the shape a `String` value takes, for a format that is not
-    a finite list. A column may have any of these, or none.
+    a finite list, and `extras` the values the column holds beside it (a
+    finite format's extras are among its `values`). A column may have any
+    of these, or none.
     """
 
     dtype: pl.DataType
     values: tuple[Any, ...] | None = None
     bounds: Bound | None = None
     format: Format | None = None
+    extras: tuple[str, ...] = ()
 
     @classmethod
     def of(cls, spec: ColSpec) -> Domain:
@@ -89,15 +92,17 @@ class Domain:
             )
         elif spec.choices is not None:
             values = tuple(spec.choices)
-        elif spec.format is not None:
+        extras: tuple[str, ...] = ()
+        if spec.format is not None and spec.choices is None:
             fmt = _lookup_format(spec.format)
+            extras = tuple(spec.extra_values or ())
             if fmt.is_finite:
-                values, fmt = fmt.values, None
+                values, fmt, extras = (*(fmt.values or ()), *extras), None, ()
 
         bounds = spec.bounds if spec.bounds is not None else None
         if bounds is not None and bounds.is_open_both:
             bounds = None
-        return cls(dtype=dtype, values=values, bounds=bounds, format=fmt)
+        return cls(dtype=dtype, values=values, bounds=bounds, format=fmt, extras=extras)
 
     @property
     def is_open(self) -> bool:
@@ -110,7 +115,8 @@ class Domain:
         if self.bounds is not None:
             return f"bounds {self.bounds}"
         if self.format is not None:
-            return f"format {self.format.name!r}"
+            also = f" or one of {describe_values(self.extras)}" if self.extras else ""
+            return f"format {self.format.name!r}{also}"
         return f"any {self.dtype}"
 
     # ------------------------------------------------------------------
@@ -149,15 +155,22 @@ class Domain:
     def _rejects(self, other: Domain) -> str | None:
         if self.format is not None:
             if other.format is not None:
-                if other.format.name == self.format.name:
-                    return None
-                return f"{other} is not {self}"
+                if other.format.name != self.format.name:
+                    return f"{other} is not {self}"
+                beyond = [e for e in other.extras if e not in self.extras]
+                if beyond:
+                    return f"{describe_values(beyond)} is not {self}"
+                return None
             if other.values is None:
                 return f"{other} is not limited to {self}"
             # A finite domain can be checked outright: run the format's own
-            # test over the listed values, the way validation would.
+            # test over the listed values, the way validation would -- an
+            # extra passes too.
             listed = pl.Series(list(other.values), dtype=pl.String, strict=False)
-            passes = listed.to_frame("v").select(self.format.check(pl.col("v")))
+            accepted = self.format.check(pl.col("v"))
+            if self.extras:
+                accepted = accepted | pl.col("v").is_in(list(self.extras))
+            passes = listed.to_frame("v").select(accepted)
             outside = [
                 raw
                 for raw, ok in zip(
