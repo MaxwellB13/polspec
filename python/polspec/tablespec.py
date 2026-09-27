@@ -402,6 +402,26 @@ class TableSpec:
     def __len__(self) -> int:
         return len(self.columns)
 
+    def __eq__(self, other: object) -> bool:
+        """Equal when every part is -- the columns *in order*.
+
+        `columns` is a mapping, and two mappings holding the same items in
+        a different order compare equal; but a spec's order is part of what
+        it declares -- `schema()`, a generated frame and `validate()`'s
+        output all follow it -- so two specs whose schemas differ are not
+        equal.
+        """
+        if not isinstance(other, TableSpec):
+            return NotImplemented
+        return (
+            self.name == other.name
+            and list(self.columns.items()) == list(other.columns.items())
+            and self.checks == other.checks
+            and self.unique_together == other.unique_together
+            and self.foreign_keys == other.foreign_keys
+            and self.hierarchy == other.hierarchy
+        )
+
     def __hash__(self) -> int:
         """A hash over the spec's shape, so a spec can be a dict key.
 
