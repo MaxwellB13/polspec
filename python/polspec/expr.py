@@ -29,6 +29,8 @@ from typing import Any, Literal
 import polars as pl
 
 from polspec.errors import SpecError
+from polspec.scalars import TAGS as SCALAR_TAGS
+from polspec.scalars import from_plain, to_plain
 
 CmpOp = Literal["eq", "ne", "lt", "le", "gt", "ge"]
 ArithOp = Literal["add", "sub", "mul", "div"]
@@ -44,6 +46,9 @@ _CMP_SYMBOLS: dict[str, str] = {
 }
 _ARITH_SYMBOLS: dict[str, str] = {"add": "+", "sub": "-", "mul": "*", "div": "/"}
 _SCALARS = (str, bool, int, float, dt.date, dt.datetime, dt.time, dt.timedelta, bytes)
+# The literals that carry a unit of time, which a column may hold at a
+# coarser one than Python does.
+_UNIT_BEARING = (dt.datetime, dt.time, dt.timedelta)
 
 
 def _wrap(value: Any) -> Pred:
@@ -248,10 +253,12 @@ class Lit(Pred):
         return pl.lit(self.value)
 
     def to_data(self) -> Any:
-        # A dict or list would be read back as a node, so wrap those.
+        # A dict or list would be read back as a node, so wrap those. A time
+        # or a duration, which YAML cannot hold, is written in its tagged
+        # form -- which reads back as a node of its own, `time`/`duration`.
         if isinstance(self.value, (dict, list, tuple)):
             return {"lit": self.value}
-        return self.value
+        return to_plain(self.value)
 
     def to_source(self) -> str:
         return repr(self.value)
@@ -399,10 +406,21 @@ class IsIn(Pred):
     values: tuple[Any, ...]
 
     def to_expr(self) -> pl.Expr:
-        return self.item.to_expr().is_in(list(self.values))
+        item = self.item.to_expr()
+        if not any(isinstance(v, _UNIT_BEARING) for v in self.values):
+            return item.is_in(list(self.values))
+        # Python holds a datetime, a time or a duration to the microsecond,
+        # and `is_in` refuses a list finer than the column's own unit -- a
+        # `Duration("ms")` column against `[timedelta(0)]` raises. `==` casts
+        # to a common unit, so the membership is the equalities it stands for.
+        present = [v for v in self.values if v is not None]
+        terms = [item == pl.lit(v) for v in present]
+        if len(present) < len(self.values):
+            terms.append(item.is_null())
+        return pl.any_horizontal(terms) if terms else pl.lit(False)
 
     def to_data(self) -> dict[str, list[Any]]:
-        return {"is_in": [self.item.to_data(), list(self.values)]}
+        return {"is_in": [self.item.to_data(), [to_plain(v) for v in self.values]]}
 
     def to_source(self) -> str:
         return f"{_source(self.item)}.is_in({list(self.values)!r})"
@@ -582,6 +600,7 @@ KNOWN_OPS: frozenset[str] = frozenset(
         "is_null",
         "between",
         "str_len",
+        *SCALAR_TAGS,
     }
 )
 
@@ -603,6 +622,11 @@ def from_data(data: Any) -> Pred:
         return col(payload)
     if op == "lit":
         return Lit(payload)
+    if op in SCALAR_TAGS:
+        try:
+            return Lit(from_plain(data))
+        except ValueError as exc:
+            raise _bad(data, str(exc)) from exc
     if op in _BINARY:
         left, right = _pair(data, payload)
         return _BINARY[op](op, from_data(left), from_data(right))  # type: ignore[arg-type]
@@ -621,7 +645,10 @@ def from_data(data: Any) -> Pred:
         item, values = _pair(data, payload)
         if not isinstance(values, Sequence) or isinstance(values, str):
             raise _bad(data, "'is_in' takes [predicate, [values...]]")
-        return IsIn(from_data(item), tuple(values))
+        try:
+            return IsIn(from_data(item), tuple(from_plain(v) for v in values))
+        except ValueError as exc:
+            raise _bad(data, str(exc)) from exc
     if op == "is_null":
         return IsNull(from_data(payload))
     if op == "between":

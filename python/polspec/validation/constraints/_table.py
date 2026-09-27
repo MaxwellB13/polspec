@@ -36,7 +36,7 @@ class _FrameCheck(Constraint):
     code: FindingCode = "check"
 
     def involved(self) -> tuple[str, ...]:
-        return tuple(self.check.expr.meta.root_names())
+        return _named_once(self.check.expr)
 
     def details(self, stats: dict[str, list]) -> dict[str, Any]:
         return {"check": self.check.name, "condition": str(self.check.expr)}
@@ -47,6 +47,17 @@ class _FrameCheck(Constraint):
             f"Check '{self.check.name}' failed: found {count} row(s) violating "
             f"condition {self.check.expr}{described}"
         )
+
+
+def _named_once(expr: pl.Expr) -> tuple[str, ...]:
+    """The columns `expr` reads, each once, in the order it first reads them.
+
+    `meta.root_names()` lists a column once per mention, so a range check --
+    `(col("a") > 0) & (col("a") < 10)` -- names `a` twice, and a struct of
+    its samples built from that list had two fields called `a`: Polars
+    refused it, and validation raised `DuplicateError`.
+    """
+    return tuple(dict.fromkeys(expr.meta.root_names()))
 
 
 def frame_constraints(
@@ -73,7 +84,7 @@ def frame_constraints(
         )
 
     for check in checks or ():
-        named = check.expr.meta.root_names()
+        named = _named_once(check.expr)
         if not all(c in df_col_names for c in named):
             # Its mask cannot be evaluated -- Polars would raise, and inspect()
             # never does for a frame that fails. The missing columns are a

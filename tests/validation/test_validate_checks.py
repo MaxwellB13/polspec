@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import polars as pl
 import pytest
@@ -288,3 +288,57 @@ def test_a_check_whose_columns_are_present_still_runs():
     frame = pl.DataFrame({"subtotal": [5.0], "total": [1.0]})
     (finding,) = _TotalsSpec.inspect(frame)
     assert finding.code == "check" and finding.key == "check:total_covers_subtotal"
+
+
+# =====================================================================
+# Checks Polars used to refuse to evaluate
+# =====================================================================
+
+
+def test_a_check_naming_a_column_twice_validates():
+    """A range check names its column twice, and the struct of samples built
+    from those names had two fields called `total`: `DuplicateError`."""
+    from polspec import TableSpec, col
+
+    spec = TableSpec(
+        "T",
+        {"total": ColSpec(pl.Float64, bounds=(0.0, 10.0))},
+        checks=[Check((col("total") >= 0) & (col("total") <= 10), name="in_range")],
+    )
+    assert spec.columns  # declared
+    good = pl.DataFrame({"total": [1.0, 9.0]})
+    assert FrameSpec.from_spec(spec).inspect(good).passed
+    (finding,) = FrameSpec.from_spec(spec).inspect(
+        pl.DataFrame({"total": [50.0]}), validate_bounds=False
+    )
+    assert finding.columns == ("total",)
+    assert finding.samples == ({"total": 50.0},)
+
+
+@pytest.mark.parametrize(
+    ("dtype", "value"),
+    [
+        (pl.Duration("ms"), timedelta(seconds=1)),
+        (pl.Datetime("ms"), datetime(2024, 1, 1, 9)),
+    ],
+    ids=["duration_ms", "datetime_ms"],
+)
+def test_is_in_over_a_coarser_unit_than_python_holds(dtype, value):
+    """Python holds these to the microsecond, and Polars' `is_in` refuses a
+    list finer than a millisecond column -- in a check, and in a rule's
+    condition, which reaches generation."""
+    from polspec import ColRule, TableSpec, col, generate
+
+    spec = TableSpec(
+        "T",
+        {
+            "t": ColSpec(dtype, choices=[value]),
+            "flag": ColSpec(
+                pl.Int8, rules=[ColRule(when=col("t").is_in([value]), choices=[1])]
+            ),
+        },
+        checks=[Check(col("t").is_in([value]), name="known")],
+    )
+    df = generate(spec, 50, seed=1)
+    assert df["flag"].unique().to_list() == [1]
+    assert FrameSpec.from_spec(spec).inspect(df).passed
