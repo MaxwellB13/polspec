@@ -699,11 +699,45 @@ class ColSpec:
 
         if self.choices is not None and not self.choices:
             raise SpecError("ColSpec.choices must not be empty")
+        if isinstance(self.value_dtype, pl.Decimal):
+            self._read_decimal_choices()
         # Before the duplicate check, which reads the choices through the
         # dtype and would otherwise report a truncated `1.5` as a repeated `1`.
         self._validate_choices_fit_dtype()
         if self.choices is not None:
             reject_duplicate_choices(self.choices, "ColSpec.choices", self.value_dtype)
+
+    def _read_decimal_choices(self) -> None:
+        """A `Decimal` column's text choices -- the column's and each
+        rule's -- as `decimal.Decimal`, read exactly.
+
+        A spec file writes a Decimal as the exact string it prints as, since
+        YAML has no decimal type and a float would not be the value
+        declared; this is the reading half, as `_decimal_endpoints` is for
+        bounds. A choice the text does not parse as is left for
+        `_validate_choices_fit_dtype` to refuse by name.
+        """
+
+        def read(values: tuple[Any, ...]) -> tuple[Any, ...]:
+            out = []
+            for value in values:
+                if isinstance(value, str):
+                    with suppress(decimal.InvalidOperation):
+                        value = decimal.Decimal(value)
+                out.append(value)
+            return tuple(out)
+
+        if self.choices is not None:
+            object.__setattr__(self, "choices", read(self.choices))
+        if any(any(isinstance(c, str) for c in rule.choices) for rule in self.rules):
+            object.__setattr__(
+                self,
+                "rules",
+                tuple(
+                    dataclasses.replace(rule, choices=read(rule.choices))
+                    for rule in self.rules
+                ),
+            )
 
     def _validate_choices_fit_dtype(self) -> None:
         """Refuses a choice -- the column's or a rule's -- that the column's

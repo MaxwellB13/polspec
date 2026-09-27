@@ -44,6 +44,49 @@ seed produces; see
   cannot be evaluated, the rules after it on that column are not checked
   either.
 
+- **`Time` and `Duration` values can be written to a spec file.** YAML has
+  no form for a time of day or a duration, so `to_yaml()` crashed with
+  PyYAML's `RepresenterError` on a `Time` or `Duration` bound, a choice, a
+  rule's choice, or a check's literal -- a spec could be declared in
+  Python that no file could hold. Both are now written in a tagged form,
+  `{time: "12:30:00"}` and `{duration: {days: 1, seconds: 0,
+  microseconds: 0}}`, and read back as themselves. Not a new format
+  version: a file without them reads as before.
+
+- **`Decimal` choices can be written to a spec file.** A Decimal bound was
+  always written as the exact string it prints as; a Decimal choice was
+  written raw, and `to_yaml()` crashed on it. Choices now follow bounds,
+  and a text choice on a `Decimal` column is read back as a `Decimal`.
+
+- **`to_python()` imports what it writes.** Its imports were guessed from
+  the bounds alone, so a `Decimal` choice wrote `Decimal('0.5')` into a
+  module that never imported it. They now follow from the source written.
+
+- **Anything else YAML cannot hold is a `SerializationError`**, naming
+  where in the file it sits (`columns.price.choices[0]`), and raised before
+  the file is opened, so no half-written file is left behind.
+
+- **A check naming a column twice no longer crashes validation.** A range
+  check -- `(col("a") > 0) & (col("a") < 10)` -- names `a` twice, and the
+  struct its samples were drawn into had two fields of one name: Polars
+  raised `DuplicateError`. Each column is now named once.
+
+- **`is_in` over datetimes, times and durations works on a coarser unit.**
+  Python holds them to the microsecond, and Polars' `is_in` refuses a list
+  finer than the column's unit: `col("d").is_in([timedelta(0)])` on a
+  `Duration("ms")` column raised, in a check and in a rule's condition --
+  and so at `generate()`. Such a membership is now evaluated as the
+  equalities it stands for.
+
+### Internal
+
+- The Hypothesis round trip draws what it did not: choices from every
+  dtype's own value space, `Time` and `Duration` bounds, a rule on a
+  column, and checks whose literals have the column's type -- including a
+  range check that names its column twice. Its first runs found the last
+  three fixes above. A second property draws declarations that cannot mean
+  anything and requires each to be refused as a `SpecError`.
+
 ### Documentation
 
 - *Specs as files* showed a check comparing against `subtotal`, a column

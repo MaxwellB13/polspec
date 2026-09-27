@@ -5015,7 +5015,7 @@ Each key is the `ColSpec` field of the same name; see
 | `dtype` | A dtype -- see [Dtypes](#dtypes) |
 | `col_name` | A string |
 | `nullable` | `true` or `false` |
-| `bounds` | `[min, max]`; either end may be `null`. A `Decimal`'s fractional ends are strings, such as `'1.50'`, so they read back exactly |
+| `bounds` | `[min, max]`; either end may be `null`. A `Decimal`'s fractional ends are strings, such as `'1.50'`, so they read back exactly; a time or a duration is [tagged](#times-and-durations) |
 | `tags` | A string, or a list of them |
 | `unique` | `true` or `false` |
 | `null_probability` | A number from 0 to 1 |
@@ -5028,7 +5028,7 @@ Each key is the `ColSpec` field of the same name; see
 | `seed_name` | A string |
 | `distribution` | A distribution's name, such as `normal` |
 | `distribution_params` | Parameter name to number |
-| `choices` | A list of values |
+| `choices` | A list of values; a time or a duration is [tagged](#times-and-durations) |
 | `weights` | A list of numbers, one per choice |
 | `rules` | A list of rules |
 | `validators` | A list of checks, each over this column |
@@ -5136,6 +5136,32 @@ col("subtotal")` is written `{ge: [{col: total}, {col: subtotal}]}`.
 | `between` | `[predicate, lower, upper]` |
 | `str_contains`, `str_starts_with`, `str_ends_with`, `str_matches` | `[predicate, text]`; `str_matches` is a regular expression, `str_contains` a literal substring |
 | `str_len` | A predicate |
+| `time`, `duration` | A literal time or duration, in its [tagged form](#times-and-durations) |
+
+## Times and durations
+
+YAML has forms for numbers, text, dates, datetimes and bytes, and none for a
+time of day or a duration. Wherever a spec file holds one -- a bound, a
+choice, a rule's choice, a predicate's literal -- it is a mapping of one key
+saying which it is:
+
+| Value | Written as |
+|:--|:--|
+| `datetime.time(12, 30)` | `{time: "12:30:00"}` -- the ISO form, microseconds included when there are any |
+| `datetime.timedelta(days=1, hours=2)` | `{duration: {days: 1, seconds: 7200, microseconds: 0}}` -- `timedelta`'s own fields; a field left out is `0` |
+
+```yaml
+columns:
+  opens:
+    dtype: Time
+    bounds: [{time: "06:00:00"}, {time: "10:00:00"}]
+checks:
+- expr: {ne: [{col: opens}, {time: "08:00:00"}]}
+  name: not_eight
+```
+
+A file holding neither reads as before, so these are not a new format
+version: a file could not hold a time or a duration at all until 0.13.0.
 
 ## Versions
 
@@ -5451,6 +5477,7 @@ owns only the inner loop that fills arrays with values.
 | `frames` | The frame plumbing every verb shares: accepting a `DataFrame` or `LazyFrame`, and resolving `references=` to parent frames |
 | `_options` | One way to take options -- an options object, keywords, or neither -- shared by `validate`, `inspect` and `drift` |
 | `expr` | `col()`: a small predicate language that evaluates like Polars and survives a trip through a file |
+| `scalars` | The plain forms a spec file writes for the values YAML cannot hold -- a time, a duration -- shared by bounds, choices and predicate literals |
 | `formats` | Named string formats -- what each looks like, said once for generation and validation |
 | `hierarchy` | `Hierarchy` -- a self-referencing link table, declared |
 | `drift` | `diff` and `drift`: what changed between two specs, or between a spec and data. `fields.py` holds one comparator per `ColSpec` field, `data.py` measures a frame in the declaration's terms |
@@ -6282,6 +6309,49 @@ seed produces; see
   earlier one had rewritten, and reported them as failing. Once a rule
   cannot be evaluated, the rules after it on that column are not checked
   either.
+
+- **`Time` and `Duration` values can be written to a spec file.** YAML has
+  no form for a time of day or a duration, so `to_yaml()` crashed with
+  PyYAML's `RepresenterError` on a `Time` or `Duration` bound, a choice, a
+  rule's choice, or a check's literal -- a spec could be declared in
+  Python that no file could hold. Both are now written in a tagged form,
+  `{time: "12:30:00"}` and `{duration: {days: 1, seconds: 0,
+  microseconds: 0}}`, and read back as themselves. Not a new format
+  version: a file without them reads as before.
+
+- **`Decimal` choices can be written to a spec file.** A Decimal bound was
+  always written as the exact string it prints as; a Decimal choice was
+  written raw, and `to_yaml()` crashed on it. Choices now follow bounds,
+  and a text choice on a `Decimal` column is read back as a `Decimal`.
+
+- **`to_python()` imports what it writes.** Its imports were guessed from
+  the bounds alone, so a `Decimal` choice wrote `Decimal('0.5')` into a
+  module that never imported it. They now follow from the source written.
+
+- **Anything else YAML cannot hold is a `SerializationError`**, naming
+  where in the file it sits (`columns.price.choices[0]`), and raised before
+  the file is opened, so no half-written file is left behind.
+
+- **A check naming a column twice no longer crashes validation.** A range
+  check -- `(col("a") > 0) & (col("a") < 10)` -- names `a` twice, and the
+  struct its samples were drawn into had two fields of one name: Polars
+  raised `DuplicateError`. Each column is now named once.
+
+- **`is_in` over datetimes, times and durations works on a coarser unit.**
+  Python holds them to the microsecond, and Polars' `is_in` refuses a list
+  finer than the column's unit: `col("d").is_in([timedelta(0)])` on a
+  `Duration("ms")` column raised, in a check and in a rule's condition --
+  and so at `generate()`. Such a membership is now evaluated as the
+  equalities it stands for.
+
+### Internal
+
+- The Hypothesis round trip draws what it did not: choices from every
+  dtype's own value space, `Time` and `Duration` bounds, a rule on a
+  column, and checks whose literals have the column's type -- including a
+  range check that names its column twice. Its first runs found the last
+  three fixes above. A second property draws declarations that cannot mean
+  anything and requires each to be refused as a `SpecError`.
 
 ### Documentation
 

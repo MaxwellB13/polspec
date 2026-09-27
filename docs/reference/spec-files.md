@@ -38,7 +38,7 @@ Each key is the `ColSpec` field of the same name; see
 | `dtype` | A dtype -- see [Dtypes](#dtypes) |
 | `col_name` | A string |
 | `nullable` | `true` or `false` |
-| `bounds` | `[min, max]`; either end may be `null`. A `Decimal`'s fractional ends are strings, such as `'1.50'`, so they read back exactly |
+| `bounds` | `[min, max]`; either end may be `null`. A `Decimal`'s fractional ends are strings, such as `'1.50'`, so they read back exactly; a time or a duration is [tagged](#times-and-durations) |
 | `tags` | A string, or a list of them |
 | `unique` | `true` or `false` |
 | `null_probability` | A number from 0 to 1 |
@@ -51,7 +51,7 @@ Each key is the `ColSpec` field of the same name; see
 | `seed_name` | A string |
 | `distribution` | A distribution's name, such as `normal` |
 | `distribution_params` | Parameter name to number |
-| `choices` | A list of values |
+| `choices` | A list of values; a time or a duration is [tagged](#times-and-durations) |
 | `weights` | A list of numbers, one per choice |
 | `rules` | A list of rules |
 | `validators` | A list of checks, each over this column |
@@ -159,6 +159,32 @@ col("subtotal")` is written `{ge: [{col: total}, {col: subtotal}]}`.
 | `between` | `[predicate, lower, upper]` |
 | `str_contains`, `str_starts_with`, `str_ends_with`, `str_matches` | `[predicate, text]`; `str_matches` is a regular expression, `str_contains` a literal substring |
 | `str_len` | A predicate |
+| `time`, `duration` | A literal time or duration, in its [tagged form](#times-and-durations) |
+
+## Times and durations
+
+YAML has forms for numbers, text, dates, datetimes and bytes, and none for a
+time of day or a duration. Wherever a spec file holds one -- a bound, a
+choice, a rule's choice, a predicate's literal -- it is a mapping of one key
+saying which it is:
+
+| Value | Written as |
+|:--|:--|
+| `datetime.time(12, 30)` | `{time: "12:30:00"}` -- the ISO form, microseconds included when there are any |
+| `datetime.timedelta(days=1, hours=2)` | `{duration: {days: 1, seconds: 7200, microseconds: 0}}` -- `timedelta`'s own fields; a field left out is `0` |
+
+```yaml
+columns:
+  opens:
+    dtype: Time
+    bounds: [{time: "06:00:00"}, {time: "10:00:00"}]
+checks:
+- expr: {ne: [{col: opens}, {time: "08:00:00"}]}
+  name: not_eight
+```
+
+A file holding neither reads as before, so these are not a new format
+version: a file could not hold a time or a duration at all until 0.13.0.
 
 ## Versions
 

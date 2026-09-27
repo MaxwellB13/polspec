@@ -26,6 +26,7 @@ from polspec.expr import from_data as pred_from_data
 from polspec.foreign_key import ForeignKey, default_fk_name
 from polspec.hierarchy import Hierarchy
 from polspec.rules import ColRule
+from polspec.scalars import from_plain, is_tagged, to_plain
 from polspec.serialization.dtypes import dtype_from_data, dtype_to_data, dtype_to_source
 from polspec.spec import ColSpec
 from polspec.tablespec import TableSpec
@@ -164,16 +165,41 @@ def to_source(obj: Any, fields: Sequence[Field], ctor: str) -> str:
 
 def _bound_to_data(value: Bound) -> list[Any]:
     # A Decimal endpoint is written as the exact string it prints as; YAML
-    # has no decimal type, and a float would not be the bound declared.
+    # has no decimal type, and a float would not be the bound declared. A
+    # time or a duration, which YAML cannot hold either, is tagged.
     return [
-        str(v) if isinstance(v, decimal.Decimal) else v for v in (value.min, value.max)
+        str(v) if isinstance(v, decimal.Decimal) else to_plain(v)
+        for v in (value.min, value.max)
     ]
 
 
 def _bound_from_data(value: Any, ctx: Ctx, path: str) -> tuple[Any, Any]:
     if not isinstance(value, Sequence) or isinstance(value, str) or len(value) != 2:
         raise SerializationError(f"{path} must be a two-element list, got {value!r}")
-    return (value[0], value[1])
+    low, high = _values_from_data(value, path)
+    return (low, high)
+
+
+def _values_to_data(values: Sequence[Any]) -> list[Any]:
+    """Choices as a file holds them: a Decimal as the exact string it prints
+    as, as a bound's end is, and a time or a duration tagged."""
+    return [str(v) if isinstance(v, decimal.Decimal) else to_plain(v) for v in values]
+
+
+def _values_from_data(value: Any, path: str) -> Any:
+    """Choices, or a bound's two ends, read back: the tagged forms untagged.
+
+    A `{choice: weight}` mapping, which `ColSpec` takes too, passes as it is:
+    its keys are the choices, and a mapping key cannot be a tagged form.
+    """
+    if isinstance(value, Mapping) and not is_tagged(value):
+        return value
+    if not isinstance(value, Sequence) or isinstance(value, str):
+        raise SerializationError(f"{path} must be a list, got {value!r}")
+    try:
+        return [from_plain(v) for v in value]
+    except ValueError as exc:
+        raise SerializationError(f"{path}: {exc}") from exc
 
 
 def _bound_to_source(value: Bound) -> str:
@@ -262,7 +288,13 @@ COLRULE_FIELDS: tuple[Field, ...] = (
         from_data=_when_from_data,
         to_source=lambda pred: pred.to_source(),
     ),
-    Field("choices", omit_if=_never, to_data=list, to_source=lambda v: repr(list(v))),
+    Field(
+        "choices",
+        omit_if=_never,
+        to_data=_values_to_data,
+        from_data=lambda v, ctx, path: _values_from_data(v, path),
+        to_source=lambda v: repr(list(v)),
+    ),
     Field("weights", to_data=list, to_source=lambda v: repr(list(v))),
 )
 
@@ -351,7 +383,12 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
         to_data=dict,
         to_source=lambda v: repr(dict(v)),
     ),
-    Field("choices", to_data=list, to_source=lambda v: repr(list(v))),
+    Field(
+        "choices",
+        to_data=_values_to_data,
+        from_data=lambda v, ctx, path: _values_from_data(v, path),
+        to_source=lambda v: repr(list(v)),
+    ),
     Field("weights", to_data=list, to_source=lambda v: repr(list(v))),
     Field(
         "rules",
@@ -532,36 +569,3 @@ def tablespec_from_data(data: Mapping[str, Any], ctx: Ctx) -> TableSpec:
         raise SerializationError("the spec declares no columns")
     body.setdefault("name", "LoadedFrameSpec")
     return decode(TableSpec, body, TABLESPEC_FIELDS, ctx, "")
-
-
-# ---------------------------------------------------------------------------
-# `import datetime` in generated Python
-# ---------------------------------------------------------------------------
-
-
-def needs_datetime_import(value: Any) -> bool:
-    """Whether any literal in an encoded value is a date, time or timedelta."""
-    import datetime
-
-    return _any_literal(value, (datetime.date, datetime.time, datetime.timedelta))
-
-
-def needs_decimal_import(spec: TableSpec) -> bool:
-    """Whether any bound in the spec is a `decimal.Decimal`, whose source
-    form (`Decimal('0.5')`) needs the import."""
-    return any(
-        isinstance(v, decimal.Decimal)
-        for cs in spec.columns.values()
-        if cs.bounds is not None
-        for v in (cs.bounds.min, cs.bounds.max)
-    )
-
-
-def _any_literal(value: Any, types: tuple[type, ...]) -> bool:
-    if isinstance(value, types):
-        return True
-    if isinstance(value, Mapping):
-        return any(_any_literal(v, types) for v in value.values())
-    if isinstance(value, (list, tuple)):
-        return any(_any_literal(v, types) for v in value)
-    return False

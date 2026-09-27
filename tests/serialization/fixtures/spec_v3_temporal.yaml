@@ -1,0 +1,33 @@
+# A version 3 spec holding the two values YAML has no form for, in the
+# tagged forms 0.13.0 writes: a time of day and a duration, as bounds,
+# choices, a rule's choice and a check's literals. Written by hand, as a
+# user would; never regenerated.
+version: 3
+name: Shifts
+columns:
+  night:
+    dtype: Boolean
+  starts:
+    dtype: Time
+    bounds: [{time: "06:00:00"}, {time: "22:00:00"}]
+    rules:
+    - when: {col: night}
+      choices: [{time: "22:00:00"}]
+  length:
+    dtype:
+      Duration:
+        time_unit: us
+    choices:
+    - {duration: {days: 0, seconds: 28800}}
+    - {duration: {seconds: 43200}}
+checks:
+- expr:
+    ne:
+    - col: starts
+    - time: "12:00:00.500000"
+  name: not_half_past_noon
+- expr:
+    is_in:
+    - col: length
+    - [{duration: {seconds: 28800}}, {duration: {seconds: 43200}}]
+  name: standard_lengths

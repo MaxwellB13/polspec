@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 import yaml
+from yaml.representer import RepresenterError
 
 from polspec.errors import SerializationError
 from polspec.serialization.dtypes import physical_name
@@ -30,8 +31,6 @@ from polspec.serialization.fields import (
     colspec_to_source,
     fk_to_source,
     hierarchy_to_source,
-    needs_datetime_import,
-    needs_decimal_import,
     tablespec_from_data,
     tablespec_to_data,
 )
@@ -113,6 +112,43 @@ def _warn_unserializable(spec: TableSpec, source: str | Path, kind: str) -> None
         )
 
 
+def dump_yaml(data: Mapping[str, Any], source: str | Path) -> str:
+    """`data` as YAML text, or a `SerializationError` naming what YAML
+    cannot hold and where it sits.
+
+    Dumped to a string before any file is opened, so a value that cannot be
+    written leaves no half-written file behind. The values a spec holds
+    that YAML has no form for -- a time, a duration -- are tagged before
+    they get here (`polspec.scalars`); this is for anything that is not.
+    """
+    try:
+        return yaml.safe_dump(dict(data), sort_keys=False)
+    except RepresenterError as exc:
+        value = exc.args[1] if len(exc.args) > 1 else None
+        where = _path_to(data, value) or "a value"
+        raise SerializationError(
+            f"{source}: {where} holds {value!r} (of type {type(value).__name__}), "
+            "which a YAML spec file cannot hold."
+        ) from exc
+
+
+def _path_to(data: Any, target: Any, path: str = "") -> str | None:
+    """Where in `data` the object `target` sits, as `columns.c.bounds[0]`."""
+    if data is target:
+        return path or None
+    if isinstance(data, Mapping):
+        items = ((f"{path}.{k}" if path else str(k), v) for k, v in data.items())
+    elif isinstance(data, (list, tuple)):
+        items = ((f"{path}[{i}]", v) for i, v in enumerate(data))
+    else:
+        return None
+    for where, value in items:
+        found = _path_to(value, target, where)
+        if found is not None:
+            return found
+    return None
+
+
 # ---------------------------------------------------------------------------
 # TableSpec <-> data
 # ---------------------------------------------------------------------------
@@ -152,9 +188,10 @@ def to_yaml(spec: TableSpec, source: str | Path) -> None:
     """
     require_columns(spec)
     _warn_unserializable(spec, source, "yaml")
+    dumped = dump_yaml(to_dict(spec), source)
     p = Path(source)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(yaml.safe_dump(to_dict(spec), sort_keys=False), encoding="utf-8")
+    p.write_text(dumped, encoding="utf-8")
 
 
 def _resolve_categories(
@@ -239,27 +276,34 @@ def to_python(spec: TableSpec, source: str | Path) -> None:
     if has_rules or has_validators or persistable_checks:
         imports.append("col")
 
-    lines = [f'"""Declares the {spec.name} schema."""', "", "import polars as pl"]
-    if needs_datetime_import(data):
-        lines.append("import datetime")
-    if needs_decimal_import(spec):
-        lines.append("from decimal import Decimal")
-    lines.append(f"from polspec import {', '.join(imports)}")
-    lines.extend(["", "", f"class {spec.name}(FrameSpec):", "    __columns__ = {"])
+    body = [f"class {spec.name}(FrameSpec):", "    __columns__ = {"]
     for name, cs in spec.columns.items():
-        lines.append(f"        {name!r}: {colspec_to_source(cs)},")
-    lines.append("    }")
+        body.append(f"        {name!r}: {colspec_to_source(cs)},")
+    body.append("    }")
     if spec.unique_together:
         groups = ", ".join(repr(list(group)) for group in spec.unique_together)
-        lines.append(f"    __unique_together__ = [{groups}]")
+        body.append(f"    __unique_together__ = [{groups}]")
     if spec.foreign_keys:
         fks = ", ".join(fk_to_source(fk) for fk in spec.foreign_keys)
-        lines.append(f"    __foreign_keys__ = [{fks}]")
+        body.append(f"    __foreign_keys__ = [{fks}]")
     if spec.hierarchy is not None:
-        lines.append(f"    __hierarchy__ = {hierarchy_to_source(spec.hierarchy)}")
+        body.append(f"    __hierarchy__ = {hierarchy_to_source(spec.hierarchy)}")
     if persistable_checks:
         checks = ", ".join(check_to_source(c) for c in persistable_checks)
-        lines.append(f"    __checks__ = [{checks}]")
+        body.append(f"    __checks__ = [{checks}]")
+
+    # The imports follow from the source written, not from a guess at which
+    # values will need them: a Decimal choice or a time literal in a rule is
+    # written wherever it is, and must be importable wherever that is. An
+    # import the text only appears to need (inside a string) costs nothing.
+    written = "\n".join(body)
+    lines = [f'"""Declares the {spec.name} schema."""', "", "import polars as pl"]
+    if "datetime." in written:
+        lines.append("import datetime")
+    if "Decimal(" in written:
+        lines.append("from decimal import Decimal")
+    lines.append(f"from polspec import {', '.join(imports)}")
+    lines.extend(["", "", *body])
 
     p = Path(source)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -320,8 +364,9 @@ def catspec_from_dict(
 
 
 def catspec_to_yaml(catspec: CatSpec, source: str | Path | None = None) -> str | None:
-    dumped = yaml.safe_dump(
-        {"version": FORMAT_VERSION, **catspec_to_dict(catspec)}, sort_keys=False
+    dumped = dump_yaml(
+        {"version": FORMAT_VERSION, **catspec_to_dict(catspec)},
+        source if source is not None else "a category registry",
     )
     if source is None:
         return dumped
@@ -419,10 +464,9 @@ def registry_to_yaml(registry: Registry, source: str | Path) -> None:
     for spec in registry.specs:
         _warn_unserializable(spec, source, "yaml")
     p = Path(source)
+    dumped = dump_yaml(registry_to_dict(registry), source)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(
-        yaml.safe_dump(registry_to_dict(registry), sort_keys=False), encoding="utf-8"
-    )
+    p.write_text(dumped, encoding="utf-8")
 
 
 def registry_from_yaml(source: str | Path, *, strict: bool = True) -> Registry:

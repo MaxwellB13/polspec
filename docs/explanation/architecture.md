@@ -27,6 +27,7 @@ owns only the inner loop that fills arrays with values.
 | `frames` | The frame plumbing every verb shares: accepting a `DataFrame` or `LazyFrame`, and resolving `references=` to parent frames |
 | `_options` | One way to take options -- an options object, keywords, or neither -- shared by `validate`, `inspect` and `drift` |
 | `expr` | `col()`: a small predicate language that evaluates like Polars and survives a trip through a file |
+| `scalars` | The plain forms a spec file writes for the values YAML cannot hold -- a time, a duration -- shared by bounds, choices and predicate literals |
 | `formats` | Named string formats -- what each looks like, said once for generation and validation |
 | `hierarchy` | `Hierarchy` -- a self-referencing link table, declared |
 | `drift` | `diff` and `drift`: what changed between two specs, or between a spec and data. `fields.py` holds one comparator per `ColSpec` field, `data.py` measures a frame in the declaration's terms |
