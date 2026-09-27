@@ -139,18 +139,21 @@ page says otherwise, don't build something that depends on today's YAML
 surviving a version bump byte-for-byte, or on a specific seed producing the
 same values after an upgrade.
 
+## Fake data from real data exists, one column at a time
+
+`polspec.synthesize` (0.13.0) turns a real table into a fake one: each
+column's shape, frequencies, null rate and uniqueness are profiled and
+generated again, and `replace=` keeps a column's values out of it. What it
+does not do is the next step: columns are profiled independently, so what
+they do *together* -- an age that follows a status, a child row that points
+at a parent -- is not kept. Capturing that means a spec that can describe a
+joint distribution, which `ColRule` does only for conditions written by hand.
+
 ## Directions, not commitments
 
 Lower confidence than everything above: opportunities noticed rather than gaps
 being actively closed. They are here because the machinery each would need
 already exists, not because any of them is started.
-
-**Synthetic look-alike data.** `from_dataframe()` profiles real data into a
-spec and `generate()` turns a spec back into data, so the trip from a real
-table to a statistically similar fake one is already two calls. Making it one —
-with `tags` marking which columns should be replaced outright rather than
-imitated — would serve the share-realistic-data-without-sharing-real-data case
-directly.
 
 **A profiled spec that names a `format`.** `from_dataframe()` reads a
 string column as a `String` with a length range; it does not notice that
@@ -158,7 +161,8 @@ every value is an email address. Inference is a decision about how sure to be
 before naming a format, and a wrong guess is a spec that rejects real data,
 so it has not been made. [Drift](../how-to/drift.md) is the reason to want
 it: a `format_violated` finding on a column the profiler named would have
-been the drift that mattered.
+been the drift that mattered, and `synthesize` would generate email-shaped
+emails rather than email-length text.
 
 **Test-framework integration.** A pytest fixture or plugin, or a Hypothesis
 strategy built from a spec, are the natural adjacent surfaces for a library

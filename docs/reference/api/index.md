@@ -33,6 +33,8 @@ cannot describe a signature the code does not have.
 | [`DriftOptions`][polspec.DriftOptions] | [Drift](drift.md) |
 | [`DriftReport`][polspec.DriftReport] | [Drift](drift.md) |
 | [`DriftFinding`][polspec.DriftFinding] | [Drift](drift.md) |
+| [`synthesize`][polspec.synthesize] | [Profiling](profiling.md) |
+| [`profile`][polspec.profile] | [Profiling](profiling.md) |
 | [`profile_dataframe`][polspec.profile_dataframe] | [Profiling](profiling.md) |
 | [`PolspecError`][polspec.PolspecError] | [Errors](errors.md) |
 | [`SpecError`][polspec.SpecError] | [Errors](errors.md) |

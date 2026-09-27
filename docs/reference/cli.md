@@ -7,7 +7,8 @@ shows the workflows, and what the exit codes mean.
 Generate a schema from data, a test from a schema, or check data against a schema.
 
 ```
-polspec [-h] [--version] {schema,test,validate,generate,diff,drift} ...
+polspec [-h] [--version]
+               {schema,test,validate,generate,synthesize,diff,drift} ...
 ```
 
 | Argument | Meaning |
@@ -24,7 +25,8 @@ Profile a data file into a YAML schema.
 
 ```
 polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
-                            [--max-unique-enum N] [--no-bounds] [--sample N]
+                            [--max-unique-enum N] [--no-bounds] [--sample N] [--shape]
+                            [--keys] [--replace COL [COL ...]]
                             source
 ```
 
@@ -37,6 +39,9 @@ polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
 | `--max-unique-enum` `N` | Max distinct values for a string column to become an Enum (default: 50) |
 | `--no-bounds` | Skip computing numeric/temporal bounds and string lengths |
 | `--sample` `N` | Profile only the first N rows |
+| `--shape` | Fit the distribution each numeric or temporal column follows |
+| `--keys` | Declare an all-distinct integer or text column unique |
+| `--replace` `COL` | Columns whose values must not be carried into the spec |
 
 ## `polspec schema new`
 
@@ -118,6 +123,29 @@ polspec generate [-h] [--all] [--format EXT] -n N -o OUTPUT [--seed SEED]
 | `--method` `METHOD` | Sampling method (default: random) One of `random`, `cartesian`. |
 | `--references` `NAME=PATH` | Parent data for a foreign key to another spec; repeat for several |
 | `--class` `NAME` | Generate from only this class (a .py source may define several) |
+
+## `polspec synthesize`
+
+Write a fake data file that looks like a real one.
+
+```
+polspec synthesize [-h] -o OUTPUT [-n N] [--seed SEED]
+                          [--replace COL [COL ...]] [--sample N] [--max-unique-enum N]
+                          [--spec PATH] [--name NAME]
+                          source
+```
+
+| Argument | Meaning |
+|:--|:--|
+| `source` | Path to a CSV, TSV, Parquet, NDJSON, JSON or IPC file |
+| `-o`, `--output` `OUTPUT` | **Required.** File to write; the extension picks the format (.parquet, .csv, ...) |
+| `-n`, `--rows` `N` | Rows to generate (default: as many as the source has) |
+| `--seed` `SEED` | Generation seed (default: random) |
+| `--replace` `COL` | Columns whose values must not be carried over: text in them is generated from its lengths, never from the values the source holds |
+| `--sample` `N` | Profile a random sample of N rows rather than every row |
+| `--max-unique-enum` `N` | Max distinct values for a text column to keep its values (default: 50) |
+| `--spec` `PATH` | Also write the spec the data was generated from (.yaml, or .py) |
+| `--name` `NAME` | The spec's class name (default: derived from source) |
 
 ## `polspec diff`
 

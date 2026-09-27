@@ -83,6 +83,15 @@ either side, so `nobody@example.invalid` passes, `hostname` accepts
 identifiers is a `choices` list or a foreign key into the table that owns
 them. See [String formats](../how-to/formats.md).
 
+## Synthesized data is column by column
+
+`polspec.synthesize` profiles each column on its own and generates each on
+its own, so every column of the fake frame looks like the source's and no
+relationship between columns survives: a correlation, a conditional mix, a
+foreign key. A text column's format is not recognised either, so an email
+column becomes text of an email's length. See
+[Fake data from real data](../how-to/synthesizing.md#how-close-the-fake-data-is).
+
 ## Smaller sharp edges
 
 - **A `Decimal`, `Int128` or `UInt128` is drawn through 64 bits.**

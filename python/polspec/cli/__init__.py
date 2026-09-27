@@ -25,6 +25,7 @@ import sys
 from polspec.cli._data import _cmd_generate, _cmd_validate
 from polspec.cli._drift import _FAIL_ON, _cmd_diff, _cmd_drift
 from polspec.cli._schema import _cmd_schema_infer, _cmd_schema_new
+from polspec.cli._synthesize import add_synthesize_parser
 from polspec.cli._test import _cmd_test
 from polspec.errors import PolspecError
 from polspec.validation import _SWITCHES
@@ -84,6 +85,23 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         metavar="N",
         help="Profile only the first N rows",
+    )
+    infer.add_argument(
+        "--shape",
+        action="store_true",
+        help="Fit the distribution each numeric or temporal column follows",
+    )
+    infer.add_argument(
+        "--keys",
+        action="store_true",
+        help="Declare an all-distinct integer or text column unique",
+    )
+    infer.add_argument(
+        "--replace",
+        nargs="+",
+        action="extend",
+        metavar="COL",
+        help="Columns whose values must not be carried into the spec",
     )
     infer.set_defaults(func=_cmd_schema_infer)
 
@@ -252,6 +270,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Generate from only this class (a .py source may define several)",
     )
     generate.set_defaults(func=_cmd_generate)
+
+    add_synthesize_parser(subparsers)
 
     def add_report_options(sub: argparse.ArgumentParser) -> None:
         output = sub.add_mutually_exclusive_group()

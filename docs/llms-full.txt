@@ -93,6 +93,14 @@ production will reject.
 
     [Specs as files](https://maxwellb13.github.io/polspec/how-to/files/) · [Multiple specs](https://maxwellb13.github.io/polspec/how-to/registry/)
 
+- **Fake data from real data**
+
+    `polspec.synthesize` turns a real dataset -- a frame, a lazy scan or a
+    file -- into a fake one with the same schema, shapes, frequencies and
+    keys, and none of its rows or sensitive values.
+
+    [Fake data from real data](https://maxwellb13.github.io/polspec/how-to/synthesizing/)
+
 - **What changed**
 
     Diff two versions of a spec, or a spec against data, into a report that
@@ -2779,6 +2787,143 @@ that expects byte-identical output after you bump the version.
 
 ---
 
+# Fake data from real data
+Source: https://maxwellb13.github.io/polspec/how-to/synthesizing/
+
+# Fake data from real data
+
+`polspec.synthesize` turns a real dataset into a fake one that looks like
+it: the same schema, the same shape of values in each column, the same
+category mix and null rates -- and none of its rows. It is for the data you
+cannot share, cannot copy into a test environment, or cannot keep: hand
+over a stand-in instead.
+
+```python
+import math
+
+import polars as pl
+import polspec
+
+# Stand-in for a real table: a key, a skewed amount, a weighted status,
+# and a column of names nobody should see outside production.
+real = orders.with_columns(
+    amount=pl.Series([round(math.exp(3 + (i % 97) / 40), 2) for i in range(500)]),
+    name=pl.Series([f"customer {i % 30}" for i in range(500)]),
+)
+
+fake = polspec.synthesize(real, seed=1, replace=["name"])
+
+assert fake.schema == real.schema
+assert fake.height == real.height
+assert fake["order_id"].is_unique().all()        # a key stays a key
+assert not set(fake["name"]) & set(real["name"])  # no real name carried over
+```
+
+The source can be a `DataFrame`, a `LazyFrame` -- anything Polars can
+`scan_*`, a file, a glob, cloud storage -- or the path of a data file:
+
+<!-- docs: skip -->
+```python
+fake = polspec.synthesize("customers.parquet", 1_000_000, seed=1)
+fake = polspec.synthesize(pl.scan_parquet("s3://bucket/customers/*.parquet"), seed=1)
+```
+
+`n` defaults to as many rows as the source has; ask for more or fewer.
+
+## The spec in between
+
+`synthesize` is two steps: `polspec.profile` describes the source as a
+`TableSpec`, and `generate` makes data from it. Take them one at a time when
+the description is worth looking at, editing or keeping -- a reviewed spec
+is a safer thing to share than a function call over real data:
+
+```python
+spec = polspec.profile(real, replace=["name"])
+
+assert spec["amount"].distribution == "lognormal"   # the shape was fitted
+assert spec["order_id"].unique                      # every value distinct: a key
+
+FrameSpec.from_spec(spec).to_yaml("orders_profile.yaml")
+fake = polspec.generate(spec, 10_000, seed=1)
+```
+
+## What carries over from the source
+
+Everything a spec can say about a column, and nothing else:
+
+| Carried over | Not carried over |
+|:--|:--|
+| dtypes, and the schema's column order | any row of the source |
+| each column's null rate | any value of a column in `replace=` |
+| numeric and temporal extremes | any relationship *between* columns |
+| the distribution each numeric or temporal column follows | foreign keys between tables |
+| a low-cardinality text column's **values** and how often each occurs | |
+| string lengths | |
+| which columns are keys | |
+
+Two lines of that table decide what to put in `replace=`:
+
+- **A text column with few distinct values keeps them.** A column of at
+  most `max_unique_enum` (50) distinct values becomes an `Enum` of them, so
+  a status column stays `NEW`/`PAID`/`SHIPPED` -- and a column of thirty
+  customer names stays those thirty names. Name every column whose values
+  are sensitive in `replace=`: it is then generated from its lengths alone.
+- **Extremes are real values.** The smallest and largest amount, the
+  earliest and latest date, become the fake column's bounds. If those are
+  sensitive, edit them out of the profiled spec before generating.
+
+## How close the fake data is
+
+Each column is described on its own, so each column on its own looks like
+the source:
+
+- **Shape.** A numeric or temporal column's values are fitted against every
+  distribution polspec can draw -- `normal`, `lognormal`, `gamma`,
+  `exponential`, `beta`, `poisson` -- by drawing from each and comparing the
+  draws with the data. The closest wins if it beats drawing evenly between
+  the extremes; otherwise the column stays even. A log-normal amount comes
+  out log-normal, a bell-curved age bell-curved, and a count as counts.
+- **Keys.** An integer or text column whose values are all distinct, over
+  at least a hundred of them, is declared unique, and the fake one is
+  distinct too. Asked for more rows than the key's range holds, the range
+  widens upward to make room -- and a nullable key's range has to hold its
+  null rows as well, so it can widen by a little even at the source's size.
+- **Categories and nulls.** Category frequencies and null rates are
+  measured and reproduced.
+
+What columns do *together* is not kept: a fake `age` does not follow a fake
+`status`, and a fake child row's key does not point at a fake parent. A
+`__checks__` rule or a `ColRule` added to the profiled spec by hand puts a
+relationship back where one matters. Nor is a text column's *format*
+recognised: an email column becomes random text of email-like length --
+declare `format="email"` on the profiled spec to fix that.
+
+## Large sources
+
+`sample=` profiles a random sample of that many rows instead of all of
+them, and `seed` makes the sample -- and the fake data -- the same every
+run:
+
+<!-- docs: skip -->
+```python
+fake = polspec.synthesize("events.parquet", 5_000_000, sample=200_000, seed=1)
+```
+
+## From the command line
+
+```bash
+polspec synthesize customers.parquet -o fake_customers.parquet \
+    -n 1000000 --seed 1 --replace name email --spec fake_customers.yaml
+```
+
+`--spec` writes the profiled spec beside the data, so the fake data can be
+reproduced -- `polspec generate fake_customers.yaml -n 1000000 --seed 1`
+-- and the spec reviewed. `polspec schema infer` takes the same profiling
+steps one at a time, as `--shape`, `--keys` and `--replace`; see
+[Command line](https://maxwellb13.github.io/polspec/how-to/cli/).
+
+---
+
 # Specs as values
 Source: https://maxwellb13.github.io/polspec/how-to/tablespec/
 
@@ -3431,6 +3576,7 @@ polspec generate orders.yaml -n 1000 -o orders.parquet --seed 1
 polspec validate orders.yaml orders.parquet
 polspec diff orders_v1.yaml orders_v2.yaml --markdown
 polspec drift orders.yaml orders.parquet
+polspec synthesize orders.parquet -o fake_orders.parquet --replace customer_name
 ```
 
 ## `schema infer` — profile data into a spec
@@ -3486,6 +3632,9 @@ new`.
 | `--max-unique-enum N` | Max distinct values for a string column to become an `Enum` (default 50) |
 | `--no-bounds` | Skip computing numeric/temporal bounds and string lengths |
 | `--sample N` | Profile only the first N rows |
+| `--shape` | Fit the distribution each numeric or temporal column follows |
+| `--keys` | Declare an all-distinct integer or text column unique |
+| `--replace COL...` | Columns whose values must not be carried into the spec |
 
 Treat the output as a draft. It describes the sample it saw — edit bounds,
 add rules, tighten a domain — before trusting it as a contract.
@@ -3626,6 +3775,19 @@ first with their keys threaded into their children** as
 written as `<name>.<format>` (Parquet by default). No `--references` are
 needed for keys between the discovered specs; supply them for a parent
 outside the directory.
+
+## `synthesize` — fake data from real data
+
+```bash
+polspec synthesize customers.parquet -o fake_customers.parquet     -n 1000000 --seed 1 --replace name email --spec fake_customers.yaml
+```
+
+Profiles the file -- shapes, keys, category frequencies, null rates -- and
+writes a fake one with the same schema, `-n` rows (as many as the source,
+by default). `--replace` names the columns whose values must not be carried
+over; `--sample N` profiles a random sample of N rows; `--spec` writes the
+profiled spec beside the data, to review or to regenerate from. See
+[Fake data from real data](https://maxwellb13.github.io/polspec/how-to/synthesizing/) for what carries over.
 
 ## `validate` — check data against a schema
 
@@ -3780,6 +3942,8 @@ cannot describe a signature the code does not have.
 | [`DriftOptions`][polspec.DriftOptions] | [Drift](https://maxwellb13.github.io/polspec/reference/api/drift/) |
 | [`DriftReport`][polspec.DriftReport] | [Drift](https://maxwellb13.github.io/polspec/reference/api/drift/) |
 | [`DriftFinding`][polspec.DriftFinding] | [Drift](https://maxwellb13.github.io/polspec/reference/api/drift/) |
+| [`synthesize`][polspec.synthesize] | [Profiling](https://maxwellb13.github.io/polspec/reference/api/profiling/) |
+| [`profile`][polspec.profile] | [Profiling](https://maxwellb13.github.io/polspec/reference/api/profiling/) |
 | [`profile_dataframe`][polspec.profile_dataframe] | [Profiling](https://maxwellb13.github.io/polspec/reference/api/profiling/) |
 | [`PolspecError`][polspec.PolspecError] | [Errors](https://maxwellb13.github.io/polspec/reference/api/errors/) |
 | [`SpecError`][polspec.SpecError] | [Errors](https://maxwellb13.github.io/polspec/reference/api/errors/) |
@@ -4153,7 +4317,7 @@ data -- go through `__columns__`:
 
 - `FrameSpec.foreign_keys(cls) -> 'tuple[ForeignKey, ...]'` -- The ForeignKey constraints defined on this FrameSpec.
 
-- `FrameSpec.from_dataframe(cls, df: 'pl.DataFrame', *, name: 'str' = 'ProfiledFrameSpec', weights: 'bool' = False, max_unique_enum: 'int' = 50, calculate_bounds: 'bool' = True) -> 'type[FrameSpec]'` -- Infers a spec by profiling an existing DataFrame.
+- `FrameSpec.from_dataframe(cls, df: 'pl.DataFrame', *, name: 'str' = 'ProfiledFrameSpec', weights: 'bool' = False, max_unique_enum: 'int' = 50, calculate_bounds: 'bool' = True, shape: 'bool' = False, detect_unique: 'bool' = False, replace: 'Sequence[str]' = ()) -> 'type[FrameSpec]'` -- Infers a spec by profiling an existing DataFrame.
 
 - `FrameSpec.from_spec(cls, spec: 'TableSpec', *, name: 'str | None' = None) -> 'type[FrameSpec]'` -- A `FrameSpec` subclass wrapping an existing `TableSpec`.
 
@@ -4836,13 +5000,90 @@ Source: https://maxwellb13.github.io/polspec/reference/api/profiling/
 
 # Profiling
 
-Inferring a spec from data you already have.
+Inferring a spec from data you already have, and generating a stand-in for
+it. See [Fake data from real data](https://maxwellb13.github.io/polspec/how-to/synthesizing/) for the
+workflow, and what carries over from the source.
 
+## synthesize
+
+### synthesize(source: 'Source', n: 'int | None' = None, *, seed: 'int | None' = None, replace: 'Sequence[str]' = (), sample: 'int | None' = None, max_unique_enum: 'int' = 50) -> 'pl.DataFrame'
+
+A fake frame that looks like `source`: `generate()` over `profile()`.
+
+The result has `source`'s schema, and `n` rows -- as many as `source`
+has, by default. Each column follows the profiled column's null rate,
+extremes, category frequencies and fitted distribution; a key column
+stays distinct. Columns are generated independently, so a relationship
+between two columns in `source` is not kept. See `profile` for `replace`,
+`sample` and `max_unique_enum`.
+
+`seed` seeds the generation, and the sample and fitting behind it, so the
+same source and seed give the same frame. To look at, edit or keep the
+spec the frame came from, call `profile` and `generate` separately.
+## profile
+
+### profile(source: 'Source', *, name: 'str' = 'Profiled', replace: 'Sequence[str]' = (), sample: 'int | None' = None, seed: 'int' = 0, max_unique_enum: 'int' = 50) -> 'TableSpec'
+
+A spec describing `source` well enough to generate a stand-in for it.
+
+Parameters
+----------
+source : pl.DataFrame | pl.LazyFrame | str | os.PathLike
+    The data: a frame, a lazy frame (any `scan_*` -- a file, a glob,
+    cloud storage), or the path of a CSV, TSV, Parquet, NDJSON, JSON or
+    Arrow IPC file.
+name : str, default "Profiled"
+    The spec's name.
+replace : sequence of str, default ()
+    Columns whose values must not be carried into the spec. A text
+    column named here is described by its lengths, never as an `Enum`
+    of the values it holds, and carries no weights.
+sample : int, optional
+    Profile a random sample of this many rows rather than every row.
+seed : int, default 0
+    Seeds the sample and the shape fitting, so a profile is the same
+    every run.
+max_unique_enum : int, default 50
+    A text column with at most this many distinct values -- and not in
+    `replace` -- becomes an `Enum` of them.
+
+Returns
+-------
+TableSpec
+    Everything `FrameSpec.from_dataframe` records, plus each column's
+    category frequencies, fitted distribution and uniqueness.
 ## profile_dataframe
 
-### profile_dataframe(df: 'pl.DataFrame', *, weights: 'bool' = False, max_unique_enum: 'int' = 50, calculate_bounds: 'bool' = True) -> 'dict[str, ColSpec]'
+### profile_dataframe(df: 'pl.DataFrame', *, weights: 'bool' = False, max_unique_enum: 'int' = 50, calculate_bounds: 'bool' = True, shape: 'bool' = False, detect_unique: 'bool' = False, replace: 'Sequence[str]' = (), seed: 'int' = 0) -> 'dict[str, ColSpec]'
 
 Infers ColSpec column definitions by profiling an existing DataFrame.
+
+Parameters
+----------
+df : pl.DataFrame
+    The data to describe.
+weights : bool, default False
+    Record each category's observed frequency, for categorical, enum and
+    boolean columns.
+max_unique_enum : int, default 50
+    A string or categorical column with at most this many distinct values
+    becomes an `Enum` of them.
+calculate_bounds : bool, default True
+    Record the observed extremes of numeric and temporal columns, and the
+    length range of text and binary ones.
+shape : bool, default False
+    Fit the distribution each numeric or temporal column follows, so it
+    generates that shape rather than uniformly between its extremes.
+    Needs `calculate_bounds`.
+detect_unique : bool, default False
+    Declare an integer or text column `unique=True` when every one of at
+    least a hundred values is distinct.
+replace : sequence of str, default ()
+    Columns whose values must not be carried into the spec: a text
+    column named here is described by its lengths alone -- never as an
+    `Enum` of the values it holds -- and carries no weights.
+seed : int, default 0
+    Seeds what fitting a shape samples, so a profile is the same every run.
 
 ---
 
@@ -5188,7 +5429,8 @@ shows the workflows, and what the exit codes mean.
 Generate a schema from data, a test from a schema, or check data against a schema.
 
 ```
-polspec [-h] [--version] {schema,test,validate,generate,diff,drift} ...
+polspec [-h] [--version]
+               {schema,test,validate,generate,synthesize,diff,drift} ...
 ```
 
 | Argument | Meaning |
@@ -5205,7 +5447,8 @@ Profile a data file into a YAML schema.
 
 ```
 polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
-                            [--max-unique-enum N] [--no-bounds] [--sample N]
+                            [--max-unique-enum N] [--no-bounds] [--sample N] [--shape]
+                            [--keys] [--replace COL [COL ...]]
                             source
 ```
 
@@ -5218,6 +5461,9 @@ polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
 | `--max-unique-enum` `N` | Max distinct values for a string column to become an Enum (default: 50) |
 | `--no-bounds` | Skip computing numeric/temporal bounds and string lengths |
 | `--sample` `N` | Profile only the first N rows |
+| `--shape` | Fit the distribution each numeric or temporal column follows |
+| `--keys` | Declare an all-distinct integer or text column unique |
+| `--replace` `COL` | Columns whose values must not be carried into the spec |
 
 ## `polspec schema new`
 
@@ -5299,6 +5545,29 @@ polspec generate [-h] [--all] [--format EXT] -n N -o OUTPUT [--seed SEED]
 | `--method` `METHOD` | Sampling method (default: random) One of `random`, `cartesian`. |
 | `--references` `NAME=PATH` | Parent data for a foreign key to another spec; repeat for several |
 | `--class` `NAME` | Generate from only this class (a .py source may define several) |
+
+## `polspec synthesize`
+
+Write a fake data file that looks like a real one.
+
+```
+polspec synthesize [-h] -o OUTPUT [-n N] [--seed SEED]
+                          [--replace COL [COL ...]] [--sample N] [--max-unique-enum N]
+                          [--spec PATH] [--name NAME]
+                          source
+```
+
+| Argument | Meaning |
+|:--|:--|
+| `source` | Path to a CSV, TSV, Parquet, NDJSON, JSON or IPC file |
+| `-o`, `--output` `OUTPUT` | **Required.** File to write; the extension picks the format (.parquet, .csv, ...) |
+| `-n`, `--rows` `N` | Rows to generate (default: as many as the source has) |
+| `--seed` `SEED` | Generation seed (default: random) |
+| `--replace` `COL` | Columns whose values must not be carried over: text in them is generated from its lengths, never from the values the source holds |
+| `--sample` `N` | Profile a random sample of N rows rather than every row |
+| `--max-unique-enum` `N` | Max distinct values for a text column to keep its values (default: 50) |
+| `--spec` `PATH` | Also write the spec the data was generated from (.yaml, or .py) |
+| `--name` `NAME` | The spec's class name (default: derived from source) |
 
 ## `polspec diff`
 
@@ -5486,7 +5755,9 @@ owns only the inner loop that fills arrays with values.
 | `catspec` | `CatSpec` — a shared registry of enums and categoricals, as a value, plus the metaclass that builds one from a class body (the same split as `tablespec`/`framespec`) |
 | `registry` | `Registry` — a declared set of specs: resolving cross-spec keys, ordering parents before children, `generate_all`/`validate_all`, one file and one diagram for the set |
 | `serialization` | Spec files: a field registry (`fields.py`) that YAML, generated Python and the `import datetime` decision all derive from; the dtype codec table (`dtypes.py`); format versions and migrations (`migrations.py`) |
-| `profiler` | Inferring a spec from an existing DataFrame |
+| `profiler` | Inferring a spec from an existing DataFrame; opt-in, a column's fitted shape, whether it is a key, and which columns' values not to carry over |
+| `shape` | Fitting the distribution a numeric or temporal column follows: each candidate the engine draws is fitted by moments, drawn through `generate()` with the column's bounds, and scored by its Kolmogorov-Smirnov distance to the data |
+| `synthesis` | `profile` and `synthesize`: a spec, and a fake frame, from a `DataFrame`, a `LazyFrame` or a data file |
 | `render` | Rendering a spec, a registry, a category registry or a drift report as Markdown or Mermaid |
 | `cli` | The `polspec` command, one module per verb: `_schema` (infer, new), `_data` (validate, generate), `_drift` (diff, drift), `_test`; `_io` holds the readers, writers and spec loaders they share |
 
@@ -5816,6 +6087,15 @@ either side, so `nobody@example.invalid` passes, `hostname` accepts
 `localhost`, and `ipv4` accepts `0.0.0.0`. A column that has to hold *real*
 identifiers is a `choices` list or a foreign key into the table that owns
 them. See [String formats](https://maxwellb13.github.io/polspec/how-to/formats/).
+
+## Synthesized data is column by column
+
+`polspec.synthesize` profiles each column on its own and generates each on
+its own, so every column of the fake frame looks like the source's and no
+relationship between columns survives: a correlation, a conditional mix, a
+foreign key. A text column's format is not recognised either, so an email
+column becomes text of an email's length. See
+[Fake data from real data](https://maxwellb13.github.io/polspec/how-to/synthesizing/#how-close-the-fake-data-is).
 
 ## Smaller sharp edges
 
@@ -6219,18 +6499,21 @@ page says otherwise, don't build something that depends on today's YAML
 surviving a version bump byte-for-byte, or on a specific seed producing the
 same values after an upgrade.
 
+## Fake data from real data exists, one column at a time
+
+`polspec.synthesize` (0.13.0) turns a real table into a fake one: each
+column's shape, frequencies, null rate and uniqueness are profiled and
+generated again, and `replace=` keeps a column's values out of it. What it
+does not do is the next step: columns are profiled independently, so what
+they do *together* -- an age that follows a status, a child row that points
+at a parent -- is not kept. Capturing that means a spec that can describe a
+joint distribution, which `ColRule` does only for conditions written by hand.
+
 ## Directions, not commitments
 
 Lower confidence than everything above: opportunities noticed rather than gaps
 being actively closed. They are here because the machinery each would need
 already exists, not because any of them is started.
-
-**Synthetic look-alike data.** `from_dataframe()` profiles real data into a
-spec and `generate()` turns a spec back into data, so the trip from a real
-table to a statistically similar fake one is already two calls. Making it one —
-with `tags` marking which columns should be replaced outright rather than
-imitated — would serve the share-realistic-data-without-sharing-real-data case
-directly.
 
 **A profiled spec that names a `format`.** `from_dataframe()` reads a
 string column as a `String` with a length range; it does not notice that
@@ -6238,7 +6521,8 @@ every value is an email address. Inference is a decision about how sure to be
 before naming a format, and a wrong guess is a spec that rejects real data,
 so it has not been made. [Drift](https://maxwellb13.github.io/polspec/how-to/drift/) is the reason to want
 it: a `format_violated` finding on a column the profiler named would have
-been the drift that mattered.
+been the drift that mattered, and `synthesize` would generate email-shaped
+emails rather than email-length text.
 
 **Test-framework integration.** A pytest fixture or plugin, or a Hypothesis
 strategy built from a spec, are the natural adjacent surfaces for a library
@@ -6273,6 +6557,31 @@ seed produces; see
 [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/).
 
 ## [Unreleased]
+
+### Added
+
+- **`polspec.synthesize`: a fake dataset from a real one.** From a
+  `DataFrame`, a `LazyFrame` or a data file, a frame with the same schema
+  whose columns follow the source's shapes, category frequencies and null
+  rates, whose keys stay distinct, and which holds none of its rows.
+  `replace=` names columns whose values must not be carried over; text in
+  them is generated from its lengths, never as an `Enum` of the values the
+  source holds. `sample=` profiles a random sample of a large source.
+  `polspec synthesize` does the same from the shell, and `--spec` writes
+  the spec the data was generated from. Columns are profiled one at a
+  time, so relationships between them are not kept -- see *Fake data from
+  real data*.
+
+- **`polspec.profile`**, the half of `synthesize` that describes the
+  source as a `TableSpec`, to review, edit or keep before generating.
+
+- **Profiling can fit a shape, find keys, and leave values behind.**
+  `from_dataframe()` and `profile_dataframe()` take `shape=True` -- each
+  numeric or temporal column's distribution, fitted against every one the
+  engine draws and kept if it beats drawing evenly (`polspec.shape`) --
+  `detect_unique=True`, and `replace=`; `polspec schema infer` takes
+  `--shape`, `--keys` and `--replace`. All three are off by default: a
+  profile with none of them is exactly what it was.
 
 ### Changed
 

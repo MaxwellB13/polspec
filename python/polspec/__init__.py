@@ -34,6 +34,7 @@ from polspec.reading import read
 from polspec.registry import Registry
 from polspec.rules import ColRule
 from polspec.spec import ColSpec
+from polspec.synthesis import profile, synthesize
 from polspec.tablespec import TableSpec
 from polspec.validation import (
     Finding,
@@ -75,6 +76,7 @@ __all__ = [
     "generate",
     "generate_batches",
     "inspect",
+    "profile",
     "profile_dataframe",
     "read",
     "scan",
@@ -82,5 +84,6 @@ __all__ = [
     "sink_ipc",
     "sink_ndjson",
     "sink_parquet",
+    "synthesize",
     "validate",
 ]

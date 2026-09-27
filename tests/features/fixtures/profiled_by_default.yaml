@@ -1,0 +1,57 @@
+# What FrameSpec.from_dataframe() infers from test_synthesize.golden_frame()
+# with no options: 0.13.0 added opt-in profiling, and this pins that the
+# default did not move. Regenerate only on purpose.
+version: 3
+name: Profiled
+columns:
+  id:
+    dtype: Int64
+    bounds:
+    - 0
+    - 399
+    null_probability: 0.0
+  amount:
+    dtype: Float64
+    bounds:
+    - 0.5
+    - 125.5
+    null_probability: 0.0
+  status:
+    dtype:
+      Enum:
+      - NEW
+      - PAID
+      - SHIPPED
+    null_probability: 0.0
+  note:
+    dtype: String
+    null_probability: 0.0
+    string_length:
+    - 6
+    - 8
+  flag:
+    dtype: Boolean
+    null_probability: 0.0
+  day:
+    dtype: Date
+    bounds:
+    - 19723
+    - 19812
+    null_probability: 0.0
+  tags:
+    dtype:
+      List: Int64
+    bounds:
+    - 0
+    - 1
+    null_probability: 0.0
+    list_length:
+    - 0
+    - 2
+  maybe:
+    dtype: Int64
+    nullable: true
+    bounds:
+    - 1
+    - 399
+    null_probability: 0.2

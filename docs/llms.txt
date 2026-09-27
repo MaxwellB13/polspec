@@ -28,6 +28,7 @@ https://maxwellb13.github.io/polspec/llms-full.txt
 - [Validate data](https://maxwellb13.github.io/polspec/how-to/validating/): `validate()` accepts a `DataFrame` or a `LazyFrame` and returns the same kind, so it drops into a pipeline.
 - [Schema and data drift](https://maxwellb13.github.io/polspec/how-to/drift/): `validate()` says whether data meets its spec.
 - [Test pipelines](https://maxwellb13.github.io/polspec/how-to/testing/): A spec is a schema and a data source at once, which makes it a natural fit for the tests around a data pipeline: declare what a stage of the pipeline expects, generate data that matches, and validate what it produces.
+- [Fake data from real data](https://maxwellb13.github.io/polspec/how-to/synthesizing/): `polspec.synthesize` turns a real dataset into a fake one that looks like it: the same schema, the same shape of values in each column, the same category mix and null rates -- and none of its rows.
 - [Specs as values](https://maxwellb13.github.io/polspec/how-to/tablespec/): A `FrameSpec` class body is the convenient way to *write* a spec.
 - [Specs as files](https://maxwellb13.github.io/polspec/how-to/files/): A spec can live in a file instead of a class body, so tooling outside Python can read it and so it can be reviewed as a document.
 - [Multiple specs](https://maxwellb13.github.io/polspec/how-to/registry/): A `ForeignKey` names the spec it points at, and a single spec knows nothing beyond that name.
@@ -44,7 +45,7 @@ https://maxwellb13.github.io/polspec/llms-full.txt
 - [Generation](https://maxwellb13.github.io/polspec/reference/api/generation/): Every function here takes a `TableSpec` as its first argument, and every one has a `FrameSpec` classmethod that forwards to it with `cls.spec` -- see Generating data for what the options mean and Specs as values for when to reach for which.
 - [Validation](https://maxwellb13.github.io/polspec/reference/api/validation/): `read()` brings a file in, in a spec's terms; `inspect()` returns a report on it and `validate()` raises one.
 - [Drift](https://maxwellb13.github.io/polspec/reference/api/drift/): `polspec.drift.diff()` compares two declarations; `polspec.drift.drift()` compares a declaration to a frame.
-- [Profiling](https://maxwellb13.github.io/polspec/reference/api/profiling/): Inferring a spec from data you already have.
+- [Profiling](https://maxwellb13.github.io/polspec/reference/api/profiling/): Inferring a spec from data you already have, and generating a stand-in for it.
 - [Exceptions](https://maxwellb13.github.io/polspec/reference/api/errors/): Every error polspec raises descends from `PolspecError`, so one `except` clause catches the lot.
 - [ColSpec fields](https://maxwellb13.github.io/polspec/reference/colspec-fields/): Every field a `ColSpec` takes, what it applies to, and what each side of the spec does with it.
 - [Spec files](https://maxwellb13.github.io/polspec/reference/spec-files/): The YAML a spec, a category registry or a registry of specs is written as, key by key.

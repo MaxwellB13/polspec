@@ -63,6 +63,21 @@ def _reader(path: Path) -> Callable[..., pl.DataFrame]:
     return reader
 
 
+def read_file(
+    path: str | os.PathLike[str], *, infer_dates: bool = False, **reader_options: Any
+) -> pl.DataFrame:
+    """A data file as Polars reads it, with no spec to read it in the terms
+    of: the reader chosen by extension, as `read` and the command line
+    choose it. `infer_dates` has a CSV or TSV reader recognise dates itself,
+    where there is no declaration to say which columns hold them.
+    """
+    file = Path(path)
+    reader = _reader(file)
+    if infer_dates and file.suffix.lower() in _DELIMITED:
+        reader_options.setdefault("try_parse_dates", True)
+    return reader(file, **reader_options)
+
+
 def read(
     spec: TableSpec | type, path: str | os.PathLike[str], **reader_options: Any
 ) -> pl.DataFrame:
