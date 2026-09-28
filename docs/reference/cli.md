@@ -36,7 +36,7 @@ polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
 | `-o`, `--output` `OUTPUT` | **Required.** File to write: .yaml/.yml, or .py for a FrameSpec subclass |
 | `--name` `NAME` | Spec class name (default: derived from source) |
 | `--weights` | Record each category's observed frequency |
-| `--max-unique-enum` `N` | Max distinct values for a string column to become an Enum (default: 50) |
+| `--max-unique-enum` `N` | Max distinct values for a string column to become an Enum, when they repeat (default: 50) |
 | `--no-bounds` | Skip computing numeric/temporal bounds and string lengths |
 | `--sample` `N` | Profile only the first N rows |
 | `--shape` | Fit the distribution each numeric or temporal column follows |
@@ -143,7 +143,7 @@ polspec synthesize [-h] -o OUTPUT [-n N] [--seed SEED]
 | `--seed` `SEED` | Generation seed (default: random) |
 | `--replace` `COL` | Columns whose values must not be carried over: text in them is generated from its lengths, never from the values the source holds |
 | `--sample` `N` | Profile a random sample of N rows rather than every row |
-| `--max-unique-enum` `N` | Max distinct values for a text column to keep its values (default: 50) |
+| `--max-unique-enum` `N` | Max distinct values for a text column to keep its values, when they repeat (default: 50) |
 | `--spec` `PATH` | Also write the spec the data was generated from (.yaml, or .py) |
 | `--name` `NAME` | The spec's class name (default: derived from source) |
 

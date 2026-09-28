@@ -9,6 +9,7 @@ from polspec import (
     FrameSpec,
     profile_dataframe,
 )
+from polspec.profiler import ENUM_MIN_REPEATS
 
 
 def test_from_dataframe_basic():
@@ -301,7 +302,7 @@ def test_from_dataframe_warns_for_a_nan_too():
 
 
 def test_a_column_with_the_empty_name_profiles_with_its_weights():
-    df = pl.DataFrame({"": ["x", "y", "x"], "b": [1, 2, 3]})
+    df = pl.DataFrame({"": ["x", "y", "x", "x", "y", "x"], "b": [1, 2, 3, 4, 5, 6]})
     columns = profile_dataframe(df, weights=True)
     assert columns[""].dtype == pl.Enum(["x", "y"])
     assert columns[""].weights == pytest.approx((2 / 3, 1 / 3))
@@ -317,3 +318,54 @@ def test_a_null_column_profiles_as_nothing_but_nulls():
             True,
             1.0,
         )
+
+
+# ---------------------------------------------------------------------------
+# An Enum needs repeats
+# ---------------------------------------------------------------------------
+
+
+def test_text_of_distinct_values_stays_text_however_few():
+    """Forty names in forty rows used to become an `Enum` of those forty,
+    and the spec rejected every other name. Values have to repeat -- each
+    at least twice on average -- to be categories."""
+    names = [f"person_{i}" for i in range(40)]
+    column = profile_dataframe(pl.DataFrame({"name": names}))["name"]
+    assert column.dtype == pl.String
+    assert column.string_length == Bound(8, 9)
+
+
+@pytest.mark.parametrize(
+    "values, narrowed",
+    [
+        (["a", "b", "a", "b"], True),  # two values, each twice: exactly enough
+        (["a", "b", "c", "a", "b"], False),  # three values in five rows
+        (["a", "b", "c", "a", "b", "c"], True),
+        (["only"], False),  # one row is no evidence of a category
+        (["x"] * 50, True),
+    ],
+)
+def test_an_enum_needs_each_value_twice_on_average(values, narrowed):
+    column = profile_dataframe(pl.DataFrame({"c": values}))["c"]
+    assert isinstance(column.dtype, pl.Enum) == narrowed
+    assert ENUM_MIN_REPEATS == 2
+
+
+def test_nulls_do_not_count_as_repeats():
+    values = ["a", None, "b", None, None, None]
+    assert profile_dataframe(pl.DataFrame({"c": values}))["c"].dtype == pl.String
+
+
+def test_a_categorical_of_distinct_values_stays_categorical():
+    series = pl.Series("c", ["a", "b", "c"], dtype=pl.Categorical)
+    column = profile_dataframe(series.to_frame())["c"]
+    assert column.dtype == pl.Categorical()
+
+
+def test_a_lists_elements_need_repeats_too():
+    df = pl.DataFrame({"tags": [["red", "blue"], ["green"], ["gold", "teal"]]})
+    assert profile_dataframe(df)["tags"].dtype == pl.List(pl.String)
+    repeated = pl.DataFrame({"tags": [["red", "blue"], ["red"], ["blue", "red"]]})
+    assert profile_dataframe(repeated)["tags"].dtype == pl.List(
+        pl.Enum(["blue", "red"])
+    )

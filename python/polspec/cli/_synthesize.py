@@ -110,7 +110,7 @@ def add_synthesize_parser(subparsers: argparse._SubParsersAction) -> None:
         type=int,
         default=50,
         metavar="N",
-        help="Max distinct values for a text column to keep its values (default: 50)",
+        help="Max distinct values for a text column to keep its values, when they repeat (default: 50)",
     )
     synthesize.add_argument(
         "--spec",

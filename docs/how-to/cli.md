@@ -69,7 +69,7 @@ new`.
 |:--|:--|
 | `--name NAME` | Class name (default: derived from the file name) |
 | `--weights` | Record each category's observed frequency |
-| `--max-unique-enum N` | Max distinct values for a string column to become an `Enum` (default 50) |
+| `--max-unique-enum N` | Max distinct values for a string column to become an `Enum`, when they repeat (default 50) |
 | `--no-bounds` | Skip computing numeric/temporal bounds and string lengths |
 | `--sample N` | Profile only the first N rows |
 | `--shape` | Fit the distribution each numeric or temporal column follows |

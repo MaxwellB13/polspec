@@ -72,9 +72,10 @@ Everything a spec can say about a column, and nothing else:
 Two lines of that table decide what to put in `replace=`:
 
 - **A text column with few distinct values keeps them.** A column of at
-  most `max_unique_enum` (50) distinct values becomes an `Enum` of them, so
-  a status column stays `NEW`/`PAID`/`SHIPPED` -- and a column of thirty
-  customer names stays those thirty names. Name every column whose values
+  most `max_unique_enum` (50) distinct values, each repeated twice on
+  average, becomes an `Enum` of them, so a status column stays
+  `NEW`/`PAID`/`SHIPPED` -- and a column of thirty customer names, over a
+  few hundred rows, stays those thirty names. Name every column whose values
   are sensitive in `replace=`: it is then generated from its lengths alone.
 - **Extremes are real values.** The smallest and largest amount, the
   earliest and latest date, become the fake column's bounds. If those are

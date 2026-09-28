@@ -125,7 +125,8 @@ print(Profiled.to_markdown())
 ```
 
 It infers nullability and observed null rates, narrows low-cardinality strings
-to `Enum`, and — with `weights=True` — records how often each category actually
+whose values repeat to `Enum` -- a column of distinct names stays text --
+and — with `weights=True` — records how often each category actually
 occurred, so regenerated data keeps the observed mix rather than a uniform one.
 
 Treat the result as a first draft to edit, not a finished contract: it

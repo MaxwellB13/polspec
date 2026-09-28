@@ -1166,3 +1166,14 @@ def test_synthesize_accepts_a_file_holding_infinities(tmp_path, capsys):
     assert run_cli("synthesize", source, "-o", fake, "-n", "50", "--seed", "1") == 0
     assert "holds 0 NaN and 10 infinite value(s)" in capsys.readouterr().err
     assert pl.read_parquet(fake)["rate"].is_finite().all()
+
+
+def test_a_schema_inferred_from_one_sample_of_names_accepts_another(tmp_path):
+    """The case that made an Enum need repeats: forty distinct names became
+    an Enum of those forty, and the next file of names failed validation."""
+    first, second = tmp_path / "first.csv", tmp_path / "second.csv"
+    pl.DataFrame({"name": [f"person_{i}" for i in range(40)]}).write_csv(first)
+    pl.DataFrame({"name": [f"person_{i}" for i in range(40, 80)]}).write_csv(second)
+    spec = tmp_path / "people.yaml"
+    assert run_cli("schema", "infer", first, "-o", spec) == 0
+    assert run_cli("validate", spec, second) == 0
