@@ -65,6 +65,8 @@ def column_kind(dtype: pl.DataType) -> str:
         return "struct"
     if map_parts(dtype) is not None:
         return "map"
+    if dtype == pl.Null:
+        return "null"
     raise SpecError(f"polspec cannot generate data for dtype {dtype!r}")
 
 
@@ -335,6 +337,7 @@ class ColSpec:
         self._normalize_choices_and_weights()
         self._normalize_distribution()
 
+        self._validate_null()
         self._validate_probabilities()
         self._validate_format()
         self._validate_extra_values()
@@ -402,7 +405,9 @@ class ColSpec:
             return declared
         dtype = self.value_dtype
         assert isinstance(dtype, pl.Struct)  # noqa: S101 - only a struct has fields
-        return ColSpec(field_dtypes(dtype)[name])
+        field = field_dtypes(dtype)[name]
+        # A Null field can only be declared nullable; say so for it.
+        return ColSpec(field, nullable=field == pl.Null)
 
     def _validate_nesting(self) -> None:
         """A `List` or `Array` needs an element dtype to describe."""
@@ -816,6 +821,24 @@ class ColSpec:
                 raise SpecError(
                     f"Boolean distribution_params['p'] must be between 0 and 1, got {params['p']}"
                 )
+
+    def _validate_null(self) -> None:
+        """A `Null` column holds nothing but nulls: it must be declared
+        nullable, and its null rate is 1 by definition -- the default rate
+        becomes 1, and any other rate written for it is refused."""
+        if self.dtype != pl.Null:
+            return
+        if not self.nullable:
+            raise SpecError(
+                "ColSpec(pl.Null) holds only nulls, so it must be declared "
+                "nullable=True."
+            )
+        if self.null_probability not in (DEFAULT_NULL_PROBABILITY, 1.0):
+            raise SpecError(
+                f"ColSpec(pl.Null) declares null_probability={self.null_probability}"
+                ", but every value of a Null column is null. Leave it out."
+            )
+        object.__setattr__(self, "null_probability", 1.0)
 
     def _validate_probabilities(self) -> None:
         if not 0.0 <= self.null_probability <= 1.0:

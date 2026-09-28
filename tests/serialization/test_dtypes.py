@@ -28,6 +28,9 @@ NAMED = [
     pl.Datetime("ns", "Europe/London"),
     pl.Duration("ns"),
     pl.List(pl.Categorical(pl.Categories("colour"))),
+    # Holds no data, but a profiled file can have a column of it.
+    pl.Null(),
+    pl.Struct({"empty": pl.Null, "x": pl.Int64}),
 ]
 
 
@@ -92,7 +95,7 @@ def test_a_malformed_dtype_is_refused_naming_its_form(data, complaint):
         dtype_from_data(data)
 
 
-@pytest.mark.parametrize("dtype", [pl.Object(), pl.Null()], ids=str)
+@pytest.mark.parametrize("dtype", [pl.Object()], ids=str)
 def test_a_dtype_with_no_file_form_is_refused(dtype):
     with pytest.raises(SerializationError, match="cannot write dtype"):
         dtype_to_data(dtype)

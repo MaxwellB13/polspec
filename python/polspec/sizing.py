@@ -72,6 +72,8 @@ def _column_bytes(spec: ColSpec) -> float:
     """One column's bytes per row: its values, plus a validity bit when the
     column can hold nulls."""
     width = _value_bytes(spec, spec.dtype)
+    if spec.dtype == pl.Null:
+        return width
     return width + (_VALIDITY_BYTES if spec.nullable else 0.0)
 
 
@@ -110,8 +112,8 @@ def _value_bytes(spec: ColSpec, dtype: pl.DataType) -> float:
         # A struct holds no values of its own: it is its fields, each a
         # column with its own validity when it can be null.
         return sum(_column_bytes(spec._field(name)) for name in field_dtypes(dtype))
-    # A dtype with no values to hold (a `Null` column) costs its view at most.
-    return _VIEW_BYTES
+    # A `Null` column allocates nothing: no values, and no validity either.
+    return 0.0
 
 
 def _present(spec: ColSpec) -> float:

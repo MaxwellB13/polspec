@@ -35,11 +35,15 @@ from polspec import (
     GenerationError,
     SpecError,
     TableSpec,
+    ValidationError,
     col,
     generate,
+    generate_batches,
+    profile,
     validate,
 )
 from polspec.formats import FORMATS
+from polspec.serialization import from_dict, to_dict
 
 ROWS = 300
 SEED = 11
@@ -747,10 +751,14 @@ def test_a_hand_built_cycle_still_validates():
 # name, which is how Int128, UInt128 and Float16 went unnoticed through 0.9.0.
 # ---------------------------------------------------------------------------
 
-# Dtypes that hold no data of their own to generate: a column of nothing,
-# arbitrary Python objects, a placeholder, and the extension mechanism.
-# Declared and validated by dtype; generate() refuses each by name.
-NOT_DATA = {"Null", "Object", "Unknown", "Extension", "BaseExtension"}
+# Dtypes that hold no data of their own to generate: arbitrary Python
+# objects, a placeholder, and the extension mechanism. Declared and
+# validated by dtype; generate() refuses each by name.
+NOT_DATA = {"Object", "Unknown", "Extension", "BaseExtension"}
+
+# A column of nothing: it holds no data either, but there is nothing to
+# refuse -- it generates as all nulls, since 0.13.1 (profiled files have them).
+ONLY_NULLS = {"Null"}
 
 # Dtypes that hold data polspec does not generate yet: declared, validated,
 # profiled and written to a spec file by dtype, refused by name at generate().
@@ -776,7 +784,7 @@ def test_every_polars_dtype_is_generated_or_named_as_not_data():
         (dtype if isinstance(dtype, type) else type(dtype)).__name__
         for dtype in EVERY_DTYPE
     }
-    assert exported - covered - NOT_DATA - NOT_YET == set(), (
+    assert exported - covered - NOT_DATA - ONLY_NULLS - NOT_YET == set(), (
         "a Polars dtype neither generates nor is named as holding no data, or "
         "as not generated yet"
     )
@@ -787,6 +795,44 @@ def test_a_dtype_that_holds_no_data_is_refused_by_name(name):
     spec = TableSpec("NotData", {"c": ColSpec(getattr(pl, name))})
     with pytest.raises(SpecError, match="cannot generate data for dtype"):
         generate(spec, ROWS, seed=SEED)
+
+
+def test_a_null_column_generates_validates_and_survives_a_spec_file():
+    """A `Null` column is declared nullable -- it can hold nothing else --
+    generates as all nulls, whole and batched, and writes as `Null`. Before
+    0.13.1 generate() refused it, so a file with an empty column could be
+    profiled and not synthesized."""
+    spec = TableSpec(
+        "Nulls",
+        {"c": ColSpec(pl.Null, nullable=True), "n": ColSpec(pl.Int64)},
+    )
+    df = generate(spec, ROWS, seed=SEED)
+    assert df.schema == spec.schema()
+    assert df["c"].null_count() == ROWS
+    validate(spec, df)
+    batched = pl.concat(generate_batches(spec, ROWS, batch_size=7, seed=SEED))
+    assert batched.equals(df)
+    assert from_dict(to_dict(spec)) == spec
+    assert to_dict(spec)["columns"]["c"] == {
+        "dtype": "Null",
+        "nullable": True,
+        "null_probability": 1.0,
+    }
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=ValidationError,
+    reason="A spec cannot declare NaN, so a profile's bounds exclude it (0.14.0)",
+)
+def test_a_profiled_spec_accepts_its_sources_nan():
+    """limitations.md, "a float's NaN and infinities": the profile takes a
+    float column's bounds from its finite values, and warns; the spec it
+    makes then reports the NaN it was made from."""
+    source = pl.DataFrame({"f": [1.5, float("nan"), 3.0]})
+    with pytest.warns(UserWarning, match="1 NaN and 0 infinite"):
+        spec = profile(source)
+    validate(spec, source)
 
 
 @pytest.mark.parametrize("dtype", EVERY_DTYPE, ids=str)

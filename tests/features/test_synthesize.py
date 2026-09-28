@@ -249,3 +249,37 @@ def test_spec_for_helper_still_profiles_a_single_column():
         detect_unique=True,
     ).spec["c"]
     assert column.bounds is not None
+
+
+# ---------------------------------------------------------------------------
+# Sources with what a spec cannot say, or barely can
+# ---------------------------------------------------------------------------
+
+
+def test_a_source_holding_infinities_and_nans_synthesizes():
+    """It used to fail -- a profiled bound must be finite. The fake frame
+    keeps to the finite values' range and holds neither."""
+    source = pl.DataFrame({"f": [1.5, float("inf"), float("nan"), 3.0, 2.0] * 20})
+    with pytest.warns(UserWarning, match="20 NaN and 20 infinite"):
+        fake = synthesize(source, 500, seed=1)
+    assert fake["f"].is_finite().all()
+    assert fake["f"].min() >= 1.5
+    assert fake["f"].max() <= 3.0
+
+
+def test_a_null_column_and_an_empty_name_synthesize():
+    """An empty column -- `Null`, as Parquet keeps one -- could be profiled
+    and not generated; a column named "" came back from the engine renamed
+    `column_0`."""
+    source = pl.DataFrame(
+        {
+            "": ["x", "y", "x", "z"],
+            "empty": pl.Series([None] * 4, dtype=pl.Null),
+            "n": [1, 2, 3, 4],
+        }
+    )
+    fake = synthesize(source, 30, seed=1)
+    assert fake.schema == source.schema
+    assert fake["empty"].null_count() == 30
+    assert set(fake[""]) <= {"x", "y", "z"}
+    validate(profile(source), fake)

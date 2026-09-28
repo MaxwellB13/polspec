@@ -13,6 +13,8 @@ import re
 import subprocess
 import sys
 import types
+import warnings
+from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -201,6 +203,19 @@ def _frame_specs_in_module(module: types.ModuleType) -> dict[str, type[FrameSpec
         and value is not FrameSpec
         and value.__module__ == module.__name__
     }
+
+
+@contextlib.contextmanager
+def _warnings_printed() -> Iterator[None]:
+    """Prints each warning raised inside as a `warning:` line on stderr --
+    a spec file that cannot hold a value, a column profiled around its NaNs
+    -- where a Python warning would be a traceback-looking line, or an
+    error under `-W error`."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        yield
+    for warning in caught:
+        print(f"warning: {warning.message}", file=sys.stderr)
 
 
 def _maybe_format(path: Path) -> None:

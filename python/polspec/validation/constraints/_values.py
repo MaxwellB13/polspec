@@ -651,11 +651,14 @@ def _unholdable(
     range `declared` holds in words; None when every value fits.
 
     Only a declared integer or `Decimal` has a range a compatible dtype can
-    exceed and a cast then refuse. A float declared narrower than it arrives
+    exceed and a cast then refuse -- and a declared `Null`, which any dtype
+    stands in for and which holds no value at all. A float declared narrower than it arrives
     is left alone: past its range a cast makes an infinity, not an error.
     Each literal is typed as the column is, and each side is tested only
     where `actual` reaches past it, so every literal is one `actual` holds.
     """
+    if declared == pl.Null:
+        return None if actual == pl.Null else (column.is_not_null(), "only nulls")
     if declared.is_integer() and actual.is_integer():
         declared_limits = dtype_value_limits(declared)
         actual_limits = dtype_value_limits(actual)

@@ -1142,3 +1142,27 @@ def test_validate_reports_a_time_of_day_on_a_date_column_rather_than_a_traceback
     pl.DataFrame({"day": [dt.time(9), dt.time(17)]}).write_parquet(data)
     assert run_cli("validate", spec, data) == 1
     assert "Column 'day': expected dtype Date, got Time" in capsys.readouterr().out
+
+
+def test_schema_infer_names_a_column_holding_nans(tmp_path, capsys):
+    """The profile's bounds leave the NaN out, so validating the same file
+    against the spec reports it; the command says so up front."""
+    data = tmp_path / "readings.csv"
+    pl.DataFrame({"level": [1.5, float("nan"), 3.0]}).write_csv(data)
+    spec = tmp_path / "readings.yaml"
+    assert run_cli("schema", "infer", data, "-o", spec) == 0
+    err = capsys.readouterr().err
+    assert "warning: Column 'level' holds 1 NaN and 0 infinite value(s)" in err
+    assert run_cli("validate", spec, data) == 1
+
+
+def test_synthesize_accepts_a_file_holding_infinities(tmp_path, capsys):
+    """It used to end in `error: ColSpec.bounds max must be a finite value`."""
+    source = tmp_path / "rates.parquet"
+    pl.DataFrame({"rate": [0.5, float("inf"), 1.5, -float("inf")] * 5}).write_parquet(
+        source
+    )
+    fake = tmp_path / "fake.parquet"
+    assert run_cli("synthesize", source, "-o", fake, "-n", "50", "--seed", "1") == 0
+    assert "holds 0 NaN and 10 infinite value(s)" in capsys.readouterr().err
+    assert pl.read_parquet(fake)["rate"].is_finite().all()
