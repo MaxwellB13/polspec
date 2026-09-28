@@ -7,6 +7,7 @@ for the elements of a List, recursing as deeply as the dtype nests.
 from __future__ import annotations
 
 import dataclasses
+import decimal
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -14,7 +15,13 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 
 from polspec.domain import is_textual
-from polspec.dtypes import element_dtype, field_dtypes, map_entries, typed_values
+from polspec.dtypes import (
+    dtype_value_limits,
+    element_dtype,
+    field_dtypes,
+    map_entries,
+    typed_values,
+)
 from polspec.formats import lookup as _lookup_format
 from polspec.validation.report import FindingCode
 
@@ -62,6 +69,27 @@ class _Nullability(_ColumnConstraint):
         kind = "column" if self.where == self.column else "field"
         return (
             f"Column '{self.where}': non-nullable {kind} contains {count} null value(s)"
+        )
+
+
+@dataclass(kw_only=True)
+class _Unholdable(_ColumnConstraint):
+    """A value the declared dtype cannot hold, in a column whose own dtype
+    can: an `Int64` of 1000 where an `Int8` is declared. The permissive
+    dtype check lets the wider dtype stand in; this is what keeps a frame
+    that passes castable to the spec it passed."""
+
+    declared: pl.DataType
+    holds: str
+    code: FindingCode = "dtype"
+
+    def details(self, stats: dict[str, list]) -> dict[str, Any]:
+        return {"expected": str(self.declared), "holds": self.holds}
+
+    def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
+        return (
+            f"Column '{self.where}': found {count} value(s) that "
+            f"{self.declared} cannot hold ({self.holds}). Samples: {samples}"
         )
 
 
@@ -352,6 +380,23 @@ def _value_constraints(
     dtype = spec.value_dtype
     constraints: list[Constraint] = []
 
+    # Whatever `validate_bounds` says: this is the dtype's claim, not the
+    # declared bounds'.
+    unholdable = _unholdable(column, dtype, actual_dtype)
+    if unholdable is not None:
+        mask, holds = unholdable
+        constraints.append(
+            _Unholdable(
+                key=f"{where}__dtype_range",
+                mask=present & mask,
+                sample_expr=column,
+                column=name,
+                where=where,
+                declared=dtype,
+                holds=holds,
+            )
+        )
+
     allowed = _allowed_values(spec)
     if allowed is not None:
         if is_textual(actual_dtype):
@@ -601,6 +646,83 @@ def _allowed_values(spec: ColSpec) -> list[Any] | None:
     if spec.choices is not None:
         return list(spec.choices)
     return None
+
+
+def _unholdable(
+    column: pl.Expr, declared: pl.DataType, actual: pl.DataType
+) -> tuple[pl.Expr, str] | None:
+    """A mask for the values `actual` holds and `declared` cannot, and the
+    range `declared` holds in words; None when every value fits.
+
+    Only a declared integer or `Decimal` has a range a compatible dtype can
+    exceed and a cast then refuse. A float declared narrower than it arrives
+    is left alone: past its range a cast makes an infinity, not an error.
+    Each literal is typed as the column is, and each side is tested only
+    where `actual` reaches past it, so every literal is one `actual` holds.
+    """
+    if declared.is_integer() and actual.is_integer():
+        declared_limits = dtype_value_limits(declared)
+        actual_limits = dtype_value_limits(actual)
+        if declared_limits is None or actual_limits is None:
+            return None
+        lo, hi = (int(v) for v in declared_limits)
+        sides = []
+        if actual_limits[0] < lo:
+            sides.append(column < pl.lit(lo, dtype=actual))
+        if actual_limits[1] > hi:
+            sides.append(column > pl.lit(hi, dtype=actual))
+        return _either(sides, f"{lo}..{hi}")
+
+    if not isinstance(declared, pl.Decimal):
+        return None
+    precision = declared.precision or 38
+    scale = declared.scale or 0
+    # A Decimal(p, s) holds magnitudes under 10**(p - s); a value is rounded
+    # to s places before that is asked, so half a unit below it is too many.
+    limit = 10 ** (precision - scale)
+    holds = f"magnitude under {limit}"
+    rounding = decimal.Decimal(5).scaleb(-(scale + 1))
+
+    if actual.is_float():
+        threshold = float(limit - rounding)
+        # A NaN compares greater than any number, so it is caught here too:
+        # a Decimal cannot hold one either.
+        return _either([column >= threshold, column <= -threshold], holds)
+
+    if actual.is_integer():
+        actual_limits = dtype_value_limits(actual)
+        if actual_limits is None:
+            return None
+        sides = []
+        if actual_limits[1] >= limit:
+            sides.append(column >= pl.lit(limit, dtype=actual))
+        if actual_limits[0] <= -limit:
+            sides.append(column <= pl.lit(-limit, dtype=actual))
+        return _either(sides, holds)
+
+    if isinstance(actual, pl.Decimal):
+        actual_scale = actual.scale or 0
+        if (actual.precision or 38) - actual_scale <= precision - scale:
+            return None
+        edge = decimal.Decimal(limit) - (rounding if actual_scale > scale else 0)
+        return _either(
+            [
+                column >= pl.lit(edge, dtype=actual),
+                column <= pl.lit(-edge, dtype=actual),
+            ],
+            holds,
+        )
+    return None
+
+
+def _either(sides: list[pl.Expr], holds: str) -> tuple[pl.Expr, str] | None:
+    """`sides` as one mask, with `holds`; None when there is no side to test."""
+    if not sides:
+        return None
+    mask = sides[0]
+    for side in sides[1:]:
+        mask = mask | side
+    return mask, holds
 
 
 def _out_of_bounds(

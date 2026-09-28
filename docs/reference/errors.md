@@ -44,6 +44,7 @@ through `report.rows(finding)`; structural ones describe the frame's shape.
 | `extra_columns` | structural | the frame has columns the spec does not declare (`extra_cols="raise"`) |
 | `missing_columns` | structural | the frame lacks declared columns (`missing_cols="raise"`) |
 | `dtype` | structural | a column's dtype is not compatible with its declaration |
+| `dtype` | row-level | a compatible, wider dtype holds a value the declared one cannot -- `Int8` declared, an `Int64` of 1000; keyed `<column>__dtype_range` |
 | `foreign_key_unresolved` | structural | a key references another spec and `references=` had no entry for it |
 | `nullability` | row-level | a non-nullable column holds nulls |
 | `choices` | row-level | a value is outside `choices` or the `Enum` categories |

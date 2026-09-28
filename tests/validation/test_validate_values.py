@@ -19,6 +19,7 @@ from polspec import (
     col,
     generate,
     inspect,
+    validate,
 )
 
 
@@ -332,3 +333,163 @@ def test_a_rules_choices_are_compared_in_the_columns_own_dtype():
     )
     df = generate(spec, 200, seed=1)
     assert inspect(spec, df).passed
+
+
+# ---------------------------------------------------------------------------
+# A value the declared dtype cannot hold
+# ---------------------------------------------------------------------------
+
+_INTEGER_LIMITS = {
+    pl.Int8: (-(2**7), 2**7 - 1),
+    pl.Int16: (-(2**15), 2**15 - 1),
+    pl.Int32: (-(2**31), 2**31 - 1),
+    pl.UInt8: (0, 2**8 - 1),
+    pl.UInt16: (0, 2**16 - 1),
+    pl.UInt32: (0, 2**32 - 1),
+}
+
+
+def _dtype_findings(report) -> list[str]:
+    return [f.key for f in report.findings if f.code == "dtype"]
+
+
+@pytest.mark.parametrize("declared", list(_INTEGER_LIMITS), ids=str)
+@pytest.mark.parametrize("arrives_as", [pl.Int64, pl.UInt64, pl.Int128], ids=str)
+def test_an_integer_the_declared_width_cannot_hold_is_a_dtype_finding(
+    declared, arrives_as
+):
+    """Any integer width stands in for a declared integer; its values still
+    have to fit. Before 0.13.1 `Int8` holding 1000 passed, and
+    `validate(cast=True)` -- which only runs on a frame that passed -- then
+    raised Polars' conversion error.
+    """
+    lo, hi = _INTEGER_LIMITS[declared]
+    spec = TableSpec("T", {"n": ColSpec(declared, nullable=True)})
+    edges = [v for v in (lo, hi) if _fits(v, arrives_as)]
+    inside = pl.DataFrame({"n": pl.Series([*edges, None], dtype=arrives_as)})
+    assert not inspect(spec, inside)
+    assert validate(spec, inside, cast=True)["n"].dtype == declared
+
+    beyond = [v for v in (lo - 1, hi + 1) if _fits(v, arrives_as)]
+    outside = pl.DataFrame({"n": pl.Series([hi, *beyond], dtype=arrives_as)})
+    report = inspect(spec, outside)
+    assert _dtype_findings(report) == ["n__dtype_range"]
+    (finding,) = report.findings
+    assert finding.count == len(beyond)
+    assert sorted(finding.samples) == sorted(beyond)
+    assert f"{declared} cannot hold ({lo}..{hi})" in finding.message
+
+
+def _fits(value: int, dtype: pl.DataType) -> bool:
+    return value >= 0 or not dtype.is_unsigned_integer()
+
+
+def test_a_wider_integer_that_holds_nothing_past_the_declared_one_adds_no_check():
+    """`Int8` arriving as `Int8`, or as a narrower `UInt8` for an `Int16`,
+    cannot hold a value its declaration cannot."""
+    from polspec.validation.constraints._values import _unholdable
+
+    assert _unholdable(pl.col("n"), pl.Int16, pl.UInt8) is None
+    assert _unholdable(pl.col("n"), pl.Int64, pl.Int64) is None
+
+
+@pytest.mark.parametrize(
+    "data, unholdable",
+    [
+        # A float is rounded to two places first: 999.995 becomes 1000.00.
+        (pl.Series([999.99, 999.994, -999.994]), []),
+        (pl.Series([999.995, 1000.0, -1000.0, float("inf")]), None),
+        (pl.Series([float("nan")]), None),
+        (pl.Series([999, -999], dtype=pl.Int64), []),
+        (pl.Series([1000, -1000], dtype=pl.Int64), None),
+        (pl.Series([100, 255], dtype=pl.UInt8), []),
+        (
+            pl.Series(["999.994", "-999.994"]).cast(pl.Decimal(10, 3)),
+            [],
+        ),
+        (
+            pl.Series(["999.995", "-1000.000"]).cast(pl.Decimal(10, 3)),
+            None,
+        ),
+        (pl.Series(["99.99"]).cast(pl.Decimal(4, 2)), []),
+    ],
+    ids=lambda v: str(v.dtype) if isinstance(v, pl.Series) else "",
+)
+def test_a_decimal_holds_magnitudes_under_its_integer_digits(data, unholdable):
+    """A `Decimal(5, 2)` holds magnitudes under 1000, however the column
+    arrives: as a float, an integer or a wider Decimal. `None` in the table
+    means every value is one it cannot hold."""
+    spec = TableSpec("T", {"d": ColSpec(pl.Decimal(5, 2))})
+    frame = pl.DataFrame({"d": data})
+    report = inspect(spec, frame)
+    if unholdable == []:
+        assert not report, report
+        assert validate(spec, frame, cast=True)["d"].dtype == pl.Decimal(5, 2)
+    else:
+        (finding,) = report.findings
+        assert finding.key == "d__dtype_range"
+        assert finding.count == len(data)
+        assert "magnitude under 1000" in finding.message
+
+
+def test_an_unholdable_value_is_found_inside_lists_and_structs():
+    spec = TableSpec(
+        "T",
+        {
+            "l": ColSpec(pl.List(pl.Int8)),
+            "a": ColSpec(pl.Array(pl.UInt8, 2)),
+            "s": ColSpec(pl.Struct({"x": pl.Int16})),
+            "ll": ColSpec(pl.List(pl.List(pl.Int8))),
+        },
+    )
+    frame = pl.DataFrame(
+        {
+            "l": [[1, 1000], [2]],
+            "a": pl.Series([[1, -1], [2, 3]], dtype=pl.Array(pl.Int64, 2)),
+            "s": [{"x": 40_000}, {"x": 1}],
+            "ll": [[[1], [500]], [[2]]],
+        }
+    )
+    report = inspect(spec, frame)
+    assert sorted(_dtype_findings(report)) == [
+        "a__dtype_range",
+        "l__dtype_range",
+        "ll[]__dtype_range",
+        "s.x__dtype_range",
+    ]
+    assert all(f.count == 1 for f in report.findings)
+    # A field's samples are the field's values, as for any claim on a field.
+    assert [f.samples for f in report.findings if f.key == "s.x__dtype_range"] == [
+        (40_000,)
+    ]
+
+
+@pytest.mark.skipif(not hasattr(pl, "Map"), reason="Map is a Polars 2 dtype")
+def test_an_unholdable_value_is_found_in_a_map():
+    spec = TableSpec("T", {"m": ColSpec(pl.Map(pl.String, pl.Int8))})
+    frame = pl.DataFrame(
+        {
+            "m": pl.Series([[{"key": "a", "value": 1000}]]).cast(
+                pl.Map(pl.String, pl.Int64)
+            )
+        }
+    )
+    assert _dtype_findings(inspect(spec, frame)) == ["m.value__dtype_range"]
+
+
+def test_an_unholdable_value_is_reported_with_the_bounds_checks_off():
+    """The range is the dtype's claim, not the declared bounds'."""
+    spec = TableSpec("T", {"n": ColSpec(pl.Int8, bounds=(0, 10))})
+    frame = pl.DataFrame({"n": [1000]})
+    assert sorted(f.code for f in inspect(spec, frame).findings) == ["bounds", "dtype"]
+    assert [f.code for f in inspect(spec, frame, validate_bounds=False).findings] == [
+        "dtype"
+    ]
+
+
+def test_an_unholdable_value_locates_its_rows():
+    spec = TableSpec("T", {"n": ColSpec(pl.Int8)})
+    frame = pl.DataFrame({"n": [1, 1000, 2, -500]})
+    report = inspect(spec, frame)
+    assert report.failing_rows().collect()["n"].to_list() == [1000, -500]
+    assert report.passing_rows().collect()["n"].to_list() == [1, 2]

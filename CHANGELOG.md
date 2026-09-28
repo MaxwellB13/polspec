@@ -21,6 +21,17 @@ seed produces; see
   zoned `Datetime` no longer stand in for each other -- one is a
   wall-clock reading, the other an instant; two zones still do. Drift's
   `dtype_changed` severity follows, decided by the same function.
+- **A value the declared dtype cannot hold is a finding.** A wider dtype
+  stands in for a declared integer or `Decimal`, and its values were never
+  asked to fit: an `Int8` column arriving as `Int64` with 1000 in it, a
+  `UInt8` with -5, passed -- and `validate(cast=True)`, which only runs on
+  a frame that passed, then raised Polars' conversion error. **Stricter:**
+  such a value is now a row-level `dtype` finding keyed
+  `<column>__dtype_range`, with samples and rows, in list elements, struct
+  fields and map values too, and whatever `validate_bounds` says. A float
+  or integer too large for a `Decimal`'s integer digits, after rounding to
+  its scale, is one as well. A frame with no findings now always survives
+  `cast=True`.
 - **Every function taking a spec takes a `FrameSpec` class.**
   `polspec.generate(Orders, 10)` -- and `generate_batches`, `scan`, the
   four `sink_*` functions, `inspect`, `validate` and

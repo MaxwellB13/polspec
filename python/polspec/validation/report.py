@@ -215,10 +215,11 @@ class ValidationReport:
         the complement of `failing_rows()`, so the two split a frame into
         what passed and what to quarantine.
 
-        Raises `ValueError` when a structural finding (`dtype`,
+        Raises `ValueError` when a structural finding (a wrong `dtype`,
         `missing_columns`, `extra_columns`, `foreign_key_unresolved`) is in
         the report: that is a verdict on the whole frame, not on rows, so
-        there is no row-level answer to give.
+        there is no row-level answer to give. A `dtype` finding about values
+        the declared dtype cannot hold has rows, and does not raise.
         """
         structural = [f.key for f in self.findings if not f.row_level]
         if structural:

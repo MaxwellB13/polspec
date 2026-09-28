@@ -91,9 +91,10 @@ A structural finding -- a missing column, a wrong dtype -- judges the whole
 frame rather than rows, so `passing_rows()` refuses to answer until it is
 fixed.
 
-Structural findings (`extra_columns`, `missing_columns`, `dtype`,
+Structural findings (`extra_columns`, `missing_columns`, a wrong `dtype`,
 `foreign_key_unresolved`) describe the frame's shape rather than its rows and
-have no rows to return. `inspect()` takes exactly the options `validate()`
+have no rows to return. A `dtype` finding about values the declared dtype
+cannot hold -- keyed `<column>__dtype_range` -- is row-level: it has rows. `inspect()` takes exactly the options `validate()`
 does; `validate()` is `inspect()` followed by `report.raise_if_failed()` and
 the structural transformations below. The full list of codes is in
 [Errors](../reference/errors.md#finding-codes), and `polspec validate` on the
@@ -288,6 +289,15 @@ naive one do not stand in for each other -- one is an instant, the other a
 wall-clock reading -- but two zones do, being the same instants shown
 differently. `strict_dtypes=True` requires the exact dtype, treating only
 `String` and `Utf8` as interchangeable.
+
+A wider dtype standing in still has to hold only values the declared one
+can. An `Int64` column where an `Int8` is declared passes with values from
+-128 to 127, and a value outside that is a `dtype` finding with its rows and
+samples; so is a float or integer too large for a declared `Decimal`'s
+integer digits, after rounding to its scale. That is what makes a frame
+with no findings safe to hand to `cast=True`. Floats are left alone: a
+`Float64` too large for a declared `Float32` casts to an infinity rather
+than failing.
 
 ### Casting
 
