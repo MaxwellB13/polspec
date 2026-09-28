@@ -1,10 +1,13 @@
 """`FrameSpec.from_dataframe`: inferring a spec by profiling existing data."""
 
+import warnings
+
 import polars as pl
 import pytest
 from polspec import (
     Bound,
     FrameSpec,
+    profile_dataframe,
 )
 
 
@@ -227,3 +230,90 @@ def test_from_dataframe_temporal_and_binary(tmp_path):
     gen = LoadedSpec.generate(100, seed=42)
     assert gen.height == 100
     assert gen.schema == df.schema
+
+
+# ---------------------------------------------------------------------------
+# NaN and infinity: bounds from the finite values, and a warning
+# ---------------------------------------------------------------------------
+
+
+def _profiled_with_warnings(df: pl.DataFrame, **options) -> tuple[dict, list[str]]:
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        columns = profile_dataframe(df, **options)
+    return columns, [str(w.message) for w in caught]
+
+
+def test_a_float_is_bounded_by_its_finite_values_and_its_others_are_named():
+    """An infinity used to make profiling fail -- a bound must be finite --
+    and a NaN was left outside the bounds without a word. Now the bounds
+    are the finite values', and each column holding either says so."""
+    inf = float("inf")
+    df = pl.DataFrame(
+        {
+            "f": [1.5, inf, float("nan"), 3.0, -inf],
+            "clean": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "point": [{"v": float("nan")}, {"v": 1.0}, {"v": 2.0}, None, {"v": 2.0}],
+            "readings": [[1.0, inf], [2.0], [], None, [0.5]],
+        }
+    )
+    columns, said = _profiled_with_warnings(df)
+    assert columns["f"].bounds == Bound(1.5, 3.0)
+    assert columns["point"].fields["v"].bounds == Bound(1.0, 2.0)
+    assert columns["readings"].bounds == Bound(0.5, 2.0)
+    assert said == [
+        f"Column '{where}' holds {nans} NaN and {infinities} infinite value(s), "
+        "which a spec cannot declare: its bounds are its finite values', so "
+        "validating this data against the spec reports them."
+        for where, nans, infinities in (
+            ("f", 1, 2),
+            ("point.v", 1, 0),
+            ("readings", 0, 1),
+        )
+    ]
+
+
+def test_a_float_with_no_finite_value_has_no_bounds_and_no_warning():
+    """No bounds, so nothing is left outside them: validation accepts the
+    NaNs, and there is nothing to warn about."""
+    df = pl.DataFrame({"f": [float("nan"), float("inf")]})
+    columns, said = _profiled_with_warnings(df)
+    assert columns["f"].bounds is None
+    assert said == []
+
+
+def test_no_bounds_asked_for_means_no_warning():
+    df = pl.DataFrame({"f": [1.0, float("nan")]})
+    columns, said = _profiled_with_warnings(df, calculate_bounds=False)
+    assert columns["f"].bounds is None
+    assert said == []
+
+
+def test_from_dataframe_warns_for_a_nan_too():
+    with pytest.warns(UserWarning, match="Column 'f' holds 1 NaN"):
+        spec = FrameSpec.from_dataframe(pl.DataFrame({"f": [1.0, float("nan")]}))
+    assert spec.col("f").bounds == Bound(1.0, 1.0)
+
+
+# ---------------------------------------------------------------------------
+# Names and dtypes at the edge
+# ---------------------------------------------------------------------------
+
+
+def test_a_column_with_the_empty_name_profiles_with_its_weights():
+    df = pl.DataFrame({"": ["x", "y", "x"], "b": [1, 2, 3]})
+    columns = profile_dataframe(df, weights=True)
+    assert columns[""].dtype == pl.Enum(["x", "y"])
+    assert columns[""].weights == pytest.approx((2 / 3, 1 / 3))
+
+
+def test_a_null_column_profiles_as_nothing_but_nulls():
+    """However many rows -- none included, where a rate cannot be measured."""
+    null = pl.Series([None, None], dtype=pl.Null)
+    for df in (pl.DataFrame({"z": null}), pl.DataFrame({"z": null}).head(0)):
+        column = profile_dataframe(df)["z"]
+        assert (column.dtype, column.nullable, column.null_probability) == (
+            pl.Null,
+            True,
+            1.0,
+        )

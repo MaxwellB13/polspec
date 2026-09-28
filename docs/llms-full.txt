@@ -5163,6 +5163,13 @@ replace : sequence of str, default ()
 seed : int, default 0
     Seeds what fitting a shape samples, so a profile is the same every run.
 
+Warns
+-----
+UserWarning
+    Once per float column holding a NaN or an infinity. A spec cannot
+    declare either yet, so the bounds are its finite values' and the
+    spec reports those values when the data is validated against it.
+
 ---
 
 # Exceptions
@@ -5420,7 +5427,8 @@ and a spec file's `categories:` may name one.
 A dtype with no parameters is its name: `Int8`, `Int16`, `Int32`, `Int64`,
 `Int128`, `UInt8`, `UInt16`, `UInt32`, `UInt64`, `UInt128`, `Float16`,
 `Float32`, `Float64`, `Boolean`, `String`, `Binary`, `Date`, `Time`,
-`Datetime`, `Duration` and `Categorical`. One with parameters is a mapping
+`Datetime`, `Duration`, `Categorical` and `Null` -- a column of nothing but
+nulls, which is declared `nullable: true`. One with parameters is a mapping
 of one key:
 
 | Dtype | Written as |
@@ -6178,6 +6186,17 @@ foreign key. A text column's format is not recognised either, so an email
 column becomes text of an email's length. See
 [Fake data from real data](https://maxwellb13.github.io/polspec/how-to/synthesizing/#how-close-the-fake-data-is).
 
+### A float's NaN and infinities are outside its profiled bounds
+
+A spec cannot yet say that a column holds NaN, and a bound cannot be
+infinite. So `profile()`, `from_dataframe()`, `polspec schema infer` and
+`polspec synthesize` take a float column's bounds from its finite values,
+and warn once per column that holds either, saying how many. Validating the
+source against its own profile then reports those values as `bounds`
+findings, and a synthesized frame holds none of them. A column with no
+finite value at all gets no bounds. Declaring how often a column is NaN is
+planned for 0.14.0.
+
 ## Smaller sharp edges
 
 - **A `Decimal`, `Int128` or `UInt128` is drawn through 64 bits.**
@@ -6672,6 +6691,24 @@ seed produces; see
   for the declared one -- datetimes against a `Date` -- are now asked of
   the column as `cast=True` would hand it back, so a clean report stays
   clean once cast.
+- **A float column holding NaN or an infinity can be profiled.** An
+  infinity made `profile()`, `synthesize()`, `from_dataframe()`, `polspec
+  schema infer` and `polspec synthesize` fail -- a bound must be finite --
+  and a NaN was left outside the inferred bounds without a word, so the
+  spec rejected the file it came from. The bounds are now the finite
+  values', and a `UserWarning` (a `warning:` line on the command line)
+  names each column holding either, with how many. A spec still cannot
+  declare NaN, so validating the source against its profile reports them;
+  see *Known limitations*.
+- **A `Null` column generates.** A column of nothing but nulls -- what an
+  empty column is in Parquet -- could be profiled but not generated, so
+  `synthesize` failed on it, and it could not be written to a spec file.
+  `ColSpec(pl.Null, nullable=True)` now generates all nulls, writes as
+  `Null`, and validates any dtype holding only nulls, a value in it being
+  a row-level `dtype` finding. It must be declared nullable, and its null
+  rate is 1.
+- **A column named `""`** came back from generation named `column_0`, so
+  a spec -- or a synthesized file -- with an empty column name failed.
 - **Every function taking a spec takes a `FrameSpec` class.**
   `polspec.generate(Orders, 10)` -- and `generate_batches`, `scan`, the
   four `sink_*` functions, `inspect`, `validate` and

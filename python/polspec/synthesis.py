@@ -146,8 +146,11 @@ def synthesized(
     fake = generate(spec, rows, seed=seed)
     # The profile narrows a low-cardinality text column to an Enum of its
     # values; a stand-in for the source has the source's own dtypes.
-    fake = fake.cast(
-        {c: dtype for c, dtype in frame.schema.items() if fake.schema[c] != dtype}
+    # Column by column: `DataFrame.cast` skips a mapping's "" key.
+    fake = fake.with_columns(
+        pl.col(c).cast(dtype)
+        for c, dtype in frame.schema.items()
+        if fake.schema[c] != dtype
     )
     return fake, spec
 

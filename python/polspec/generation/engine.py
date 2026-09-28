@@ -514,7 +514,7 @@ def generate_random(
     scalars = {
         n_: s
         for n_, s in columns.items()
-        if column_kind(s.dtype) not in ("list", "struct", "map")
+        if column_kind(s.dtype) not in ("list", "struct", "map", "null")
         and not _overlays_extras(s)
     }
     plans: list[ColumnPlan] = []
@@ -532,7 +532,8 @@ def generate_random(
             finished[name] = _finish(raw.pop(name), spec, domains[name])
         else:
             finished[name] = _generate_column(name, spec, n, seed, row_offset)
-    return pl.DataFrame([finished[name] for name in columns])
+    # Keyed by name: from a list, Polars renames a series called "" `column_0`.
+    return pl.DataFrame({name: finished[name] for name in columns})
 
 
 def _generate_column(
@@ -547,6 +548,9 @@ def _generate_column(
     own type.
     """
     kind = column_kind(spec.dtype)
+    if kind == "null":
+        # Nothing to draw: every value of a Null column is null.
+        return pl.Series(name, [None] * n, dtype=pl.Null)
     if kind == "list":
         return _generate_list_column(name, spec, n, seed, row_offset)
     if kind == "map":

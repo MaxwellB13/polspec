@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import sys
-import warnings
 from pathlib import Path
 
 from polspec.cli._io import (
@@ -13,6 +11,7 @@ from polspec.cli._io import (
     _existing,
     _maybe_format,
     _require_identifier,
+    _warnings_printed,
     _write_data_file,
 )
 from polspec.errors import CliError
@@ -35,18 +34,19 @@ def _cmd_synthesize(args: argparse.Namespace) -> int:
     name = args.name or _class_name_from(source.stem)
     _require_identifier(name, what="--name")
 
-    try:
-        fake, spec = synthesized(
-            source,
-            args.rows,
-            seed=args.seed,
-            replace=args.replace or (),
-            sample=args.sample,
-            max_unique_enum=args.max_unique_enum,
-            name=name,
-        )
-    except ValueError as exc:  # a name in --replace the file lacks, and the like
-        raise CliError(str(exc)) from exc
+    with _warnings_printed():
+        try:
+            fake, spec = synthesized(
+                source,
+                args.rows,
+                seed=args.seed,
+                replace=args.replace or (),
+                sample=args.sample,
+                max_unique_enum=args.max_unique_enum,
+                name=name,
+            )
+        except ValueError as exc:  # a name in --replace the file lacks, and the like
+            raise CliError(str(exc)) from exc
     _write_data_file(fake, output)
     print(f"Wrote {fake.height:,} synthesized row(s) like {source} to {output}")
 
@@ -59,11 +59,8 @@ def _cmd_synthesize(args: argparse.Namespace) -> int:
             if spec_path.suffix.lower() == ".py"
             else spec_cls.to_yaml
         )
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
+        with _warnings_printed():
             writer(spec_path)
-        for warning in caught:
-            print(f"warning: {warning.message}", file=sys.stderr)
         _maybe_format(spec_path)
         print(f"Wrote the spec it was generated from to {spec_path}")
     return 0

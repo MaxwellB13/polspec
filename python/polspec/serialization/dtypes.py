@@ -43,6 +43,7 @@ DTYPE_NAMES: dict[DtypeLike, str] = {
     pl.Datetime: "Datetime",
     pl.Duration: "Duration",
     pl.Binary: "Binary",
+    pl.Null: "Null",
 }
 NAME_TO_DTYPE: dict[str, DtypeLike] = {name: dt for dt, name in DTYPE_NAMES.items()}
 

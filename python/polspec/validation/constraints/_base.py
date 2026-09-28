@@ -103,6 +103,11 @@ def is_dtype_compatible(
             return actual in (pl.String, pl.Utf8)
         return actual == expected
 
+    if expected == pl.Null:
+        # Any dtype can hold nothing but nulls -- a text format hands an
+        # empty column back as `String` -- and a value is a finding of its
+        # own (`_unholdable`), with its rows.
+        return True
     if isinstance(expected, pl.Enum):
         return isinstance(actual, pl.Enum) or actual in (
             pl.String,

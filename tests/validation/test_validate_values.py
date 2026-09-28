@@ -14,6 +14,7 @@ from polspec import (
     ColRule,
     ColSpec,
     FrameSpec,
+    SpecError,
     TableSpec,
     ValidationError,
     col,
@@ -493,3 +494,38 @@ def test_an_unholdable_value_locates_its_rows():
     report = inspect(spec, frame)
     assert report.failing_rows().collect()["n"].to_list() == [1000, -500]
     assert report.passing_rows().collect()["n"].to_list() == [1, 2]
+
+
+# ---------------------------------------------------------------------------
+# A `Null` column holds nothing, whatever dtype it arrives as
+# ---------------------------------------------------------------------------
+
+
+def test_a_null_column_accepts_any_dtype_holding_only_nulls():
+    """A text format hands an empty column back as `String`; a value in it
+    is a row-level `dtype` finding, as a value an `Int8` cannot hold is."""
+    spec = TableSpec("T", {"z": ColSpec(pl.Null, nullable=True)})
+    empty = pl.DataFrame({"z": pl.Series([None, None], dtype=pl.String)})
+    assert not inspect(spec, empty)
+    assert validate(spec, empty, cast=True)["z"].dtype == pl.Null
+
+    held = pl.DataFrame({"z": ["x", None, "y"]})
+    (finding,) = inspect(spec, held).findings
+    assert (finding.key, finding.count, finding.samples) == (
+        "z__dtype_range",
+        2,
+        ("x", "y"),
+    )
+    assert "Null cannot hold (only nulls)" in finding.message
+    assert [f.key for f in inspect(spec, empty, strict_dtypes=True).findings] == [
+        "z__dtype"
+    ]
+
+
+def test_a_null_column_is_declared_nullable_with_every_value_null():
+    assert ColSpec(pl.Null, nullable=True).null_probability == 1.0
+    assert ColSpec(pl.Null, nullable=True, null_probability=1.0).null_probability == 1.0
+    with pytest.raises(SpecError, match="must be declared nullable=True"):
+        ColSpec(pl.Null)
+    with pytest.raises(SpecError, match="every value of a Null column is null"):
+        ColSpec(pl.Null, nullable=True, null_probability=0.5)

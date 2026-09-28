@@ -43,6 +43,24 @@ seed produces; see
   for the declared one -- datetimes against a `Date` -- are now asked of
   the column as `cast=True` would hand it back, so a clean report stays
   clean once cast.
+- **A float column holding NaN or an infinity can be profiled.** An
+  infinity made `profile()`, `synthesize()`, `from_dataframe()`, `polspec
+  schema infer` and `polspec synthesize` fail -- a bound must be finite --
+  and a NaN was left outside the inferred bounds without a word, so the
+  spec rejected the file it came from. The bounds are now the finite
+  values', and a `UserWarning` (a `warning:` line on the command line)
+  names each column holding either, with how many. A spec still cannot
+  declare NaN, so validating the source against its profile reports them;
+  see *Known limitations*.
+- **A `Null` column generates.** A column of nothing but nulls -- what an
+  empty column is in Parquet -- could be profiled but not generated, so
+  `synthesize` failed on it, and it could not be written to a spec file.
+  `ColSpec(pl.Null, nullable=True)` now generates all nulls, writes as
+  `Null`, and validates any dtype holding only nulls, a value in it being
+  a row-level `dtype` finding. It must be declared nullable, and its null
+  rate is 1.
+- **A column named `""`** came back from generation named `column_0`, so
+  a spec -- or a synthesized file -- with an empty column name failed.
 - **Every function taking a spec takes a `FrameSpec` class.**
   `polspec.generate(Orders, 10)` -- and `generate_batches`, `scan`, the
   four `sink_*` functions, `inspect`, `validate` and

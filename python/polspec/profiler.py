@@ -21,8 +21,9 @@ the data (`polspec.synthesize`):
 from __future__ import annotations
 
 import dataclasses
+import warnings
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import polars as pl
 
@@ -47,6 +48,9 @@ class _Options:
     shape: bool = False
     detect_unique: bool = False
     seed: int = 0
+    # Each float column holding a NaN or an infinity outside the bounds its
+    # finite values gave it, as (path, NaNs, infinities): said once, after.
+    non_finite: list[tuple[str, int, int]] = field(default_factory=list)
 
 
 def profile_dataframe(
@@ -88,6 +92,13 @@ def profile_dataframe(
         `Enum` of the values it holds -- and carries no weights.
     seed : int, default 0
         Seeds what fitting a shape samples, so a profile is the same every run.
+
+    Warns
+    -----
+    UserWarning
+        Once per float column holding a NaN or an infinity. A spec cannot
+        declare either yet, so the bounds are its finite values' and the
+        spec reports those values when the data is validated against it.
     """
     if not isinstance(df, pl.DataFrame):
         raise TypeError(f"Expected pl.DataFrame, got {type(df).__name__}")
@@ -114,7 +125,7 @@ def profile_dataframe(
         detect_unique=detect_unique,
         seed=seed,
     )
-    return {
+    columns = {
         name: _profile_column(
             df[name],
             name,
@@ -125,6 +136,15 @@ def profile_dataframe(
         )
         for name in df.columns
     }
+    for where, nans, infinities in options.non_finite:
+        warnings.warn(
+            f"Column '{where}' holds {nans:,} NaN and {infinities:,} infinite "
+            "value(s), which a spec cannot declare: its bounds are its finite "
+            "values', so validating this data against the spec reports them.",
+            UserWarning,
+            stacklevel=2,
+        )
+    return columns
 
 
 def _profile_column(
@@ -155,13 +175,15 @@ def _profile_column(
             values, label, total_rows=rows, options=options, imitate=imitate
         )
 
+    if dtype == pl.Null:
+        # Every value null, however many rows -- an empty frame included.
+        return ColSpec(dtype=pl.Null, nullable=True)
+
     if isinstance(dtype, pl.Enum):
         categories = dtype.categories.to_list()
         return spec(
             dtype=dtype,
-            weights=_empirical_weights(non_null, name, categories)
-            if with_weights
-            else None,
+            weights=_empirical_weights(non_null, categories) if with_weights else None,
         )
 
     if (entries := map_entries(dtype)) is not None:
@@ -185,7 +207,9 @@ def _profile_column(
         # it is null inside one. The dtype is rebuilt from the fields', since
         # profiling may narrow a String field to an Enum as it would a column.
         fields = {
-            field: nested(non_null.struct.field(field), field, len(non_null))
+            field: nested(
+                non_null.struct.field(field), f"{name}.{field}", len(non_null)
+            )
             for field in field_dtypes(dtype)
         }
         return spec(
@@ -252,10 +276,16 @@ def _profile_column(
         return keyed if keyed.unique else _shaped(keyed, non_null, options)
 
     if dtype.is_float():
+        # A NaN or an infinity is no bound -- a spec refuses a non-finite
+        # one -- so the extent and the shape are the finite values'.
+        finite = non_null.filter(non_null.is_finite())
         described = spec(
-            dtype=dtype, bounds=_extent(non_null, float, options.calculate_bounds)
+            dtype=dtype, bounds=_extent(finite, float, options.calculate_bounds)
         )
-        return _shaped(described, non_null, options)
+        if described.bounds is not None and len(finite) < len(non_null):
+            nans = int(non_null.is_nan().sum())
+            options.non_finite.append((name, nans, len(non_null) - len(finite) - nans))
+        return _shaped(described, finite, options)
 
     if dtype.is_decimal():
         described = spec(
@@ -331,9 +361,7 @@ def _profile_textual(
         categories = non_null.unique().sort().to_list()
         return spec(
             dtype=pl.Enum(categories),
-            weights=_empirical_weights(non_null, name, categories)
-            if with_weights
-            else None,
+            weights=_empirical_weights(non_null, categories) if with_weights else None,
         )
 
     if is_categorical_dtype(dtype):
@@ -367,7 +395,7 @@ def _extent(values: pl.Series, cast, calculate_bounds: bool) -> Bound | None:
 
 
 def _empirical_weights(
-    non_null: pl.Series, name: str, categories: list
+    non_null: pl.Series, categories: list
 ) -> tuple[float, ...] | None:
     """How often each category actually occurs, in `categories` order.
 
@@ -377,8 +405,14 @@ def _empirical_weights(
     if len(non_null) == 0:
         return None
     counts = non_null.value_counts()
+    # By position: the values' column is named for the series, which may be
+    # named "", and Polars will not index a column by the empty name.
     observed = dict(
-        zip(counts[name].to_list(), counts[counts.columns[1]].to_list(), strict=True)
+        zip(
+            counts[counts.columns[0]].to_list(),
+            counts[counts.columns[1]].to_list(),
+            strict=True,
+        )
     )
     total = float(len(non_null))
     return tuple(observed.get(category, 0) / total for category in categories)

@@ -57,9 +57,16 @@ def generate_dataframe(
     `GenerationError`. `row_offset` asks for rows `[row_offset, row_offset + n)`
     of the frame `seed` describes."""
     try:
-        return _extension().generate_dataframe(list(plans), n, seed, row_offset)
+        frame = _extension().generate_dataframe(list(plans), n, seed, row_offset)
     except ValueError as exc:
         raise GenerationError(str(exc)) from exc
+    # Polars names a series called "" `column_<i>` on its way into Python, so
+    # a column with the empty name came back as another; the engine keeps the
+    # plans' order, so each is named for its plan again.
+    names = [plan.name for plan in plans]
+    if frame.columns != names:
+        frame.columns = names
+    return frame
 
 
 def permuted_indices(domain: int, seed: int, start: int, n: int) -> pl.Series:

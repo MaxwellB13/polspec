@@ -92,6 +92,17 @@ foreign key. A text column's format is not recognised either, so an email
 column becomes text of an email's length. See
 [Fake data from real data](../how-to/synthesizing.md#how-close-the-fake-data-is).
 
+### A float's NaN and infinities are outside its profiled bounds
+
+A spec cannot yet say that a column holds NaN, and a bound cannot be
+infinite. So `profile()`, `from_dataframe()`, `polspec schema infer` and
+`polspec synthesize` take a float column's bounds from its finite values,
+and warn once per column that holds either, saying how many. Validating the
+source against its own profile then reports those values as `bounds`
+findings, and a synthesized frame holds none of them. A column with no
+finite value at all gets no bounds. Declaring how often a column is NaN is
+planned for 0.14.0.
+
 ## Smaller sharp edges
 
 - **A `Decimal`, `Int128` or `UInt128` is drawn through 64 bits.**

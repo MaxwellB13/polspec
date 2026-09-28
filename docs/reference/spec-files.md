@@ -123,7 +123,8 @@ and a spec file's `categories:` may name one.
 A dtype with no parameters is its name: `Int8`, `Int16`, `Int32`, `Int64`,
 `Int128`, `UInt8`, `UInt16`, `UInt32`, `UInt64`, `UInt128`, `Float16`,
 `Float32`, `Float64`, `Boolean`, `String`, `Binary`, `Date`, `Time`,
-`Datetime`, `Duration` and `Categorical`. One with parameters is a mapping
+`Datetime`, `Duration`, `Categorical` and `Null` -- a column of nothing but
+nulls, which is declared `nullable: true`. One with parameters is a mapping
 of one key:
 
 | Dtype | Written as |
