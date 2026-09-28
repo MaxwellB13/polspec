@@ -2373,7 +2373,9 @@ A wider dtype standing in still has to hold only values the declared one
 can. An `Int64` column where an `Int8` is declared passes with values from
 -128 to 127, and a value outside that is a `dtype` finding with its rows and
 samples; so is a float or integer too large for a declared `Decimal`'s
-integer digits, after rounding to its scale. That is what makes a frame
+integer digits, after rounding to its scale. A declared bound has to fit its
+dtype, so on a side a bound closes such a value is out of bounds as well,
+and reported only as that -- unless `validate_bounds=False`. That is what makes a frame
 with no findings safe to hand to `cast=True`. Floats are left alone: a
 `Float64` too large for a declared `Float32` casts to an infinity rather
 than failing.
@@ -2964,6 +2966,13 @@ What columns do *together* is not kept: a fake `age` does not follow a fake
 relationship back where one matters. Nor is a text column's *format*
 recognised: an email column becomes random text of email-like length --
 declare `format="email"` on the profiled spec to fix that.
+
+A float column's NaNs and infinities are not carried over either: a spec
+cannot declare them yet, so the column's range is its finite values', and
+`profile()` and `synthesize()` warn, naming each column that held any and
+how many. The fake column holds none; validating the *source* against its
+profile reports them as out of bounds. See
+[Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/#a-floats-nan-and-infinities-are-outside-its-profiled-bounds).
 
 ## Large sources
 
@@ -6480,7 +6489,9 @@ distinct within its map. A `Datetime` carrying a `time_zone` is included: the
 physical value is an offset from the naive epoch whatever the zone, so the
 zone rides along and `generate()` hands back a column of the dtype you
 declared. A `Decimal` is the same idea: an integer and a scale, drawn as
-the integer and scaled back.
+the integer and scaled back. A `Null` column, which holds no data at all,
+generates as the nulls it is -- declared `nullable=True`, since it can hold
+nothing else.
 
 What a nested column *claims* is one declaration per value: a `List`'s
 elements take the fields a scalar column takes, and a `Struct`'s take a
@@ -6578,7 +6589,8 @@ Two things this project has made no compatibility promise about yet:
   column repeating its first batch's elements in every batch after it, so
   the elements of a `List`, `Array` or `Map` column past the first batch
   changed, once; `generate()` did not. 0.13.0 changed nothing that
-  constructed under 0.12.0.
+  constructed under 0.12.0, and 0.13.1 nothing that constructed under
+  0.13.0.
 
 The first of those is easier to live with than it sounds, because a spec file
 now says which format wrote it. Every file `to_yaml()` writes carries
@@ -6656,6 +6668,27 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-09-28
+
+**Fixes, for data nobody generated.** 0.13.0 pointed polspec at real
+tables; this release makes it answer for them. `inspect()` promises never to
+raise for a frame that fails, and three ways a frame arriving in another
+dtype broke that are closed -- most found by a new property test that
+carries generated frames through the dtypes real data arrives as. Profiling
+survives NaN and infinities, a `Null` column generates, and every function
+that takes a spec takes a `FrameSpec` class.
+
+**Validation is stricter in two places, on purpose:** a value the declared
+dtype cannot hold (an `Int8` column arriving as `Int64` with 1000 in it) is
+now a `dtype` finding, and a naive `Datetime` no longer stands in for a
+zoned one, or a `Time` or `Duration` for a `Date`. Each was a frame that was
+not what its spec declared, and could end in a raw Polars error one step
+later; a frame with no findings now always survives `validate(cast=True)`.
+
+**No seeded output changes.** Every spec that constructs under 0.13.0
+generates what it did -- checked against the published 0.13.0 across 435
+cases -- and no spec file needs migrating.
+
 ### Fixed
 
 - **A temporal stands in only for its own kind.** Validation's default,
@@ -6676,9 +6709,12 @@ seed produces; see
   a frame that passed, then raised Polars' conversion error. **Stricter:**
   such a value is now a row-level `dtype` finding keyed
   `<column>__dtype_range`, with samples and rows, in list elements, struct
-  fields and map values too, and whatever `validate_bounds` says. A float
-  or integer too large for a `Decimal`'s integer digits, after rounding to
-  its scale, is one as well. A frame with no findings now always survives
+  fields and map values too. A float or integer too large for a
+  `Decimal`'s integer digits, after rounding to its scale, is one as well.
+  A declared bound has to fit its dtype, so on a side a checked bound
+  closes, such a value is out of bounds too and reported there alone --
+  which keeps the check free for the usual case, a CSV's `Int64` for a
+  bounded `Int32`. A frame with no findings now always survives
   `cast=True`.
 - **A claim over a column that arrived as another dtype no longer takes
   `inspect()` down.** Found by a new property test that carries generated
@@ -6690,7 +6726,9 @@ seed produces; see
   `Date`. And a column's or rule's `choices` against a dtype standing in
   for the declared one -- datetimes against a `Date` -- are now asked of
   the column as `cast=True` would hand it back, so a clean report stays
-  clean once cast.
+  clean once cast. Temporal bounds are measured the same way: a bound a
+  microsecond past midnight, on a `Datetime` column arriving as a `Date`,
+  rounded to the day and passed a value the cast then put outside it.
 - **A float column holding NaN or an infinity can be profiled.** An
   infinity made `profile()`, `synthesize()`, `from_dataframe()`, `polspec
   schema infer` and `polspec synthesize` fail -- a bound must be finite --
@@ -8453,7 +8491,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/MaxwellB13/polspec/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/MaxwellB13/polspec/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/MaxwellB13/polspec/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/MaxwellB13/polspec/compare/v0.10.1...v0.11.0

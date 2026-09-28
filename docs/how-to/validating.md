@@ -294,7 +294,9 @@ A wider dtype standing in still has to hold only values the declared one
 can. An `Int64` column where an `Int8` is declared passes with values from
 -128 to 127, and a value outside that is a `dtype` finding with its rows and
 samples; so is a float or integer too large for a declared `Decimal`'s
-integer digits, after rounding to its scale. That is what makes a frame
+integer digits, after rounding to its scale. A declared bound has to fit its
+dtype, so on a side a bound closes such a value is out of bounds as well,
+and reported only as that -- unless `validate_bounds=False`. That is what makes a frame
 with no findings safe to hand to `cast=True`. Floats are left alone: a
 `Float64` too large for a declared `Float32` casts to an infinity rather
 than failing.

@@ -654,8 +654,12 @@ def _full_range(dtype: pl.DataType) -> st.SearchStrategy[Any] | None:
 @st.composite
 def _lone_number(draw: st.DrawFn) -> TableSpec:
     """One integer or Decimal column: the declarations a wider dtype can
-    carry values past, drawn often enough for the range check to be tried."""
+    carry values past, drawn often enough for the range check to be tried --
+    and often unbounded, since a checked bound leaves the range check
+    nothing to do on its side."""
     fields = draw(st.one_of(_integer(), _decimal()))
+    if draw(st.booleans()):
+        fields.pop("bounds", None)
     if draw(st.booleans()):
         fields["nullable"] = True
     return TableSpec("Drawn", {"c0": ColSpec(**fields)})
@@ -713,7 +717,9 @@ def test_the_arrival_strategy_reaches_both_verdicts():
     be drawn often enough to count."""
     seen: dict[str, int] = {"clean": 0, "dtype": 0, "dtype_range": 0, "transported": 0}
 
-    @settings(max_examples=400, deadline=None, database=None, derandomize=True)
+    # As many draws as the other reach tests take: at 400 the range findings
+    # fell as low as 13 in a full-suite run, too close to the floor to trust.
+    @settings(max_examples=1_000, deadline=None, database=None, derandomize=True)
     @given(case=_arrived())
     def record(case: tuple[TableSpec, pl.DataFrame]) -> None:
         spec, frame = case
@@ -728,3 +734,4 @@ def test_the_arrival_strategy_reaches_both_verdicts():
 
     record()
     assert all(count >= 20 for count in seen.values()), seen
+    print(seen)

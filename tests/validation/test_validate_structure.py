@@ -462,3 +462,20 @@ def test_choices_are_asked_as_the_column_would_be_cast():
     assert not inspect(spec, validate(spec, as_dates, cast=True))
     wrong_day = pl.DataFrame({"t": [dt.date(2020, 6, 2)], "r": [_DATE]})
     assert [f.key for f in inspect(spec, wrong_day).findings] == ["t__choices"]
+
+
+def test_temporal_bounds_are_measured_as_the_column_would_be_cast():
+    """A bound a microsecond past midnight, on a `Datetime` column arriving
+    as a `Date`: measured as a date, the bound rounded to the day and the
+    report was clean -- then `cast=True` made midnight, outside it. Found by
+    the arrival property's re-inspection of the cast frame."""
+    edge = dt.datetime(2000, 1, 1, 0, 0, 0, 1)
+    spec = TableSpec("T", {"t": ColSpec(pl.Datetime("us"), bounds=(edge, edge))})
+    as_dates = pl.DataFrame({"t": [dt.date(2000, 1, 1)]})
+    assert [f.key for f in inspect(spec, as_dates).findings] == ["t__bounds"]
+
+    midnight = TableSpec(
+        "T", {"t": ColSpec(pl.Datetime("us"), bounds=(dt.datetime(2000, 1, 1), edge))}
+    )
+    assert not inspect(midnight, as_dates)
+    assert not inspect(midnight, validate(midnight, as_dates, cast=True))

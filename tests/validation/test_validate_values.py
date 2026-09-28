@@ -478,14 +478,21 @@ def test_an_unholdable_value_is_found_in_a_map():
     assert _dtype_findings(inspect(spec, frame)) == ["m.value__dtype_range"]
 
 
-def test_an_unholdable_value_is_reported_with_the_bounds_checks_off():
-    """The range is the dtype's claim, not the declared bounds'."""
+def test_a_checked_bound_reports_what_lies_past_the_dtype_on_its_side():
+    """A bound must fit its dtype, so a value past the dtype's range on a
+    bounded side is past the bound too: one `bounds` finding, not a second
+    `dtype` one, and no second pass over the column. With the bounds checks
+    off, or on a side a bound leaves open, the range is checked itself."""
     spec = TableSpec("T", {"n": ColSpec(pl.Int8, bounds=(0, 10))})
-    frame = pl.DataFrame({"n": [1000]})
-    assert sorted(f.code for f in inspect(spec, frame).findings) == ["bounds", "dtype"]
-    assert [f.code for f in inspect(spec, frame, validate_bounds=False).findings] == [
-        "dtype"
+    frame = pl.DataFrame({"n": [1000, -1000]})
+    assert [f.key for f in inspect(spec, frame).findings] == ["n__bounds"]
+    assert [f.key for f in inspect(spec, frame, validate_bounds=False).findings] == [
+        "n__dtype_range"
     ]
+    at_least = TableSpec("T", {"n": ColSpec(pl.Int8, bounds=(0, None))})
+    report = inspect(at_least, frame)
+    assert sorted(f.key for f in report.findings) == ["n__bounds", "n__dtype_range"]
+    assert [f.samples for f in report.findings if f.code == "dtype"] == [(1000,)]
 
 
 def test_an_unholdable_value_locates_its_rows():

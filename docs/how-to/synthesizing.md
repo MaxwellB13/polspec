@@ -106,6 +106,13 @@ relationship back where one matters. Nor is a text column's *format*
 recognised: an email column becomes random text of email-like length --
 declare `format="email"` on the profiled spec to fix that.
 
+A float column's NaNs and infinities are not carried over either: a spec
+cannot declare them yet, so the column's range is its finite values', and
+`profile()` and `synthesize()` warn, naming each column that held any and
+how many. The fake column holds none; validating the *source* against its
+profile reports them as out of bounds. See
+[Known limitations](../explanation/limitations.md#a-floats-nan-and-infinities-are-outside-its-profiled-bounds).
+
 ## Large sources
 
 `sample=` profiles a random sample of that many rows instead of all of

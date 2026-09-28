@@ -532,8 +532,14 @@ def generate_random(
             finished[name] = _finish(raw.pop(name), spec, domains[name])
         else:
             finished[name] = _generate_column(name, spec, n, seed, row_offset)
-    # Keyed by name: from a list, Polars renames a series called "" `column_0`.
-    return pl.DataFrame({name: finished[name] for name in columns})
+    # From a list, which is several times cheaper for a wide frame than a
+    # mapping; but Polars renames a series called "" `column_<i>` there, so
+    # the names are put back when that happened.
+    frame = pl.DataFrame([finished[name] for name in columns])
+    names = list(columns)
+    if frame.columns != names:
+        frame.columns = names
+    return frame
 
 
 def _generate_column(
