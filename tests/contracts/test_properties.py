@@ -16,6 +16,7 @@ case for the catalogue once it is fixed.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import datetime as dt
 import importlib.util
@@ -40,6 +41,7 @@ from polspec import (
     col,
     generate,
     generate_batches,
+    inspect,
     validate,
 )
 from polspec.formats import FORMATS
@@ -562,3 +564,167 @@ def test_an_invalid_declaration_is_refused_as_a_spec_error(declaration):
     except SpecError:
         return
     pytest.fail(f"{kind}: accepted")
+
+
+# ---------------------------------------------------------------------------
+# Data that arrives as some other dtype
+# ---------------------------------------------------------------------------
+
+# What a column of each kind can arrive as: the dtype another pipeline, a
+# text format or a wider type hands back. Some stand in for the declaration
+# and some do not; `inspect()` has to answer for all of them.
+_WIDE_INTS = [*_INT_DTYPES, pl.Int128]
+
+
+def _transports(value: pl.DataType) -> list[pl.DataType]:
+    if value.is_integer():
+        return [*_WIDE_INTS, pl.Float64, pl.String]
+    if value.is_float():
+        return [pl.Float32, pl.Float64, pl.Int64, pl.String]
+    if value.is_decimal():
+        return [
+            pl.Decimal(38, 4),
+            pl.Decimal(12, 2),
+            pl.Decimal(6, 1),
+            pl.Float64,
+            pl.Int64,
+        ]
+    if value == pl.Date:
+        return [
+            pl.Date,
+            pl.Datetime("ms"),
+            pl.Datetime("us", "UTC"),
+            pl.String,
+            pl.Int32,
+        ]
+    if isinstance(value, pl.Datetime):
+        return [
+            pl.Date,
+            pl.Datetime("ns"),
+            pl.Datetime("us", "Asia/Tokyo"),
+            pl.Time,
+            pl.Int64,
+        ]
+    if value == pl.Time:
+        return [pl.Time, pl.Duration("us"), pl.String, pl.Int64]
+    if isinstance(value, pl.Duration):
+        return [pl.Duration("us"), pl.Duration("ns"), pl.Int64, pl.Time]
+    if value == pl.Boolean:
+        return [pl.Boolean, pl.Int8, pl.String]
+    if isinstance(value, pl.Enum):
+        wider = pl.Enum([*value.categories.to_list(), "~extra"])
+        return [pl.String, pl.Categorical, wider]
+    if value == pl.Categorical or isinstance(value, pl.Categorical):
+        return [pl.String, pl.Categorical]
+    return [pl.String, pl.Binary, pl.Categorical]
+
+
+def _transport(draw: st.DrawFn, dtype: pl.DataType) -> pl.DataType:
+    """A dtype `dtype` may arrive as, recursing into a list's elements."""
+    if isinstance(dtype, pl.Array):
+        inner = _transport(draw, dtype.inner)
+        return draw(st.sampled_from([pl.Array(inner, dtype.size), pl.List(inner)]))
+    if isinstance(dtype, pl.List):
+        return pl.List(_transport(draw, dtype.inner))
+    return draw(st.sampled_from(_transports(dtype)))
+
+
+def _full_range(dtype: pl.DataType) -> st.SearchStrategy[Any] | None:
+    """Any value a column of `dtype` holds, including ones a narrower
+    declaration cannot: where a range check has to earn its keep."""
+    if dtype.is_integer():
+        lo, hi = (-(2**127), 2**127 - 1) if dtype == pl.Int128 else _INT_LIMITS[dtype]
+        # Just past the narrower widths, where a range check has an edge.
+        edges = [v for v in (lo, hi, -129, -1, 0, 128, 256, 70_000) if lo <= v <= hi]
+        return st.one_of(st.integers(lo, hi), st.sampled_from(edges))
+    if dtype.is_float():
+        return st.floats(width=32 if dtype == pl.Float32 else 64)
+    if isinstance(dtype, pl.Decimal):
+        places = dtype.scale or 0
+        # Capped at twenty integer digits -- past every declared Decimal here,
+        # and short of the 38 Polars 2 will not build from Python at the edge.
+        digits = min((dtype.precision or 38) - places, 20)
+        limit = Decimal(10) ** digits
+        return st.decimals(
+            -limit + 1, limit - 1, places=places, allow_nan=False, allow_infinity=False
+        )
+    return None
+
+
+@st.composite
+def _lone_number(draw: st.DrawFn) -> TableSpec:
+    """One integer or Decimal column: the declarations a wider dtype can
+    carry values past, drawn often enough for the range check to be tried."""
+    fields = draw(st.one_of(_integer(), _decimal()))
+    if draw(st.booleans()):
+        fields["nullable"] = True
+    return TableSpec("Drawn", {"c0": ColSpec(**fields)})
+
+
+@st.composite
+def _arrived(draw: st.DrawFn) -> tuple[TableSpec, pl.DataFrame]:
+    """A drawn spec, and a frame that satisfied it before its columns were
+    carried through other dtypes -- and, sometimes, had values from the
+    whole range of those dtypes written over a few rows."""
+    spec = draw(st.one_of(specs(), _lone_number()))
+    n = draw(st.integers(0, 40))
+    frame = generate(spec, n, seed=draw(_SEEDS))
+    arrived = {}
+    for name, column in spec.columns.items():
+        series = frame[name]
+        if draw(st.integers(0, 3)):  # three times in four
+            target = _transport(draw, column.dtype)
+            # No such cast in Polars: the column arrives as it was.
+            with contextlib.suppress(pl.exceptions.PolarsError):
+                series = series.cast(target, strict=False)
+        values = _full_range(series.dtype)
+        if values is not None and n and draw(st.integers(0, 3)):
+            rows = draw(
+                st.lists(st.integers(0, n - 1), min_size=1, max_size=3, unique=True)
+            )
+            written = pl.Series(
+                draw(st.lists(values, min_size=len(rows), max_size=len(rows))),
+                dtype=series.dtype,
+            )
+            series = series.scatter(rows, written)
+        arrived[name] = series
+    return spec, pl.DataFrame(arrived)
+
+
+@SETTINGS
+@given(case=_arrived())
+def test_inspect_answers_for_data_of_any_dtype(case):
+    """Whatever dtype a column arrives as, `inspect()` returns a report;
+    and a report with nothing in it is a promise `cast=True` keeps -- the
+    frame it hands back has the declared schema and is still clean. Before
+    0.13.1 a `Time` on a bounded `Date` raised Polars' cast error, and an
+    `Int8` holding 1000 passed and then failed its own cast."""
+    spec, frame = case
+    report = inspect(spec, frame)
+    if not report:
+        cast = validate(spec, frame, cast=True)
+        assert cast.schema == spec.schema()
+        assert not inspect(spec, cast)
+
+
+def test_the_arrival_strategy_reaches_both_verdicts():
+    """The cast property only says something for clean reports, and the
+    range check only for the rows written past a declaration; both have to
+    be drawn often enough to count."""
+    seen: dict[str, int] = {"clean": 0, "dtype": 0, "dtype_range": 0, "transported": 0}
+
+    @settings(max_examples=400, deadline=None, database=None, derandomize=True)
+    @given(case=_arrived())
+    def record(case: tuple[TableSpec, pl.DataFrame]) -> None:
+        spec, frame = case
+        if frame.schema != spec.schema():
+            seen["transported"] += 1
+        report = inspect(spec, frame)
+        if not report:
+            seen["clean"] += 1
+        for finding in report.findings:
+            if finding.code == "dtype":
+                seen["dtype_range" if finding.row_level else "dtype"] += 1
+
+    record()
+    assert all(count >= 20 for count in seen.values()), seen

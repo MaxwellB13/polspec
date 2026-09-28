@@ -20,7 +20,6 @@ from polspec.dtypes import (
     element_dtype,
     field_dtypes,
     map_entries,
-    typed_values,
 )
 from polspec.formats import lookup as _lookup_format
 from polspec.validation.report import FindingCode
@@ -35,6 +34,7 @@ if TYPE_CHECKING:
 from polspec.validation.constraints._base import (
     Constraint,
     as_strings,
+    in_values,
     sample_source,
 )
 from polspec.validation.constraints._rules import rule_constraints
@@ -293,7 +293,8 @@ def column_constraints(
     values against something typed -- bounds, choices, a rule's operands -- and
     against the wrong type that is at best noise on top of the dtype finding
     the caller will already see, and at worst an expression Polars refuses to
-    compile at all.
+    compile at all. For the same reason `df_col_names` is the columns a claim
+    may *read*: present, and of a compatible dtype if declared.
     """
     column = pl.col(name)
     constraints: list[Constraint] = []
@@ -403,12 +404,7 @@ def _value_constraints(
             in_domain = column.cast(pl.String).is_in(as_strings(allowed, dtype))
             sample_expr = column.cast(pl.String)
         else:
-            # The choices as a Series of the column's own dtype: `is_in` compares
-            # like with like -- strictly so from Polars 2 -- and a Python list
-            # reaches it at its widest type, a datetime at microseconds or a
-            # Decimal at full precision, which the column's own may not be.
-            # Imploded, so Polars reads the Series as one set, not row by row.
-            in_domain = column.is_in(typed_values(allowed, actual_dtype).implode())
+            in_domain = in_values(column, allowed, dtype, actual_dtype)
             sample_expr = column
         constraints.append(
             _AllowedValues(

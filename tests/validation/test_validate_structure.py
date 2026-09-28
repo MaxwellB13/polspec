@@ -10,10 +10,13 @@ import polars as pl
 import pytest
 from polspec import (
     Bound,
+    Check,
+    ColRule,
     ColSpec,
     FrameSpec,
     TableSpec,
     ValidationError,
+    col,
     inspect,
     validate,
 )
@@ -394,3 +397,68 @@ def test_strict_dtypes_still_tells_two_zones_apart():
     tokyo = pl.DataFrame({"t": _TEMPORAL_DATA["Datetime(Asia/Tokyo)"]})
     report = inspect(spec, tokyo, strict_dtypes=True)
     assert [f.code for f in report.findings] == ["dtype"]
+
+
+# ---------------------------------------------------------------------------
+# Claims over a column that arrived as another dtype. Each was found by
+# `test_inspect_answers_for_data_of_any_dtype` making `inspect()` raise.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("flag", [["x", "y"], [1, 0]], ids=["String", "Int64"])
+def test_a_rule_reading_a_column_of_the_wrong_dtype_is_skipped(flag):
+    """`flag` is a `dtype` finding; a rule keyed on it cannot be evaluated,
+    and used to be compiled anyway -- Polars refused `&` on text."""
+    spec = TableSpec(
+        "T",
+        {
+            "flag": ColSpec(pl.Boolean),
+            "v": ColSpec(
+                pl.Int64,
+                choices=[0, 1],
+                rules=[ColRule(when=col("flag"), choices=[0])],
+            ),
+        },
+        checks=[Check(col("flag") | (col("v") == 1), name="flag_or_one")],
+    )
+    report = inspect(spec, pl.DataFrame({"flag": flag, "v": [1, 1]}))
+    assert [f.key for f in report.findings] == ["flag__dtype"]
+
+
+def test_a_check_on_a_date_holds_for_the_datetime_standing_in_for_it():
+    """A `Datetime` stands in for a declared `Date`; `is_in` refused a list
+    of dates against it."""
+    spec = TableSpec(
+        "T",
+        {"d": ColSpec(pl.Date)},
+        checks=[Check(col("d").is_in([_DATE]), name="the_day")],
+    )
+    on_the_day = pl.DataFrame({"d": [dt.datetime(2020, 6, 1)]}).cast(
+        {"d": pl.Datetime("ms")}
+    )
+    assert not inspect(spec, on_the_day)
+    other_day = on_the_day.with_columns(pl.col("d") + dt.timedelta(days=1))
+    assert [f.key for f in inspect(spec, other_day).findings] == ["check:the_day"]
+
+
+def test_choices_are_asked_as_the_column_would_be_cast():
+    """A `Datetime` column's choices, against a `Date` standing in for it:
+    `is_in` refused datetimes against dates. Membership is asked of the
+    column cast to what it declares -- what `cast=True` hands back -- so a
+    clean report stays clean once cast."""
+    midnight = dt.datetime(2020, 6, 1)
+    spec = TableSpec(
+        "T",
+        {
+            "t": ColSpec(pl.Datetime("us"), choices=[midnight]),
+            "r": ColSpec(
+                pl.Datetime("us"),
+                rules=[ColRule(when=col("t") == midnight, choices=[midnight])],
+            ),
+        },
+    )
+    as_dates = pl.DataFrame({"t": [_DATE], "r": [_DATE]})
+    assert not inspect(spec, as_dates)
+    assert not inspect(spec, validate(spec, as_dates, cast=True))
+    wrong_day = pl.DataFrame({"t": [dt.date(2020, 6, 2)], "r": [_DATE]})
+    assert [f.key for f in inspect(spec, wrong_day).findings] == ["t__choices"]
