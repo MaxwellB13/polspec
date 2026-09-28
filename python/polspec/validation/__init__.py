@@ -20,7 +20,13 @@ import polars as pl
 from polspec._options import accepted_options, options_from
 from polspec.errors import ValidationError
 from polspec.frames import References, to_lazy
-from polspec.tablespec import TableSpec, require_columns, resolve_references
+from polspec.tablespec import (
+    SpecLike,
+    TableSpec,
+    as_table_spec,
+    require_columns,
+    resolve_references,
+)
 from polspec.validation.constraints import (
     Constraint,
     column_constraints,
@@ -147,7 +153,7 @@ def _resolve_foreign_keys(
 
 
 def inspect(
-    spec: TableSpec,
+    spec: SpecLike,
     df: pl.DataFrame | pl.LazyFrame,
     *,
     options: ValidationOptions | None = None,
@@ -160,6 +166,7 @@ def inspect(
     the report, with `report.rows(finding)` and `report.failing_rows()`
     giving the offending rows back lazily. See `validate` for the options.
     """
+    spec = as_table_spec(spec)
     require_columns(spec)
     opts = _options_from(options, **option_kwargs)
     lf = to_lazy(df)
@@ -258,15 +265,15 @@ def inspect(
 
 
 @overload
-def validate(spec: TableSpec, df: pl.DataFrame, **options: Any) -> pl.DataFrame: ...
+def validate(spec: SpecLike, df: pl.DataFrame, **options: Any) -> pl.DataFrame: ...
 
 
 @overload
-def validate(spec: TableSpec, df: pl.LazyFrame, **options: Any) -> pl.LazyFrame: ...
+def validate(spec: SpecLike, df: pl.LazyFrame, **options: Any) -> pl.LazyFrame: ...
 
 
 def validate(
-    spec: TableSpec,
+    spec: SpecLike,
     df: pl.DataFrame | pl.LazyFrame,
     *,
     options: ValidationOptions | None = None,
@@ -307,6 +314,7 @@ def validate(
     ValueError
         For an accepted option given a value outside its choices.
     """
+    spec = as_table_spec(spec)
     report = inspect(spec, df, options=options, references=references, **option_kwargs)
     report.raise_if_failed()
     return _transformed(spec, df, report)

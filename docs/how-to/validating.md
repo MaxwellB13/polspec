@@ -279,9 +279,15 @@ refuse, add them as all-null, or ignore them.
 ### Dtype strictness
 
 By default polspec accepts what a real pipeline delivers: any integer width for
-a declared integer, an integer or float for a declared float, any temporal for
-a temporal, and `String`/`Categorical` for a declared `Enum`. `strict_dtypes=True`
-requires the exact dtype, treating only `String` and `Utf8` as interchangeable.
+a declared integer, an integer or float for a declared float, and
+`String`/`Categorical` for a declared `Enum`. A temporal is held to its kind:
+a `Date` and a `Datetime` stand in for each other, since text formats hand
+one back as the other, while a `Time` stands in only for a `Time` and a
+`Duration` only for a `Duration`, of any unit. A zoned `Datetime` and a
+naive one do not stand in for each other -- one is an instant, the other a
+wall-clock reading -- but two zones do, being the same instants shown
+differently. `strict_dtypes=True` requires the exact dtype, treating only
+`String` and `Utf8` as interchangeable.
 
 ### Casting
 

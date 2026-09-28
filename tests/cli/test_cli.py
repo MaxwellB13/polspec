@@ -4,6 +4,7 @@ templating, and -- the part with real risk -- generating a test file that
 actually passes when run.
 """
 
+import datetime as dt
 import json
 import subprocess
 import sys
@@ -1121,3 +1122,23 @@ def test_schema_infer_profiles_shape_keys_and_replaced_columns_when_asked(tmp_pa
     assert not before.col("id").unique and after.col("id").unique
     assert isinstance(before.col("name").dtype, pl.Enum)
     assert after.col("name").dtype == pl.String
+
+
+def test_validate_reports_a_time_of_day_on_a_date_column_rather_than_a_traceback(
+    tmp_path, capsys
+):
+    """Any temporal used to stand in for any other, so the declared bounds
+    were compiled against a `Time` and the command ended in Polars'
+    `InvalidOperationError`."""
+    spec = tmp_path / "shifts.yaml"
+    spec.write_text(
+        "version: 3\n"
+        "name: Shifts\n"
+        "columns:\n"
+        "  day: {dtype: Date, bounds: [2020-01-01, 2021-01-01]}\n",
+        encoding="utf-8",
+    )
+    data = tmp_path / "shifts.parquet"
+    pl.DataFrame({"day": [dt.time(9), dt.time(17)]}).write_parquet(data)
+    assert run_cli("validate", spec, data) == 1
+    assert "Column 'day': expected dtype Date, got Time" in capsys.readouterr().out

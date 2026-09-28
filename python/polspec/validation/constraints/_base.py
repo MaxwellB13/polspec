@@ -92,9 +92,11 @@ def is_dtype_compatible(
     """Whether `actual` can stand in for the declared `expected` dtype.
 
     Strict mode demands the same dtype, with String/Utf8 treated as one. The
-    default is permissive about widening and about textual columns arriving as
-    String rather than their declared Enum/Categorical, since that is how they
-    come back from CSV and JSON.
+    default is permissive about widening, about textual columns arriving as
+    String rather than their declared Enum/Categorical, and about a date
+    arriving as a datetime or the reverse, since that is how they come back
+    from CSV and JSON. A temporal is still held to its kind: see
+    `_same_temporal_kind`.
     """
     if strict:
         if expected in (pl.String, pl.Utf8):
@@ -123,7 +125,7 @@ def is_dtype_compatible(
         # bounds are checked on the values either way.
         return actual.is_decimal() or actual.is_float() or actual.is_integer()
     if expected.is_temporal():
-        return actual.is_temporal()
+        return _same_temporal_kind(expected, actual)
     if isinstance(expected, pl.List):
         return isinstance(actual, pl.List) and is_dtype_compatible(
             element_dtype(expected), element_dtype(actual), strict=strict
@@ -153,6 +155,30 @@ def is_dtype_compatible(
         return want.keys() == got.keys() and all(
             is_dtype_compatible(want[f], got[f], strict=strict) for f in want
         )
+    return actual == expected
+
+
+def _same_temporal_kind(expected: pl.DataType, actual: pl.DataType) -> bool:
+    """Whether `actual` holds the same kind of time as the declared `expected`.
+
+    A calendar value -- a `Date` or a `Datetime` -- stands in for either,
+    since text formats hand one back as the other; a time of day only for a
+    time of day, and a duration only for a duration, whatever the unit. A
+    zoned `Datetime` is an instant and a naive one a wall-clock reading, so
+    neither stands in for the other; two zones do, being the same instants
+    shown differently.
+    """
+    calendar = (pl.Date, pl.Datetime)
+    if isinstance(expected, calendar) or expected in calendar:
+        if not (isinstance(actual, calendar) or actual in calendar):
+            return False
+        if isinstance(expected, pl.Datetime) and isinstance(actual, pl.Datetime):
+            return (expected.time_zone is None) == (actual.time_zone is None)
+        return True
+    if expected == pl.Time:
+        return actual == pl.Time
+    if isinstance(expected, pl.Duration) or expected == pl.Duration:
+        return isinstance(actual, pl.Duration) or actual == pl.Duration
     return actual == expected
 
 

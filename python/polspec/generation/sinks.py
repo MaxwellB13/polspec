@@ -18,16 +18,14 @@ import polars as pl
 from polspec.frames import Method, References
 from polspec.generation.pipeline import requires_whole_frame
 from polspec.generation.scan import scan
-from polspec.tablespec import require_columns
+from polspec.tablespec import SpecLike, as_table_spec, require_columns
 
 if TYPE_CHECKING:
     from polars._typing import IpcCompression, ParquetCompression
 
-    from polspec.tablespec import TableSpec
-
 
 def _scan(
-    spec: TableSpec,
+    spec: SpecLike,
     path: str | Path,
     n: int,
     batch_size: int,
@@ -42,6 +40,7 @@ def _scan(
     directory is created here, which polars' sinks do not do. A hierarchy is
     refused by name here too, so the message says which verb refused.
     """
+    spec = as_table_spec(spec)
     require_columns(spec)
     requires_whole_frame(spec, "a sink")
     target = Path(path)
@@ -58,7 +57,7 @@ def _scan(
 
 
 def sink_parquet(
-    spec: TableSpec,
+    spec: SpecLike,
     path: str | Path,
     n: int,
     *,
@@ -78,7 +77,7 @@ def sink_parquet(
 
 
 def sink_ipc(
-    spec: TableSpec,
+    spec: SpecLike,
     path: str | Path,
     n: int,
     *,
@@ -98,7 +97,7 @@ def sink_ipc(
 
 
 def sink_csv(
-    spec: TableSpec,
+    spec: SpecLike,
     path: str | Path,
     n: int,
     *,
@@ -118,7 +117,7 @@ def sink_csv(
 
 
 def sink_ndjson(
-    spec: TableSpec,
+    spec: SpecLike,
     path: str | Path,
     n: int,
     *,

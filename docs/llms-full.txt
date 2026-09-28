@@ -2358,9 +2358,15 @@ refuse, add them as all-null, or ignore them.
 ### Dtype strictness
 
 By default polspec accepts what a real pipeline delivers: any integer width for
-a declared integer, an integer or float for a declared float, any temporal for
-a temporal, and `String`/`Categorical` for a declared `Enum`. `strict_dtypes=True`
-requires the exact dtype, treating only `String` and `Utf8` as interchangeable.
+a declared integer, an integer or float for a declared float, and
+`String`/`Categorical` for a declared `Enum`. A temporal is held to its kind:
+a `Date` and a `Datetime` stand in for each other, since text formats hand
+one back as the other, while a `Time` stands in only for a `Time` and a
+`Duration` only for a `Duration`, of any unit. A zoned `Datetime` and a
+naive one do not stand in for each other -- one is an instant, the other a
+wall-clock reading -- but two zones do, being the same instants shown
+differently. `strict_dtypes=True` requires the exact dtype, treating only
+`String` and `Utf8` as interchangeable.
 
 ### Casting
 
@@ -4642,14 +4648,15 @@ Source: https://maxwellb13.github.io/polspec/reference/api/generation/
 
 # Generation
 
-Every function here takes a `TableSpec` as its first argument, and every one
-has a `FrameSpec` classmethod that forwards to it with `cls.spec` -- see
+Every function here takes a spec as its first argument -- a `TableSpec`,
+or a `FrameSpec` class, which stands for its `.spec` -- and every one has a
+`FrameSpec` classmethod that forwards to it with `cls.spec` -- see
 [Generating data](https://maxwellb13.github.io/polspec/how-to/generating/) for what the options mean and
 [Specs as values](https://maxwellb13.github.io/polspec/how-to/tablespec/) for when to reach for which.
 
 ## generate
 
-### generate(spec: 'TableSpec', n: 'int', *, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, cycles: 'int' = 0, self_references: 'int' = 0, max_bytes: 'int | None' = None) -> 'pl.DataFrame'
+### generate(spec: 'SpecLike', n: 'int', *, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, cycles: 'int' = 0, self_references: 'int' = 0, max_bytes: 'int | None' = None) -> 'pl.DataFrame'
 
 Generates a DataFrame matching `spec`.
 
@@ -4701,7 +4708,7 @@ verb: it generates as the plan is collected, so only the columns and
 rows a plan asks for are made.
 ## generate_batches
 
-### generate_batches(spec: 'TableSpec', n: 'int', *, batch_size: 'int' = 100000, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None) -> 'Iterator[pl.DataFrame]'
+### generate_batches(spec: 'SpecLike', n: 'int', *, batch_size: 'int' = 100000, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None) -> 'Iterator[pl.DataFrame]'
 
 Yields chunks of generated rows without holding all `n` in memory.
 
@@ -4720,7 +4727,7 @@ batch, so they are distinct within a batch and collide across batches
 only by chance.
 ## scan
 
-### scan(spec: 'TableSpec', n: 'int', *, seed: 'int | None' = None, batch_size: 'int | None' = None, method: 'Method' = 'random', references: 'References' = None) -> 'pl.LazyFrame'
+### scan(spec: 'SpecLike', n: 'int', *, seed: 'int | None' = None, batch_size: 'int | None' = None, method: 'Method' = 'random', references: 'References' = None) -> 'pl.LazyFrame'
 
 A `LazyFrame` of `n` generated rows, produced as they are collected.
 
@@ -4733,35 +4740,35 @@ column is unique across the whole scan -- a foreign-keyed one too -- and
 a composite key only within each batch.
 ## estimated_size
 
-### estimated_size(spec: 'TableSpec', n: 'int') -> 'int'
+### estimated_size(spec: 'SpecLike', n: 'int') -> 'int'
 
 Bytes `generate(spec, n)` is expected to hold, as whole bytes.
 
 See the module docstring for what this does and does not count.
 ## sink_parquet
 
-### sink_parquet(spec: 'TableSpec', path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, compression: 'ParquetCompression' = 'zstd', method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'
+### sink_parquet(spec: 'SpecLike', path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, compression: 'ParquetCompression' = 'zstd', method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'
 
 Generates `n` rows and streams them to a Parquet file in batches.
 
 Extra keyword arguments go to `pl.LazyFrame.sink_parquet`.
 ## sink_ipc
 
-### sink_ipc(spec: 'TableSpec', path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, compression: 'IpcCompression | None' = 'zstd', method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'
+### sink_ipc(spec: 'SpecLike', path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, compression: 'IpcCompression | None' = 'zstd', method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'
 
 Generates `n` rows and streams them to an Arrow IPC / Feather file in batches.
 
 Extra keyword arguments go to `pl.LazyFrame.sink_ipc`.
 ## sink_csv
 
-### sink_csv(spec: 'TableSpec', path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, include_header: 'bool' = True, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'
+### sink_csv(spec: 'SpecLike', path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, include_header: 'bool' = True, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'
 
 Generates `n` rows and streams them to a CSV file in batches.
 
 Extra keyword arguments go to `pl.LazyFrame.sink_csv`.
 ## sink_ndjson
 
-### sink_ndjson(spec: 'TableSpec', path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'
+### sink_ndjson(spec: 'SpecLike', path: 'str | Path', n: 'int', *, batch_size: 'int' = 100000, method: 'Method' = 'random', seed: 'int | None' = None, references: 'References' = None, **kwargs: 'Any') -> 'None'
 
 Generates `n` rows and streams them to a newline-delimited JSON file in batches.
 
@@ -4776,7 +4783,8 @@ Source: https://maxwellb13.github.io/polspec/reference/api/validation/
 
 `read()` brings a file in, in a spec's terms; `inspect()` returns a
 report on it and `validate()` raises one. Both carry the same findings as
-data -- see [Validating data](https://maxwellb13.github.io/polspec/how-to/validating/).
+data -- see [Validating data](https://maxwellb13.github.io/polspec/how-to/validating/). Each takes a
+`TableSpec` or a `FrameSpec` class as its spec.
 
 ## read
 
@@ -4813,7 +4821,7 @@ ValueError
     For an extension polspec does not know.
 ## inspect
 
-### inspect(spec: 'TableSpec', df: 'pl.DataFrame | pl.LazyFrame', *, options: 'ValidationOptions | None' = None, references: 'References' = None, **option_kwargs: 'Any') -> 'ValidationReport'
+### inspect(spec: 'SpecLike', df: 'pl.DataFrame | pl.LazyFrame', *, options: 'ValidationOptions | None' = None, references: 'References' = None, **option_kwargs: 'Any') -> 'ValidationReport'
 
 Everything `spec` has to say about `df`, as a `ValidationReport`.
 
@@ -4822,7 +4830,7 @@ the report, with `report.rows(finding)` and `report.failing_rows()`
 giving the offending rows back lazily. See `validate` for the options.
 ## validate
 
-### validate(spec: 'TableSpec', df: 'pl.DataFrame | pl.LazyFrame', *, options: 'ValidationOptions | None' = None, references: 'References' = None, **option_kwargs: 'Any') -> 'pl.DataFrame | pl.LazyFrame'
+### validate(spec: 'SpecLike', df: 'pl.DataFrame | pl.LazyFrame', *, options: 'ValidationOptions | None' = None, references: 'References' = None, **option_kwargs: 'Any') -> 'pl.DataFrame | pl.LazyFrame'
 
 Validates a DataFrame or LazyFrame against `spec`.
 
@@ -6617,6 +6625,27 @@ seed produces; see
 [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/).
 
 ## [Unreleased]
+
+### Fixed
+
+- **A temporal stands in only for its own kind.** Validation's default,
+  permissive dtype check accepted any temporal for any declared temporal,
+  so a `Time` or a `Duration` passed for a `Date` column with no bounds,
+  and made `inspect()` raise Polars' `InvalidOperationError` -- and
+  `polspec validate` end in a traceback -- for one with bounds. A `Date`
+  and a `Datetime` still stand in for each other, as text formats need; a
+  `Time` only for a `Time` and a `Duration` only for a `Duration`, any
+  unit. Anything else is a `dtype` finding. **Stricter:** a naive and a
+  zoned `Datetime` no longer stand in for each other -- one is a
+  wall-clock reading, the other an instant; two zones still do. Drift's
+  `dtype_changed` severity follows, decided by the same function.
+- **Every function taking a spec takes a `FrameSpec` class.**
+  `polspec.generate(Orders, 10)` -- and `generate_batches`, `scan`, the
+  four `sink_*` functions, `inspect`, `validate` and
+  `polspec.sizing.estimated_size` -- failed with `AttributeError: type
+  object 'Orders' has no attribute 'columns'`; each now reads the class as
+  its `.spec`, as `drift`, `read` and the renderers already did. A class
+  that is not a spec is refused naming the class.
 
 ## [0.13.0] - 2026-09-27
 
