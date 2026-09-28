@@ -31,7 +31,13 @@ from polspec.generation.passes.unique_together import apply_unique_together
 from polspec.generation.seeds import pass_seed
 from polspec.pass_order import ordered_passes, rewritable_members
 from polspec.spec import ColSpec
-from polspec.tablespec import TableSpec, require_columns, resolve_references
+from polspec.tablespec import (
+    SpecLike,
+    TableSpec,
+    as_table_spec,
+    require_columns,
+    resolve_references,
+)
 
 __all__ = [
     "check_counts",
@@ -121,7 +127,7 @@ def _warn_unused_references(spec: TableSpec, parents: dict[str, Any]) -> None:
 
 
 def generate(
-    spec: TableSpec,
+    spec: SpecLike,
     n: int,
     *,
     method: Method = "random",
@@ -180,6 +186,7 @@ def generate(
     verb: it generates as the plan is collected, so only the columns and
     rows a plan asks for are made.
     """
+    spec = as_table_spec(spec)
     require_columns(spec)
     check_counts(n)
     _check_faults(spec, cycles, self_references)
@@ -385,7 +392,7 @@ def _run_passes(
 
 
 def generate_batches(
-    spec: TableSpec,
+    spec: SpecLike,
     n: int,
     *,
     batch_size: int = 100_000,
@@ -409,6 +416,7 @@ def generate_batches(
     batch, so they are distinct within a batch and collide across batches
     only by chance.
     """
+    spec = as_table_spec(spec)
     require_columns(spec)
     requires_whole_frame(spec, "generate_batches")
     check_counts(n, batch_size)

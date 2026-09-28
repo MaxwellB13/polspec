@@ -13,6 +13,7 @@ import dataclasses
 import inspect
 import textwrap
 
+import polars as pl
 import pytest
 from polspec import (
     Check,
@@ -163,3 +164,80 @@ def test_the_facade_spells_out_the_signature_it_forwards_to(verb):
     assert {n: p.default for n, p in facade.items()} == {
         n: p.default for n, p in expected.items()
     }, verb
+
+
+# ---------------------------------------------------------------------------
+# Every function taking a spec takes the class, as the facade's own
+# classmethods and `drift`, `read` and the renderers always have.
+# ---------------------------------------------------------------------------
+
+
+class _Orders(FrameSpec):
+    order_id = ColSpec(pl.Int64, unique=True, bounds=(1, 1_000))
+    status = ColSpec(pl.Enum(["NEW", "PAID"]))
+
+
+_FRAME = pl.DataFrame(
+    {"order_id": [1, 2, 2], "status": ["NEW", "PAID", "LOST"]}
+).with_columns(pl.col("status").cast(pl.String))
+
+_SINKS = ("sink_parquet", "sink_csv", "sink_ipc", "sink_ndjson")
+_READERS = {
+    "sink_parquet": pl.read_parquet,
+    "sink_csv": pl.read_csv,
+    "sink_ipc": pl.read_ipc,
+    "sink_ndjson": pl.read_ndjson,
+}
+
+
+def _call(verb: str, spec, tmp_path) -> object:
+    import polspec
+    from polspec.sizing import estimated_size
+
+    if verb == "generate":
+        return polspec.generate(spec, 20, seed=1)
+    if verb == "generate_batches":
+        return pl.concat(polspec.generate_batches(spec, 20, batch_size=7, seed=1))
+    if verb == "scan":
+        return polspec.scan(spec, 20, seed=1).collect()
+    if verb == "estimated_size":
+        return estimated_size(spec, 1_000)
+    if verb == "inspect":
+        return polspec.inspect(spec, _FRAME).findings
+    if verb == "validate":
+        with pytest.raises(polspec.ValidationError) as caught:
+            polspec.validate(spec, _FRAME)
+        return caught.value.report.findings
+    assert verb in _SINKS
+    path = tmp_path / f"{verb}_{type(spec).__name__}.out"
+    getattr(polspec, verb)(spec, path, 20, seed=1)
+    return _READERS[verb](path)
+
+
+@pytest.mark.parametrize(
+    "verb",
+    [
+        "generate",
+        "generate_batches",
+        "scan",
+        "estimated_size",
+        "inspect",
+        "validate",
+        *_SINKS,
+    ],
+)
+def test_every_verb_takes_a_framespec_class_as_its_spec(verb, tmp_path):
+    by_class = _call(verb, _Orders, tmp_path)
+    by_spec = _call(verb, _Orders.spec, tmp_path)
+    if isinstance(by_spec, pl.DataFrame):
+        assert isinstance(by_class, pl.DataFrame)
+        assert by_class.equals(by_spec)
+    else:
+        assert by_class == by_spec
+
+
+def test_a_class_that_is_not_a_spec_is_refused_by_name():
+    import polspec
+
+    with pytest.raises(TypeError, match="FrameSpec subclass, got the class dict"):
+        polspec.generate(dict, 5)  # ty: ignore[invalid-argument-type]

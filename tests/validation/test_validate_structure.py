@@ -4,13 +4,18 @@ strictness and casting, lazy and streaming input, ordering, empty frames.
 
 from __future__ import annotations
 
+import datetime as dt
+
 import polars as pl
 import pytest
 from polspec import (
     Bound,
     ColSpec,
     FrameSpec,
+    TableSpec,
     ValidationError,
+    inspect,
+    validate,
 )
 
 
@@ -302,3 +307,90 @@ def test_validation_column_ordering():
 
     res = OrderedSpec.validate(df, extra_cols="allow")
     assert res.columns == ["first", "second", "third", "extra"]
+
+
+# ---------------------------------------------------------------------------
+# A temporal stands in for its own kind only
+# ---------------------------------------------------------------------------
+
+_DATE = dt.date(2020, 6, 1)
+_TEMPORAL_DATA = {
+    "Date": pl.Series([_DATE]),
+    "Datetime": pl.Series([dt.datetime(2020, 6, 1, 12)]),
+    "Datetime(ms)": pl.Series([dt.datetime(2020, 6, 1, 12)]).cast(pl.Datetime("ms")),
+    "Datetime(UTC)": pl.Series([dt.datetime(2020, 6, 1, 12)]).dt.replace_time_zone(
+        "UTC"
+    ),
+    "Datetime(Asia/Tokyo)": pl.Series(
+        [dt.datetime(2020, 6, 1, 12)]
+    ).dt.replace_time_zone("Asia/Tokyo"),
+    "Time": pl.Series([dt.time(12)]),
+    "Duration": pl.Series([dt.timedelta(hours=12)]),
+    "Duration(ms)": pl.Series([dt.timedelta(hours=12)]).cast(pl.Duration("ms")),
+}
+
+# (declared dtype, bounds, the data kinds that stand in for it)
+_TEMPORAL_DECLARED = {
+    "Date": (
+        pl.Date,
+        (dt.date(2020, 1, 1), dt.date(2021, 1, 1)),
+        {"Date", "Datetime", "Datetime(ms)", "Datetime(UTC)", "Datetime(Asia/Tokyo)"},
+    ),
+    "Datetime": (
+        pl.Datetime("us"),
+        (dt.datetime(2020, 1, 1), dt.datetime(2021, 1, 1)),
+        {"Date", "Datetime", "Datetime(ms)"},
+    ),
+    "Datetime(UTC)": (
+        pl.Datetime("us", "UTC"),
+        (
+            dt.datetime(2020, 1, 1, tzinfo=dt.UTC),
+            dt.datetime(2021, 1, 1, tzinfo=dt.UTC),
+        ),
+        {"Date", "Datetime(UTC)", "Datetime(Asia/Tokyo)"},
+    ),
+    "Time": (pl.Time, (dt.time(1), dt.time(23)), {"Time"}),
+    "Duration": (
+        pl.Duration("us"),
+        (dt.timedelta(0), dt.timedelta(days=1)),
+        {"Duration", "Duration(ms)"},
+    ),
+}
+
+
+@pytest.mark.parametrize("with_bounds", [True, False], ids=["bounded", "unbounded"])
+@pytest.mark.parametrize("declared", list(_TEMPORAL_DECLARED))
+def test_a_temporal_stands_in_only_for_its_own_kind(declared, with_bounds):
+    """A date and a datetime stand in for each other -- text hands one back
+    as the other -- and a time of day or a duration for nothing else. Before
+    0.13.1 any temporal stood in for any other: a `Time` on a bounded `Date`
+    made `inspect()` raise Polars' cast error, and on an unbounded one
+    passed. Naive and zoned datetimes are an instant and a wall-clock
+    reading, so neither stands in for the other; two zones do.
+    """
+    dtype, bounds, accepted = _TEMPORAL_DECLARED[declared]
+    spec = TableSpec("T", {"t": ColSpec(dtype, bounds=bounds if with_bounds else None)})
+    for kind, values in _TEMPORAL_DATA.items():
+        report = inspect(spec, pl.DataFrame({"t": values}))
+        codes = [f.code for f in report.findings]
+        if kind in accepted:
+            assert codes == [], (declared, kind, report.findings)
+        else:
+            assert codes == ["dtype"], (declared, kind, report.findings)
+
+
+def test_a_zoned_datetime_casts_to_the_declared_zone():
+    """Two zones stand in for each other because they hold the same
+    instants; `cast=True` then shows them in the declared one."""
+    spec = TableSpec("T", {"t": ColSpec(pl.Datetime("us", "UTC"))})
+    tokyo = pl.DataFrame({"t": _TEMPORAL_DATA["Datetime(Asia/Tokyo)"]})
+    cast = validate(spec, tokyo, cast=True)
+    assert cast.schema["t"] == pl.Datetime("us", "UTC")
+    assert cast["t"].dt.epoch("us").equals(tokyo["t"].dt.epoch("us"))
+
+
+def test_strict_dtypes_still_tells_two_zones_apart():
+    spec = TableSpec("T", {"t": ColSpec(pl.Datetime("us", "UTC"))})
+    tokyo = pl.DataFrame({"t": _TEMPORAL_DATA["Datetime(Asia/Tokyo)"]})
+    report = inspect(spec, tokyo, strict_dtypes=True)
+    assert [f.code for f in report.findings] == ["dtype"]

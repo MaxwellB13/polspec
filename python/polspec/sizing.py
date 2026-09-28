@@ -22,11 +22,11 @@ import polars as pl
 from polspec.constants import DEFAULT_LIST_LEN, DEFAULT_STRING_LEN
 from polspec.dtypes import field_dtypes, map_entries
 from polspec.formats import lookup as _lookup_format
+from polspec.tablespec import SpecLike, as_table_spec
 
 if TYPE_CHECKING:
     from polspec.formats import Format
     from polspec.spec import ColSpec
-    from polspec.tablespec import TableSpec
 
 # A Polars string or binary value is a 16-byte view. Up to `_INLINE` bytes
 # live inside the view; anything longer is the view *and* its bytes in a
@@ -56,11 +56,12 @@ _FIXED_WIDTHS: dict[object, float] = {
 }
 
 
-def estimated_size(spec: TableSpec, n: int) -> int:
+def estimated_size(spec: SpecLike, n: int) -> int:
     """Bytes `generate(spec, n)` is expected to hold, as whole bytes.
 
     See the module docstring for what this does and does not count.
     """
+    spec = as_table_spec(spec)
     if n < 0:
         raise ValueError("n must be >= 0")
     per_row = sum(_column_bytes(column) for column in spec.columns.values())

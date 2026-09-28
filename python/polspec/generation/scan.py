@@ -43,7 +43,7 @@ from polspec.generation.pipeline import (
     requires_whole_frame,
 )
 from polspec.pass_order import passes_of
-from polspec.tablespec import require_columns
+from polspec.tablespec import SpecLike, as_table_spec, require_columns
 
 if TYPE_CHECKING:
     from polspec.tablespec import TableSpec
@@ -82,7 +82,7 @@ def _predicate_columns(predicate: pl.Expr | None) -> frozenset[str]:
 
 
 def scan(
-    spec: TableSpec,
+    spec: SpecLike,
     n: int,
     *,
     seed: int | None = None,
@@ -100,6 +100,7 @@ def scan(
     column is unique across the whole scan -- a foreign-keyed one too -- and
     a composite key only within each batch.
     """
+    spec = as_table_spec(spec)
     require_columns(spec)
     requires_whole_frame(spec, "scan")
     check_counts(n, batch_size)

@@ -8,6 +8,27 @@ seed produces; see
 
 ## [Unreleased]
 
+### Fixed
+
+- **A temporal stands in only for its own kind.** Validation's default,
+  permissive dtype check accepted any temporal for any declared temporal,
+  so a `Time` or a `Duration` passed for a `Date` column with no bounds,
+  and made `inspect()` raise Polars' `InvalidOperationError` -- and
+  `polspec validate` end in a traceback -- for one with bounds. A `Date`
+  and a `Datetime` still stand in for each other, as text formats need; a
+  `Time` only for a `Time` and a `Duration` only for a `Duration`, any
+  unit. Anything else is a `dtype` finding. **Stricter:** a naive and a
+  zoned `Datetime` no longer stand in for each other -- one is a
+  wall-clock reading, the other an instant; two zones still do. Drift's
+  `dtype_changed` severity follows, decided by the same function.
+- **Every function taking a spec takes a `FrameSpec` class.**
+  `polspec.generate(Orders, 10)` -- and `generate_batches`, `scan`, the
+  four `sink_*` functions, `inspect`, `validate` and
+  `polspec.sizing.estimated_size` -- failed with `AttributeError: type
+  object 'Orders' has no attribute 'columns'`; each now reads the class as
+  its `.spec`, as `drift`, `read` and the renderers already did. A class
+  that is not a spec is refused naming the class.
+
 ## [0.13.0] - 2026-09-27
 
 **Two features: a fake dataset from a real one, and a format with values of

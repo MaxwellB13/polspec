@@ -785,6 +785,12 @@ def _retype_column(
     return dataclasses.replace(spec, **updates)
 
 
+# What a verb takes where it takes a spec: the `TableSpec`, or a `FrameSpec`
+# class, whose `.spec` it is. Spelled `type` because a declaration cannot
+# import `FrameSpec`; `as_table_spec` refuses any other class by name.
+SpecLike = TableSpec | type
+
+
 def as_table_spec(obj: Any) -> TableSpec:
     """The `TableSpec` behind `obj`: itself, or a `FrameSpec` subclass's `.spec`."""
     if isinstance(obj, TableSpec):
@@ -792,9 +798,9 @@ def as_table_spec(obj: Any) -> TableSpec:
     spec = getattr(obj, "spec", None)
     if isinstance(obj, type) and isinstance(spec, TableSpec):
         return spec
-    raise TypeError(
-        f"Expected a TableSpec or a FrameSpec subclass, got {type(obj).__name__}"
-    )
+    # A class is named as itself: `type(obj)` of any class is `type`.
+    got = f"the class {obj.__name__}" if isinstance(obj, type) else type(obj).__name__
+    raise TypeError(f"Expected a TableSpec or a FrameSpec subclass, got {got}")
 
 
 def as_spec_name(obj: Any) -> str:
