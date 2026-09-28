@@ -46,9 +46,11 @@ _CMP_SYMBOLS: dict[str, str] = {
 }
 _ARITH_SYMBOLS: dict[str, str] = {"add": "+", "sub": "-", "mul": "*", "div": "/"}
 _SCALARS = (str, bool, int, float, dt.date, dt.datetime, dt.time, dt.timedelta, bytes)
-# The literals that carry a unit of time, which a column may hold at a
-# coarser one than Python does.
-_UNIT_BEARING = (dt.datetime, dt.time, dt.timedelta)
+# The temporal literals `is_in` can refuse: a datetime, a time or a duration
+# carries a unit of time, which a column may hold at a coarser one than Python
+# does; and a date is refused by a `Datetime` column, which stands in for a
+# declared `Date`. (`dt.datetime` is a `dt.date`.)
+_UNIT_BEARING = (dt.date, dt.time, dt.timedelta)
 
 
 def _wrap(value: Any) -> Pred:
@@ -411,8 +413,9 @@ class IsIn(Pred):
             return item.is_in(list(self.values))
         # Python holds a datetime, a time or a duration to the microsecond,
         # and `is_in` refuses a list finer than the column's own unit -- a
-        # `Duration("ms")` column against `[timedelta(0)]` raises. `==` casts
-        # to a common unit, so the membership is the equalities it stands for.
+        # `Duration("ms")` column against `[timedelta(0)]` raises -- or a
+        # date against a `Datetime` column. `==` casts to a common type, so
+        # the membership is the equalities it stands for.
         present = [v for v in self.values if v is not None]
         terms = [item == pl.lit(v) for v in present]
         if len(present) < len(self.values):

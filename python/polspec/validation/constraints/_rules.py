@@ -17,8 +17,8 @@ if TYPE_CHECKING:
     from polspec.rules import ColRule
     from polspec.spec import ColSpec
 
-from polspec.dtypes import typed_values
-from polspec.validation.constraints._base import Constraint, as_strings
+
+from polspec.validation.constraints._base import Constraint, as_strings, in_values
 
 
 @dataclass(kw_only=True)
@@ -60,8 +60,9 @@ def rule_constraints(
     propagate through `~claimed` and silently excuse every later rule on that
     row, which is a row generation did rewrite and validation would not check.
 
-    A rule whose `when` names a column the frame lacks ends the list: the
-    rows it would have claimed are unknown, so no later rule can be checked.
+    A rule whose `when` names a column the frame lacks, or holds as a dtype
+    its declaration does not accept, ends the list: the rows it would have
+    claimed are unknown, so no later rule can be checked.
     """
     column = pl.col(name)
     constraints: list[Constraint] = []
@@ -85,11 +86,7 @@ def rule_constraints(
             )
             sample_expr = column.cast(pl.String)
         else:
-            # In the column's own dtype, for the reason `_value_constraints`
-            # gives for choices.
-            in_choices = column.is_in(
-                typed_values(rule.choices, actual_dtype).implode()
-            )
+            in_choices = in_values(column, rule.choices, spec.value_dtype, actual_dtype)
             sample_expr = column
 
         constraints.append(

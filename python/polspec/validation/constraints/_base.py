@@ -182,6 +182,28 @@ def _same_temporal_kind(expected: pl.DataType, actual: pl.DataType) -> bool:
     return actual == expected
 
 
+def in_values(
+    column: pl.Expr,
+    values: Sequence[Any],
+    declared: pl.DataType,
+    actual: pl.DataType,
+) -> pl.Expr:
+    """Whether each value of a non-textual `column` is one of `values`, asked
+    in the declared dtype -- the column as `cast=True` would hand it back.
+
+    `is_in` compares like with like -- strictly so from Polars 2 -- and a
+    Python list reaches it at its widest type, a datetime at microseconds or
+    a Decimal at full precision; so the values are typed as declared, and a
+    column of another dtype that stands in for it is cast to meet them. A
+    value the cast cannot make is null here, neither in nor out: that is the
+    range check's finding, not this one's. Imploded, so Polars reads the
+    values as one set, not row by row.
+    """
+    if actual != declared:
+        column = column.cast(declared, strict=False)
+    return column.is_in(typed_values(values, declared).implode())
+
+
 def as_strings(values: Sequence[Any], dtype: pl.DataType) -> list[str]:
     """`values` as the strings a column of `dtype` holds them as, so a choice
     of `True` on a String column compares as `"true"` -- the same form

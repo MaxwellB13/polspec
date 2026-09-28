@@ -199,13 +199,24 @@ def inspect(
             )
         )
 
+    present = [c for c in columns if c in df_col_names]
+    compatible_with = {
+        name: is_dtype_compatible(
+            columns[name].dtype, df_schema[name], strict=opts.strict_dtypes
+        )
+        for name in present
+    }
+    # The columns a claim may read: a declared column of the wrong dtype is
+    # a `dtype` finding already, and a rule or check compiled
+    # against it is at best noise and at worst an expression Polars refuses,
+    # as it refuses one naming a missing column. Each is skipped the same way.
+    readable = [c for c in df_col_names if c not in columns or compatible_with[c]]
+
     constraints: list[Constraint] = []
-    for name in (c for c in columns if c in df_col_names):
+    for name in present:
         cs = columns[name]
         actual_dtype = df_schema[name]
-        compatible = is_dtype_compatible(
-            cs.dtype, actual_dtype, strict=opts.strict_dtypes
-        )
+        compatible = compatible_with[name]
         if not compatible:
             findings.append(
                 Finding(
@@ -223,7 +234,7 @@ def inspect(
                 actual_dtype,
                 compatible=compatible,
                 options=opts,
-                df_col_names=df_col_names,
+                df_col_names=readable,
             )
         )
     if opts.hierarchy and spec.hierarchy is not None:
@@ -232,7 +243,7 @@ def inspect(
         frame_constraints(
             spec.unique_together if opts.unique else None,
             spec.checks if opts.checks else None,
-            df_col_names,
+            readable,
         )
     )
 

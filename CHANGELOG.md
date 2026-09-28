@@ -32,6 +32,17 @@ seed produces; see
   or integer too large for a `Decimal`'s integer digits, after rounding to
   its scale, is one as well. A frame with no findings now always survives
   `cast=True`.
+- **A claim over a column that arrived as another dtype no longer takes
+  `inspect()` down.** Found by a new property test that carries generated
+  frames through the dtypes data really arrives as. A rule or check reading
+  a column of the wrong dtype -- a `Boolean` flag read as text -- was
+  compiled anyway and Polars refused it; it is now skipped, as one reading
+  a missing column is, the column being a `dtype` finding already. A
+  check's `is_in` over dates refused a `Datetime` column standing in for a
+  `Date`. And a column's or rule's `choices` against a dtype standing in
+  for the declared one -- datetimes against a `Date` -- are now asked of
+  the column as `cast=True` would hand it back, so a clean report stays
+  clean once cast.
 - **Every function taking a spec takes a `FrameSpec` class.**
   `polspec.generate(Orders, 10)` -- and `generate_batches`, `scan`, the
   four `sink_*` functions, `inspect`, `validate` and
