@@ -616,7 +616,8 @@ def test_from_dataframe_re_declares_a_list_of_structs_and_a_list_of_lists():
 def test_a_narrowed_field_rebuilds_the_struct_dtype():
     """Profiling narrows a small String field to an Enum as it would a
     column, so the struct's dtype follows its fields'."""
-    df = _frame([{"lat": 1.0, "lon": 1.0, "label": "a"}], POINT)
+    # Twice: a field's values have to repeat to be categories, as a column's do.
+    df = _frame([{"lat": 1.0, "lon": 1.0, "label": "a"}] * 2, POINT)
     profiled = FrameSpec.from_dataframe(df).spec.columns["c"]
     assert profiled.fields["label"].dtype == pl.Enum(["a"])
     assert profiled.value_dtype.to_schema()["label"] == pl.Enum(["a"])

@@ -4,9 +4,9 @@ The inverse of generation: given a DataFrame, describe the columns well enough
 that `FrameSpec.generate` could produce something like it again.
 
 By default a column is described by its dtype, its null rate, its extremes
-and -- for a low-cardinality text column -- its categories. Three opt-in
-steps describe more, for when the spec is going to generate a stand-in for
-the data (`polspec.synthesize`):
+and -- for a low-cardinality text column whose values repeat -- its
+categories. Three opt-in steps describe more, for when the spec is going to
+generate a stand-in for the data (`polspec.synthesize`):
 
 - `shape=True` fits the distribution a numeric or temporal column's values
   follow (`polspec.shape`), so the stand-in is not uniform where the data
@@ -36,6 +36,12 @@ from polspec.spec import ColSpec, is_categorical_dtype
 # The fewest distinct values that make an all-distinct column a key. Ten
 # rows of distinct values are ten rows, not evidence of a key.
 KEY_MIN_ROWS = 100
+
+# A text column narrows to an `Enum` of its values only when they repeat --
+# each, on average, at least this many times. Forty distinct names in forty
+# rows are names, not categories, and an `Enum` of them rejects the next
+# file's. Below `max_unique_enum` distinct values *and* repeating: both.
+ENUM_MIN_REPEATS = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +81,9 @@ def profile_dataframe(
         boolean columns.
     max_unique_enum : int, default 50
         A string or categorical column with at most this many distinct values
-        becomes an `Enum` of them.
+        becomes an `Enum` of them -- when they repeat, each at least twice
+        on average (`ENUM_MIN_REPEATS`); a column of distinct values stays
+        text however few there are.
     calculate_bounds : bool, default True
         Record the observed extremes of numeric and temporal columns, and the
         length range of text and binary ones.
@@ -354,10 +362,13 @@ def _profile_textual(
     max_unique_enum: int,
     calculate_bounds: bool,
 ) -> ColSpec:
-    """A String or Categorical column, narrowed to an Enum when it is small enough."""
+    """A String or Categorical column, narrowed to an Enum when it holds few
+    enough distinct values and they repeat."""
     n_unique = non_null.n_unique()
 
-    if 0 < n_unique <= max_unique_enum:
+    if 0 < n_unique <= max_unique_enum and (
+        n_unique * ENUM_MIN_REPEATS <= len(non_null)
+    ):
         categories = non_null.unique().sort().to_list()
         return spec(
             dtype=pl.Enum(categories),

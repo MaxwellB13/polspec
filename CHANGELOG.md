@@ -8,6 +8,20 @@ seed produces; see
 
 ## [Unreleased]
 
+### Changed
+
+- **A profiled text column becomes an `Enum` only when its values repeat.**
+  `from_dataframe()`, `profile()`, `synthesize()`, `polspec schema infer`
+  and `polspec synthesize` narrowed any text column with at most
+  `max_unique_enum` (50) distinct values to an `Enum` of them -- so forty
+  distinct names in a forty-row sample became an `Enum` of those forty, and
+  the spec rejected every other name. The values now have to repeat, each
+  at least twice on average (`polspec.profiler.ENUM_MIN_REPEATS`); a column
+  of distinct values stays `String`, with its lengths, and a `Categorical`
+  stays `Categorical`. A spec inferred before is unchanged unless it came
+  from such a column; the same holds for a list's elements and a struct's
+  fields.
+
 ## [0.13.1] - 2026-09-28
 
 **Fixes, for data nobody generated.** 0.13.0 pointed polspec at real

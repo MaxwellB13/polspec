@@ -73,7 +73,7 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=50,
         metavar="N",
-        help="Max distinct values for a string column to become an Enum (default: 50)",
+        help="Max distinct values for a string column to become an Enum, when they repeat (default: 50)",
     )
     infer.add_argument(
         "--no-bounds",

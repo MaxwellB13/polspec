@@ -282,7 +282,8 @@ print(Profiled.to_markdown())
 ```
 
 It infers nullability and observed null rates, narrows low-cardinality strings
-to `Enum`, and — with `weights=True` — records how often each category actually
+whose values repeat to `Enum` -- a column of distinct names stays text --
+and — with `weights=True` — records how often each category actually
 occurred, so regenerated data keeps the observed mix rather than a uniform one.
 
 Treat the result as a first draft to edit, not a finished contract: it
@@ -2933,9 +2934,10 @@ Everything a spec can say about a column, and nothing else:
 Two lines of that table decide what to put in `replace=`:
 
 - **A text column with few distinct values keeps them.** A column of at
-  most `max_unique_enum` (50) distinct values becomes an `Enum` of them, so
-  a status column stays `NEW`/`PAID`/`SHIPPED` -- and a column of thirty
-  customer names stays those thirty names. Name every column whose values
+  most `max_unique_enum` (50) distinct values, each repeated twice on
+  average, becomes an `Enum` of them, so a status column stays
+  `NEW`/`PAID`/`SHIPPED` -- and a column of thirty customer names, over a
+  few hundred rows, stays those thirty names. Name every column whose values
   are sensitive in `replace=`: it is then generated from its lengths alone.
 - **Extremes are real values.** The smallest and largest amount, the
   earliest and latest date, become the fake column's bounds. If those are
@@ -3705,7 +3707,7 @@ new`.
 |:--|:--|
 | `--name NAME` | Class name (default: derived from the file name) |
 | `--weights` | Record each category's observed frequency |
-| `--max-unique-enum N` | Max distinct values for a string column to become an `Enum` (default 50) |
+| `--max-unique-enum N` | Max distinct values for a string column to become an `Enum`, when they repeat (default 50) |
 | `--no-bounds` | Skip computing numeric/temporal bounds and string lengths |
 | `--sample N` | Profile only the first N rows |
 | `--shape` | Fit the distribution each numeric or temporal column follows |
@@ -5131,8 +5133,8 @@ seed : int, default 0
     Seeds the sample and the shape fitting, so a profile is the same
     every run.
 max_unique_enum : int, default 50
-    A text column with at most this many distinct values -- and not in
-    `replace` -- becomes an `Enum` of them.
+    A text column with at most this many distinct values, repeating --
+    and not in `replace` -- becomes an `Enum` of them.
 
 Returns
 -------
@@ -5154,7 +5156,9 @@ weights : bool, default False
     boolean columns.
 max_unique_enum : int, default 50
     A string or categorical column with at most this many distinct values
-    becomes an `Enum` of them.
+    becomes an `Enum` of them -- when they repeat, each at least twice
+    on average (`ENUM_MIN_REPEATS`); a column of distinct values stays
+    text however few there are.
 calculate_bounds : bool, default True
     Record the observed extremes of numeric and temporal columns, and the
     length range of text and binary ones.
@@ -5555,7 +5559,7 @@ polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
 | `-o`, `--output` `OUTPUT` | **Required.** File to write: .yaml/.yml, or .py for a FrameSpec subclass |
 | `--name` `NAME` | Spec class name (default: derived from source) |
 | `--weights` | Record each category's observed frequency |
-| `--max-unique-enum` `N` | Max distinct values for a string column to become an Enum (default: 50) |
+| `--max-unique-enum` `N` | Max distinct values for a string column to become an Enum, when they repeat (default: 50) |
 | `--no-bounds` | Skip computing numeric/temporal bounds and string lengths |
 | `--sample` `N` | Profile only the first N rows |
 | `--shape` | Fit the distribution each numeric or temporal column follows |
@@ -5662,7 +5666,7 @@ polspec synthesize [-h] -o OUTPUT [-n N] [--seed SEED]
 | `--seed` `SEED` | Generation seed (default: random) |
 | `--replace` `COL` | Columns whose values must not be carried over: text in them is generated from its lengths, never from the values the source holds |
 | `--sample` `N` | Profile a random sample of N rows rather than every row |
-| `--max-unique-enum` `N` | Max distinct values for a text column to keep its values (default: 50) |
+| `--max-unique-enum` `N` | Max distinct values for a text column to keep its values, when they repeat (default: 50) |
 | `--spec` `PATH` | Also write the spec the data was generated from (.yaml, or .py) |
 | `--name` `NAME` | The spec's class name (default: derived from source) |
 
@@ -6667,6 +6671,20 @@ seed produces; see
 [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/).
 
 ## [Unreleased]
+
+### Changed
+
+- **A profiled text column becomes an `Enum` only when its values repeat.**
+  `from_dataframe()`, `profile()`, `synthesize()`, `polspec schema infer`
+  and `polspec synthesize` narrowed any text column with at most
+  `max_unique_enum` (50) distinct values to an `Enum` of them -- so forty
+  distinct names in a forty-row sample became an `Enum` of those forty, and
+  the spec rejected every other name. The values now have to repeat, each
+  at least twice on average (`polspec.profiler.ENUM_MIN_REPEATS`); a column
+  of distinct values stays `String`, with its lengths, and a `Categorical`
+  stays `Categorical`. A spec inferred before is unchanged unless it came
+  from such a column; the same holds for a list's elements and a struct's
+  fields.
 
 ## [0.13.1] - 2026-09-28
 

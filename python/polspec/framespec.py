@@ -350,7 +350,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
 
         `weights=True` records empirical frequencies for categorical, enum and
         boolean columns. A string or categorical column with at most
-        `max_unique_enum` distinct values becomes an `Enum`. `calculate_bounds`
+        `max_unique_enum` distinct values, repeating, becomes an `Enum`.
+        `calculate_bounds`
         records observed `(min, max)` for numeric and temporal columns and
         `(min_len, max_len)` for strings and binary. `shape`, `detect_unique`
         and `replace` describe more, for a spec that will generate a stand-in

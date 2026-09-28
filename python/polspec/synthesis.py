@@ -63,8 +63,8 @@ def profile(
         Seeds the sample and the shape fitting, so a profile is the same
         every run.
     max_unique_enum : int, default 50
-        A text column with at most this many distinct values -- and not in
-        `replace` -- becomes an `Enum` of them.
+        A text column with at most this many distinct values, repeating --
+        and not in `replace` -- becomes an `Enum` of them.
 
     Returns
     -------

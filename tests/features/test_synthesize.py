@@ -273,9 +273,9 @@ def test_a_null_column_and_an_empty_name_synthesize():
     `column_0`."""
     source = pl.DataFrame(
         {
-            "": ["x", "y", "x", "z"],
-            "empty": pl.Series([None] * 4, dtype=pl.Null),
-            "n": [1, 2, 3, 4],
+            "": ["x", "y", "x", "z", "y", "z"],
+            "empty": pl.Series([None] * 6, dtype=pl.Null),
+            "n": [1, 2, 3, 4, 5, 6],
         }
     )
     fake = synthesize(source, 30, seed=1)
