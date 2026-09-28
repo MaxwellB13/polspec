@@ -20,7 +20,9 @@ distinct within its map. A `Datetime` carrying a `time_zone` is included: the
 physical value is an offset from the naive epoch whatever the zone, so the
 zone rides along and `generate()` hands back a column of the dtype you
 declared. A `Decimal` is the same idea: an integer and a scale, drawn as
-the integer and scaled back.
+the integer and scaled back. A `Null` column, which holds no data at all,
+generates as the nulls it is -- declared `nullable=True`, since it can hold
+nothing else.
 
 What a nested column *claims* is one declaration per value: a `List`'s
 elements take the fields a scalar column takes, and a `Struct`'s take a
@@ -118,7 +120,8 @@ Two things this project has made no compatibility promise about yet:
   column repeating its first batch's elements in every batch after it, so
   the elements of a `List`, `Array` or `Map` column past the first batch
   changed, once; `generate()` did not. 0.13.0 changed nothing that
-  constructed under 0.12.0.
+  constructed under 0.12.0, and 0.13.1 nothing that constructed under
+  0.13.0.
 
 The first of those is easier to live with than it sounds, because a spec file
 now says which format wrote it. Every file `to_yaml()` writes carries

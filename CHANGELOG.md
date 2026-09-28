@@ -8,6 +8,27 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-09-28
+
+**Fixes, for data nobody generated.** 0.13.0 pointed polspec at real
+tables; this release makes it answer for them. `inspect()` promises never to
+raise for a frame that fails, and three ways a frame arriving in another
+dtype broke that are closed -- most found by a new property test that
+carries generated frames through the dtypes real data arrives as. Profiling
+survives NaN and infinities, a `Null` column generates, and every function
+that takes a spec takes a `FrameSpec` class.
+
+**Validation is stricter in two places, on purpose:** a value the declared
+dtype cannot hold (an `Int8` column arriving as `Int64` with 1000 in it) is
+now a `dtype` finding, and a naive `Datetime` no longer stands in for a
+zoned one, or a `Time` or `Duration` for a `Date`. Each was a frame that was
+not what its spec declared, and could end in a raw Polars error one step
+later; a frame with no findings now always survives `validate(cast=True)`.
+
+**No seeded output changes.** Every spec that constructs under 0.13.0
+generates what it did -- checked against the published 0.13.0 across 435
+cases -- and no spec file needs migrating.
+
 ### Fixed
 
 - **A temporal stands in only for its own kind.** Validation's default,
@@ -28,9 +49,12 @@ seed produces; see
   a frame that passed, then raised Polars' conversion error. **Stricter:**
   such a value is now a row-level `dtype` finding keyed
   `<column>__dtype_range`, with samples and rows, in list elements, struct
-  fields and map values too, and whatever `validate_bounds` says. A float
-  or integer too large for a `Decimal`'s integer digits, after rounding to
-  its scale, is one as well. A frame with no findings now always survives
+  fields and map values too. A float or integer too large for a
+  `Decimal`'s integer digits, after rounding to its scale, is one as well.
+  A declared bound has to fit its dtype, so on a side a checked bound
+  closes, such a value is out of bounds too and reported there alone --
+  which keeps the check free for the usual case, a CSV's `Int64` for a
+  bounded `Int32`. A frame with no findings now always survives
   `cast=True`.
 - **A claim over a column that arrived as another dtype no longer takes
   `inspect()` down.** Found by a new property test that carries generated
@@ -42,7 +66,9 @@ seed produces; see
   `Date`. And a column's or rule's `choices` against a dtype standing in
   for the declared one -- datetimes against a `Date` -- are now asked of
   the column as `cast=True` would hand it back, so a clean report stays
-  clean once cast.
+  clean once cast. Temporal bounds are measured the same way: a bound a
+  microsecond past midnight, on a `Datetime` column arriving as a `Date`,
+  rounded to the day and passed a value the cast then put outside it.
 - **A float column holding NaN or an infinity can be profiled.** An
   infinity made `profile()`, `synthesize()`, `from_dataframe()`, `polspec
   schema infer` and `polspec synthesize` fail -- a bound must be finite --
@@ -1805,7 +1831,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/MaxwellB13/polspec/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/MaxwellB13/polspec/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/MaxwellB13/polspec/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/MaxwellB13/polspec/compare/v0.10.1...v0.11.0
