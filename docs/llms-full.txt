@@ -2987,12 +2987,12 @@ relationship back where one matters. Nor is a text column's *format*
 recognised: an email column becomes random text of email-like length --
 declare `format="email"` on the profiled spec to fix that.
 
-A float column's NaNs and infinities are not carried over either: a spec
-cannot declare them yet, so the column's range is its finite values', and
-`profile()` and `synthesize()` warn, naming each column that held any and
-how many. The fake column holds none; validating the *source* against its
-profile reports them as out of bounds. See
-[Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/#a-floats-nan-and-infinities-are-outside-its-profiled-bounds).
+A float column's NaNs are carried over as a share: the profile records
+`nan_probability`, and the fake column holds NaN on as many of its present
+rows. Infinities are not: the column's range is its finite values', so
+`profile()` and `synthesize()` warn, naming each column that held any and how
+many, and the fake column holds none. See
+[Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/#a-floats-infinities-are-outside-its-profiled-bounds).
 
 ## Large sources
 
@@ -3193,7 +3193,7 @@ The output is plain, readable YAML — defaults are omitted so the file shows
 only what you actually declared:
 
 ```yaml
-version: 3
+version: 4
 name: Orders
 columns:
   order_id:
@@ -3474,7 +3474,7 @@ categories, and every spec keyed by name. Foreign keys are written as names
 and bound again by `resolve()` on the way back:
 
 ```yaml
-version: 3
+version: 4
 categories:
   enums:
     STATUS: [NEW, PAID, SHIPPED]
@@ -5203,9 +5203,9 @@ seed : int, default 0
 Warns
 -----
 UserWarning
-    Once per float column holding a NaN or an infinity. A spec cannot
-    declare either yet, so the bounds are its finite values' and the
-    spec reports those values when the data is validated against it.
+    Once per float column holding an infinity. The bounds are its finite
+    values', so the spec reports the infinities when the data is
+    validated against it. A NaN is recorded as `nan_probability`.
 
 ---
 
@@ -5347,7 +5347,7 @@ key by key. [Specs as files](https://maxwellb13.github.io/polspec/how-to/files/)
 the format. A test holds every table here to the reader's own field
 registry, so a key the reader accepts cannot be missing from this page.
 
-Every file starts with `version: 3`, the format version that wrote it. A
+Every file starts with `version: 4`, the format version that wrote it. A
 file from an older version is migrated as it is read; one from a newer
 polspec is refused, naming the version it needs. A key the reader does not
 know is an error naming the closest known key; `strict=False` downgrades it
@@ -5361,7 +5361,7 @@ every key still at its default.
 
 | Key | Holds |
 |:--|:--|
-| `version` | The format version, `3` |
+| `version` | The format version, `4` |
 | `name` | The spec's name; foreign keys refer to a spec by it |
 | `categories` | A category registry: a path to one (relative to the file), or one written inline |
 | `columns` | Column name to column, in order |
@@ -5538,9 +5538,15 @@ version: a file could not hold a time or a duration at all until 0.13.0.
 | 1 | The original format, with no `version` key: tags could be spelt `category` or `categories`, a rule's `when` was a one-column mapping such as `{column: region, equals: UK}`, and distribution parameters took any alias |
 | 2 | `version` recorded; tags spelt `tags`; conditions and checks as predicates; distribution parameters canonical; foreign keys written with their target's name; `checks` and `validators`; registry files |
 | 3 | `hierarchy` |
+| 4 | `nan_probability` |
 
 A key added without changing another's meaning -- `format`, `pattern`,
 `seed_name` -- is not a new version: a file without it reads as before.
+`nan_probability` is, because its absence makes a claim -- a float that does
+not declare it holds no NaN -- that a reader too old to know the key would
+not check: version 4 has that reader refuse the file by name instead of
+reading it more loosely than it was written. Every file carries the current
+version, so polspec 0.13 and earlier refuse every file 0.14.0 writes.
 
 ---
 
@@ -6227,16 +6233,18 @@ foreign key. A text column's format is not recognised either, so an email
 column becomes text of an email's length. See
 [Fake data from real data](https://maxwellb13.github.io/polspec/how-to/synthesizing/#how-close-the-fake-data-is).
 
-### A float's NaN and infinities are outside its profiled bounds
+### A float's infinities are outside its profiled bounds
 
-A spec cannot yet say that a column holds NaN, and a bound cannot be
-infinite. So `profile()`, `from_dataframe()`, `polspec schema infer` and
-`polspec synthesize` take a float column's bounds from its finite values,
-and warn once per column that holds either, saying how many. Validating the
-source against its own profile then reports those values as `bounds`
-findings, and a synthesized frame holds none of them. A column with no
-finite value at all gets no bounds. Declaring how often a column is NaN is
-planned for 0.14.0.
+A bound cannot be infinite, and an infinity is a matter of bounds -- an
+open end admits one, a closed end refuses it. So `profile()`,
+`from_dataframe()`, `polspec schema infer` and `polspec synthesize` take a
+float column's bounds from its finite values, and warn once per column that
+holds an infinity, saying how many. Validating the source against its own
+profile then reports them as `bounds` findings, and a synthesized frame
+holds none; open the bound on that side (`None`) where infinities belong.
+A column with no finite value at all gets no bounds. This is deliberate, and
+pinned by a passing test. A NaN, by contrast, is recorded as the column's
+`nan_probability` (0.14.0) and carried into the fake data.
 
 ## Smaller sharp edges
 
@@ -6626,7 +6634,7 @@ Two things this project has made no compatibility promise about yet:
 
 The first of those is easier to live with than it sounds, because a spec file
 now says which format wrote it. Every file `to_yaml()` writes carries
-`version: 3`; a file with no `version:` key is read as version 1 and migrated
+`version: 4`; a file with no `version:` key is read as version 1 and migrated
 on load, and one written by a newer polspec than the reader is refused by name
 rather than misread. So a format change is a migration to write, not a class of
 file that silently stops loading — which is what makes the rest of this section
@@ -6712,8 +6720,28 @@ seed produces; see
   declared one than `null_rate_tolerance` as `nan_rate_moved`. Refused on
   any other dtype and with `unique=True`.
 
+- **Profiling records a float's NaN share.** `profile()`,
+  `from_dataframe()`, `synthesize()` and both commands record how often a
+  float column -- or a list's float elements, or a struct's float field --
+  is NaN as its `nan_probability`, so a source holding NaN validates against
+  its own profile (pinned as a strict xfail since 0.13.1, now passing) and
+  its fake data holds NaN on the same share. The 0.13.1 warning now names
+  infinities alone, which stay a matter of bounds.
+- **A foreign key from a parent that holds NaN** is refused unless its
+  column declares NaN too -- the parent's NaN keys would fill it, and fail
+  its own claim.
+- The data dictionary shows a NaN share in the Nullable column
+  (`Yes; NaN 5%`), and the diagram as a comment.
+
 ### Changed
 
+- **Spec files are format version 4.** `nan_probability` is the reason:
+  a float that does not declare it now claims to hold no NaN, which an
+  older reader would not check, so the version has a 0.13 reader refuse the
+  file by name rather than read it more loosely than it was written. Every
+  file 0.14.0 writes carries `version: 4` -- polspec 0.13 and earlier
+  refuse all of them, whether or not they use the key. Version 3 files
+  read as before, through a migration that changes nothing.
 - **A NaN a float column does not declare is a finding.** The default,
   `nan_probability=0`, claims a column holds numbers, so validation now
   reports a NaN in it as a row-level `nan` finding, and `drift` as

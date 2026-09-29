@@ -54,9 +54,10 @@ class _Options:
     shape: bool = False
     detect_unique: bool = False
     seed: int = 0
-    # Each float column holding a NaN or an infinity outside the bounds its
-    # finite values gave it, as (path, NaNs, infinities): said once, after.
-    non_finite: list[tuple[str, int, int]] = field(default_factory=list)
+    # Each float column holding an infinity outside the bounds its finite
+    # values gave it, as (path, infinities): said once, after. A NaN needs no
+    # word -- the column's `nan_probability` records it.
+    infinite: list[tuple[str, int]] = field(default_factory=list)
 
 
 def profile_dataframe(
@@ -104,9 +105,9 @@ def profile_dataframe(
     Warns
     -----
     UserWarning
-        Once per float column holding a NaN or an infinity. A spec cannot
-        declare either yet, so the bounds are its finite values' and the
-        spec reports those values when the data is validated against it.
+        Once per float column holding an infinity. The bounds are its finite
+        values', so the spec reports the infinities when the data is
+        validated against it. A NaN is recorded as `nan_probability`.
     """
     if not isinstance(df, pl.DataFrame):
         raise TypeError(f"Expected pl.DataFrame, got {type(df).__name__}")
@@ -144,11 +145,12 @@ def profile_dataframe(
         )
         for name in df.columns
     }
-    for where, nans, infinities in options.non_finite:
+    for where, infinities in options.infinite:
         warnings.warn(
-            f"Column '{where}' holds {nans:,} NaN and {infinities:,} infinite "
-            "value(s), which a spec cannot declare: its bounds are its finite "
-            "values', so validating this data against the spec reports them.",
+            f"Column '{where}' holds {infinities:,} infinite value(s), which "
+            "its bounds -- its finite values' -- leave out, so validating this "
+            "data against the spec reports them. Open the bound on that side "
+            "(None) if infinities belong there.",
             UserWarning,
             stacklevel=2,
         )
@@ -284,15 +286,19 @@ def _profile_column(
         return keyed if keyed.unique else _shaped(keyed, non_null, options)
 
     if dtype.is_float():
-        # A NaN or an infinity is no bound -- a spec refuses a non-finite
-        # one -- so the extent and the shape are the finite values'.
+        # A NaN is recorded as the share of present values it is; an infinity
+        # is no bound -- a spec refuses a non-finite one -- so the extent and
+        # the shape are the finite values'.
+        nans = int(non_null.is_nan().sum())
         finite = non_null.filter(non_null.is_finite())
         described = spec(
-            dtype=dtype, bounds=_extent(finite, float, options.calculate_bounds)
+            dtype=dtype,
+            bounds=_extent(finite, float, options.calculate_bounds),
+            nan_probability=nans / len(non_null) if nans else 0.0,
         )
-        if described.bounds is not None and len(finite) < len(non_null):
-            nans = int(non_null.is_nan().sum())
-            options.non_finite.append((name, nans, len(non_null) - len(finite) - nans))
+        infinities = len(non_null) - len(finite) - nans
+        if described.bounds is not None and infinities:
+            options.infinite.append((name, infinities))
         return _shaped(described, finite, options)
 
     if dtype.is_decimal():

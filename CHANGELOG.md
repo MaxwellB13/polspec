@@ -20,8 +20,28 @@ seed produces; see
   declared one than `null_rate_tolerance` as `nan_rate_moved`. Refused on
   any other dtype and with `unique=True`.
 
+- **Profiling records a float's NaN share.** `profile()`,
+  `from_dataframe()`, `synthesize()` and both commands record how often a
+  float column -- or a list's float elements, or a struct's float field --
+  is NaN as its `nan_probability`, so a source holding NaN validates against
+  its own profile (pinned as a strict xfail since 0.13.1, now passing) and
+  its fake data holds NaN on the same share. The 0.13.1 warning now names
+  infinities alone, which stay a matter of bounds.
+- **A foreign key from a parent that holds NaN** is refused unless its
+  column declares NaN too -- the parent's NaN keys would fill it, and fail
+  its own claim.
+- The data dictionary shows a NaN share in the Nullable column
+  (`Yes; NaN 5%`), and the diagram as a comment.
+
 ### Changed
 
+- **Spec files are format version 4.** `nan_probability` is the reason:
+  a float that does not declare it now claims to hold no NaN, which an
+  older reader would not check, so the version has a 0.13 reader refuse the
+  file by name rather than read it more loosely than it was written. Every
+  file 0.14.0 writes carries `version: 4` -- polspec 0.13 and earlier
+  refuse all of them, whether or not they use the key. Version 3 files
+  read as before, through a migration that changes nothing.
 - **A NaN a float column does not declare is a finding.** The default,
   `nan_probability=0`, claims a column holds numbers, so validation now
   reports a NaN in it as a row-level `nan` finding, and `drift` as

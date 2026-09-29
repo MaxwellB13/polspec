@@ -1,7 +1,7 @@
 # What FrameSpec.from_dataframe() infers from test_synthesize.golden_frame()
 # with no options: 0.13.0 added opt-in profiling, and this pins that the
 # default did not move. Regenerate only on purpose.
-version: 3
+version: 4
 name: Profiled
 columns:
   id:

@@ -26,6 +26,7 @@ from polspec import (
     SerializationError,
     TableSpec,
     col,
+    inspect,
 )
 from polspec.serialization import (
     FORMAT_VERSION,
@@ -129,7 +130,9 @@ def test_an_old_spec_file_reads_as_the_spec_it_declared(fixture, expected):
             assert got.when.equals(want.when), (name, want.when)
 
 
-@pytest.mark.parametrize("fixture", ["spec_v1.yaml", "spec_v2.yaml"])
+@pytest.mark.parametrize(
+    "fixture", ["spec_v1.yaml", "spec_v2.yaml", "spec_v3_temporal.yaml"]
+)
 def test_an_old_spec_file_writes_back_as_the_current_version(fixture, tmp_path):
     """Read, written, read again: the file is now the current version, and
     says the same thing."""
@@ -232,3 +235,16 @@ def test_a_version_that_is_not_a_positive_integer_is_refused(version):
 def test_a_file_that_is_not_a_mapping_is_refused():
     with pytest.raises(SerializationError, match="expected a mapping"):
         migrate(["not", "a", "mapping"], "spec", "odd.yaml")
+
+
+def test_a_version_3_float_reads_as_holding_no_nan():
+    """Version 4 is `nan_probability`, bumped because its absence makes a
+    claim: a version 3 file that says nothing of NaN is read as a float
+    that holds none, which a polspec too old for the key would not check."""
+    spec = from_dict(
+        {"version": 3, "name": "Readings", "columns": {"level": {"dtype": "Float64"}}}
+    )
+    assert spec["level"].nan_probability == 0.0
+    report = inspect(spec, pl.DataFrame({"level": [1.0, float("nan")]}))
+    assert [f.code for f in report.findings] == ["nan"]
+    assert to_dict(spec)["version"] == 4
