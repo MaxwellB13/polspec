@@ -379,7 +379,8 @@ def test_diff_reads_element_nulls_as_nullability():
 
 
 def test_drift_measures_element_nulls_against_the_rate():
-    holed = pl.DataFrame({"c": [[1, None], [None, None], [3, 4]]})  # 3 of 6 null
+    # Half the elements null, over enough of them for a rate to be measured.
+    holed = pl.DataFrame({"c": [[1, None], [None, None], [3, 4]] * 100})
 
     def spec(rate: float) -> TableSpec:
         return TableSpec(

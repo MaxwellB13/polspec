@@ -22,6 +22,7 @@ what would fail.
 from __future__ import annotations
 
 import datetime
+import functools
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
@@ -29,11 +30,21 @@ from typing import TYPE_CHECKING, Any, Literal
 import polars as pl
 
 from polspec.domain import Domain, describe_values
+from polspec.drift import stats
 from polspec.drift.data import Observed
 from polspec.drift.report import DriftFinding, Severity
 from polspec.dtypes import bound_endpoint_to_physical, field_dtypes
+from polspec.errors import PolspecError
 from polspec.formats import lookup as _lookup_format
+from polspec.generation import generate
+from polspec.shape import ks_distance, physical
 from polspec.validation.constraints import is_dtype_compatible
+
+# The sample a declared distribution is drawn as, to hold values against:
+# large enough that its own noise is a small part of the KS distance, and
+# drawn from a fixed seed, so a report is the same every run.
+REFERENCE_ROWS = 50_000
+REFERENCE_SEED = 20_260_929
 
 if TYPE_CHECKING:
     from polspec.bound import Bound
@@ -50,7 +61,10 @@ class Pair:
     are being diffed and an `Observed` when a spec is being held against a
     frame; `mode` says which. `where` names a field inside the column
     (`point.lat`) when the pair is one of a struct's fields: a finding's key
-    and message name it, while its `columns` stay the column's.
+    and message name it, while its `columns` stay the column's. `rewritten`
+    marks a column a pass writes -- a rule, a foreign key, a hierarchy, a
+    composite key's repair -- whose values are not drawn from its own
+    weights or distribution, so neither is compared.
     """
 
     column: str
@@ -58,6 +72,7 @@ class Pair:
     other: ColSpec | Observed
     options: DriftOptions
     where: str = ""
+    rewritten: bool = False
 
     @property
     def label(self) -> str:
@@ -130,6 +145,11 @@ def _compare_dtype(pair: Pair) -> list[DriftFinding]:
     compatible = is_dtype_compatible(
         expected, actual, strict=pair.options.strict_dtypes
     )
+    if compatible and pair.mode == "drift":
+        # What a file hands back -- a String for an Enum from a CSV, an
+        # Int64 for an Int32 -- validates as it is; data that passes
+        # validation has not drifted on dtype. `strict_dtypes` reports it.
+        return []
     if pair.mode == "diff":
         message = f"dtype changed from {actual} to {expected}" + (
             "" if compatible else "; values of the old type no longer validate"
@@ -347,8 +367,8 @@ def _observed_values(pair: Pair) -> list[DriftFinding]:
                 values=list(samples),
             )
         )
-    if pair.options.unseen_values and pair.observed.unseen:
-        unseen = pair.observed.unseen
+    unseen = _improbably_unseen(pair, domain) if pair.options.unseen_values else ()
+    if unseen:
         findings.append(
             pair.finding(
                 "cardinality_moved",
@@ -362,6 +382,44 @@ def _observed_values(pair: Pair) -> list[DriftFinding]:
             )
         )
     return findings
+
+
+def _improbably_unseen(pair: Pair, domain: Domain) -> tuple[Any, ...]:
+    """The declared values the data never holds and, at the share each is
+    generated at, would not miss by chance: a value of weight 1% is absent
+    from fifty rows six times in ten, and from a thousand almost never. A
+    column a pass rewrites has no share to weigh a value at -- a rule may
+    leave one out of every row -- so none is reported on it."""
+    unseen = pair.observed.unseen
+    if not unseen or pair.rewritten:
+        return ()
+    values = list(domain.values or ())
+    shares = _generation_shares(pair.declared, values)
+    share_of = dict(zip(values, shares, strict=True))
+    draws = pair.observed.present_count
+    return tuple(
+        value
+        for value in unseen
+        if stats.unseen_p(share_of.get(value, 0.0), draws) < pair.options.significance
+    )
+
+
+def _generation_shares(declared: ColSpec, values: Sequence[Any]) -> list[float]:
+    """How often generation draws each of `values`, the column's finite
+    domain: its weights, a finite format's extras at their shares and its
+    own values evenly, or every value evenly."""
+    if not values:
+        return []
+    even = [1 / len(values)] * len(values)
+    if declared.weights is not None and len(declared.weights) == len(values):
+        total = sum(declared.weights)
+        return [w / total for w in declared.weights]
+    extras = declared.extra_values or {}
+    if extras and declared.format is not None and len(values) > len(extras):
+        rest = max(0.0, 1.0 - sum(extras.values()))
+        own = len(values) - len(extras)
+        return [rest / own] * own + list(extras.values())
+    return even
 
 
 def _observed_format(pair: Pair) -> list[DriftFinding]:
@@ -450,29 +508,63 @@ def _compare_length(field: str, observed_attr: str) -> Comparator:
 # ---------------------------------------------------------------------------
 
 
+def _rate_moved(
+    pair: Pair,
+    code: str,
+    what: str,
+    field: str,
+    declared: float,
+    hits: int,
+    trials: int,
+    suffix: str,
+) -> list[DriftFinding]:
+    """A rate that moved: further from `declared` than the tolerance, and
+    further than sampling noise over `trials` would put it."""
+    if not trials:
+        return []
+    observed = hits / trials
+    tolerance = pair.options.null_rate_tolerance
+    if abs(observed - declared) <= tolerance:
+        return []
+    p_value = stats.binomial_p(hits, trials, declared)
+    if p_value >= pair.options.significance:
+        return []
+    return [
+        pair.finding(
+            code,
+            "compatible",
+            f"{observed:.1%} {what}, declared {field}={declared}; beyond the "
+            f"{tolerance:.0%} tolerance over {trials:,} value(s) "
+            f"(p={p_value:.2g})",
+            suffix=suffix,
+            declared=declared,
+            observed=observed,
+            tolerance=tolerance,
+            count=trials,
+            p_value=p_value,
+        )
+    ]
+
+
 def _compare_null_rate(pair: Pair) -> list[DriftFinding]:
     if pair.mode == "diff":
         old, new = pair.declared.null_probability, pair.new.null_probability
         if old == new or not (pair.declared.nullable and pair.new.nullable):
             return []  # a rate on a non-nullable column means nothing
         return [_field_changed(pair, "null_probability", old, new)]
-    if not pair.declared.nullable or pair.observed.null_rate is None:
+    if not pair.declared.nullable:
         return []
-    declared, observed = pair.declared.null_probability, pair.observed.null_rate
-    if abs(observed - declared) <= pair.options.null_rate_tolerance:
-        return []
-    return [
-        pair.finding(
-            "null_rate_moved",
-            "compatible",
-            f"{observed:.1%} null, declared null_probability={declared}; "
-            f"beyond the {pair.options.null_rate_tolerance:.0%} tolerance",
-            suffix="null_rate",
-            declared=declared,
-            observed=observed,
-            tolerance=pair.options.null_rate_tolerance,
-        )
-    ]
+    observed = pair.observed
+    return _rate_moved(
+        pair,
+        "null_rate_moved",
+        "null",
+        "null_probability",
+        pair.declared.null_probability,
+        observed.null_count,
+        observed.height,
+        "null_rate",
+    )
 
 
 def _compare_nans(pair: Pair) -> list[DriftFinding]:
@@ -513,21 +605,16 @@ def _compare_nans(pair: Pair) -> list[DriftFinding]:
                 nan_count=observed.nan_count,
             )
         ]
-    rate = observed.nan_rate
-    if rate is None or abs(rate - declared) <= pair.options.null_rate_tolerance:
-        return []
-    return [
-        pair.finding(
-            "nan_rate_moved",
-            "compatible",
-            f"{rate:.1%} of values NaN, declared nan_probability={declared}; "
-            f"beyond the {pair.options.null_rate_tolerance:.0%} tolerance",
-            suffix="nan_rate",
-            declared=declared,
-            observed=rate,
-            tolerance=pair.options.null_rate_tolerance,
-        )
-    ]
+    return _rate_moved(
+        pair,
+        "nan_rate_moved",
+        "of values NaN",
+        "nan_probability",
+        declared,
+        observed.nan_count,
+        observed.value_count,
+        "nan_rate",
+    )
 
 
 def _compare_element_nulls(pair: Pair) -> list[DriftFinding]:
@@ -570,22 +657,16 @@ def _compare_element_nulls(pair: Pair) -> list[DriftFinding]:
                 null_count=observed.element_null_count,
             )
         ]
-    rate = observed.element_null_rate
-    if rate is None or abs(rate - declared) <= pair.options.null_rate_tolerance:
-        return []
-    return [
-        pair.finding(
-            "null_rate_moved",
-            "compatible",
-            f"{rate:.1%} of elements null, declared element_null_probability="
-            f"{declared}; beyond the {pair.options.null_rate_tolerance:.0%} "
-            "tolerance",
-            suffix="element_null_rate",
-            declared=declared,
-            observed=rate,
-            tolerance=pair.options.null_rate_tolerance,
-        )
-    ]
+    return _rate_moved(
+        pair,
+        "null_rate_moved",
+        "of elements null",
+        "element_null_probability",
+        declared,
+        observed.element_null_count,
+        observed.element_count,
+        "element_null_rate",
+    )
 
 
 def _constraint(pair: Pair, kind: str, added: bool, what: str) -> DriftFinding:
@@ -702,9 +783,144 @@ def _compare_struct_fields(pair: Pair) -> list[DriftFinding]:
             other,
             pair.options,
             where=f"{pair.label}.{name}",
+            rewritten=pair.rewritten,
         )
         findings.extend(compare_column(field_pair))
     return findings
+
+
+def _compare_weights(pair: Pair) -> list[DriftFinding]:
+    """Declared weights against the frequencies the data holds: moved when
+    the shares differ by at least `frequency_tolerance` in total variation,
+    and by more than chance would move them over the rows seen."""
+    if pair.mode == "diff":
+        old, new = pair.declared.weights, pair.new.weights
+        return [] if old == new else [_field_changed(pair, "weights", old, new)]
+    counts = pair.observed.counts
+    declared = pair.declared
+    if pair.rewritten or counts is None or not sum(counts) or declared.weights is None:
+        return []
+    if declared.value_dtype == pl.Boolean:
+        values: list[Any] = [False, True]
+    else:
+        values = list(Domain.of(declared).values or ())
+    if len(values) != len(counts):
+        return []
+    shares = _generation_shares(declared, values)
+    distance = stats.total_variation(counts, shares)
+    if distance < pair.options.frequency_tolerance:
+        return []
+    p_value = stats.chi_square_p(counts, shares)
+    if p_value >= pair.options.significance:
+        return []
+    total = sum(counts)
+    moved = sorted(
+        zip(values, shares, counts, strict=True),
+        key=lambda row: -abs(row[2] / total - row[1]),
+    )[:3]
+    described = ", ".join(
+        f"{value!r} {count / total:.1%} (declared {share:.1%})"
+        for value, share, count in moved
+    )
+    return [
+        pair.finding(
+            "frequencies_moved",
+            "compatible",
+            f"frequencies moved by {distance:.1%} over {total:,} value(s): "
+            f"{described} (p={p_value:.2g})",
+            suffix="frequencies",
+            declared={_key(v): share for v, share in zip(values, shares, strict=True)},
+            observed={_key(v): c / total for v, c in zip(values, counts, strict=True)},
+            distance=distance,
+            tolerance=pair.options.frequency_tolerance,
+            count=total,
+            p_value=p_value,
+        )
+    ]
+
+
+def _key(value: Any) -> Any:
+    """A value as a details key: JSON keys are strings."""
+    return value if isinstance(value, str) else str(value)
+
+
+def _compare_shape(pair: Pair) -> list[DriftFinding]:
+    """A declared distribution against the values: moved when their
+    Kolmogorov-Smirnov distance from a sample drawn from the declaration is
+    at least `distribution_tolerance`, and more than chance would put
+    between two samples of those sizes. Drawn, not computed: the reference
+    is what `generate()` makes of the declaration -- clamping at its bounds
+    and rounding an integer included -- as `shape.fit` compares candidates."""
+    if pair.mode == "diff":
+        return [
+            _field_changed(
+                pair, name, getattr(pair.declared, name), getattr(pair.new, name)
+            )
+            for name in ("distribution", "distribution_params")
+            if getattr(pair.declared, name) != getattr(pair.new, name)
+        ]
+    declared, values = pair.declared, pair.observed.physical
+    if pair.rewritten or declared.distribution is None or values is None:
+        return []
+    if len(values) < 2:
+        return []
+    reference = _reference(
+        declared.value_dtype,
+        declared.bounds,
+        declared.distribution,
+        tuple(sorted((declared.distribution_params or {}).items())),
+    )
+    if reference is None:
+        return []
+    distance = ks_distance(values, reference)
+    if distance < pair.options.distribution_tolerance:
+        return []
+    p_value = stats.ks_p(distance, len(values), len(reference))
+    if p_value >= pair.options.significance:
+        return []
+    return [
+        pair.finding(
+            "distribution_moved",
+            "compatible",
+            f"values no longer follow the declared {declared.distribution} "
+            f"distribution: a distance of {distance:.3f} from a sample drawn "
+            f"from the declaration, over {len(values):,} value(s) "
+            f"(p={p_value:.2g})",
+            suffix="distribution",
+            distribution=declared.distribution,
+            distance=distance,
+            tolerance=pair.options.distribution_tolerance,
+            count=len(values),
+            p_value=p_value,
+        )
+    ]
+
+
+@functools.lru_cache(maxsize=64)
+def _reference(
+    dtype: pl.DataType,
+    bounds: Bound | None,
+    distribution: str,
+    params: tuple[tuple[str, float], ...],
+) -> pl.Series | None:
+    """A sample of what the declaration generates, in physical units; None
+    for a declaration the engine refuses."""
+    from polspec.spec import ColSpec
+    from polspec.tablespec import TableSpec
+
+    column = ColSpec(
+        dtype,
+        bounds=bounds,
+        distribution=distribution,
+        distribution_params=dict(params) or None,
+    )
+    try:
+        frame = generate(
+            TableSpec("Reference", {"v": column}), REFERENCE_ROWS, seed=REFERENCE_SEED
+        )
+    except (PolspecError, ValueError):
+        return None
+    return physical(frame["v"]).cast(pl.Float64)
 
 
 def _compare_field(name: str) -> Comparator:
@@ -748,9 +964,10 @@ FIELD_COMPARATORS: dict[str, Comparator] = {
     "rules": _compare_rules,
     "validators": _compare_validators,
     "tags": _compare_field("tags"),
-    "weights": _compare_field("weights"),
-    "distribution": _compare_field("distribution"),
-    "distribution_params": _compare_field("distribution_params"),
+    "weights": _compare_weights,
+    # One claim in two fields: the distribution and its parameters.
+    "distribution": _compare_shape,
+    "distribution_params": _compare_shape,
 }
 
 

@@ -44,6 +44,8 @@ DriftCode = Literal[
     "format_violated",
     "null_rate_moved",
     "nan_rate_moved",
+    "frequencies_moved",
+    "distribution_moved",
     "cardinality_moved",
     "constraint_added",
     "constraint_removed",

@@ -30,6 +30,7 @@ from polspec.drift.data import Observed
 from polspec.drift.fields import Pair, compare_column, compare_table
 from polspec.drift.report import DriftCode, DriftFinding, DriftReport, Severity
 from polspec.frames import Frame, to_eager
+from polspec.pass_order import passes_of
 from polspec.tablespec import TableSpec, as_table_spec, require_columns
 
 __all__ = [
@@ -47,15 +48,36 @@ __all__ = [
 class DriftOptions:
     """What counts as drift, said once.
 
+    A rate, a set of frequencies or a distribution is reported as moved only
+    when the move is both *significant* -- unlikely to be sampling noise at
+    the number of rows measured -- and at least as large as its tolerance.
+    Fifty rows cannot trip a finding on noise, and ten million cannot trip
+    one on a difference too small to matter. Each column's tests are run at
+    `significance`, uncorrected for how many columns there are: a frame of a
+    hundred columns, each tested once at 0.001, expects a false alarm about
+    one run in ten.
+
     Parameters
     ----------
+    significance : float, default 0.001
+        The false-alarm rate of each statistical test: how unlikely a move
+        must be, were the declaration exactly right, before it is reported.
     null_rate_tolerance : float, default 0.05
-        How far the observed null rate may sit from a nullable column's
-        `null_probability` before `null_rate_moved` is reported. Absolute,
-        not relative: a relative tolerance is unstable near zero.
+        The smallest move of a null rate -- or an element null rate, or a
+        NaN share -- worth reporting (`null_rate_moved`, `nan_rate_moved`).
+        Absolute, not relative: a relative tolerance is unstable near zero.
+    frequency_tolerance : float, default 0.05
+        The smallest move of a weighted column's frequencies worth
+        reporting (`frequencies_moved`), as the total variation distance:
+        half the summed gap between observed and declared shares.
+    distribution_tolerance : float, default 0.05
+        The smallest move of a declared distribution worth reporting
+        (`distribution_moved`), as the Kolmogorov-Smirnov distance between
+        the values and a sample drawn from the declaration.
     unseen_values : bool, default True
         Whether to report declared `choices` or `Enum` categories the data
-        never holds (`cardinality_moved`).
+        never holds (`cardinality_moved`) -- each only when, at its declared
+        share, never seeing it is itself unlikely at `significance`.
     strict_dtypes : bool, default False
         The same switch as `ValidationOptions.strict_dtypes`, and decided by
         the same function: whether a `dtype_changed` is breaking.
@@ -63,16 +85,28 @@ class DriftOptions:
         How many offending values a finding's `details` carry.
     """
 
+    significance: float = 0.001
     null_rate_tolerance: float = 0.05
+    frequency_tolerance: float = 0.05
+    distribution_tolerance: float = 0.05
     unseen_values: bool = True
     strict_dtypes: bool = False
     max_samples: int = 10
 
     def __post_init__(self) -> None:
-        if not 0.0 <= self.null_rate_tolerance <= 1.0:
+        if not 0.0 < self.significance < 1.0:
             raise ValueError(
-                f"null_rate_tolerance must be between 0 and 1, got {self.null_rate_tolerance!r}"
+                f"significance must be between 0 and 1, exclusive; got {self.significance!r}"
             )
+        for name in (
+            "null_rate_tolerance",
+            "frequency_tolerance",
+            "distribution_tolerance",
+        ):
+            if not 0.0 <= getattr(self, name) <= 1.0:
+                raise ValueError(
+                    f"{name} must be between 0 and 1, got {getattr(self, name)!r}"
+                )
         if self.max_samples < 0:
             raise ValueError(
                 f"max_samples must be non-negative, got {self.max_samples!r}"
@@ -230,6 +264,10 @@ def drift(
     opts = _options_from(options, **option_kwargs)
     frame = to_eager(df)
     findings: list[DriftFinding] = []
+    # A column a pass writes -- a rule, a foreign key, a hierarchy, a
+    # composite key's repair -- is not drawn from its own weights or
+    # distribution, so neither is a claim about its values.
+    rewritten = {column for p in passes_of(table) for column in p.writes}
 
     present = frame.columns
     for name in present:
@@ -258,7 +296,11 @@ def drift(
             )
             continue
         observed = Observed.of(frame[name], declared, opts)
-        findings.extend(compare_column(Pair(name, declared, observed, opts)))
+        findings.extend(
+            compare_column(
+                Pair(name, declared, observed, opts, rewritten=name in rewritten)
+            )
+        )
 
     return DriftReport(
         kind="drift",
