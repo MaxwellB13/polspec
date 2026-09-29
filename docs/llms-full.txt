@@ -6727,8 +6727,9 @@ Two things this project has made no compatibility promise about yet:
   column repeating its first batch's elements in every batch after it, so
   the elements of a `List`, `Array` or `Map` column past the first batch
   changed, once; `generate()` did not. 0.13.0 changed nothing that
-  constructed under 0.12.0, and 0.13.1 nothing that constructed under
-  0.13.0.
+  constructed under 0.12.0, 0.13.1 nothing that constructed under 0.13.0,
+  and 0.14.0 nothing that constructed under 0.13.1: a column declaring
+  `nan_probability` draws its NaN from a draw of its own.
 
 The first of those is easier to live with than it sounds, because a spec file
 now says which format wrote it. Every file `to_yaml()` writes carries
@@ -6803,8 +6804,54 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-29
+
+**A profiled spec says what the data is, and drift notices when that stops
+being true.** A float declares how often it is NaN (`nan_probability`); the
+profiler records that share, names a text column's `format` -- emails,
+UUIDs, IPs, country codes -- and makes a text column an `Enum` only when its
+values repeat; and drift compares weighted frequencies and declared
+distributions, reporting a move only when it is significant at the rows
+seen and large enough to matter.
+
+**Breaking, on purpose:**
+- a NaN in a float column that does not declare one is a `nan` finding;
+- spec files are format version 4, and polspec 0.13 and earlier refuse
+  every file 0.14.0 writes;
+- `from_dataframe()` and `schema infer` infer differently: formats named,
+  Enums only of repeated values;
+- drift reports fewer, better-founded findings: no small-sample rate
+  alarms, no dtype that validates, and new codes for frequencies and
+  distributions.
+
+**No seeded output changes.** Every spec that constructs under 0.13.1
+generates what it did -- checked against the published 0.13.1 across
+435 cases -- and a version 3 spec file reads as before.
+
+**Generation and validation run as fast as they did** -- measured against
+0.13.1 on one build of the extension. Drift and profiling do more than they
+did, and take longer for it: on a million rows, drift with two declared
+distributions 44 ms to 79 ms, profiling with a text column checked for
+formats 0.10 s to 0.22 s (`formats=False` skips that).
+
 ### Added
 
+- **`ColSpec.nan_probability`: NaN in a float value, declared.** How often a
+  present value is NaN, from 0 to 1, on a float column, a list's float
+  elements or a struct's float field. Generation draws NaN on that share of
+  the present rows -- whole and batched alike, from a draw of its own, so a
+  column that declares none generates exactly what it did -- and spec files
+  carry it as `nan_probability`. `diff` calls allowing NaN compatible and
+  forbidding it breaking; `drift` reports a NaN share that has moved,
+  significantly and by at least `null_rate_tolerance`, as
+  `nan_rate_moved`. Refused on any other dtype and with `unique=True`.
+- **Profiling records a float's NaN share.** `profile()`,
+  `from_dataframe()`, `synthesize()` and both commands record how often a
+  float column -- or a list's float elements, or a struct's float field --
+  is NaN as its `nan_probability`, so a source holding NaN validates against
+  its own profile (pinned as a strict xfail since 0.13.1, now passing) and
+  its fake data holds NaN on the same share. The 0.13.1 warning now names
+  infinities alone, which stay a matter of bounds.
 - **Profiling names a text column's format.** `profile()`,
   `from_dataframe()`, `synthesize()`, `polspec schema infer` and `polspec
   synthesize` name the `format` a text column's values have -- `uuid4`,
@@ -6823,23 +6870,6 @@ seed produces; see
   clamping at its bounds and an integer's rounding are what generation
   does. `DriftOptions` gains `significance`, `frequency_tolerance` and
   `distribution_tolerance`.
-- **`ColSpec.nan_probability`: NaN in a float value, declared.** How often a
-  present value is NaN, from 0 to 1, on a float column, a list's float
-  elements or a struct's float field. Generation draws NaN on that share of
-  the present rows -- whole and batched alike, from a draw of its own, so a
-  column that declares none generates exactly what it did -- and spec files
-  carry it as `nan_probability`. `diff` calls allowing NaN compatible and
-  forbidding it breaking; `drift` reports a NaN rate further from the
-  declared one than `null_rate_tolerance` as `nan_rate_moved`. Refused on
-  any other dtype and with `unique=True`.
-
-- **Profiling records a float's NaN share.** `profile()`,
-  `from_dataframe()`, `synthesize()` and both commands record how often a
-  float column -- or a list's float elements, or a struct's float field --
-  is NaN as its `nan_probability`, so a source holding NaN validates against
-  its own profile (pinned as a strict xfail since 0.13.1, now passing) and
-  its fake data holds NaN on the same share. The 0.13.1 warning now names
-  infinities alone, which stay a matter of bounds.
 - **A foreign key from a parent that holds NaN** is refused unless its
   column declares NaN too -- the parent's NaN keys would fill it, and fail
   its own claim.
@@ -6848,6 +6878,32 @@ seed produces; see
 
 ### Changed
 
+- **A NaN a float column does not declare is a finding.** The default,
+  `nan_probability=0`, claims a column holds numbers, so validation now
+  reports a NaN in it as a row-level `nan` finding, and `drift` as
+  `new_values` -- where before a NaN in a column with no `bounds` passed
+  unremarked. And NaN is no longer judged by `bounds` or `choices`: in a
+  bounded column it used to be a `bounds` finding, since it compares
+  greater than every number; it is now the `nan` finding alone, and
+  nothing at all where it is declared.
+- **Spec files are format version 4.** `nan_probability` is the reason:
+  a float that does not declare it now claims to hold no NaN, which an
+  older reader would not check, so the version has a 0.13 reader refuse the
+  file by name rather than read it more loosely than it was written. Every
+  file 0.14.0 writes carries `version: 4` -- polspec 0.13 and earlier
+  refuse all of them, whether or not they use the key. Version 3 files
+  read as before, through a migration that changes nothing.
+- **A profiled text column becomes an `Enum` only when its values repeat.**
+  `from_dataframe()`, `profile()`, `synthesize()`, `polspec schema infer`
+  and `polspec synthesize` narrowed any text column with at most
+  `max_unique_enum` (50) distinct values to an `Enum` of them -- so forty
+  distinct names in a forty-row sample became an `Enum` of those forty, and
+  the spec rejected every other name. The values now have to repeat, each
+  at least twice on average (`polspec.profiler.ENUM_MIN_REPEATS`); a column
+  of distinct values stays `String`, with its lengths, and a `Categorical`
+  stays `Categorical`. A spec inferred before is unchanged unless it came
+  from such a column; the same holds for a list's elements and a struct's
+  fields.
 - **Drift reports a move only when it is both significant and large.** A
   null rate, an element null rate or a NaN share is reported as moved only
   when it is at least `null_rate_tolerance` from the declared rate *and*
@@ -6866,33 +6922,13 @@ seed produces; see
   -- used to be a compatible `dtype_changed` against data that `validate()`
   accepts; it is now reported only under `strict_dtypes=True`, where it is
   breaking. `diff` between two declarations still reports every change.
-- **Spec files are format version 4.** `nan_probability` is the reason:
-  a float that does not declare it now claims to hold no NaN, which an
-  older reader would not check, so the version has a 0.13 reader refuse the
-  file by name rather than read it more loosely than it was written. Every
-  file 0.14.0 writes carries `version: 4` -- polspec 0.13 and earlier
-  refuse all of them, whether or not they use the key. Version 3 files
-  read as before, through a migration that changes nothing.
-- **A NaN a float column does not declare is a finding.** The default,
-  `nan_probability=0`, claims a column holds numbers, so validation now
-  reports a NaN in it as a row-level `nan` finding, and `drift` as
-  `new_values` -- where before a NaN in a column with no `bounds` passed
-  unremarked. And NaN is no longer judged by `bounds` or `choices`: in a
-  bounded column it used to be a `bounds` finding, since it compares
-  greater than every number; it is now the `nan` finding alone, and
-  nothing at all where it is declared.
 
-- **A profiled text column becomes an `Enum` only when its values repeat.**
-  `from_dataframe()`, `profile()`, `synthesize()`, `polspec schema infer`
-  and `polspec synthesize` narrowed any text column with at most
-  `max_unique_enum` (50) distinct values to an `Enum` of them -- so forty
-  distinct names in a forty-row sample became an `Enum` of those forty, and
-  the spec rejected every other name. The values now have to repeat, each
-  at least twice on average (`polspec.profiler.ENUM_MIN_REPEATS`); a column
-  of distinct values stays `String`, with its lengths, and a `Categorical`
-  stays `Categorical`. A spec inferred before is unchanged unless it came
-  from such a column; the same holds for a list's elements and a struct's
-  fields.
+### Fixed
+
+- A test that runs `pytest` on a generated file could fail now and then on
+  Windows: left to find its own root, the subprocess scanned directories up
+  into the system temp folder, where another program's file vanishing
+  mid-scan failed collection. It is now rooted in the file's own folder.
 
 ## [0.13.1] - 2026-09-28
 
@@ -8717,7 +8753,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/MaxwellB13/polspec/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/MaxwellB13/polspec/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/MaxwellB13/polspec/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/MaxwellB13/polspec/compare/v0.11.0...v0.12.0

@@ -9,6 +9,7 @@ import json
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 
 import polars as pl
 import pytest
@@ -25,13 +26,28 @@ def run_pytest_on(path) -> subprocess.CompletedProcess:
 
     A subprocess rather than pytest.main(): the generated file imports
     `polspec` itself, and running it in-process would collect it as part of
-    this very test session.
+    this very test session. Rooted in the file's own directory: left to find
+    its own root, pytest scanned directories up into the system temp folder,
+    where other programs' files come and go -- and a file vanishing mid-scan
+    failed collection, now and then.
     """
+    folder = Path(path).parent
     return subprocess.run(
-        [sys.executable, "-m", "pytest", str(path), "-q"],
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            str(path),
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "--rootdir",
+            str(folder),
+        ],
         capture_output=True,
         text=True,
         check=False,
+        cwd=folder,
     )
 
 
