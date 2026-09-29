@@ -35,6 +35,7 @@ def _cmd_schema_infer(args: argparse.Namespace) -> int:
                 name=name,
                 weights=args.weights,
                 max_unique_enum=args.max_unique_enum,
+                formats=not args.no_formats,
                 calculate_bounds=not args.no_bounds,
                 shape=args.shape,
                 detect_unique=args.keys,

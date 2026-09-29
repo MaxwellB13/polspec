@@ -1177,3 +1177,24 @@ def test_a_schema_inferred_from_one_sample_of_names_accepts_another(tmp_path):
     spec = tmp_path / "people.yaml"
     assert run_cli("schema", "infer", first, "-o", spec) == 0
     assert run_cli("validate", spec, second) == 0
+
+
+def test_schema_infer_names_a_format_and_can_be_told_not_to(tmp_path):
+    data = tmp_path / "people.csv"
+    pl.DataFrame({"email": [f"user{i}@example.com" for i in range(40)]}).write_csv(data)
+    named, plain = tmp_path / "named.yaml", tmp_path / "plain.yaml"
+    assert run_cli("schema", "infer", data, "-o", named) == 0
+    assert "format: email" in named.read_text(encoding="utf-8")
+    assert run_cli("schema", "infer", data, "-o", plain, "--no-formats") == 0
+    assert "format:" not in plain.read_text(encoding="utf-8")
+
+
+def test_synthesize_writes_values_of_the_sources_format(tmp_path):
+    source = tmp_path / "hosts.parquet"
+    pl.DataFrame(
+        {"ip": [f"10.0.{i}.{j}" for i in range(5) for j in range(10)]}
+    ).write_parquet(source)
+    fake, spec = tmp_path / "fake.parquet", tmp_path / "fake.yaml"
+    assert run_cli("synthesize", source, "-o", fake, "--spec", spec, "--seed", "1") == 0
+    assert "format: ipv4" in spec.read_text(encoding="utf-8")
+    assert run_cli("validate", spec, fake) == 0

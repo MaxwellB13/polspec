@@ -30,6 +30,7 @@ import polars as pl
 from polspec.bound import Bound
 from polspec.constants import DEFAULT_NULL_PROBABILITY
 from polspec.dtypes import MAP, field_dtypes, map_entries
+from polspec.formats import lookup as _lookup_format
 from polspec.shape import fit, physical, with_fit
 from polspec.spec import ColSpec, is_categorical_dtype
 
@@ -43,6 +44,30 @@ KEY_MIN_ROWS = 100
 # file's. Below `max_unique_enum` distinct values *and* repeating: both.
 ENUM_MIN_REPEATS = 2
 
+# A text column is named a `format` only when at least this many distinct
+# values have it: three rows of "a@b.co" are a short Enum, not evidence.
+FORMAT_MIN_DISTINCT = 20
+
+# The formats a column is tried against, most specific first; the first
+# that fits wins. A finite format (a country, a currency) is tried before
+# the column could narrow to an Enum of the codes it happens to hold.
+FORMAT_ORDER = (
+    "uuid4",
+    "ipv6",
+    "ipv4",
+    "mac",
+    "iso_country",
+    "iso_currency",
+    "email",
+    "hostname",
+)
+
+# A near miss: a column where nearly every value has the format and the rest
+# are a few repeated stand-ins -- `N/A`, `UK (ISO)` -- is that format with
+# those values as `extra_values`, at the share each is observed at.
+FORMAT_MIN_SHARE = 0.99
+FORMAT_MAX_EXTRAS = 5
+
 
 @dataclass(frozen=True, slots=True)
 class _Options:
@@ -53,6 +78,7 @@ class _Options:
     calculate_bounds: bool
     shape: bool = False
     detect_unique: bool = False
+    formats: bool = True
     seed: int = 0
     # Each float column holding an infinity outside the bounds its finite
     # values gave it, as (path, infinities): said once, after. A NaN needs no
@@ -70,6 +96,7 @@ def profile_dataframe(
     detect_unique: bool = False,
     replace: Sequence[str] = (),
     seed: int = 0,
+    formats: bool = True,
 ) -> dict[str, ColSpec]:
     """Infers ColSpec column definitions by profiling an existing DataFrame.
 
@@ -101,6 +128,15 @@ def profile_dataframe(
         `Enum` of the values it holds -- and carries no weights.
     seed : int, default 0
         Seeds what fitting a shape samples, so a profile is the same every run.
+    formats : bool, default True
+        Name the `format` a text column's values have -- `email`, `uuid4`,
+        `ipv4`, `ipv6`, `mac`, `hostname`, `iso_country`, `iso_currency` --
+        when at least `FORMAT_MIN_DISTINCT` (20) distinct values have it and
+        every value does; or 99% of them do and the rest are at most five
+        repeated stand-ins, which become the format's `extra_values`. A
+        hostname has to hold a dot: a single word is too weak a sign. A
+        column in `replace` is named a format only when every value has it,
+        since its stand-ins would be values of the source.
 
     Warns
     -----
@@ -132,6 +168,7 @@ def profile_dataframe(
         calculate_bounds=calculate_bounds,
         shape=shape and calculate_bounds,
         detect_unique=detect_unique,
+        formats=formats,
         seed=seed,
     )
     columns = {
@@ -269,6 +306,8 @@ def _profile_column(
             with_weights=with_weights,
             max_unique_enum=options.max_unique_enum if imitate else 0,
             calculate_bounds=options.calculate_bounds,
+            formats=options.formats,
+            keep_values=imitate,
         )
         return _as_key(described, non_null, options, top)
 
@@ -367,10 +406,18 @@ def _profile_textual(
     with_weights: bool,
     max_unique_enum: int,
     calculate_bounds: bool,
+    formats: bool = False,
+    keep_values: bool = True,
 ) -> ColSpec:
     """A String or Categorical column, narrowed to an Enum when it holds few
     enough distinct values and they repeat."""
     n_unique = non_null.n_unique()
+
+    if formats and dtype in (pl.String, pl.Utf8) and n_unique >= FORMAT_MIN_DISTINCT:
+        named = _named_format(non_null, keep_values=keep_values)
+        if named is not None:
+            fmt, extras = named
+            return spec(dtype=pl.String, format=fmt, extra_values=extras or None)
 
     if 0 < n_unique <= max_unique_enum and (
         n_unique * ENUM_MIN_REPEATS <= len(non_null)
@@ -392,6 +439,60 @@ def _profile_textual(
             calculate_bounds,
         ),
     )
+
+
+def _named_format(
+    non_null: pl.Series, *, keep_values: bool
+) -> tuple[str, dict[str, float]] | None:
+    """The format `non_null`'s values have, and the stand-ins beside it with
+    their shares; None when no format fits.
+
+    Asked of the distinct values, weighted by how often each occurs, with
+    the check validation uses -- so a spec that names a format accepts the
+    data it was named from. A near miss is kept only with `keep_values`:
+    its stand-ins are values of the source.
+    """
+    counts = non_null.value_counts()
+    value, count = counts.columns[0], counts.columns[1]
+    total = len(non_null)
+    # A format tolerates at most FORMAT_MAX_EXTRAS distinct misses -- none,
+    # without `keep_values` -- so a probe of any thousand distinct values
+    # holding more rules it out exactly, before free text is checked whole.
+    allowed_misses = FORMAT_MAX_EXTRAS if keep_values else 0
+    probe = counts.head(1_000)
+    for name in FORMAT_ORDER:
+        fmt = _lookup_format(name)
+        fits = fmt.check(pl.col(value))
+        if name == "hostname":
+            fits = fits & pl.col(value).str.contains(".", literal=True)
+        misses = probe.select((~fits.fill_null(False)).sum()).item()
+        if misses > allowed_misses:
+            continue
+        judged = counts.with_columns(fits.fill_null(False).alias("_fits"))
+        passing = judged.filter(pl.col("_fits"))
+        if passing.height < FORMAT_MIN_DISTINCT:
+            continue
+        passing_rows = int(passing[count].sum())
+        if passing_rows == total:
+            return name, {}
+        # Most frequent first, then by value: `value_counts` keeps no order,
+        # and a spec file should not change between runs on the same data.
+        failing = judged.filter(~pl.col("_fits")).sort(
+            [count, value], descending=[True, False]
+        )
+        if (
+            keep_values
+            and passing_rows >= FORMAT_MIN_SHARE * total
+            and failing.height <= FORMAT_MAX_EXTRAS
+            and bool((failing[count] >= 2).all())
+        ):
+            return name, {
+                str(extra): int(seen) / total
+                for extra, seen in zip(
+                    failing[value].to_list(), failing[count].to_list(), strict=True
+                )
+            }
+    return None
 
 
 def _nullability(series: pl.Series, total_rows: int) -> tuple[bool, float]:

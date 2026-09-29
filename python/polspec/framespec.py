@@ -341,6 +341,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         name: str = "ProfiledFrameSpec",
         weights: bool = False,
         max_unique_enum: int = 50,
+        formats: bool = True,
         calculate_bounds: bool = True,
         shape: bool = False,
         detect_unique: bool = False,
@@ -350,7 +351,9 @@ class FrameSpec(metaclass=_FrameSpecMeta):
 
         `weights=True` records empirical frequencies for categorical, enum and
         boolean columns. A string or categorical column with at most
-        `max_unique_enum` distinct values, repeating, becomes an `Enum`.
+        `max_unique_enum` distinct values, repeating, becomes an `Enum`;
+        one whose values have a `format` -- an email, a UUID, a country
+        code -- names it, unless `formats=False`.
         `calculate_bounds`
         records observed `(min, max)` for numeric and temporal columns and
         `(min_len, max_len)` for strings and binary. `shape`, `detect_unique`
@@ -362,6 +365,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             df,
             weights=weights,
             max_unique_enum=max_unique_enum,
+            formats=formats,
             calculate_bounds=calculate_bounds,
             shape=shape,
             detect_unique=detect_unique,

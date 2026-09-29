@@ -22,7 +22,15 @@ import polars as pl
 import pytest
 import yaml
 from helpers import spec_for
-from polspec import ColSpec, FrameSpec, generate, profile, synthesize, validate
+from polspec import (
+    ColSpec,
+    FrameSpec,
+    TableSpec,
+    generate,
+    profile,
+    synthesize,
+    validate,
+)
 from polspec.bound import Bound
 from polspec.drift import drift
 from polspec.serialization import to_dict
@@ -48,6 +56,7 @@ def golden_frame() -> pl.DataFrame:
             "day": [dt.date(2024, 1, 1) + dt.timedelta(days=i % 90) for i in range(n)],
             "tags": [list(range(i % 3)) for i in range(n)],
             "maybe": [None if i % 5 == 0 else i for i in range(n)],
+            "contact": [f"user{i % 50}@example.com" for i in range(n)],
         }
     )
 
@@ -75,8 +84,11 @@ def real() -> pl.DataFrame:
 
 
 def test_from_dataframe_with_no_options_infers_what_it_always_did():
-    """Profiling gained three opt-in steps; none of them runs unless asked,
-    so a spec `polspec schema infer` wrote before still comes out the same."""
+    """Profiling gained three opt-in steps in 0.13.0; none of them runs unless
+    asked, so a spec `polspec schema infer` wrote before still comes out the
+    same. 0.14.0 changed the default on purpose, twice: an Enum needs its
+    values to repeat, and a text column names its format -- `contact` here.
+    Regenerate the fixture only on purpose."""
     golden = yaml.safe_load(
         (FIXTURES / "profiled_by_default.yaml").read_text(encoding="utf-8")
     )
@@ -287,3 +299,17 @@ def test_a_null_column_and_an_empty_name_synthesize():
     assert fake["empty"].null_count() == 30
     assert set(fake[""]) <= {"x", "y", "z"}
     validate(profile(source), fake)
+
+
+def test_a_synthesized_column_has_its_sources_format():
+    """Email-shaped fake emails: 0.13.0 made text of an email's length."""
+    emails = generate(
+        TableSpec("S", {"e": ColSpec(pl.String, format="email")}), 500, seed=4
+    )["e"]
+    source = pl.DataFrame({"email": emails, "name": emails.str.split("@").list.first()})
+    fake = synthesize(source, 1_000, seed=2, replace=["email"])
+    assert fake["email"].str.contains("@").all()
+    assert not set(fake["email"]) & set(source["email"])
+    spec = profile(source, replace=["email"])
+    assert spec["email"].format == "email"
+    validate(spec, fake)

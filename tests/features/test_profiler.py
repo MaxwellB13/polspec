@@ -6,10 +6,15 @@ import polars as pl
 import pytest
 from polspec import (
     Bound,
+    ColSpec,
     FrameSpec,
+    TableSpec,
+    generate,
+    inspect,
     profile_dataframe,
 )
-from polspec.profiler import ENUM_MIN_REPEATS
+from polspec.formats import FORMATS
+from polspec.profiler import ENUM_MIN_REPEATS, FORMAT_MIN_DISTINCT
 
 
 def test_from_dataframe_basic():
@@ -375,3 +380,129 @@ def test_a_lists_elements_need_repeats_too():
     assert profile_dataframe(repeated)["tags"].dtype == pl.List(
         pl.Enum(["blue", "red"])
     )
+
+
+# ---------------------------------------------------------------------------
+# A text column names its format
+# ---------------------------------------------------------------------------
+
+
+def _values_of(format_name: str, n: int) -> list[str]:
+    spec = TableSpec("S", {"c": ColSpec(pl.String, format=format_name)})
+    return generate(spec, n, seed=1)["c"].to_list()
+
+
+@pytest.mark.parametrize("format_name", list(FORMATS))
+def test_a_column_of_one_format_is_named_for_it(format_name):
+    """Every format polspec can generate, recognised from its own values --
+    before a finite one could narrow to an Enum of the codes seen."""
+    values = _values_of(format_name, 200)
+    column = profile_dataframe(pl.DataFrame({"c": values}))["c"]
+    assert (column.dtype, column.format, column.extra_values) == (
+        pl.String,
+        format_name,
+        None,
+    )
+    assert column.string_length is None  # a format fixes its own lengths
+    spec = TableSpec("T", {"c": column})
+    assert not inspect(spec, pl.DataFrame({"c": values}))
+
+
+def test_too_few_distinct_values_are_not_evidence_of_a_format():
+    few = _values_of("email", FORMAT_MIN_DISTINCT - 1) * 3
+    column = profile_dataframe(pl.DataFrame({"c": few}))["c"]
+    assert column.format is None
+    assert isinstance(column.dtype, pl.Enum)
+
+
+def test_a_hostname_needs_a_dot():
+    """A single word passes the hostname check -- `localhost` is one -- so a
+    column of first names would be hostnames; inference asks for more."""
+    names = [f"name{letter}" for letter in "abcdefghijklmnopqrstuvwxyz"] * 2
+    assert profile_dataframe(pl.DataFrame({"c": names}))["c"].format is None
+
+
+def _near_miss(stand_ins: int, repeats: int) -> list[str]:
+    countries = _values_of("iso_country", 2_000)[:1_000]
+    extra = [f"stand-in {i}" for i in range(stand_ins) for _ in range(repeats)]
+    return countries + extra
+
+
+def test_a_near_miss_keeps_its_stand_ins_as_extra_values():
+    """The case `extra_values` was built for: ISO countries, and a few rows
+    of `UK (ISO)`."""
+    values = _values_of("iso_country", 2_000)[:1_000] + ["UK (ISO)"] * 6
+    column = profile_dataframe(pl.DataFrame({"c": values}))["c"]
+    assert column.format == "iso_country"
+    assert dict(column.extra_values) == {"UK (ISO)": pytest.approx(6 / 1_006)}
+    assert not inspect(TableSpec("T", {"c": column}), pl.DataFrame({"c": values}))
+
+
+@pytest.mark.parametrize(
+    "stand_ins, repeats, named",
+    [
+        (5, 2, True),  # five stand-ins, each twice: 1% of rows
+        (6, 1, False),  # more than five
+        (1, 1, False),  # a stand-in seen once is a typo, not a convention
+        (1, 20, False),  # 2% of rows: more than a near miss
+    ],
+)
+def test_a_near_miss_is_a_few_repeated_stand_ins(stand_ins, repeats, named):
+    values = _near_miss(stand_ins, repeats)
+    column = profile_dataframe(pl.DataFrame({"c": values}))["c"]
+    assert (column.format == "iso_country") is named
+
+
+def test_a_replaced_column_is_named_a_format_but_keeps_no_stand_ins():
+    """`replace=` keeps a column's values out of the spec: the format is a
+    shape, not values, so it stays; stand-ins are values of the source."""
+    exact = _values_of("email", 100)
+    column = profile_dataframe(pl.DataFrame({"c": exact}), replace=["c"])["c"]
+    assert column.format == "email"
+    near = _values_of("iso_country", 2_000)[:1_000] + ["UK (ISO)"] * 6
+    column = profile_dataframe(pl.DataFrame({"c": near}), replace=["c"])["c"]
+    assert column.format is None and column.dtype == pl.String
+
+
+def test_formats_false_profiles_text_as_before():
+    values = _values_of("email", 100)
+    column = profile_dataframe(pl.DataFrame({"c": values}), formats=False)["c"]
+    assert column.format is None and column.string_length is not None
+
+
+def test_a_categorical_column_is_not_named_a_format():
+    """A format describes a String; a Categorical keeps its dtype."""
+    values = pl.Series(_values_of("email", 100), dtype=pl.Categorical)
+    column = profile_dataframe(values.to_frame("c"))["c"]
+    assert column.format is None
+
+
+def test_a_lists_elements_and_a_structs_fields_name_their_format():
+    emails = _values_of("email", 90)
+    frame = pl.DataFrame(
+        {
+            "l": [emails[i : i + 3] for i in range(0, 90, 3)],
+            "s": [{"host": h} for h in _values_of("hostname", 30)],
+        }
+    )
+    columns = profile_dataframe(frame)
+    assert columns["l"].format == "email"
+    assert columns["s"].fields["host"].format == "hostname"
+
+
+def test_a_unique_key_of_uuids_is_both():
+    ids = _values_of("uuid4", 150)
+    column = profile_dataframe(pl.DataFrame({"id": ids}), detect_unique=True)["id"]
+    assert (column.format, column.unique) == ("uuid4", True)
+
+
+def test_stand_ins_are_listed_most_frequent_first_every_run():
+    """`value_counts` keeps no order; the spec file written from the same
+    data must not change between runs."""
+    countries = _values_of("iso_country", 2_000)[:1_000]
+    values = countries + ["N/A"] * 2 + ["UK (ISO)"] * 4 + ["TBD"] * 2
+    orders = {
+        tuple(profile_dataframe(pl.DataFrame({"c": values}))["c"].extra_values)
+        for _ in range(20)
+    }
+    assert orders == {("UK (ISO)", "N/A", "TBD")}

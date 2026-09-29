@@ -43,6 +43,7 @@ def _cmd_synthesize(args: argparse.Namespace) -> int:
                 replace=args.replace or (),
                 sample=args.sample,
                 max_unique_enum=args.max_unique_enum,
+                formats=not args.no_formats,
                 name=name,
             )
         except ValueError as exc:  # a name in --replace the file lacks, and the like
@@ -111,6 +112,11 @@ def add_synthesize_parser(subparsers: argparse._SubParsersAction) -> None:
         default=50,
         metavar="N",
         help="Max distinct values for a text column to keep its values, when they repeat (default: 50)",
+    )
+    synthesize.add_argument(
+        "--no-formats",
+        action="store_true",
+        help="Do not name the format a text column's values have (email, uuid4, ...)",
     )
     synthesize.add_argument(
         "--spec",
