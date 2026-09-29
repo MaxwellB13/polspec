@@ -170,6 +170,12 @@ class ColSpec:
         off does not also require deleting the rate beside it. Declaring a
         rate of your own without `nullable=True` warns, since that reads as
         asking for nulls rather than as a leftover.
+    nan_probability : float, optional
+        For a float column -- or a list's float elements, or a struct's float
+        field -- how often a present value is NaN, from 0 (the default: a
+        NaN is never generated, and validation reports one) to 1. NaN is not
+        a value in any other sense: `bounds` and `choices` say nothing about
+        it. Refused with `unique=True`, since no NaN equals another.
     string_length : Bound | tuple[int, int] | list[int] | None, optional
         The inclusive range of string lengths, where that applies.
     list_length : Bound | tuple[int, int] | list[int] | None, optional
@@ -277,6 +283,7 @@ class ColSpec:
     tags: tuple[str, ...] = ()
     unique: bool = False
     null_probability: float = DEFAULT_NULL_PROBABILITY
+    nan_probability: float = 0.0
     string_length: Bound[int] | None = None
     list_length: Bound[int] | None = None
     element_null_probability: float = 0.0
@@ -303,6 +310,7 @@ class ColSpec:
             tags: str | Sequence[str] | None = (),
             unique: bool = False,
             null_probability: float = DEFAULT_NULL_PROBABILITY,
+            nan_probability: float = 0.0,
             string_length: Bound[int] | tuple[int, int] | list[int] | None = None,
             list_length: Bound[int] | tuple[int, int] | list[int] | None = None,
             element_null_probability: float = 0.0,
@@ -339,6 +347,7 @@ class ColSpec:
 
         self._validate_null()
         self._validate_probabilities()
+        self._validate_nan_probability()
         self._validate_format()
         self._validate_extra_values()
         self._validate_pattern()
@@ -839,6 +848,26 @@ class ColSpec:
                 ", but every value of a Null column is null. Leave it out."
             )
         object.__setattr__(self, "null_probability", 1.0)
+
+    def _validate_nan_probability(self) -> None:
+        """A NaN share belongs to a float value, and a unique column can hold
+        none: every NaN is unequal to every other, so distinctness has
+        nothing to say about one."""
+        if not 0.0 <= self.nan_probability <= 1.0:
+            raise SpecError("nan_probability must be between 0 and 1")
+        if not self.nan_probability:
+            return
+        if not self.value_dtype.is_float():
+            raise SpecError(
+                "ColSpec.nan_probability is only supported for a float value, got "
+                f"{self.dtype!r}. NaN is a float; a missing value of any other "
+                "dtype is a null -- declare nullable=True."
+            )
+        if self.unique:
+            raise SpecError(
+                "ColSpec cannot be unique=True and carry nan_probability: no NaN "
+                "equals another, so a unique column has nothing to say about one."
+            )
 
     def _validate_probabilities(self) -> None:
         if not 0.0 <= self.null_probability <= 1.0:

@@ -94,6 +94,20 @@ class _Unholdable(_ColumnConstraint):
 
 
 @dataclass(kw_only=True)
+class _NotANumber(_ColumnConstraint):
+    """A NaN in a float value that declares none: `nan_probability=0`, the
+    default, says the column holds numbers."""
+
+    code: FindingCode = "nan"
+
+    def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
+        return (
+            f"Column '{self.where}': found {count} NaN value(s); declare "
+            "nan_probability for a column that holds them"
+        )
+
+
+@dataclass(kw_only=True)
 class _AllowedValues(_ColumnConstraint):
     allowed: list[Any]
     code: FindingCode = "choices"
@@ -381,6 +395,22 @@ def _value_constraints(
     dtype = spec.value_dtype
     constraints: list[Constraint] = []
 
+    # NaN is not a value of a float column in any sense `bounds` or `choices`
+    # speak of -- it sits in no range and equals nothing -- so it is judged
+    # once, by the NaN claim, and the value claims read the numbers alone.
+    nan_able = dtype.is_float() and actual_dtype.is_float()
+    valued = present & column.is_not_nan() if nan_able else present
+    if nan_able and not spec.nan_probability:
+        constraints.append(
+            _NotANumber(
+                key=f"{where}__nan",
+                mask=present & column.is_nan(),
+                sample_expr=None,
+                column=name,
+                where=where,
+            )
+        )
+
     # The dtype's claim, not the bounds' -- but a side a checked bound
     # closes is the bound's to report: see `_unholdable`.
     unfit = _unholdable(
@@ -411,7 +441,7 @@ def _value_constraints(
         constraints.append(
             _AllowedValues(
                 key=f"{where}__choices",
-                mask=present & ~in_domain,
+                mask=valued & ~in_domain,
                 sample_expr=sample_expr,
                 column=name,
                 where=where,
@@ -431,7 +461,7 @@ def _value_constraints(
         constraints.append(
             _Bounds(
                 key=f"{where}__bounds",
-                mask=present & _out_of_bounds(measured, spec.bounds, measured_dtype),
+                mask=valued & _out_of_bounds(measured, spec.bounds, measured_dtype),
                 sample_expr=column,
                 column=name,
                 where=where,

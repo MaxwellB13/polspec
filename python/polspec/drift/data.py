@@ -56,6 +56,11 @@ class Observed:
         For a List or Array column, how many elements its present lists
         hold, and how many of those are null; `element_null_rate` is the
         fraction.
+    value_count, nan_count : int
+        For a float value, how many present values the column holds, and
+        how many of those are NaN; `nan_rate` is the fraction. A NaN is not
+        a value in any other measurement: the extent and the domain read
+        the numbers alone.
     outside : tuple[int, tuple]
         Rows holding a value outside the declared finite domain, and up to
         `max_samples` of those values.
@@ -79,6 +84,8 @@ class Observed:
     list_length_extent: Bound | None = None
     element_count: int = 0
     element_null_count: int = 0
+    value_count: int = 0
+    nan_count: int = 0
     outside: tuple[int, tuple[Any, ...]] = (0, ())
     unseen: tuple[Any, ...] = ()
     format_failures: tuple[int, tuple[Any, ...]] = (0, ())
@@ -97,6 +104,10 @@ class Observed:
         if not self.element_count:
             return None
         return self.element_null_count / self.element_count
+
+    @property
+    def nan_rate(self) -> float | None:
+        return self.nan_count / self.value_count if self.value_count else None
 
     @classmethod
     def of(
@@ -148,6 +159,13 @@ class Observed:
                 if name in shared
             }
             return cls(**measured)
+
+        if declared.value_dtype.is_float() and values.dtype.is_float():
+            measured["value_count"] = len(values)
+            measured["nan_count"] = int(values.is_nan().sum())
+            values = values.filter(values.is_not_nan())
+            if len(values) == 0:
+                return cls(**measured)
 
         if declared.bounds is not None and _extent_measurable(values.dtype):
             measured["extent"] = Bound(values.min(), values.max())

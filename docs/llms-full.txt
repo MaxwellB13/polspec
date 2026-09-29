@@ -539,6 +539,24 @@ ColSpec(pl.Int64)                                          # no nulls, no warnin
 Only a rate that cannot be a leftover warns: the default and an explicit
 `0.0` both already agree with `nullable=False`.
 
+### NaN
+
+A float value can be present and still not a number. `nan_probability` says
+how often a *present* value is NaN -- nulls are counted first, and NaN is a
+share of what is left:
+
+```python
+ColSpec(pl.Float64, nullable=True, null_probability=0.1, nan_probability=0.05)
+```
+
+The default, `0`, claims a column holds numbers: validation reports a NaN in
+it as a `nan` finding. NaN is not a value in any other sense -- it sits in no
+range and equals nothing -- so `bounds` and `choices` never judge one; the
+NaN claim does, once. It applies wherever a float value sits: a column, a
+list's elements, a struct's field. A `unique=True` column cannot declare it,
+since no NaN equals another, and a column of any other dtype cannot hold
+one -- a missing value there is a null.
+
 ## Bounds
 
 `bounds` is an inclusive `[min, max]` for numeric and temporal columns. Pass a
@@ -4046,7 +4064,7 @@ What one column declares, and the pieces that make up a declaration.
 
 ## ColSpec
 
-### ColSpec(dtype: pl.DataType | type[pl.DataType], col_name: str | None=None, seed_name: str | None=None, nullable: bool=False, bounds: Bound[Any] | tuple[Any, Any] | list[Any] | None=None, tags: str | Sequence[str] | None=(), unique: bool=False, null_probability: float=DEFAULT_NULL_PROBABILITY, string_length: Bound[int] | tuple[int, int] | list[int] | None=None, list_length: Bound[int] | tuple[int, int] | list[int] | None=None, element_null_probability: float=0.0, fields: Mapping[str, ColSpec] | None=None, format: str | None=None, extra_values: Sequence[str] | Mapping[str, float] | None=None, pattern: str | None=None, distribution: str | None=None, distribution_params: dict[str, float] | None=None, choices: Sequence[Any] | dict[Any, float] | None=None, weights: Sequence[float] | None=None, rules: Sequence[ColRule]=(), validators: Check | pl.Expr | Pred | Sequence[Check | pl.Expr | Pred] | None=())
+### ColSpec(dtype: pl.DataType | type[pl.DataType], col_name: str | None=None, seed_name: str | None=None, nullable: bool=False, bounds: Bound[Any] | tuple[Any, Any] | list[Any] | None=None, tags: str | Sequence[str] | None=(), unique: bool=False, null_probability: float=DEFAULT_NULL_PROBABILITY, nan_probability: float=0.0, string_length: Bound[int] | tuple[int, int] | list[int] | None=None, list_length: Bound[int] | tuple[int, int] | list[int] | None=None, element_null_probability: float=0.0, fields: Mapping[str, ColSpec] | None=None, format: str | None=None, extra_values: Sequence[str] | Mapping[str, float] | None=None, pattern: str | None=None, distribution: str | None=None, distribution_params: dict[str, float] | None=None, choices: Sequence[Any] | dict[Any, float] | None=None, weights: Sequence[float] | None=None, rules: Sequence[ColRule]=(), validators: Check | pl.Expr | Pred | Sequence[Check | pl.Expr | Pred] | None=())
 
 One column's declaration: its type, and every claim made about its values.
 
@@ -4104,6 +4122,12 @@ null_probability : float, optional
     off does not also require deleting the rate beside it. Declaring a
     rate of your own without `nullable=True` warns, since that reads as
     asking for nulls rather than as a leftover.
+nan_probability : float, optional
+    For a float column -- or a list's float elements, or a struct's float
+    field -- how often a present value is NaN, from 0 (the default: a
+    NaN is never generated, and validation reports one) to 1. NaN is not
+    a value in any other sense: `bounds` and `choices` say nothing about
+    it. Refused with `unique=True`, since no NaN equals another.
 string_length : Bound | tuple[int, int] | list[int] | None, optional
     The inclusive range of string lengths, where that applies.
 list_length : Bound | tuple[int, int] | list[int] | None, optional
@@ -5291,6 +5315,7 @@ and `null_probability` describe the cell itself.
 | `tags` | `tags` | every column | -- | -- (selects columns: `spec.tag(...)`) |
 | `unique` | `unique` | scalar columns | draws without replacement, unique across a whole frame however it is batched | a repeated value is a `unique` finding |
 | `null_probability` | `null_probability` | a `nullable` column | the rate nulls are drawn at | -- (drift compares it to the observed rate) |
+| `nan_probability` | `nan_probability` | float values -- a column's, a list's elements, a struct's fields | the share of present values drawn as NaN | a NaN is a `nan` finding while this is `0`; `bounds` and `choices` never judge a NaN |
 | `string_length` | `string_length` | `String` and `Binary` values | draws lengths within it | a length outside it is a `string_length` finding |
 | `list_length` | `list_length` | `List` and `Map` columns | draws each cell's length within it | a length outside it is a `list_length` finding |
 | `element_null_probability` | `element_null_probability` | `List` and `Array` columns | the rate an element inside a present list is null | a null element is a `nullability` finding while this is `0` |
@@ -5359,6 +5384,7 @@ Each key is the `ColSpec` field of the same name; see
 | `tags` | A string, or a list of them |
 | `unique` | `true` or `false` |
 | `null_probability` | A number from 0 to 1 |
+| `nan_probability` | A number from 0 to 1 |
 | `element_null_probability` | A number from 0 to 1 |
 | `string_length` | `[min, max]` |
 | `list_length` | `[min, max]` |
@@ -5771,6 +5797,7 @@ through `report.rows(finding)`; structural ones describe the frame's shape.
 | `dtype` | row-level | a compatible, wider dtype holds a value the declared one cannot -- `Int8` declared, an `Int64` of 1000; keyed `<column>__dtype_range` |
 | `foreign_key_unresolved` | structural | a key references another spec and `references=` had no entry for it |
 | `nullability` | row-level | a non-nullable column holds nulls |
+| `nan` | row-level | a float value holds NaN while `nan_probability` is `0` |
 | `choices` | row-level | a value is outside `choices` or the `Enum` categories |
 | `bounds` | row-level | a value is outside `bounds`; `details` carry the extremes found |
 | `string_length` | row-level | a string or binary value's length is outside `string_length` |
@@ -5798,13 +5825,14 @@ otherwise. See [Schema and data drift](https://maxwellb13.github.io/polspec/how-
 | `column_renamed` | `diff` | compatible | a rename given through `renames=` |
 | `dtype_changed` | both | as validation decides | the dtypes differ; compatible when the old values would still validate |
 | `nullability_changed` | both | off → on compatible; on → off breaking; nulls in a non-nullable column breaking | `nullable`, or a list's `element_null_probability` between 0 and not |
-| `domain_widened` | `diff` | compatible | bounds, choices, format or string length accept more than before |
+| `domain_widened` | `diff` | compatible | bounds, choices, format or string length accept more than before -- or a float value now allows NaN |
 | `domain_narrowed` | `diff` | breaking | they accept less |
 | `domain_changed` | `diff` | breaking | neither is inside the other |
 | `bounds_exceeded` | `drift` | breaking | values escape `bounds`, `string_length` or `list_length`; `details` say which and by how much |
-| `new_values` | `drift` | breaking | values outside `choices`, an `Enum` or a finite format |
+| `new_values` | `drift` | breaking | values outside `choices`, an `Enum` or a finite format -- or a NaN in a float value that declares none |
 | `format_violated` | `drift` | breaking | values that do not match the declared `format` |
 | `null_rate_moved` | `drift` | compatible | the null rate sits further from `null_probability` -- or the element null rate from `element_null_probability` -- than the tolerance |
+| `nan_rate_moved` | `drift` | compatible | the share of present values that are NaN sits further from `nan_probability` than the tolerance |
 | `cardinality_moved` | `drift` | compatible | declared values the data never holds |
 | `constraint_added` | `diff` | breaking | `unique`, a validator, rule, check, composite key, foreign key or hierarchy present only in the new spec |
 | `constraint_removed` | `diff` | compatible | the reverse |
@@ -6672,7 +6700,28 @@ seed produces; see
 
 ## [Unreleased]
 
+### Added
+
+- **`ColSpec.nan_probability`: NaN in a float value, declared.** How often a
+  present value is NaN, from 0 to 1, on a float column, a list's float
+  elements or a struct's float field. Generation draws NaN on that share of
+  the present rows -- whole and batched alike, from a draw of its own, so a
+  column that declares none generates exactly what it did -- and spec files
+  carry it as `nan_probability`. `diff` calls allowing NaN compatible and
+  forbidding it breaking; `drift` reports a NaN rate further from the
+  declared one than `null_rate_tolerance` as `nan_rate_moved`. Refused on
+  any other dtype and with `unique=True`.
+
 ### Changed
+
+- **A NaN a float column does not declare is a finding.** The default,
+  `nan_probability=0`, claims a column holds numbers, so validation now
+  reports a NaN in it as a row-level `nan` finding, and `drift` as
+  `new_values` -- where before a NaN in a column with no `bounds` passed
+  unremarked. And NaN is no longer judged by `bounds` or `choices`: in a
+  bounded column it used to be a `bounds` finding, since it compares
+  greater than every number; it is now the `nan` finding alone, and
+  nothing at all where it is declared.
 
 - **A profiled text column becomes an `Enum` only when its values repeat.**
   `from_dataframe()`, `profile()`, `synthesize()`, `polspec schema infer`
