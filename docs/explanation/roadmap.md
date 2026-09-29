@@ -120,8 +120,9 @@ Two things this project has made no compatibility promise about yet:
   column repeating its first batch's elements in every batch after it, so
   the elements of a `List`, `Array` or `Map` column past the first batch
   changed, once; `generate()` did not. 0.13.0 changed nothing that
-  constructed under 0.12.0, and 0.13.1 nothing that constructed under
-  0.13.0.
+  constructed under 0.12.0, 0.13.1 nothing that constructed under 0.13.0,
+  and 0.14.0 nothing that constructed under 0.13.1: a column declaring
+  `nan_probability` draws its NaN from a draw of its own.
 
 The first of those is easier to live with than it sounds, because a spec file
 now says which format wrote it. Every file `to_yaml()` writes carries
