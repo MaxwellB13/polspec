@@ -8,7 +8,28 @@ seed produces; see
 
 ## [Unreleased]
 
+### Added
+
+- **`ColSpec.nan_probability`: NaN in a float value, declared.** How often a
+  present value is NaN, from 0 to 1, on a float column, a list's float
+  elements or a struct's float field. Generation draws NaN on that share of
+  the present rows -- whole and batched alike, from a draw of its own, so a
+  column that declares none generates exactly what it did -- and spec files
+  carry it as `nan_probability`. `diff` calls allowing NaN compatible and
+  forbidding it breaking; `drift` reports a NaN rate further from the
+  declared one than `null_rate_tolerance` as `nan_rate_moved`. Refused on
+  any other dtype and with `unique=True`.
+
 ### Changed
+
+- **A NaN a float column does not declare is a finding.** The default,
+  `nan_probability=0`, claims a column holds numbers, so validation now
+  reports a NaN in it as a row-level `nan` finding, and `drift` as
+  `new_values` -- where before a NaN in a column with no `bounds` passed
+  unremarked. And NaN is no longer judged by `bounds` or `choices`: in a
+  bounded column it used to be a `bounds` finding, since it compares
+  greater than every number; it is now the `nan` finding alone, and
+  nothing at all where it is declared.
 
 - **A profiled text column becomes an `Enum` only when its values repeat.**
   `from_dataframe()`, `profile()`, `synthesize()`, `polspec schema infer`

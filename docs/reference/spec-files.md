@@ -42,6 +42,7 @@ Each key is the `ColSpec` field of the same name; see
 | `tags` | A string, or a list of them |
 | `unique` | `true` or `false` |
 | `null_probability` | A number from 0 to 1 |
+| `nan_probability` | A number from 0 to 1 |
 | `element_null_probability` | A number from 0 to 1 |
 | `string_length` | `[min, max]` |
 | `list_length` | `[min, max]` |

@@ -529,7 +529,13 @@ def generate_random(
     finished: dict[str, pl.Series] = {}
     for name, spec in columns.items():
         if name in scalars:
-            finished[name] = _finish(raw.pop(name), spec, domains[name])
+            finished[name] = _with_nans(
+                _finish(raw.pop(name), spec, domains[name]),
+                spec,
+                n,
+                seed,
+                row_offset,
+            )
         else:
             finished[name] = _generate_column(name, spec, n, seed, row_offset)
     # From a list, which is several times cheaper for a wide frame than a
@@ -566,7 +572,38 @@ def _generate_column(
     if _overlays_extras(spec):
         return _generate_with_extras(name, spec, n, seed, row_offset)
     plan, domain = plan_column(name, spec)
-    return _finish(_generate_dataframe([plan], n, seed, row_offset)[name], spec, domain)
+    return _with_nans(
+        _finish(_generate_dataframe([plan], n, seed, row_offset)[name], spec, domain),
+        spec,
+        n,
+        seed,
+        row_offset,
+    )
+
+
+def _with_nans(
+    values: pl.Series, spec: ColSpec, n: int, seed: int | None, row_offset: int = 0
+) -> pl.Series:
+    """`values` with NaN on `nan_probability` of its present rows.
+
+    One engine column of coin flips, a window onto the frame like the values
+    it overlays, seeded as a name no user column can carry: so a batch holds
+    the NaNs the whole frame holds there, and a column that declares no NaN
+    draws nothing more -- its seeded values are what they always were. A
+    null row stays null; the share is of the present rows.
+    """
+    if not spec.nan_probability:
+        return values
+    name = values.name
+    coin = column_plan(
+        name,
+        "bool",
+        weights=[1.0 - spec.nan_probability, spec.nan_probability],
+        seed_name=f"{spec.seed_name or name}\x00nan",
+    )
+    hit = _generate_dataframe([coin], n, seed, row_offset)[name]
+    nans = pl.repeat(float("nan"), n, dtype=values.dtype, eager=True)
+    return values.zip_with(~hit | values.is_null(), nans)
 
 
 def _generate_with_extras(

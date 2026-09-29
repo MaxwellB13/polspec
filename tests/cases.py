@@ -45,6 +45,20 @@ COLUMN_CASES: dict[str, ColSpec] = {
     "float32_bounded": ColSpec(pl.Float32, bounds=(-1.0, 1.0)),
     "float64_bounded": ColSpec(pl.Float64, bounds=(-2.5, 2.5)),
     "float64_lower_open": ColSpec(pl.Float64, bounds=(0.0, None)),
+    # NaN on a share of the present values; bounds and choices say nothing of it
+    "float64_nan": ColSpec(pl.Float64, nan_probability=0.2),
+    "float64_always_nan": ColSpec(pl.Float64, nan_probability=1.0),
+    "float32_nan_bounded_nullable": ColSpec(
+        pl.Float32,
+        bounds=(-1.0, 1.0),
+        nullable=True,
+        null_probability=0.2,
+        nan_probability=0.3,
+    ),
+    "float64_nan_choices": ColSpec(
+        pl.Float64, choices=[0.5, 1.5], nan_probability=0.25
+    ),
+    "float16_nan": ColSpec(pl.Float16, nan_probability=0.5),
     # decimals: drawn as the physical integer, scaled back to the declared type
     "decimal": ColSpec(pl.Decimal(10, 2)),
     "decimal_bounded": ColSpec(pl.Decimal(10, 2), bounds=(0, "99.99")),
@@ -58,6 +72,10 @@ COLUMN_CASES: dict[str, ColSpec] = {
     "list_int_bounded": ColSpec(pl.List(pl.Int64), bounds=(-5, 5), list_length=(1, 4)),
     "list_empty_only": ColSpec(pl.List(pl.Int64), list_length=(0, 0)),
     "list_nullable": ColSpec(pl.List(pl.Float64), nullable=True, null_probability=0.4),
+    "list_float_nan": ColSpec(
+        pl.List(pl.Float64), nan_probability=0.3, element_null_probability=0.1
+    ),
+    "array_float_nan": ColSpec(pl.Array(pl.Float32, 3), nan_probability=0.4),
     "list_enum": ColSpec(pl.List(pl.Enum(["x", "y"]))),
     "list_choices_weighted": ColSpec(pl.List(pl.String), choices={"a": 1.0, "b": 3.0}),
     "list_format": ColSpec(pl.List(pl.String), format="uuid4", list_length=(2, 2)),

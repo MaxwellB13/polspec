@@ -22,6 +22,7 @@ and `null_probability` describe the cell itself.
 | `tags` | `tags` | every column | -- | -- (selects columns: `spec.tag(...)`) |
 | `unique` | `unique` | scalar columns | draws without replacement, unique across a whole frame however it is batched | a repeated value is a `unique` finding |
 | `null_probability` | `null_probability` | a `nullable` column | the rate nulls are drawn at | -- (drift compares it to the observed rate) |
+| `nan_probability` | `nan_probability` | float values -- a column's, a list's elements, a struct's fields | the share of present values drawn as NaN | a NaN is a `nan` finding while this is `0`; `bounds` and `choices` never judge a NaN |
 | `string_length` | `string_length` | `String` and `Binary` values | draws lengths within it | a length outside it is a `string_length` finding |
 | `list_length` | `list_length` | `List` and `Map` columns | draws each cell's length within it | a length outside it is a `list_length` finding |
 | `element_null_probability` | `element_null_probability` | `List` and `Array` columns | the rate an element inside a present list is null | a null element is a `nullability` finding while this is `0` |

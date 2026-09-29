@@ -475,6 +475,61 @@ def _compare_null_rate(pair: Pair) -> list[DriftFinding]:
     ]
 
 
+def _compare_nans(pair: Pair) -> list[DriftFinding]:
+    """NaN in a float value. A share of 0 claims there are none, so
+    allowing them widens what validates and forbidding them narrows it."""
+    declared = pair.declared.nan_probability
+    if pair.mode == "diff":
+        new = pair.new.nan_probability
+        if declared == new:
+            return []
+        if not declared or not new:
+            allowed = bool(new)
+            return [
+                pair.finding(
+                    "domain_widened" if allowed else "domain_narrowed",
+                    "compatible" if allowed else "breaking",
+                    "values may now be NaN; a NaN that failed before is accepted"
+                    if allowed
+                    else "values may no longer be NaN; any NaN that validated "
+                    "before now fails",
+                    suffix="nan",
+                    old=declared,
+                    new=new,
+                )
+            ]
+        return [_field_changed(pair, "nan_probability", declared, new)]
+    observed = pair.observed
+    if not declared:
+        if not observed.nan_count:
+            return []
+        return [
+            pair.finding(
+                "new_values",
+                "breaking",
+                f"holds {observed.nan_count} NaN value(s) and declares none. "
+                "Declare nan_probability, or fix the source",
+                suffix="nan",
+                nan_count=observed.nan_count,
+            )
+        ]
+    rate = observed.nan_rate
+    if rate is None or abs(rate - declared) <= pair.options.null_rate_tolerance:
+        return []
+    return [
+        pair.finding(
+            "nan_rate_moved",
+            "compatible",
+            f"{rate:.1%} of values NaN, declared nan_probability={declared}; "
+            f"beyond the {pair.options.null_rate_tolerance:.0%} tolerance",
+            suffix="nan_rate",
+            declared=declared,
+            observed=rate,
+            tolerance=pair.options.null_rate_tolerance,
+        )
+    ]
+
+
 def _compare_element_nulls(pair: Pair) -> list[DriftFinding]:
     """Nulls inside a list. A rate of 0 claims there are none, so allowing
     them widens what validates and forbidding them narrows it, as
@@ -688,6 +743,7 @@ FIELD_COMPARATORS: dict[str, Comparator] = {
     "seed_name": _compare_field("seed_name"),
     "fields": _compare_struct_fields,
     "null_probability": _compare_null_rate,
+    "nan_probability": _compare_nans,
     "unique": _compare_unique,
     "rules": _compare_rules,
     "validators": _compare_validators,

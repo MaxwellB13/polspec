@@ -31,6 +31,7 @@ FindingCode = Literal[
     "missing_columns",
     "dtype",
     "nullability",
+    "nan",
     "choices",
     "bounds",
     "string_length",

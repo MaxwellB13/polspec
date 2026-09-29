@@ -82,6 +82,24 @@ ColSpec(pl.Int64)                                          # no nulls, no warnin
 Only a rate that cannot be a leftover warns: the default and an explicit
 `0.0` both already agree with `nullable=False`.
 
+### NaN
+
+A float value can be present and still not a number. `nan_probability` says
+how often a *present* value is NaN -- nulls are counted first, and NaN is a
+share of what is left:
+
+```python
+ColSpec(pl.Float64, nullable=True, null_probability=0.1, nan_probability=0.05)
+```
+
+The default, `0`, claims a column holds numbers: validation reports a NaN in
+it as a `nan` finding. NaN is not a value in any other sense -- it sits in no
+range and equals nothing -- so `bounds` and `choices` never judge one; the
+NaN claim does, once. It applies wherever a float value sits: a column, a
+list's elements, a struct's field. A `unique=True` column cannot declare it,
+since no NaN equals another, and a column of any other dtype cannot hold
+one -- a missing value there is a null.
+
 ## Bounds
 
 `bounds` is an inclusive `[min, max]` for numeric and temporal columns. Pass a

@@ -357,6 +357,7 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
         since=3,
         omit_if=lambda v, obj: not v,
     ),
+    Field("nan_probability", since=4, omit_if=lambda v, obj: not v),
     Field(
         "string_length",
         to_data=_bound_to_data,

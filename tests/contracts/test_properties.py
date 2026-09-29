@@ -141,6 +141,8 @@ def _float(draw: st.DrawFn) -> dict[str, Any]:
         fields["bounds"] = _maybe_open(draw, _ordered((draw(value), draw(value))))
     if draw(st.booleans()):
         fields["distribution"] = draw(st.sampled_from(["uniform", "normal"]))
+    if draw(st.booleans()):
+        fields["nan_probability"] = draw(st.floats(0.0, 1.0))
     return _maybe_choices(draw, fields, value)
 
 
@@ -438,6 +440,7 @@ def test_the_strategy_reaches_every_kind_of_column():
                 "extra_values",
                 "choices",
                 "weights",
+                "nan_probability",
             )
             if getattr(column, name)
         )
@@ -465,6 +468,7 @@ def test_the_strategy_reaches_every_kind_of_column():
         "extra_values",
         "choices",
         "weights",
+        "nan_probability",
         "integer choices",
         "Float64 choices",
         "Decimal choices",
