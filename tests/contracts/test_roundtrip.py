@@ -20,6 +20,7 @@ no claim to satisfy them; see the "boundaries" section at the bottom for the
 tests that pin that down.
 """
 
+import dataclasses
 import datetime as dt
 
 import polars as pl
@@ -820,19 +821,30 @@ def test_a_null_column_generates_validates_and_survives_a_spec_file():
     }
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=ValidationError,
-    reason="A spec cannot declare NaN, so a profile's bounds exclude it (0.14.0)",
-)
 def test_a_profiled_spec_accepts_its_sources_nan():
-    """limitations.md, "a float's NaN and infinities": the profile takes a
-    float column's bounds from its finite values, and warns; the spec it
-    makes then reports the NaN it was made from."""
-    source = pl.DataFrame({"f": [1.5, float("nan"), 3.0]})
-    with pytest.warns(UserWarning, match="1 NaN and 0 infinite"):
-        spec = profile(source)
+    """Pinned as a strict xfail from 0.13.1 to 0.14.0: a spec could not
+    declare NaN, so a profile's bounds left it out and the spec reported
+    the NaN it was made from. The profile now records the share, silently."""
+    source = pl.DataFrame({"f": [1.5, float("nan"), 3.0, float("nan")]})
+    spec = profile(source)
+    assert spec["f"].nan_probability == 0.5
     validate(spec, source)
+
+
+def test_a_profiled_spec_reports_its_sources_infinities():
+    """limitations.md, "a float's infinities": a boundary, not a gap. An
+    infinity is a matter of bounds -- an open end admits one -- and a
+    profile's bounds are the finite values', so it warns and the spec it
+    makes reports the infinity."""
+    source = pl.DataFrame({"f": [1.5, float("inf"), 3.0]})
+    with pytest.warns(UserWarning, match="holds 1 infinite value"):
+        spec = profile(source)
+    with pytest.raises(ValidationError, match="out of bounds"):
+        validate(spec, source)
+    opened = spec.with_columns(
+        {"f": dataclasses.replace(spec["f"], bounds=(1.5, None))}
+    )
+    validate(opened, source)
 
 
 @pytest.mark.parametrize("dtype", EVERY_DTYPE, ids=str)

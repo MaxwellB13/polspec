@@ -14,6 +14,10 @@ import polars as pl
 import pytest
 from polspec import (
     ColSpec,
+    ForeignKey,
+    FrameSpec,
+    Registry,
+    RegistryError,
     SpecError,
     TableSpec,
     generate,
@@ -284,3 +288,58 @@ def test_a_spec_validates_what_it_generates_with_nan():
     frame = generate(spec, 10_000, seed=0)
     assert not inspect(spec, frame)
     assert math.isclose(frame["reading"].is_nan().mean(), 0.05, abs_tol=0.01)
+
+
+# ---------------------------------------------------------------------------
+# Rendering and foreign keys
+# ---------------------------------------------------------------------------
+
+
+def test_the_data_dictionary_and_the_diagram_show_the_nan_share():
+    spec = FrameSpec.from_spec(
+        _spec(
+            level=ColSpec(pl.Float64, nullable=True, nan_probability=0.05),
+            series=ColSpec(
+                pl.List(pl.Float32),
+                element_null_probability=0.1,
+                nan_probability=0.2,
+            ),
+            point=ColSpec(
+                pl.Struct({"x": pl.Float64}),
+                fields={"x": ColSpec(pl.Float64, nan_probability=0.3)},
+            ),
+        )
+    )
+    markdown = spec.to_markdown()
+    assert "| `level` | `Float64` | Yes; NaN 5% |" in markdown
+    assert "No (elements 10%); NaN 20%" in markdown
+    assert "| `point.x` | `Float64` | No; NaN 30% |" in markdown
+    assert 'Float64 level "nullable, NaN: 5%"' in spec.to_mermaid()
+
+
+def test_a_key_filled_from_a_nan_parent_must_declare_nan():
+    """A parent holding NaN hands its NaN keys to the child, which then
+    failed its own `nan` claim: generated data failing its spec. Refused
+    where it is declared, and in a registry that resolves it by name."""
+    parent = _spec(k=ColSpec(pl.Float64, nan_probability=0.3))
+    with pytest.raises(SpecError, match="declares no NaN, but the key fills it"):
+        TableSpec(
+            "C",
+            {"k": ColSpec(pl.Float64)},
+            foreign_keys=[ForeignKey("k", references=parent)],
+        )
+    by_name = TableSpec(
+        "C", {"k": ColSpec(pl.Float64)}, foreign_keys=[ForeignKey("k", references="T")]
+    )
+    with pytest.raises(RegistryError, match="declares no NaN"):
+        Registry(parent, by_name).resolve()
+
+    child = TableSpec(
+        "C",
+        {"k": ColSpec(pl.Float64, nan_probability=0.1)},
+        foreign_keys=[ForeignKey("k", references=parent)],
+    )
+    parents = generate(parent, 20, seed=1)
+    children = generate(child, 2_000, seed=2, references={parent: parents})
+    assert children["k"].is_nan().any()
+    assert not inspect(child, children, references={parent: parents})

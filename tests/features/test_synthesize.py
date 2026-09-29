@@ -258,13 +258,17 @@ def test_spec_for_helper_still_profiles_a_single_column():
 
 def test_a_source_holding_infinities_and_nans_synthesizes():
     """It used to fail -- a profiled bound must be finite. The fake frame
-    keeps to the finite values' range and holds neither."""
+    keeps to the finite values' range, holds no infinity, and holds NaN on
+    the share the source did."""
     source = pl.DataFrame({"f": [1.5, float("inf"), float("nan"), 3.0, 2.0] * 20})
-    with pytest.warns(UserWarning, match="20 NaN and 20 infinite"):
-        fake = synthesize(source, 500, seed=1)
-    assert fake["f"].is_finite().all()
-    assert fake["f"].min() >= 1.5
-    assert fake["f"].max() <= 3.0
+    with pytest.warns(UserWarning, match="holds 20 infinite"):
+        fake = synthesize(source, 5_000, seed=1)
+    numbers = fake["f"].filter(fake["f"].is_not_nan())
+    assert numbers.is_finite().all()
+    assert numbers.min() >= 1.5
+    assert numbers.max() <= 3.0
+    # 20 NaN of the 100 values: a fifth of the fake ones, too.
+    assert fake["f"].is_nan().mean() == pytest.approx(0.2, abs=0.02)
 
 
 def test_a_null_column_and_an_empty_name_synthesize():

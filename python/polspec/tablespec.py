@@ -307,6 +307,18 @@ class TableSpec:
                         "with the parent's values, so widen or drop this "
                         "column's own bounds/choices, or narrow the parent's."
                     )
+                # NaN is not a value, so `Domain` says nothing of it; but a
+                # parent that holds NaN hands its NaN keys to the child, which
+                # then fails its own `nan` claim.
+                parent_nan = target.columns[ref_col].nan_probability
+                if parent_nan and not self.columns[col].nan_probability:
+                    raise SpecError(
+                        f"ForeignKey {fk.name!r} on {self.name!r}: column "
+                        f"{col!r} declares no NaN, but the key fills it from "
+                        f"{ref_col!r} on {target_name!r}, which declares "
+                        f"nan_probability={parent_nan}. Declare nan_probability "
+                        "on this column too, or drop the parent's."
+                    )
 
     def _validate_hierarchy(self) -> None:
         """Rejects a hierarchy that cannot be built over these columns.

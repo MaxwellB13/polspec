@@ -5,7 +5,7 @@ key by key. [Specs as files](../how-to/files.md) shows the workflow; this is
 the format. A test holds every table here to the reader's own field
 registry, so a key the reader accepts cannot be missing from this page.
 
-Every file starts with `version: 3`, the format version that wrote it. A
+Every file starts with `version: 4`, the format version that wrote it. A
 file from an older version is migrated as it is read; one from a newer
 polspec is refused, naming the version it needs. A key the reader does not
 know is an error naming the closest known key; `strict=False` downgrades it
@@ -19,7 +19,7 @@ every key still at its default.
 
 | Key | Holds |
 |:--|:--|
-| `version` | The format version, `3` |
+| `version` | The format version, `4` |
 | `name` | The spec's name; foreign keys refer to a spec by it |
 | `categories` | A category registry: a path to one (relative to the file), or one written inline |
 | `columns` | Column name to column, in order |
@@ -196,6 +196,12 @@ version: a file could not hold a time or a duration at all until 0.13.0.
 | 1 | The original format, with no `version` key: tags could be spelt `category` or `categories`, a rule's `when` was a one-column mapping such as `{column: region, equals: UK}`, and distribution parameters took any alias |
 | 2 | `version` recorded; tags spelt `tags`; conditions and checks as predicates; distribution parameters canonical; foreign keys written with their target's name; `checks` and `validators`; registry files |
 | 3 | `hierarchy` |
+| 4 | `nan_probability` |
 
 A key added without changing another's meaning -- `format`, `pattern`,
 `seed_name` -- is not a new version: a file without it reads as before.
+`nan_probability` is, because its absence makes a claim -- a float that does
+not declare it holds no NaN -- that a reader too old to know the key would
+not check: version 4 has that reader refuse the file by name instead of
+reading it more loosely than it was written. Every file carries the current
+version, so polspec 0.13 and earlier refuse every file 0.14.0 writes.

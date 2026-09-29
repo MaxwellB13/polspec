@@ -125,7 +125,7 @@ Two things this project has made no compatibility promise about yet:
 
 The first of those is easier to live with than it sounds, because a spec file
 now says which format wrote it. Every file `to_yaml()` writes carries
-`version: 3`; a file with no `version:` key is read as version 1 and migrated
+`version: 4`; a file with no `version:` key is read as version 1 and migrated
 on load, and one written by a newer polspec than the reader is refused by name
 rather than misread. So a format change is a migration to write, not a class of
 file that silently stops loading — which is what makes the rest of this section

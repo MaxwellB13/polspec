@@ -1144,16 +1144,16 @@ def test_validate_reports_a_time_of_day_on_a_date_column_rather_than_a_traceback
     assert "Column 'day': expected dtype Date, got Time" in capsys.readouterr().out
 
 
-def test_schema_infer_names_a_column_holding_nans(tmp_path, capsys):
-    """The profile's bounds leave the NaN out, so validating the same file
-    against the spec reports it; the command says so up front."""
+def test_schema_infer_records_a_columns_nans(tmp_path, capsys):
+    """0.13.1 warned that the inferred spec would reject the NaN it was
+    inferred from; the spec now records the share, and the file validates."""
     data = tmp_path / "readings.csv"
-    pl.DataFrame({"level": [1.5, float("nan"), 3.0]}).write_csv(data)
+    pl.DataFrame({"level": [1.5, float("nan"), 3.0, 2.0]}).write_csv(data)
     spec = tmp_path / "readings.yaml"
     assert run_cli("schema", "infer", data, "-o", spec) == 0
-    err = capsys.readouterr().err
-    assert "warning: Column 'level' holds 1 NaN and 0 infinite value(s)" in err
-    assert run_cli("validate", spec, data) == 1
+    assert "warning" not in capsys.readouterr().err
+    assert "nan_probability: 0.25" in spec.read_text(encoding="utf-8")
+    assert run_cli("validate", spec, data) == 0
 
 
 def test_synthesize_accepts_a_file_holding_infinities(tmp_path, capsys):
@@ -1164,7 +1164,7 @@ def test_synthesize_accepts_a_file_holding_infinities(tmp_path, capsys):
     )
     fake = tmp_path / "fake.parquet"
     assert run_cli("synthesize", source, "-o", fake, "-n", "50", "--seed", "1") == 0
-    assert "holds 0 NaN and 10 infinite value(s)" in capsys.readouterr().err
+    assert "holds 10 infinite value(s)" in capsys.readouterr().err
     assert pl.read_parquet(fake)["rate"].is_finite().all()
 
 

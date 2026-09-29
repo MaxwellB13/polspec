@@ -8,7 +8,7 @@ columns look like the source's, and whose rows are none of its rows.
 
 What carries over from the source is what a spec can say about a column:
 category values and their frequencies, numeric and temporal extremes and
-fitted shapes, string lengths, null rates. Nothing else does -- no row, and
+fitted shapes, string lengths, null rates, a float's NaN share. Nothing else does -- no row, and
 no relationship between columns, which are profiled one at a time. A column
 named in `replace=` carries over its shape and not its values: text in it
 is never an `Enum` of the values the source holds.

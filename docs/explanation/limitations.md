@@ -92,16 +92,18 @@ foreign key. A text column's format is not recognised either, so an email
 column becomes text of an email's length. See
 [Fake data from real data](../how-to/synthesizing.md#how-close-the-fake-data-is).
 
-### A float's NaN and infinities are outside its profiled bounds
+### A float's infinities are outside its profiled bounds
 
-A spec cannot yet say that a column holds NaN, and a bound cannot be
-infinite. So `profile()`, `from_dataframe()`, `polspec schema infer` and
-`polspec synthesize` take a float column's bounds from its finite values,
-and warn once per column that holds either, saying how many. Validating the
-source against its own profile then reports those values as `bounds`
-findings, and a synthesized frame holds none of them. A column with no
-finite value at all gets no bounds. Declaring how often a column is NaN is
-planned for 0.14.0.
+A bound cannot be infinite, and an infinity is a matter of bounds -- an
+open end admits one, a closed end refuses it. So `profile()`,
+`from_dataframe()`, `polspec schema infer` and `polspec synthesize` take a
+float column's bounds from its finite values, and warn once per column that
+holds an infinity, saying how many. Validating the source against its own
+profile then reports them as `bounds` findings, and a synthesized frame
+holds none; open the bound on that side (`None`) where infinities belong.
+A column with no finite value at all gets no bounds. This is deliberate, and
+pinned by a passing test. A NaN, by contrast, is recorded as the column's
+`nan_probability` (0.14.0) and carried into the fake data.
 
 ## Smaller sharp edges
 

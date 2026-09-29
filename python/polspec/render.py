@@ -80,10 +80,14 @@ def _describe_domain(cs) -> str:
 
 
 def _describe_nullable(cs) -> str:
-    """The Nullable column: the cell, and -- for a list -- its elements."""
+    """The Nullable column: the cell, for a list its elements, and for a
+    float value how often it is NaN -- a float's other way of holding no
+    number."""
     cell = "Yes" if cs.nullable else "No"
     rate = getattr(cs, "element_null_probability", 0.0)
-    return f"{cell} (elements {rate:.0%})" if rate else cell
+    described = f"{cell} (elements {rate:.0%})" if rate else cell
+    nan = getattr(cs, "nan_probability", 0.0)
+    return f"{described}; NaN {nan:.0%}" if nan else described
 
 
 def _describe_choices(choices) -> str:
@@ -342,6 +346,8 @@ def _entity_lines(spec: TableSpec, entity_name: str) -> list[str]:
             comments.append("nullable")
         if cs.element_null_probability:
             comments.append(f"element nulls: {cs.element_null_probability:.0%}")
+        if cs.nan_probability:
+            comments.append(f"NaN: {cs.nan_probability:.0%}")
         if cs.bounds is not None:
             comments.append(f"bounds: {cs.bounds}")
         elif cs.choices is not None:

@@ -246,9 +246,9 @@ def _profiled_with_warnings(df: pl.DataFrame, **options) -> tuple[dict, list[str
 
 
 def test_a_float_is_bounded_by_its_finite_values_and_its_others_are_named():
-    """An infinity used to make profiling fail -- a bound must be finite --
-    and a NaN was left outside the bounds without a word. Now the bounds
-    are the finite values', and each column holding either says so."""
+    """An infinity used to make profiling fail -- a bound must be finite.
+    The bounds are the finite values', the NaN share is recorded, and each
+    column holding an infinity says so."""
     inf = float("inf")
     df = pl.DataFrame(
         {
@@ -262,24 +262,26 @@ def test_a_float_is_bounded_by_its_finite_values_and_its_others_are_named():
     assert columns["f"].bounds == Bound(1.5, 3.0)
     assert columns["point"].fields["v"].bounds == Bound(1.0, 2.0)
     assert columns["readings"].bounds == Bound(0.5, 2.0)
+    assert columns["f"].nan_probability == pytest.approx(1 / 5)
+    assert columns["point"].fields["v"].nan_probability == pytest.approx(1 / 4)
+    assert columns["readings"].nan_probability == 0.0
+    assert columns["clean"].nan_probability == 0.0
     assert said == [
-        f"Column '{where}' holds {nans} NaN and {infinities} infinite value(s), "
-        "which a spec cannot declare: its bounds are its finite values', so "
-        "validating this data against the spec reports them."
-        for where, nans, infinities in (
-            ("f", 1, 2),
-            ("point.v", 1, 0),
-            ("readings", 0, 1),
-        )
+        f"Column '{where}' holds {infinities} infinite value(s), which its "
+        "bounds -- its finite values' -- leave out, so validating this data "
+        "against the spec reports them. Open the bound on that side (None) if "
+        "infinities belong there."
+        for where, infinities in (("f", 2), ("readings", 1))
     ]
 
 
 def test_a_float_with_no_finite_value_has_no_bounds_and_no_warning():
     """No bounds, so nothing is left outside them: validation accepts the
-    NaNs, and there is nothing to warn about."""
+    infinity, the NaN share is recorded, and there is nothing to warn about."""
     df = pl.DataFrame({"f": [float("nan"), float("inf")]})
     columns, said = _profiled_with_warnings(df)
     assert columns["f"].bounds is None
+    assert columns["f"].nan_probability == 0.5
     assert said == []
 
 
@@ -290,10 +292,14 @@ def test_no_bounds_asked_for_means_no_warning():
     assert said == []
 
 
-def test_from_dataframe_warns_for_a_nan_too():
-    with pytest.warns(UserWarning, match="Column 'f' holds 1 NaN"):
-        spec = FrameSpec.from_dataframe(pl.DataFrame({"f": [1.0, float("nan")]}))
-    assert spec.col("f").bounds == Bound(1.0, 1.0)
+def test_from_dataframe_records_a_nan_share_and_warns_only_for_an_infinity():
+    spec = FrameSpec.from_dataframe(pl.DataFrame({"f": [1.0, float("nan")]}))
+    assert (spec.col("f").bounds, spec.col("f").nan_probability) == (
+        Bound(1.0, 1.0),
+        0.5,
+    )
+    with pytest.warns(UserWarning, match="Column 'f' holds 1 infinite"):
+        FrameSpec.from_dataframe(pl.DataFrame({"f": [1.0, float("inf")]}))
 
 
 # ---------------------------------------------------------------------------

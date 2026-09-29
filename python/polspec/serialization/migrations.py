@@ -17,11 +17,17 @@ Version history
    written with `col()`; unknown keys are an error. Registry files
    (`specs:` keyed by name, plus `categories:`) appear.
 3. `hierarchy:` on a spec.
+4. `nan_probability:` on a float value (0.14.0).
 
-An *added optional key* is not a new version: a file without it reads as
-before, and one with it reads on any polspec that knows the key. `format:`
-(0.5.0), `pattern:` (0.6.0) and `seed_name:` (0.7.0) were added to version 3
-on that rule; what bumps the version is a key that changes meaning or shape.
+An *added optional key* is usually not a new version: a file without it reads
+as before, and one with it reads on any polspec that knows the key.
+`format:` (0.5.0), `pattern:` (0.6.0) and `seed_name:` (0.7.0) were added to
+version 3 on that rule. What bumps the version is a key that changes meaning
+or shape -- or, as with `nan_probability:`, one whose *absence* makes a
+claim: a float that does not say otherwise holds no NaN, which a reader too
+old to know the key would not check. Its version lets such a reader refuse
+the file by name rather than read it more loosely than it was written. Every
+file carries the current version, so a reader that old refuses them all.
 """
 
 from __future__ import annotations
@@ -33,7 +39,7 @@ from polspec.distributions import canonicalize_params, normalize_distribution
 from polspec.errors import SerializationError
 from polspec.expr import Pred, col
 
-FORMAT_VERSION = 3
+FORMAT_VERSION = 4
 
 
 # ---------------------------------------------------------------------------
@@ -199,18 +205,19 @@ def _registry_v1_to_v2(data: dict[str, Any]) -> dict[str, Any]:
 def _unchanged(data: dict[str, Any]) -> dict[str, Any]:
     """A version step that adds a key rather than changing one.
 
-    Version 3 introduced `hierarchy:`, which older files simply do not carry.
-    Nothing has to be rewritten, but the step still has to exist: the version
-    on the file is what tells a *newer* reader whether to expect the key, and
-    what tells this reader to refuse a file from the future.
+    Version 3 introduced `hierarchy:`, and version 4 `nan_probability:`,
+    which older files simply do not carry. Nothing has to be rewritten, but
+    the step still has to exist: the version on the file is what tells a
+    *newer* reader whether to expect the key, and what tells this reader to
+    refuse a file from the future.
     """
     return dict(data)
 
 
 MIGRATIONS: dict[str, dict[int, Callable[[dict[str, Any]], dict[str, Any]]]] = {
-    "spec": {1: _spec_v1_to_v2, 2: _unchanged},
-    "catspec": {1: _catspec_v1_to_v2, 2: _unchanged},
-    "registry": {1: _registry_v1_to_v2, 2: _unchanged},
+    "spec": {1: _spec_v1_to_v2, 2: _unchanged, 3: _unchanged},
+    "catspec": {1: _catspec_v1_to_v2, 2: _unchanged, 3: _unchanged},
+    "registry": {1: _registry_v1_to_v2, 2: _unchanged, 3: _unchanged},
 }
 
 
