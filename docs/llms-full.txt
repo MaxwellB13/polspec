@@ -3032,9 +3032,18 @@ the source:
 What columns do *together* is not kept: a fake `age` does not follow a fake
 `status`, and a fake child row's key does not point at a fake parent. A
 `__checks__` rule or a `ColRule` added to the profiled spec by hand puts a
-relationship back where one matters. Nor is a text column's *format*
-recognised: an email column becomes random text of email-like length --
-declare `format="email"` on the profiled spec to fix that.
+relationship back where one matters.
+
+A text column's *format* is recognised: a column of emails, UUIDs, IP or MAC
+addresses, hostnames, or ISO country or currency codes is profiled as that
+`format`, so the fake values have the format and none of the source's. It
+takes at least twenty distinct values, every one of them in the format -- or
+99% of rows, with the rest a few repeated stand-ins such as `N/A`, which
+become `extra_values` at their observed shares (not for a `replace`d column:
+its stand-ins would be the source's values). A hostname has to hold a dot.
+`formats=False`, or `--no-formats`, turns it off. A shape polspec has no
+format for -- a product code, a postcode -- is still text of its lengths;
+declare a `pattern` on the profiled spec to validate it.
 
 A float column's NaNs are carried over as a share: the profile records
 `nan_probability`, and the fake column holds NaN on as many of its present
@@ -3775,6 +3784,7 @@ new`.
 | `--name NAME` | Class name (default: derived from the file name) |
 | `--weights` | Record each category's observed frequency |
 | `--max-unique-enum N` | Max distinct values for a string column to become an `Enum`, when they repeat (default 50) |
+| `--no-formats` | Do not name the `format` a text column's values have (email, uuid4, ...) |
 | `--no-bounds` | Skip computing numeric/temporal bounds and string lengths |
 | `--sample N` | Profile only the first N rows |
 | `--shape` | Fit the distribution each numeric or temporal column follows |
@@ -4477,7 +4487,7 @@ data -- go through `__columns__`:
 
 - `FrameSpec.foreign_keys(cls) -> 'tuple[ForeignKey, ...]'` -- The ForeignKey constraints defined on this FrameSpec.
 
-- `FrameSpec.from_dataframe(cls, df: 'pl.DataFrame', *, name: 'str' = 'ProfiledFrameSpec', weights: 'bool' = False, max_unique_enum: 'int' = 50, calculate_bounds: 'bool' = True, shape: 'bool' = False, detect_unique: 'bool' = False, replace: 'Sequence[str]' = ()) -> 'type[FrameSpec]'` -- Infers a spec by profiling an existing DataFrame.
+- `FrameSpec.from_dataframe(cls, df: 'pl.DataFrame', *, name: 'str' = 'ProfiledFrameSpec', weights: 'bool' = False, max_unique_enum: 'int' = 50, formats: 'bool' = True, calculate_bounds: 'bool' = True, shape: 'bool' = False, detect_unique: 'bool' = False, replace: 'Sequence[str]' = ()) -> 'type[FrameSpec]'` -- Infers a spec by profiling an existing DataFrame.
 
 - `FrameSpec.from_spec(cls, spec: 'TableSpec', *, name: 'str | None' = None) -> 'type[FrameSpec]'` -- A `FrameSpec` subclass wrapping an existing `TableSpec`.
 
@@ -5189,7 +5199,7 @@ workflow, and what carries over from the source.
 
 ## synthesize
 
-### synthesize(source: 'Source', n: 'int | None' = None, *, seed: 'int | None' = None, replace: 'Sequence[str]' = (), sample: 'int | None' = None, max_unique_enum: 'int' = 50) -> 'pl.DataFrame'
+### synthesize(source: 'Source', n: 'int | None' = None, *, seed: 'int | None' = None, replace: 'Sequence[str]' = (), sample: 'int | None' = None, max_unique_enum: 'int' = 50, formats: 'bool' = True) -> 'pl.DataFrame'
 
 A fake frame that looks like `source`: `generate()` over `profile()`.
 
@@ -5198,14 +5208,14 @@ has, by default. Each column follows the profiled column's null rate,
 extremes, category frequencies and fitted distribution; a key column
 stays distinct. Columns are generated independently, so a relationship
 between two columns in `source` is not kept. See `profile` for `replace`,
-`sample` and `max_unique_enum`.
+`sample`, `max_unique_enum` and `formats`.
 
 `seed` seeds the generation, and the sample and fitting behind it, so the
 same source and seed give the same frame. To look at, edit or keep the
 spec the frame came from, call `profile` and `generate` separately.
 ## profile
 
-### profile(source: 'Source', *, name: 'str' = 'Profiled', replace: 'Sequence[str]' = (), sample: 'int | None' = None, seed: 'int' = 0, max_unique_enum: 'int' = 50) -> 'TableSpec'
+### profile(source: 'Source', *, name: 'str' = 'Profiled', replace: 'Sequence[str]' = (), sample: 'int | None' = None, seed: 'int' = 0, max_unique_enum: 'int' = 50, formats: 'bool' = True) -> 'TableSpec'
 
 A spec describing `source` well enough to generate a stand-in for it.
 
@@ -5229,6 +5239,10 @@ seed : int, default 0
 max_unique_enum : int, default 50
     A text column with at most this many distinct values, repeating --
     and not in `replace` -- becomes an `Enum` of them.
+formats : bool, default True
+    Name the `format` a text column's values have -- an email, a UUID,
+    an IP, a country code -- so its fake values have it too. See
+    `profile_dataframe`.
 
 Returns
 -------
@@ -5237,7 +5251,7 @@ TableSpec
     category frequencies, fitted distribution and uniqueness.
 ## profile_dataframe
 
-### profile_dataframe(df: 'pl.DataFrame', *, weights: 'bool' = False, max_unique_enum: 'int' = 50, calculate_bounds: 'bool' = True, shape: 'bool' = False, detect_unique: 'bool' = False, replace: 'Sequence[str]' = (), seed: 'int' = 0) -> 'dict[str, ColSpec]'
+### profile_dataframe(df: 'pl.DataFrame', *, weights: 'bool' = False, max_unique_enum: 'int' = 50, calculate_bounds: 'bool' = True, shape: 'bool' = False, detect_unique: 'bool' = False, replace: 'Sequence[str]' = (), seed: 'int' = 0, formats: 'bool' = True) -> 'dict[str, ColSpec]'
 
 Infers ColSpec column definitions by profiling an existing DataFrame.
 
@@ -5269,6 +5283,15 @@ replace : sequence of str, default ()
     `Enum` of the values it holds -- and carries no weights.
 seed : int, default 0
     Seeds what fitting a shape samples, so a profile is the same every run.
+formats : bool, default True
+    Name the `format` a text column's values have -- `email`, `uuid4`,
+    `ipv4`, `ipv6`, `mac`, `hostname`, `iso_country`, `iso_currency` --
+    when at least `FORMAT_MIN_DISTINCT` (20) distinct values have it and
+    every value does; or 99% of them do and the rest are at most five
+    repeated stand-ins, which become the format's `extra_values`. A
+    hostname has to hold a dot: a single word is too weak a sign. A
+    column in `replace` is named a format only when every value has it,
+    since its stand-ins would be values of the source.
 
 Warns
 -----
@@ -5650,8 +5673,8 @@ Profile a data file into a YAML schema.
 
 ```
 polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
-                            [--max-unique-enum N] [--no-bounds] [--sample N] [--shape]
-                            [--keys] [--replace COL [COL ...]]
+                            [--max-unique-enum N] [--no-formats] [--no-bounds]
+                            [--sample N] [--shape] [--keys] [--replace COL [COL ...]]
                             source
 ```
 
@@ -5662,6 +5685,7 @@ polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
 | `--name` `NAME` | Spec class name (default: derived from source) |
 | `--weights` | Record each category's observed frequency |
 | `--max-unique-enum` `N` | Max distinct values for a string column to become an Enum, when they repeat (default: 50) |
+| `--no-formats` | Do not name the format a text column's values have (email, uuid4, ...) |
 | `--no-bounds` | Skip computing numeric/temporal bounds and string lengths |
 | `--sample` `N` | Profile only the first N rows |
 | `--shape` | Fit the distribution each numeric or temporal column follows |
@@ -5756,7 +5780,7 @@ Write a fake data file that looks like a real one.
 ```
 polspec synthesize [-h] -o OUTPUT [-n N] [--seed SEED]
                           [--replace COL [COL ...]] [--sample N] [--max-unique-enum N]
-                          [--spec PATH] [--name NAME]
+                          [--no-formats] [--spec PATH] [--name NAME]
                           source
 ```
 
@@ -5769,6 +5793,7 @@ polspec synthesize [-h] -o OUTPUT [-n N] [--seed SEED]
 | `--replace` `COL` | Columns whose values must not be carried over: text in them is generated from its lengths, never from the values the source holds |
 | `--sample` `N` | Profile a random sample of N rows rather than every row |
 | `--max-unique-enum` `N` | Max distinct values for a text column to keep its values, when they repeat (default: 50) |
+| `--no-formats` | Do not name the format a text column's values have (email, uuid4, ...) |
 | `--spec` `PATH` | Also write the spec the data was generated from (.yaml, or .py) |
 | `--name` `NAME` | The spec's class name (default: derived from source) |
 
@@ -6301,8 +6326,9 @@ them. See [String formats](https://maxwellb13.github.io/polspec/how-to/formats/)
 `polspec.synthesize` profiles each column on its own and generates each on
 its own, so every column of the fake frame looks like the source's and no
 relationship between columns survives: a correlation, a conditional mix, a
-foreign key. A text column's format is not recognised either, so an email
-column becomes text of an email's length. See
+foreign key. A text column's format is recognised only among the formats
+polspec knows, and from at least twenty distinct values; anything else --
+a product code, a postcode -- becomes text of its lengths. See
 [Fake data from real data](https://maxwellb13.github.io/polspec/how-to/synthesizing/#how-close-the-fake-data-is).
 
 ### A float's infinities are outside its profiled bounds
@@ -6731,20 +6757,17 @@ they do *together* -- an age that follows a status, a child row that points
 at a parent -- is not kept. Capturing that means a spec that can describe a
 joint distribution, which `ColRule` does only for conditions written by hand.
 
+Since 0.14.0 a profiled spec also names a text column's `format` when its
+values have one of the formats polspec knows, with a near miss's stand-ins
+as `extra_values`, and records a float's NaN share -- so `synthesize` makes
+email-shaped emails, and `drift` has a `format_violated` to report when a
+source starts holding something else.
+
 ## Directions, not commitments
 
 Lower confidence than everything above: opportunities noticed rather than gaps
 being actively closed. They are here because the machinery each would need
 already exists, not because any of them is started.
-
-**A profiled spec that names a `format`.** `from_dataframe()` reads a
-string column as a `String` with a length range; it does not notice that
-every value is an email address. Inference is a decision about how sure to be
-before naming a format, and a wrong guess is a spec that rejects real data,
-so it has not been made. [Drift](https://maxwellb13.github.io/polspec/how-to/drift/) is the reason to want
-it: a `format_violated` finding on a column the profiler named would have
-been the drift that mattered, and `synthesize` would generate email-shaped
-emails rather than email-length text.
 
 **Test-framework integration.** A pytest fixture or plugin, or a Hypothesis
 strategy built from a spec, are the natural adjacent surfaces for a library
@@ -6782,6 +6805,17 @@ seed produces; see
 
 ### Added
 
+- **Profiling names a text column's format.** `profile()`,
+  `from_dataframe()`, `synthesize()`, `polspec schema infer` and `polspec
+  synthesize` name the `format` a text column's values have -- `uuid4`,
+  `ipv6`, `ipv4`, `mac`, `iso_country`, `iso_currency`, `email`, `hostname`,
+  tried in that order -- when at least twenty distinct values have it and
+  every value does, or 99% of rows do and the rest are at most five repeated
+  stand-ins, which become `extra_values` at their observed shares. A
+  hostname has to hold a dot. A synthesized email column is email-shaped
+  now, where 0.13.0 made text of an email's length. On by default;
+  `formats=False` or `--no-formats` turns it off. A `replace`d column is
+  named a format only when every value has it.
 - **Drift on frequencies and distributions.** `frequencies_moved`
   compares a weighted column -- an `Enum`, a `Boolean`, `choices` -- with
   its `weights`; `distribution_moved` compares a column that declares a

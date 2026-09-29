@@ -25,8 +25,8 @@ Profile a data file into a YAML schema.
 
 ```
 polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
-                            [--max-unique-enum N] [--no-bounds] [--sample N] [--shape]
-                            [--keys] [--replace COL [COL ...]]
+                            [--max-unique-enum N] [--no-formats] [--no-bounds]
+                            [--sample N] [--shape] [--keys] [--replace COL [COL ...]]
                             source
 ```
 
@@ -37,6 +37,7 @@ polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
 | `--name` `NAME` | Spec class name (default: derived from source) |
 | `--weights` | Record each category's observed frequency |
 | `--max-unique-enum` `N` | Max distinct values for a string column to become an Enum, when they repeat (default: 50) |
+| `--no-formats` | Do not name the format a text column's values have (email, uuid4, ...) |
 | `--no-bounds` | Skip computing numeric/temporal bounds and string lengths |
 | `--sample` `N` | Profile only the first N rows |
 | `--shape` | Fit the distribution each numeric or temporal column follows |
@@ -131,7 +132,7 @@ Write a fake data file that looks like a real one.
 ```
 polspec synthesize [-h] -o OUTPUT [-n N] [--seed SEED]
                           [--replace COL [COL ...]] [--sample N] [--max-unique-enum N]
-                          [--spec PATH] [--name NAME]
+                          [--no-formats] [--spec PATH] [--name NAME]
                           source
 ```
 
@@ -144,6 +145,7 @@ polspec synthesize [-h] -o OUTPUT [-n N] [--seed SEED]
 | `--replace` `COL` | Columns whose values must not be carried over: text in them is generated from its lengths, never from the values the source holds |
 | `--sample` `N` | Profile a random sample of N rows rather than every row |
 | `--max-unique-enum` `N` | Max distinct values for a text column to keep its values, when they repeat (default: 50) |
+| `--no-formats` | Do not name the format a text column's values have (email, uuid4, ...) |
 | `--spec` `PATH` | Also write the spec the data was generated from (.yaml, or .py) |
 | `--name` `NAME` | The spec's class name (default: derived from source) |
 

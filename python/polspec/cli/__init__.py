@@ -76,6 +76,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Max distinct values for a string column to become an Enum, when they repeat (default: 50)",
     )
     infer.add_argument(
+        "--no-formats",
+        action="store_true",
+        help="Do not name the format a text column's values have (email, uuid4, ...)",
+    )
+    infer.add_argument(
         "--no-bounds",
         action="store_true",
         help="Skip computing numeric/temporal bounds and string lengths",

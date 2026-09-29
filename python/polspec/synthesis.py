@@ -42,6 +42,7 @@ def profile(
     sample: int | None = None,
     seed: int = 0,
     max_unique_enum: int = 50,
+    formats: bool = True,
 ) -> TableSpec:
     """A spec describing `source` well enough to generate a stand-in for it.
 
@@ -65,6 +66,10 @@ def profile(
     max_unique_enum : int, default 50
         A text column with at most this many distinct values, repeating --
         and not in `replace` -- becomes an `Enum` of them.
+    formats : bool, default True
+        Name the `format` a text column's values have -- an email, a UUID,
+        an IP, a country code -- so its fake values have it too. See
+        `profile_dataframe`.
 
     Returns
     -------
@@ -81,6 +86,7 @@ def profile(
         detect_unique=True,
         replace=replace,
         seed=seed,
+        formats=formats,
     )
     return TableSpec(name, columns)
 
@@ -93,6 +99,7 @@ def synthesize(
     replace: Sequence[str] = (),
     sample: int | None = None,
     max_unique_enum: int = 50,
+    formats: bool = True,
 ) -> pl.DataFrame:
     """A fake frame that looks like `source`: `generate()` over `profile()`.
 
@@ -101,7 +108,7 @@ def synthesize(
     extremes, category frequencies and fitted distribution; a key column
     stays distinct. Columns are generated independently, so a relationship
     between two columns in `source` is not kept. See `profile` for `replace`,
-    `sample` and `max_unique_enum`.
+    `sample`, `max_unique_enum` and `formats`.
 
     `seed` seeds the generation, and the sample and fitting behind it, so the
     same source and seed give the same frame. To look at, edit or keep the
@@ -114,6 +121,7 @@ def synthesize(
         replace=replace,
         sample=sample,
         max_unique_enum=max_unique_enum,
+        formats=formats,
     )
     return fake
 
@@ -126,6 +134,7 @@ def synthesized(
     replace: Sequence[str] = (),
     sample: int | None = None,
     max_unique_enum: int = 50,
+    formats: bool = True,
     name: str = "Synthesized",
 ) -> tuple[pl.DataFrame, TableSpec]:
     """`synthesize`, with the spec the frame was generated from -- one
@@ -138,6 +147,7 @@ def synthesized(
         replace=replace,
         seed=seed if seed is not None else 0,
         max_unique_enum=max_unique_enum,
+        formats=formats,
     )
     rows = height if n is None else n
     if rows < 0:

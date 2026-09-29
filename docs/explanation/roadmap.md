@@ -150,20 +150,17 @@ they do *together* -- an age that follows a status, a child row that points
 at a parent -- is not kept. Capturing that means a spec that can describe a
 joint distribution, which `ColRule` does only for conditions written by hand.
 
+Since 0.14.0 a profiled spec also names a text column's `format` when its
+values have one of the formats polspec knows, with a near miss's stand-ins
+as `extra_values`, and records a float's NaN share -- so `synthesize` makes
+email-shaped emails, and `drift` has a `format_violated` to report when a
+source starts holding something else.
+
 ## Directions, not commitments
 
 Lower confidence than everything above: opportunities noticed rather than gaps
 being actively closed. They are here because the machinery each would need
 already exists, not because any of them is started.
-
-**A profiled spec that names a `format`.** `from_dataframe()` reads a
-string column as a `String` with a length range; it does not notice that
-every value is an email address. Inference is a decision about how sure to be
-before naming a format, and a wrong guess is a spec that rejects real data,
-so it has not been made. [Drift](../how-to/drift.md) is the reason to want
-it: a `format_violated` finding on a column the profiler named would have
-been the drift that mattered, and `synthesize` would generate email-shaped
-emails rather than email-length text.
 
 **Test-framework integration.** A pytest fixture or plugin, or a Hypothesis
 strategy built from a spec, are the natural adjacent surfaces for a library

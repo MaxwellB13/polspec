@@ -10,6 +10,17 @@ seed produces; see
 
 ### Added
 
+- **Profiling names a text column's format.** `profile()`,
+  `from_dataframe()`, `synthesize()`, `polspec schema infer` and `polspec
+  synthesize` name the `format` a text column's values have -- `uuid4`,
+  `ipv6`, `ipv4`, `mac`, `iso_country`, `iso_currency`, `email`, `hostname`,
+  tried in that order -- when at least twenty distinct values have it and
+  every value does, or 99% of rows do and the rest are at most five repeated
+  stand-ins, which become `extra_values` at their observed shares. A
+  hostname has to hold a dot. A synthesized email column is email-shaped
+  now, where 0.13.0 made text of an email's length. On by default;
+  `formats=False` or `--no-formats` turns it off. A `replace`d column is
+  named a format only when every value has it.
 - **Drift on frequencies and distributions.** `frequencies_moved`
   compares a weighted column -- an `Enum`, a `Boolean`, `choices` -- with
   its `weights`; `distribution_moved` compares a column that declares a

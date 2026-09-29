@@ -103,9 +103,18 @@ the source:
 What columns do *together* is not kept: a fake `age` does not follow a fake
 `status`, and a fake child row's key does not point at a fake parent. A
 `__checks__` rule or a `ColRule` added to the profiled spec by hand puts a
-relationship back where one matters. Nor is a text column's *format*
-recognised: an email column becomes random text of email-like length --
-declare `format="email"` on the profiled spec to fix that.
+relationship back where one matters.
+
+A text column's *format* is recognised: a column of emails, UUIDs, IP or MAC
+addresses, hostnames, or ISO country or currency codes is profiled as that
+`format`, so the fake values have the format and none of the source's. It
+takes at least twenty distinct values, every one of them in the format -- or
+99% of rows, with the rest a few repeated stand-ins such as `N/A`, which
+become `extra_values` at their observed shares (not for a `replace`d column:
+its stand-ins would be the source's values). A hostname has to hold a dot.
+`formats=False`, or `--no-formats`, turns it off. A shape polspec has no
+format for -- a product code, a postcode -- is still text of its lengths;
+declare a `pattern` on the profiled spec to validate it.
 
 A float column's NaNs are carried over as a share: the profile records
 `nan_probability`, and the fake column holds NaN on as many of its present
