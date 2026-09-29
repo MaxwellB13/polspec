@@ -168,11 +168,14 @@ def test_new_values_are_named_and_counted():
 
 
 def test_new_values_on_an_enum_column_arriving_as_strings():
-    """The way a CSV hands an Enum back: compared as the strings they hold."""
+    """The way a CSV hands an Enum back: compared as the strings they hold.
+    The String itself validates, so it is no finding -- unless dtypes are
+    held strictly -- and `b`, unseen in two rows, is not news either."""
     findings = _drifted("c", ColSpec(pl.Enum(["a", "b"])), ["a", "c"])
-    codes = sorted(f.code for f in findings)
-    assert codes == ["cardinality_moved", "dtype_changed", "new_values"]
-    assert not next(f for f in findings if f.code == "dtype_changed").breaking
+    assert [f.code for f in findings] == ["new_values"]
+    strict = _drifted("c", ColSpec(pl.Enum(["a", "b"])), ["a", "c"], strict_dtypes=True)
+    assert sorted(f.code for f in strict) == ["dtype_changed", "new_values"]
+    assert next(f for f in strict if f.code == "dtype_changed").breaking
 
 
 def test_values_outside_a_finite_format_are_new_values():
@@ -210,34 +213,63 @@ def test_samples_are_capped_by_max_samples():
 
 
 def test_cardinality_moved_lists_the_values_never_seen():
+    """Each of four categories is drawn a quarter of the time: absent from
+    three rows by chance, but not from two thousand."""
     spec = ColSpec(pl.Enum(["a", "b", "c", "d"]))
-    values = pl.Series(["a", "a", "b"], dtype=spec.dtype)
-    report = drift(TableSpec("T", {"c": spec}), pl.DataFrame({"c": values}))
-    (finding,) = report.findings
+    table = TableSpec("T", {"c": spec})
+    few = pl.DataFrame({"c": pl.Series(["a", "a", "b"], dtype=spec.dtype)})
+    assert drift(table, few).unchanged
+    many = pl.DataFrame({"c": pl.Series(["a", "b"] * 1_000, dtype=spec.dtype)})
+    (finding,) = drift(table, many).findings
     assert finding.code == "cardinality_moved" and not finding.breaking
     assert finding.details == {"unseen": ["c", "d"], "declared": 4, "observed": 2}
-    assert drift(
-        TableSpec("T", {"c": spec}), pl.DataFrame({"c": values}), unseen_values=False
-    ).unchanged
+    assert drift(table, many, unseen_values=False).unchanged
+
+
+def test_an_unseen_value_is_weighed_at_its_declared_share():
+    """A category of weight 1% is missing from a hundred rows a third of the
+    time; one of weight 49.5% never is."""
+    spec = ColSpec(pl.Enum(["a", "b", "rare"]), weights=[49.5, 49.5, 1])
+    frame = pl.DataFrame({"c": pl.Series(["a", "b"] * 50, dtype=spec.dtype)})
+    assert drift(TableSpec("T", {"c": spec}), frame).unchanged
+    half = pl.DataFrame({"c": pl.Series(["a"] * 100, dtype=spec.dtype)})
+    (finding,) = [
+        f
+        for f in drift(TableSpec("T", {"c": spec}), half).findings
+        if f.code == "cardinality_moved"
+    ]
+    assert finding.details["unseen"] == ["b"]
 
 
 @pytest.mark.parametrize(
-    "nulls, tolerance, moved",
-    [(3, 0.05, True), (3, 0.25, False), (1, 0.05, False)],
+    "rows, nulls, tolerance, moved",
+    [
+        (1_000, 300, 0.05, True),  # 0.3 against 0.1: large, and no accident
+        (1_000, 300, 0.25, False),  # large, but within a tolerance of 0.25
+        (1_000, 120, 0.05, False),  # an accident it could be, and small
+        (10, 3, 0.05, False),  # 0.3 against 0.1, but ten rows prove nothing
+    ],
 )
-def test_null_rate_moved_is_measured_against_the_tolerance(nulls, tolerance, moved):
-    """Ten rows, declared null_probability=0.1: three nulls is 0.3."""
+def test_null_rate_moved_needs_a_move_both_large_and_significant(
+    rows, nulls, tolerance, moved
+):
+    """Declared null_probability=0.1. Ten rows used to be enough: three
+    nulls in ten read as a moved rate, though a rate of 0.1 gives three or
+    more one time in fifteen."""
     spec = ColSpec(pl.Int64, nullable=True, null_probability=0.1)
-    values = [None] * nulls + list(range(10 - nulls))
+    values = [None] * nulls + list(range(rows - nulls))
     findings = _drifted("n", spec, values, null_rate_tolerance=tolerance)
     assert bool(findings) is moved
     if moved:
         (finding,) = findings
         assert finding.code == "null_rate_moved" and not finding.breaking
-        assert finding.details == {
+        details = dict(finding.details)
+        assert details.pop("p_value") < 1e-10
+        assert details == {
             "declared": 0.1,
             "observed": 0.3,
             "tolerance": tolerance,
+            "count": rows,
         }
 
 
@@ -249,12 +281,13 @@ def test_nulls_in_a_non_nullable_column_are_breaking():
 
 
 def test_dtype_severity_follows_validation():
-    (finding,) = _drifted("n", ColSpec(pl.Int64), pl.Series([1, 2], dtype=pl.Int32))
-    assert finding.code == "dtype_changed" and not finding.breaking
+    """A dtype that validates -- an Int32 for an Int64 -- has not drifted;
+    held strictly it fails validation, so it is breaking."""
+    assert not _drifted("n", ColSpec(pl.Int64), pl.Series([1, 2], dtype=pl.Int32))
     (finding,) = _drifted(
         "n", ColSpec(pl.Int64), pl.Series([1, 2], dtype=pl.Int32), strict_dtypes=True
     )
-    assert finding.breaking
+    assert finding.code == "dtype_changed" and finding.breaking
     (finding,) = _drifted("n", ColSpec(pl.Int64), ["1", "2"])
     assert finding.breaking and finding.details == {"old": "String", "new": "Int64"}
 
@@ -263,7 +296,9 @@ def test_an_empty_column_has_nothing_to_say():
     spec = ColSpec(pl.Int64, bounds=(0, 1), nullable=True, null_probability=0.5)
     findings = _drifted("n", spec, pl.Series([], dtype=pl.Int64))
     assert findings == ()
-    findings = _drifted("n", spec, pl.Series([None, None], dtype=pl.Int64))
+    # Two nulls of two, at a rate of a half: one run in four.
+    assert _drifted("n", spec, pl.Series([None, None], dtype=pl.Int64)) == ()
+    findings = _drifted("n", spec, pl.Series([None] * 200, dtype=pl.Int64))
     assert [f.code for f in findings] == ["null_rate_moved"]
 
 

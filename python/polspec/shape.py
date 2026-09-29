@@ -91,14 +91,14 @@ def fit(
     uniform = draws(None, {})
     if uniform is None:
         return None
-    baseline = _ks(observed, uniform)
+    baseline = ks_distance(observed, uniform)
 
     best: Fit | None = None
     for distribution, params in _candidates(observed, dtype):
         drawn = draws(distribution, params)
         if drawn is None:
             continue
-        distance = _ks(observed, drawn)
+        distance = ks_distance(observed, drawn)
         if best is None or distance < best.distance:
             best = Fit(distribution, params, distance)
     if best is None or best.distance > baseline - MARGIN:
@@ -159,7 +159,7 @@ def _candidates(
     return found
 
 
-def _ks(a: pl.Series, b: pl.Series) -> float:
+def ks_distance(a: pl.Series, b: pl.Series) -> float:
     """The two-sample Kolmogorov-Smirnov distance: the widest gap between
     the two empirical distribution functions. Ties -- every value of an
     integer column is one -- are grouped, so a step is taken once."""

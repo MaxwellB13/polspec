@@ -73,7 +73,7 @@ otherwise. See [Schema and data drift](../how-to/drift.md).
 | `column_added` | both | breaking | the new spec declares a column the old lacks, or the data has an undeclared column |
 | `column_removed` | both | breaking | the old spec declares a column the new lacks, or the data lacks a declared column |
 | `column_renamed` | `diff` | compatible | a rename given through `renames=` |
-| `dtype_changed` | both | as validation decides | the dtypes differ; compatible when the old values would still validate |
+| `dtype_changed` | both | as validation decides | the dtypes differ; compatible when the old values would still validate. Against data, only a dtype that fails validation is reported -- or any difference, under `strict_dtypes` |
 | `nullability_changed` | both | off → on compatible; on → off breaking; nulls in a non-nullable column breaking | `nullable`, or a list's `element_null_probability` between 0 and not |
 | `domain_widened` | `diff` | compatible | bounds, choices, format or string length accept more than before -- or a float value now allows NaN |
 | `domain_narrowed` | `diff` | breaking | they accept less |
@@ -81,9 +81,11 @@ otherwise. See [Schema and data drift](../how-to/drift.md).
 | `bounds_exceeded` | `drift` | breaking | values escape `bounds`, `string_length` or `list_length`; `details` say which and by how much |
 | `new_values` | `drift` | breaking | values outside `choices`, an `Enum` or a finite format -- or a NaN in a float value that declares none |
 | `format_violated` | `drift` | breaking | values that do not match the declared `format` |
-| `null_rate_moved` | `drift` | compatible | the null rate sits further from `null_probability` -- or the element null rate from `element_null_probability` -- than the tolerance |
-| `nan_rate_moved` | `drift` | compatible | the share of present values that are NaN sits further from `nan_probability` than the tolerance |
-| `cardinality_moved` | `drift` | compatible | declared values the data never holds |
+| `null_rate_moved` | `drift` | compatible | the null rate has moved from `null_probability` -- or the element null rate from `element_null_probability` -- by at least the tolerance, and significantly over the rows seen |
+| `nan_rate_moved` | `drift` | compatible | the share of present values that are NaN has moved from `nan_probability` by at least the tolerance, and significantly |
+| `frequencies_moved` | `drift` | compatible | a weighted column's frequencies have moved from its `weights` by at least `frequency_tolerance`, and significantly |
+| `distribution_moved` | `drift` | compatible | the values have moved from a sample drawn from the declared `distribution` by at least `distribution_tolerance`, and significantly |
+| `cardinality_moved` | `drift` | compatible | declared values the data never holds, and at their declared share would not miss by chance |
 | `constraint_added` | `diff` | breaking | `unique`, a validator, rule, check, composite key, foreign key or hierarchy present only in the new spec |
 | `constraint_removed` | `diff` | compatible | the reverse |
 | `field_changed` | `diff` | compatible | `tags`, `weights`, `distribution`, `distribution_params`, `null_probability`, `pattern` or `seed_name` differ |

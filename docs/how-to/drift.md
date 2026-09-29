@@ -94,7 +94,8 @@ assert [f.code for f in OrdersV1.diff(Renamed, renames={"order_id": "order_ref"}
 `drift()` asks the frame the questions the spec makes answerable: is
 anything outside the declared bounds, and by how much; which values are
 outside the declared `choices`, `Enum` or `format`; which declared values
-never appear; has the null rate moved.
+never appear; have the null rate, the NaN share, the weights or the
+distribution moved.
 
 ```python
 good = OrdersV1.generate(2_000, seed=1)
@@ -109,10 +110,9 @@ print(OrdersV1.drift(moved))
 ```
 
 ```
-Drift: 2 breaking, 2 compatible, DataFrame against 'OrdersV1'
+Drift: 2 breaking, 1 compatible, DataFrame against 'OrdersV1'
   - [breaking] Column 'total': values escape bounds [0.0, 1000.0]: max found 2999.36861541796 by 1999.36861541796 above. Widen the bounds, or fix the source
   - [breaking] Column 'placed': values escape bounds [2024-01-01, 2025-01-01]: max found 2025-07-20 by 200 days above. Widen the bounds, or fix the source
-  - [compatible] Column 'status': holds String, declared Enum(categories=['NEW', 'PAID'])
   - [compatible] Column 'status': 1 of 2 declared value(s) never appear: ['NEW']
 ```
 
@@ -131,6 +131,52 @@ it by path. Describing `point.lat` with bounds is `domain_narrowed` on
 null rate is measured inside the structs that are present, which is what
 its `null_probability` claims. The finding's `columns` stay `("point",)`.
 
+`status` arrives as a `String` where an `Enum` is declared -- the way a CSV
+hands one back -- and that is no finding: the column validates as it is,
+and data that validates has not drifted on dtype. `strict_dtypes=True`
+reports it, as validation's own switch would.
+
+### Significant, and large enough to matter
+
+A null rate, a NaN share, a weighted column's frequencies and a declared
+distribution are claims about how often, and a sample always wanders from
+them a little. So each is reported as moved only when the move is both:
+
+- **significant** -- unlikely, at `significance` (0.001), to be what sampling
+  alone would do over the rows measured: an exact binomial test for a rate,
+  Pearson's chi-square for frequencies, a two-sample Kolmogorov-Smirnov
+  test for a distribution;
+- **large** -- at least its tolerance: `null_rate_tolerance` for a rate,
+  `frequency_tolerance` for frequencies (the total variation distance, half
+  the summed gap between observed and declared shares), and
+  `distribution_tolerance` for a distribution (the KS distance).
+
+Fifty rows of a column declared 30% null hold 22% nulls often enough --
+that used to be a finding, and is not now: a move that size over fifty rows
+happens by chance more than one run in four. Ten million rows prove every
+difference significant, and the tolerance is what keeps a rounding error
+from being reported. Both directions are pinned: a spec's own seeded output
+does not drift from it at fifty, five thousand or five million rows, and a
+real move over enough rows always does.
+
+A distribution is compared by drawing: `drift()` generates a sample from the
+declaration itself -- with a fixed seed, so a report is the same every run
+-- and measures the data's distance from it. So clamping at the bounds and
+the rounding of an integer column are exactly what generation does, the
+same way the profiler fits shapes. A declared value that never appears is
+weighed the same way: `cardinality_moved` names it only when, at the share
+it is generated at, missing it from the rows seen is itself unlikely -- a
+category of weight 1% is absent from fifty rows six times in ten.
+
+A column a pass rewrites -- one a rule narrows, a foreign key fills, a
+hierarchy links, or a composite key repairs -- is not drawn from its own
+weights or distribution, so neither is compared on it, and a declared value
+it never holds is not reported: a rule may leave one out of every row.
+
+Each column is tested at `significance` on its own. A frame of a hundred
+columns, each tested once, expects a false alarm about one run in ten;
+lower `significance` for a wide frame watched often.
+
 What `drift()` does **not** measure is what validation already does:
 uniqueness, composite keys, foreign keys and checks are pass/fail claims
 about rows, not summaries that move. `validate()` is still the verdict.
@@ -147,9 +193,12 @@ OrdersV1.drift(good, null_rate_tolerance=0.2)   # or one keyword at a time, not 
 
 | Option | Default | Meaning |
 |:--|:--|:--|
-| `null_rate_tolerance` | `0.05` | how far the observed null rate may sit from `null_probability` before `null_rate_moved` is reported; absolute, not relative |
-| `unseen_values` | `True` | report declared values the data never holds (`cardinality_moved`) |
-| `strict_dtypes` | `False` | the same switch as validation's, decided by the same function: whether a `dtype_changed` is breaking |
+| `significance` | `0.001` | the false-alarm rate of each statistical test: how unlikely a move must be, were the declaration right, before it is reported |
+| `null_rate_tolerance` | `0.05` | the smallest move of a null rate, an element null rate or a NaN share worth reporting (`null_rate_moved`, `nan_rate_moved`); absolute, not relative |
+| `frequency_tolerance` | `0.05` | the smallest move of a weighted column's frequencies worth reporting (`frequencies_moved`), as the total variation distance |
+| `distribution_tolerance` | `0.05` | the smallest move of a declared distribution worth reporting (`distribution_moved`), as the Kolmogorov-Smirnov distance |
+| `unseen_values` | `True` | report declared values the data never holds and, at their declared share, would not miss by chance (`cardinality_moved`) |
+| `strict_dtypes` | `False` | the same switch as validation's, decided by the same function: a dtype that validates is no finding, and held strictly it is a breaking `dtype_changed` |
 | `max_samples` | `10` | how many offending values a finding's `details` carry |
 
 ## The report

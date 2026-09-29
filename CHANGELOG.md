@@ -10,6 +10,13 @@ seed produces; see
 
 ### Added
 
+- **Drift on frequencies and distributions.** `frequencies_moved`
+  compares a weighted column -- an `Enum`, a `Boolean`, `choices` -- with
+  its `weights`; `distribution_moved` compares a column that declares a
+  `distribution` with a sample drawn from the declaration itself, so the
+  clamping at its bounds and an integer's rounding are what generation
+  does. `DriftOptions` gains `significance`, `frequency_tolerance` and
+  `distribution_tolerance`.
 - **`ColSpec.nan_probability`: NaN in a float value, declared.** How often a
   present value is NaN, from 0 to 1, on a float column, a list's float
   elements or a struct's float field. Generation draws NaN on that share of
@@ -35,6 +42,24 @@ seed produces; see
 
 ### Changed
 
+- **Drift reports a move only when it is both significant and large.** A
+  null rate, an element null rate or a NaN share is reported as moved only
+  when it is at least `null_rate_tolerance` from the declared rate *and*
+  unlikely -- at `significance`, 0.001 by default -- to be sampling noise
+  over the rows seen: fifty rows of a column declared 30% null holding 22%
+  used to be a finding, and a spec's own output could drift from it. The
+  same rule holds for the new frequency and distribution findings, and a
+  declared value missing from the data is `cardinality_moved` only when, at
+  its declared share, missing it is itself unlikely. A column a pass
+  rewrites -- a rule, a foreign key, a hierarchy, a composite key -- is not
+  held to its weights, distribution or unseen values, none of which its
+  values are drawn by. A spec's own seeded output does not drift from it at
+  50, 5,000 or 5,000,000 rows.
+- **A dtype that validates is no drift finding.** `String` for an `Enum`,
+  `Int64` for an `Int32`, `Datetime` for a `Date` -- what a CSV hands back
+  -- used to be a compatible `dtype_changed` against data that `validate()`
+  accepts; it is now reported only under `strict_dtypes=True`, where it is
+  breaking. `diff` between two declarations still reports every change.
 - **Spec files are format version 4.** `nan_probability` is the reason:
   a float that does not declare it now claims to hold no NaN, which an
   older reader would not check, so the version has a 0.13 reader refuse the

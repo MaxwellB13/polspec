@@ -3,7 +3,9 @@
 The declaration decides what is worth measuring: values outside a finite
 domain only mean something when a domain is declared, format failures only
 when a format is. So an `Observed` is built *from* a `ColSpec`, and carries
-just the summary statistics the comparators read -- never the rows.
+just the summary statistics the comparators read -- never the rows, except a
+bounded sample of the values of a column that declares a distribution,
+which is what a distribution is compared by.
 
 This measures directly rather than going through `profile_dataframe`. The
 profiler describes a frame well enough to generate one like it, which is a
@@ -24,10 +26,17 @@ from polspec.bound import Bound
 from polspec.domain import Domain, is_textual
 from polspec.dtypes import field_dtypes, map_entries
 from polspec.formats import lookup as _lookup_format
+from polspec.shape import physical
+from polspec.validation.constraints import is_dtype_compatible
 
 if TYPE_CHECKING:
     from polspec.drift import DriftOptions
     from polspec.spec import ColSpec
+
+# The most values of a column a distribution is compared by. A two-sample
+# test is as sharp as its smaller sample, and the declaration's own is
+# `REFERENCE_ROWS`, so more than a few times that adds cost and no power.
+DISTRIBUTION_SAMPLE = 200_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,9 +70,20 @@ class Observed:
         how many of those are NaN; `nan_rate` is the fraction. A NaN is not
         a value in any other measurement: the extent and the domain read
         the numbers alone.
+    present_count : int
+        Values measured against the domain -- the present ones, or a list's
+        present elements, with NaN set aside.
     outside : tuple[int, tuple]
         Rows holding a value outside the declared finite domain, and up to
         `max_samples` of those values.
+    counts : tuple[int, ...] | None
+        For a column declaring `weights`, how often each declared value
+        occurs, in the order the weights are declared (`False`, `True` for a
+        Boolean).
+    physical : pl.Series | None
+        For a column declaring a `distribution`, its present values in the
+        units the engine draws in -- at most `DISTRIBUTION_SAMPLE` of them,
+        sampled with a fixed seed.
     unseen : tuple
         Declared values the column never holds.
     format_failures : tuple[int, tuple]
@@ -86,7 +106,10 @@ class Observed:
     element_null_count: int = 0
     value_count: int = 0
     nan_count: int = 0
+    present_count: int = 0
     outside: tuple[int, tuple[Any, ...]] = (0, ())
+    counts: tuple[int, ...] | None = None
+    physical: pl.Series | None = None
     unseen: tuple[Any, ...] = ()
     format_failures: tuple[int, tuple[Any, ...]] = (0, ())
     fields: dict[str, Observed] = field(default_factory=dict)
@@ -167,8 +190,19 @@ class Observed:
             if len(values) == 0:
                 return cls(**measured)
 
+        measured["present_count"] = len(values)
         if declared.bounds is not None and _extent_measurable(values.dtype):
             measured["extent"] = Bound(values.min(), values.max())
+
+        if declared.distribution is not None:
+            measured["physical"] = _physical_sample(values, declared)
+        if (
+            declared.weights is not None
+            and declared.value_dtype == pl.Boolean
+            and values.dtype == pl.Boolean
+        ):
+            trues = int(values.sum())
+            measured["counts"] = (len(values) - trues, trues)
 
         if declared.string_length is not None:
             lengths = _lengths(values)
@@ -184,6 +218,8 @@ class Observed:
             measured["outside"], measured["unseen"] = _against_domain(
                 values, domain, options.max_samples
             )
+            if declared.weights is not None:
+                measured["counts"] = _domain_counts(values, domain)
 
         if declared.format is not None and values.dtype in (pl.String, pl.Utf8):
             fmt = _lookup_format(declared.format)
@@ -199,6 +235,41 @@ class Observed:
                     ),
                 )
         return cls(**measured)
+
+
+def _physical_sample(values: pl.Series, declared: ColSpec) -> pl.Series | None:
+    """`values` in the units the engine draws `declared` in: cast to the
+    declared dtype first, so a `Datetime` standing in for a `Date` is
+    measured in days, as the declaration's own draws are. None where the
+    dtype cannot stand in."""
+    dtype = declared.value_dtype
+    if not is_dtype_compatible(dtype, values.dtype, strict=False):
+        return None
+    typed = values.cast(dtype, strict=False).drop_nulls()
+    if len(typed) > DISTRIBUTION_SAMPLE:
+        typed = typed.sample(DISTRIBUTION_SAMPLE, seed=0)
+    return physical(typed).cast(pl.Float64)
+
+
+def _domain_counts(values: pl.Series, domain: Domain) -> tuple[int, ...]:
+    """How often each of `domain`'s values occurs in `values`, in order;
+    compared as `_against_domain` compares them."""
+    declared_values = list(domain.values or ())
+    if is_textual(values.dtype):
+        observed = values.cast(pl.String)
+        declared = pl.Series(declared_values, dtype=pl.String, strict=False)
+    else:
+        observed = values
+        declared = pl.Series(declared_values, dtype=values.dtype, strict=False)
+    counts = observed.value_counts()
+    seen = dict(
+        zip(
+            counts[counts.columns[0]].to_list(),
+            counts[counts.columns[1]].to_list(),
+            strict=True,
+        )
+    )
+    return tuple(int(seen.get(value, 0)) for value in declared.to_list())
 
 
 def _extent_measurable(dtype: pl.DataType) -> bool:
