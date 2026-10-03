@@ -483,3 +483,15 @@ def test_col_name_survives_yaml_roundtrip(tmp_path):
     loaded = FrameSpec.from_yaml(path)
     assert list(loaded.spec.columns) == ["Unit Price"]
     assert loaded.generate(10, seed=1).columns == ["Unit Price"]
+
+
+def test_a_composite_key_column_cannot_declare_nan():
+    """As `unique=True` refuses it: no NaN equals another. The repair that
+    separates repeated combinations hashed NaN as one value and drew every
+    NaN away -- a declared share of 0.3 generated as none."""
+    with pytest.raises(SpecError, match="declares nan_probability and is part of"):
+
+        class Spec(FrameSpec):
+            a = ColSpec(pl.Float64, bounds=(0, 1), nan_probability=0.3)
+            b = ColSpec(pl.Enum(["x", "y"]))
+            __unique_together__ = [("a", "b")]

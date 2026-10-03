@@ -127,6 +127,7 @@ pinned by a passing test. A NaN, by contrast, is recorded as the column's
 - **A `Hierarchy` owns both its columns.** A `null_probability`,
   `distribution` or `weights` declared on either is not what you get: the
   references have to come from one pool for the two columns to join at all.
+  So `drift()` does not hold either column to them.
 - **A composite key is distinct within a batch, not across batches.** A
   `unique=True` column is a permutation of its value space, unique across a
   whole frame however it is batched -- including one a foreign key fills,

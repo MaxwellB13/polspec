@@ -85,7 +85,7 @@ otherwise. See [Schema and data drift](../how-to/drift.md).
 | `nan_rate_moved` | `drift` | compatible | the share of present values that are NaN has moved from `nan_probability` by at least the tolerance, and significantly |
 | `frequencies_moved` | `drift` | compatible | a weighted column's frequencies have moved from its `weights` by at least `frequency_tolerance`, and significantly |
 | `distribution_moved` | `drift` | compatible | the values have moved from a sample drawn from the declared `distribution` by at least `distribution_tolerance`, and significantly |
-| `cardinality_moved` | `drift` | compatible | declared values the data never holds, and at their declared share would not miss by chance |
+| `cardinality_moved` | `drift` | compatible | declared `choices`, `Enum` categories or extra values the data never holds, and at their declared share would not miss by chance -- never a finite format's own codes |
 | `constraint_added` | `diff` | breaking | `unique`, a validator, rule, check, composite key, foreign key or hierarchy present only in the new spec |
 | `constraint_removed` | `diff` | compatible | the reverse |
 | `field_changed` | `diff` | compatible | `tags`, `weights`, `distribution`, `distribution_params`, `null_probability`, `pattern` or `seed_name` differ |

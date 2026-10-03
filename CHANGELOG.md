@@ -8,6 +8,26 @@ seed produces; see
 
 ## [Unreleased]
 
+### Fixed
+
+- **A spec drifted from data it describes, three ways.** A column with a
+  finite `format` -- `iso_country`, `iso_currency` -- counted every code as
+  a declared value, so a profiled country column drifted from its own
+  source (`cardinality_moved`: 224 of 249 never appear); a format promises
+  a valid code, not every code, and only `choices`, `Enum` categories and
+  `extra_values` count now. A nullable `Hierarchy` column drifted from its
+  own output on its null rate, and a column a rule rewrites on its NaN
+  share: drift now skips, on each column a pass writes, exactly the claims
+  that pass overrides -- measured per pass, so a foreign key's null rate is
+  still watched.
+
+### Changed
+
+- **A composite unique key's column cannot declare `nan_probability`**, as a
+  `unique=True` one cannot: no NaN equals another. The repair that
+  separates repeated combinations hashed NaN as one value and generated
+  none of a declared share.
+
 ## [0.14.0] - 2026-09-29
 
 **A profiled spec says what the data is, and drift notices when that stops

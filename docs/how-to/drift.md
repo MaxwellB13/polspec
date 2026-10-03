@@ -166,12 +166,24 @@ the rounding of an integer column are exactly what generation does, the
 same way the profiler fits shapes. A declared value that never appears is
 weighed the same way: `cardinality_moved` names it only when, at the share
 it is generated at, missing it from the rows seen is itself unlikely -- a
-category of weight 1% is absent from fifty rows six times in ten.
+category of weight 1% is absent from fifty rows six times in ten. Only
+declared `choices`, an `Enum`'s categories and a format's `extra_values`
+count: a finite format's own codes -- every country, every currency -- say
+what a value may be, not that each should appear.
 
-A column a pass rewrites -- one a rule narrows, a foreign key fills, a
-hierarchy links, or a composite key repairs -- is not drawn from its own
-weights or distribution, so neither is compared on it, and a declared value
-it never holds is not reported: a rule may leave one out of every row.
+A column a pass rewrites is not drawn the way its declaration says, so
+drift does not hold it to the claims that pass overrides -- each measured,
+not assumed:
+
+| The column is written by | Not compared on it |
+|:--|:--|
+| a rule | weights, distribution, unseen values, NaN share |
+| a foreign key | weights, distribution, unseen values |
+| a hierarchy | weights, distribution, unseen values, null rate |
+| a composite key's repair | weights, distribution, null rate |
+
+A foreign key keeps its column's null rate, so a moved one -- references
+gone missing -- is still reported.
 
 Each column is tested at `significance` on its own. A frame of a hundred
 columns, each tested once, expects a false alarm about one run in ten;

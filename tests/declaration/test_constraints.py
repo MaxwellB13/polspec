@@ -373,3 +373,46 @@ def test_a_key_filling_a_unique_column_needs_a_parent_that_can():
     assert df["fk"].n_unique() == 100
     assert set(df["fk"].to_list()) <= set(parent["k"].to_list())
     Child.validate(df, references={Parent: parent})
+
+
+def test_each_pass_names_the_claims_it_overrides():
+    """Measured, not assumed: a rule's choices replace the NaN drawn beneath
+    them, a hierarchy owns its nulls, a composite key's repair leaves more
+    nulls than were drawn -- and a foreign key keeps its column's null rate,
+    which is why the set is per pass, not one for every rewritten column."""
+    from polspec import ForeignKey, Hierarchy, TableSpec
+    from polspec.pass_order import (
+        DISTRIBUTION,
+        NAN_RATE,
+        NULL_RATE,
+        VALUES,
+        WEIGHTS,
+    )
+
+    spec = TableSpec(
+        "T",
+        {
+            "k": ColSpec(pl.Enum(["a", "b"])),
+            "v": ColSpec(
+                pl.Float64,
+                choices=[0.5, 1.5],
+                rules=[ColRule(when=col("k") == "a", choices=[0.5])],
+            ),
+            "id": ColSpec(pl.Int64, unique=True, bounds=(0, 10**6)),
+            "ref": ColSpec(pl.Int64, nullable=True),
+            "child": ColSpec(pl.String),
+            "parent": ColSpec(pl.String, nullable=True),
+            "x": ColSpec(pl.Int64, bounds=(0, 10**6)),
+            "y": ColSpec(pl.Enum(["p", "q"])),
+        },
+        foreign_keys=[ForeignKey("ref", references="self", ref_columns="id")],
+        hierarchy=Hierarchy(child="child", parent="parent"),
+        unique_together=[("x", "y")],
+    )
+    overrides = {p.key.split(":")[0]: p.overrides for p in passes_of(spec)}
+    assert overrides == {
+        "rules": {WEIGHTS, DISTRIBUTION, VALUES, NAN_RATE},
+        "fk": {WEIGHTS, DISTRIBUTION, VALUES},
+        "hierarchy": {WEIGHTS, DISTRIBUTION, VALUES, NULL_RATE},
+        "unique_together": {WEIGHTS, DISTRIBUTION, NULL_RATE},
+    }

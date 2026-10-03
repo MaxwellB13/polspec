@@ -2656,12 +2656,24 @@ the rounding of an integer column are exactly what generation does, the
 same way the profiler fits shapes. A declared value that never appears is
 weighed the same way: `cardinality_moved` names it only when, at the share
 it is generated at, missing it from the rows seen is itself unlikely -- a
-category of weight 1% is absent from fifty rows six times in ten.
+category of weight 1% is absent from fifty rows six times in ten. Only
+declared `choices`, an `Enum`'s categories and a format's `extra_values`
+count: a finite format's own codes -- every country, every currency -- say
+what a value may be, not that each should appear.
 
-A column a pass rewrites -- one a rule narrows, a foreign key fills, a
-hierarchy links, or a composite key repairs -- is not drawn from its own
-weights or distribution, so neither is compared on it, and a declared value
-it never holds is not reported: a rule may leave one out of every row.
+A column a pass rewrites is not drawn the way its declaration says, so
+drift does not hold it to the claims that pass overrides -- each measured,
+not assumed:
+
+| The column is written by | Not compared on it |
+|:--|:--|
+| a rule | weights, distribution, unseen values, NaN share |
+| a foreign key | weights, distribution, unseen values |
+| a hierarchy | weights, distribution, unseen values, null rate |
+| a composite key's repair | weights, distribution, null rate |
+
+A foreign key keeps its column's null rate, so a moved one -- references
+gone missing -- is still reported.
 
 Each column is tested at `significance` on its own. A frame of a hundred
 columns, each tested once, expects a false alarm about one run in ten;
@@ -5936,7 +5948,7 @@ otherwise. See [Schema and data drift](https://maxwellb13.github.io/polspec/how-
 | `nan_rate_moved` | `drift` | compatible | the share of present values that are NaN has moved from `nan_probability` by at least the tolerance, and significantly |
 | `frequencies_moved` | `drift` | compatible | a weighted column's frequencies have moved from its `weights` by at least `frequency_tolerance`, and significantly |
 | `distribution_moved` | `drift` | compatible | the values have moved from a sample drawn from the declared `distribution` by at least `distribution_tolerance`, and significantly |
-| `cardinality_moved` | `drift` | compatible | declared values the data never holds, and at their declared share would not miss by chance |
+| `cardinality_moved` | `drift` | compatible | declared `choices`, `Enum` categories or extra values the data never holds, and at their declared share would not miss by chance -- never a finite format's own codes |
 | `constraint_added` | `diff` | breaking | `unique`, a validator, rule, check, composite key, foreign key or hierarchy present only in the new spec |
 | `constraint_removed` | `diff` | compatible | the reverse |
 | `field_changed` | `diff` | compatible | `tags`, `weights`, `distribution`, `distribution_params`, `null_probability`, `pattern` or `seed_name` differ |
@@ -6365,6 +6377,7 @@ pinned by a passing test. A NaN, by contrast, is recorded as the column's
 - **A `Hierarchy` owns both its columns.** A `null_probability`,
   `distribution` or `weights` declared on either is not what you get: the
   references have to come from one pool for the two columns to join at all.
+  So `drift()` does not hold either column to them.
 - **A composite key is distinct within a batch, not across batches.** A
   `unique=True` column is a permutation of its value space, unique across a
   whole frame however it is batched -- including one a foreign key fills,
@@ -6803,6 +6816,26 @@ seed produces; see
 [Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/).
 
 ## [Unreleased]
+
+### Fixed
+
+- **A spec drifted from data it describes, three ways.** A column with a
+  finite `format` -- `iso_country`, `iso_currency` -- counted every code as
+  a declared value, so a profiled country column drifted from its own
+  source (`cardinality_moved`: 224 of 249 never appear); a format promises
+  a valid code, not every code, and only `choices`, `Enum` categories and
+  `extra_values` count now. A nullable `Hierarchy` column drifted from its
+  own output on its null rate, and a column a rule rewrites on its NaN
+  share: drift now skips, on each column a pass writes, exactly the claims
+  that pass overrides -- measured per pass, so a foreign key's null rate is
+  still watched.
+
+### Changed
+
+- **A composite unique key's column cannot declare `nan_probability`**, as a
+  `unique=True` one cannot: no NaN equals another. The repair that
+  separates repeated combinations hashed NaN as one value and generated
+  none of a declared share.
 
 ## [0.14.0] - 2026-09-29
 

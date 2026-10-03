@@ -231,6 +231,17 @@ class TableSpec:
                         "sharing a combination; keep the rules, or the "
                         "composite key, but not both on this column."
                     )
+                # As `unique=True` refuses it: no NaN equals another, so a
+                # combination holding one is neither distinct nor repeated
+                # -- and the repair, hashing NaN as one value, drew them all
+                # away.
+                if self.columns[col_name].nan_probability:
+                    raise SpecError(
+                        f"Column {col_name!r} declares nan_probability and is "
+                        f"part of the composite unique key {list(group)}: no "
+                        "NaN equals another, so a key has nothing to say about "
+                        "one. Drop one or the other on this column."
+                    )
 
     def _validate_checks(self) -> None:
         seen: dict[str, Check] = {}

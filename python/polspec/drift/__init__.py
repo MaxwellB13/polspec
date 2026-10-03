@@ -264,10 +264,12 @@ def drift(
     opts = _options_from(options, **option_kwargs)
     frame = to_eager(df)
     findings: list[DriftFinding] = []
-    # A column a pass writes -- a rule, a foreign key, a hierarchy, a
-    # composite key's repair -- is not drawn from its own weights or
-    # distribution, so neither is a claim about its values.
-    rewritten = {column for p in passes_of(table) for column in p.writes}
+    # A column a pass writes is not held to the claims that pass overrides
+    # -- a rule's weights, a hierarchy's null rate: see `Pass.overrides`.
+    overridden: dict[str, frozenset[str]] = {}
+    for p in passes_of(table):
+        for column in p.writes:
+            overridden[column] = overridden.get(column, frozenset()) | p.overrides
 
     present = frame.columns
     for name in present:
@@ -298,7 +300,13 @@ def drift(
         observed = Observed.of(frame[name], declared, opts)
         findings.extend(
             compare_column(
-                Pair(name, declared, observed, opts, rewritten=name in rewritten)
+                Pair(
+                    name,
+                    declared,
+                    observed,
+                    opts,
+                    overridden=overridden.get(name, frozenset()),
+                )
             )
         )
 
