@@ -37,6 +37,7 @@ from polspec.dtypes import bound_endpoint_to_physical, field_dtypes
 from polspec.errors import PolspecError
 from polspec.formats import lookup as _lookup_format
 from polspec.generation import generate
+from polspec.pass_order import DISTRIBUTION, NAN_RATE, NULL_RATE, VALUES, WEIGHTS
 from polspec.shape import ks_distance, physical
 from polspec.validation.constraints import is_dtype_compatible
 
@@ -61,10 +62,10 @@ class Pair:
     are being diffed and an `Observed` when a spec is being held against a
     frame; `mode` says which. `where` names a field inside the column
     (`point.lat`) when the pair is one of a struct's fields: a finding's key
-    and message name it, while its `columns` stay the column's. `rewritten`
-    marks a column a pass writes -- a rule, a foreign key, a hierarchy, a
-    composite key's repair -- whose values are not drawn from its own
-    weights or distribution, so neither is compared.
+    and message name it, while its `columns` stay the column's.
+    `overridden` names the claims a pass writing the column can leave untrue
+    of it (`Pass.overrides`) -- a rule's weights, a hierarchy's null rate --
+    which are not compared.
     """
 
     column: str
@@ -72,7 +73,7 @@ class Pair:
     other: ColSpec | Observed
     options: DriftOptions
     where: str = ""
-    rewritten: bool = False
+    overridden: frozenset[str] = frozenset()
 
     @property
     def label(self) -> str:
@@ -369,16 +370,18 @@ def _observed_values(pair: Pair) -> list[DriftFinding]:
         )
     unseen = _improbably_unseen(pair, domain) if pair.options.unseen_values else ()
     if unseen:
+        claimed = _claimed(pair.declared)
+        declared = len(claimed) if claimed is not None else len(domain.values)
         findings.append(
             pair.finding(
                 "cardinality_moved",
                 "compatible",
-                f"{len(unseen)} of {len(domain.values)} declared value(s) never "
+                f"{len(unseen)} of {declared} declared value(s) never "
                 f"appear: {describe_values(unseen)}",
                 suffix="unseen",
                 unseen=list(unseen),
-                declared=len(domain.values),
-                observed=len(domain.values) - len(unseen),
+                declared=declared,
+                observed=declared - len(unseen),
             )
         )
     return findings
@@ -391,8 +394,11 @@ def _improbably_unseen(pair: Pair, domain: Domain) -> tuple[Any, ...]:
     column a pass rewrites has no share to weigh a value at -- a rule may
     leave one out of every row -- so none is reported on it."""
     unseen = pair.observed.unseen
-    if not unseen or pair.rewritten:
+    if not unseen or VALUES in pair.overridden:
         return ()
+    claimed = _claimed(pair.declared)
+    if claimed is not None:
+        unseen = tuple(value for value in unseen if value in claimed)
     values = list(domain.values or ())
     shares = _generation_shares(pair.declared, values)
     share_of = dict(zip(values, shares, strict=True))
@@ -402,6 +408,18 @@ def _improbably_unseen(pair: Pair, domain: Domain) -> tuple[Any, ...]:
         for value in unseen
         if stats.unseen_p(share_of.get(value, 0.0), draws) < pair.options.significance
     )
+
+
+def _claimed(declared: ColSpec) -> frozenset[Any] | None:
+    """The declared values whose absence is news, when not every value in
+    the domain is one: a finite format's codes are what a value may be, not
+    a list each of which should appear -- a format promises syntax, not
+    existence -- so only its `extra_values` are claimed. None: all of them."""
+    if declared.format is None or declared.choices is not None:
+        return None
+    if not _lookup_format(declared.format).is_finite:
+        return None
+    return frozenset(declared.extra_values or ())
 
 
 def _generation_shares(declared: ColSpec, values: Sequence[Any]) -> list[float]:
@@ -552,7 +570,7 @@ def _compare_null_rate(pair: Pair) -> list[DriftFinding]:
         if old == new or not (pair.declared.nullable and pair.new.nullable):
             return []  # a rate on a non-nullable column means nothing
         return [_field_changed(pair, "null_probability", old, new)]
-    if not pair.declared.nullable:
+    if not pair.declared.nullable or NULL_RATE in pair.overridden:
         return []
     observed = pair.observed
     return _rate_moved(
@@ -605,6 +623,8 @@ def _compare_nans(pair: Pair) -> list[DriftFinding]:
                 nan_count=observed.nan_count,
             )
         ]
+    if NAN_RATE in pair.overridden:
+        return []
     return _rate_moved(
         pair,
         "nan_rate_moved",
@@ -783,7 +803,7 @@ def _compare_struct_fields(pair: Pair) -> list[DriftFinding]:
             other,
             pair.options,
             where=f"{pair.label}.{name}",
-            rewritten=pair.rewritten,
+            overridden=pair.overridden,
         )
         findings.extend(compare_column(field_pair))
     return findings
@@ -798,7 +818,12 @@ def _compare_weights(pair: Pair) -> list[DriftFinding]:
         return [] if old == new else [_field_changed(pair, "weights", old, new)]
     counts = pair.observed.counts
     declared = pair.declared
-    if pair.rewritten or counts is None or not sum(counts) or declared.weights is None:
+    if (
+        WEIGHTS in pair.overridden
+        or counts is None
+        or not sum(counts)
+        or declared.weights is None
+    ):
         return []
     if declared.value_dtype == pl.Boolean:
         values: list[Any] = [False, True]
@@ -860,7 +885,11 @@ def _compare_shape(pair: Pair) -> list[DriftFinding]:
             if getattr(pair.declared, name) != getattr(pair.new, name)
         ]
     declared, values = pair.declared, pair.observed.physical
-    if pair.rewritten or declared.distribution is None or values is None:
+    if (
+        DISTRIBUTION in pair.overridden
+        or declared.distribution is None
+        or values is None
+    ):
         return []
     if len(values) < 2:
         return []

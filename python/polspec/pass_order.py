@@ -23,6 +23,17 @@ from polspec.errors import SpecError
 if TYPE_CHECKING:
     from polspec.tablespec import TableSpec
 
+# Claims about a column's values that a pass can leave untrue of the columns
+# it writes: they describe the engine's draw, and the pass replaced it. Drift
+# skips exactly these on exactly those columns. Each pass's set is measured,
+# not assumed -- a foreign key keeps its column's null rate, a hierarchy does
+# not.
+WEIGHTS = "weights"
+DISTRIBUTION = "distribution"
+VALUES = "values"  # which declared values appear at all
+NULL_RATE = "null_probability"
+NAN_RATE = "nan_probability"
+
 
 @dataclass(frozen=True, slots=True)
 class Pass:
@@ -30,7 +41,9 @@ class Pass:
 
     `key` identifies it (`rules:total`, `fk:fk_customer_id__Customers`),
     `label` names it in an error, and `reads`/`writes` are the columns it
-    consumes and replaces.
+    consumes and replaces. `overrides` are the claims about a written
+    column's values the pass can leave untrue of it -- the ones drift does
+    not hold that column to.
 
     A pass may list the same column in both. Reading what it writes is not a
     dependency on *itself* -- it reads that column's pre-pass values -- but it
@@ -43,10 +56,12 @@ class Pass:
     label: str
     writes: frozenset[str]
     reads: frozenset[str] = field(default_factory=frozenset)
+    overrides: frozenset[str] = field(default_factory=frozenset)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "writes", frozenset(self.writes))
         object.__setattr__(self, "reads", frozenset(self.reads))
+        object.__setattr__(self, "overrides", frozenset(self.overrides))
 
 
 def passes_of(spec: TableSpec) -> list[Pass]:
@@ -66,6 +81,9 @@ def passes_of(spec: TableSpec) -> list[Pass]:
                 label=f"the rules on {name!r}",
                 writes=frozenset({name}),
                 reads=frozenset(reads),
+                # A rule's choices replace the draw, NaN included; nulls
+                # are left where they fell.
+                overrides=frozenset({WEIGHTS, DISTRIBUTION, VALUES, NAN_RATE}),
             )
         )
     for fk in spec.foreign_keys:
@@ -78,6 +96,8 @@ def passes_of(spec: TableSpec) -> list[Pass]:
                 label=f"the foreign key {fk.name!r}",
                 writes=frozenset(fk.columns),
                 reads=frozenset(reads),
+                # The parent's keys replace the draw; nulls are kept.
+                overrides=frozenset({WEIGHTS, DISTRIBUTION, VALUES}),
             )
         )
     if spec.hierarchy is not None:
@@ -89,6 +109,9 @@ def passes_of(spec: TableSpec) -> list[Pass]:
                 key="hierarchy",
                 label="the hierarchy",
                 writes=frozenset(spec.hierarchy.columns),
+                # It owns both columns outright, nulls included: a root's
+                # parent is null however often the declaration says.
+                overrides=frozenset({WEIGHTS, DISTRIBUTION, VALUES, NULL_RATE}),
             )
         )
     for index, group in enumerate(spec.unique_together):
@@ -101,6 +124,9 @@ def passes_of(spec: TableSpec) -> list[Pass]:
                 label=f"the composite key {list(members)}",
                 writes=rewritable_members(spec, members),
                 reads=frozenset(members),
+                # Resampling repeats away; a null member exempts its row, so
+                # the repair leaves more of them than were drawn.
+                overrides=frozenset({WEIGHTS, DISTRIBUTION, NULL_RATE}),
             )
         )
     return passes

@@ -22,11 +22,13 @@ from polspec import (
     ColRule,
     ColSpec,
     ForeignKey,
+    FrameSpec,
     GenerationError,
     Hierarchy,
     TableSpec,
     col,
     generate,
+    profile,
 )
 from polspec.drift import DriftOptions, drift, stats
 
@@ -133,6 +135,37 @@ _REWRITTEN = {
         "H",
         {"child": ColSpec(pl.String), "parent": ColSpec(pl.String)},
         hierarchy=Hierarchy(child="child", parent="parent", max_depth=4),
+    ),
+    # Each claim a pass overrides, declared on the column it writes.
+    "hierarchy_nulls": TableSpec(
+        "HN",
+        {
+            "child": ColSpec(pl.String),
+            "parent": ColSpec(pl.String, nullable=True, null_probability=0.5),
+        },
+        hierarchy=Hierarchy(child="child", parent="parent", max_depth=4),
+    ),
+    "rules_nan": TableSpec(
+        "RN",
+        {
+            "k": ColSpec(pl.Enum(["a", "b"])),
+            "f": ColSpec(
+                pl.Float64,
+                choices=[0.5, 1.5],
+                nan_probability=0.3,
+                rules=[ColRule(when=col("k") == "a", choices=[0.5])],
+            ),
+        },
+    ),
+    "unique_together_nulls": TableSpec(
+        "UN",
+        {
+            "a": ColSpec(
+                pl.Float64, bounds=(0, 1), nullable=True, null_probability=0.3
+            ),
+            "b": ColSpec(pl.Enum(["x", "y"])),
+        },
+        unique_together=[("a", "b")],
     ),
     "unique_together": TableSpec(
         "U",
@@ -361,3 +394,100 @@ def test_a_file_that_validates_has_not_drifted_on_dtype():
     assert drift(_WIDE, frame).unchanged
     strict = drift(_WIDE, frame, strict_dtypes=True)
     assert sorted(f.key for f in strict.findings) == ["day__dtype", "status__dtype"]
+
+
+def test_a_foreign_keys_null_rate_is_still_watched():
+    """A foreign key keeps the null rate it was declared with, so a moved
+    one is real -- missing references -- and still reported."""
+    spec = TableSpec(
+        "F",
+        {
+            "id": ColSpec(pl.Int64, unique=True, bounds=(0, 10**6)),
+            "ref": ColSpec(pl.Int64, nullable=True, null_probability=0.1),
+        },
+        foreign_keys=[ForeignKey("ref", references="self", ref_columns="id")],
+    )
+    own = generate(spec, 5_000, seed=4)
+    assert drift(spec, own).unchanged
+    holed = own.with_columns(
+        ref=pl.when(pl.int_range(pl.len()) % 2 == 0).then(None).otherwise(pl.col("ref"))
+    )
+    assert [f.code for f in drift(spec, holed).findings] == ["null_rate_moved"]
+
+
+_COUNTRIES = [
+    "GB", "FR", "DE", "ES", "IT", "NL", "BE", "PT", "IE", "SE", "NO", "DK", "FI",
+    "PL", "CZ", "AT", "CH", "HU", "GR", "RO", "BG", "HR", "SI", "SK", "US",
+]  # fmt: skip
+
+
+def test_a_finite_formats_codes_are_not_values_that_should_appear():
+    """`format="iso_country"` claims a valid code, not every code: a format
+    promises syntax, not existence. 0.14.0 counted the 249 codes a file did
+    not hold as declared values never seen."""
+    spec = TableSpec("C", {"c": ColSpec(pl.String, format="iso_country")})
+    frame = pl.DataFrame({"c": np.random.default_rng(0).choice(_COUNTRIES, 20_000)})
+    assert drift(spec, frame).unchanged
+
+
+def test_a_finite_formats_extra_values_are_declared_values():
+    spec = TableSpec(
+        "C",
+        {"c": ColSpec(pl.String, format="iso_country", extra_values={"UK (ISO)": 0.2})},
+    )
+    frame = pl.DataFrame({"c": np.random.default_rng(0).choice(_COUNTRIES, 5_000)})
+    (finding,) = drift(spec, frame).findings
+    assert finding.code == "cardinality_moved"
+    assert finding.details == {"unseen": ["UK (ISO)"], "declared": 1, "observed": 0}
+
+
+def test_choices_and_categories_still_report_what_never_appears():
+    spec = TableSpec(
+        "C",
+        {
+            "e": ColSpec(pl.Enum(["a", "b", "c"])),
+            "s": ColSpec(pl.String, choices=["x", "y"]),
+        },
+    )
+    frame = pl.DataFrame(
+        {"e": pl.Series(["a"] * 2_000).cast(spec["e"].dtype), "s": ["x"] * 2_000}
+    )
+    assert sorted(f.key for f in drift(spec, frame).findings) == [
+        "e__unseen",
+        "s__unseen",
+    ]
+
+
+def _source(rows: int) -> pl.DataFrame:
+    rng = np.random.default_rng(0)
+    amount = rng.lognormal(3, 0.8, rows)
+    amount[rng.random(rows) < 0.03] = np.nan
+    return pl.DataFrame(
+        {
+            "id": np.arange(rows),
+            "amount": amount,
+            "age": np.clip(rng.normal(40, 12, rows).round(), 18, 90).astype(np.int64),
+            "status": rng.choice(["NEW", "PAID", "SHIPPED"], rows, p=[0.7, 0.2, 0.1]),
+            "flag": rng.random(rows) < 0.2,
+            "email": [f"user{i}@example.com" for i in rng.integers(0, 5_000, rows)],
+            "country": rng.choice(_COUNTRIES, rows),
+            "currency": rng.choice(["GBP", "EUR", "USD"] * 7 + ["CHF"], rows),
+            "day": [
+                dt.date(2024, 1, 1) + dt.timedelta(days=int(d))
+                for d in rng.integers(0, 365, rows)
+            ],
+            "note": [
+                None if r < 0.1 else f"note {int(r * 1e6)}" for r in rng.random(rows)
+            ],
+        }
+    )
+
+
+@pytest.mark.parametrize("rows", [500, 20_000])
+def test_a_source_does_not_drift_from_its_own_profile(rows):
+    """The other half of the promise: data a spec was profiled from is data
+    the spec describes. A country column used to break it, its 249 unseen
+    codes reported."""
+    source = _source(rows)
+    for spec in (profile(source), FrameSpec.from_dataframe(source).spec):
+        assert drift(spec, source).unchanged, drift(spec, source).findings
