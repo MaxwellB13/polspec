@@ -8,6 +8,40 @@ seed produces; see
 
 ## [Unreleased]
 
+### Fixed
+
+- **`to_markdown()` keeps its tables whole, whatever the names.** A `|` in a
+  column name, category, choice, tag or pattern split its cell -- inside
+  backticks too -- and a newline ended the row; both are escaped now, in the
+  data dictionary, the drift report and the category registry. A name
+  holding a backtick is fenced so its code span holds, and an empty name is
+  an empty code span rather than a stray "``".
+- **`to_mermaid()` draws a diagram Mermaid can parse, whatever the names.**
+  An attribute is drawn under a name Mermaid reads as one word (ASCII
+  letters, digits, `_`, `-`, not a leading digit, not `PK`, `FK` or `UK`),
+  with its real name first in the note when that changed it; two that would
+  draw alike are told apart by a suffix. An entity name no longer starts
+  with a digit, holds a non-ASCII letter Mermaid 10 refuses, or is a word
+  Mermaid reserves (`class`, `end`, `one`, ...). A `~` in a note -- a
+  choice, a pattern, a name -- is drawn as the look-alike `∼`, since Mermaid
+  10's parser hung on it. Names that already read are drawn as before.
+- **A list or array column named `""` generates.** It raised a `SpecError`
+  about its element's `seed_name`; its values are what a column of any other
+  name would draw.
+
+### Changed
+
+- **A column name holding a NUL character is refused when the spec is
+  declared**, with a `SpecError`. It constructed before, then panicked in
+  Arrow's C interface the first time anything generated.
+
+### Internal
+
+- The property tests draw awkward names -- punctuation Markdown and Mermaid
+  read, whitespace, keywords, leading digits, non-ASCII, the empty string and
+  arbitrary text -- and hold generation, validation, YAML, the data
+  dictionary and the ER diagram to them. They found the two defects above.
+
 ## [0.15.0] - 2026-10-04
 
 **A profile never contradicts its own data.** 0.14.0's promise -- a spec
