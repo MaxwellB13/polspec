@@ -8,15 +8,30 @@ seed produces; see
 
 ## [Unreleased]
 
-### Fixed
+## [0.15.0] - 2026-10-04
 
-- **`polspec drift` can set every drift option.** 0.14.0 added
-  `significance`, `frequency_tolerance` and `distribution_tolerance` to
-  `DriftOptions` and no flags for them; `--significance`,
-  `--frequency-tolerance` and `--distribution-tolerance` now exist, every
-  flag's default is the option's own -- said once, on `DriftOptions` -- and
-  a test holds the command to the options. An option out of range is an
-  `error:` line, not a traceback.
+**A profile never contradicts its own data.** 0.14.0's promise -- a spec
+does not drift from data it describes -- broke in two places: a country or
+currency column profiled from a file drifted from that file, and a
+hierarchy's nulls and a rule's NaN drifted from their own generated output.
+Both are fixed, each pinned by a test that fails on 0.14.0, and a realistic
+source is now checked against its own profile. A few repeated country codes
+also keep their frequencies through `synthesize` again, which 0.14.0 lost to
+the format.
+
+**Changed, on purpose:** a few repeated country or currency codes profile as
+an `Enum` again; `--sample N` is a random sample of the file rather than its
+first N rows; a composite key's column cannot declare `nan_probability`.
+
+**No seeded output changes.** Every spec that constructs under 0.14.0
+generates what it did -- checked against the published 0.14.0 across
+463 cases -- and no spec file needs migrating.
+
+**Performance is unchanged** -- generation, validation, drift, profiling and
+synthesis measured against 0.14.0 on one build of the extension, all within
+noise.
+
+### Fixed
 
 - **A spec drifted from data it describes, three ways.** A column with a
   finite `format` -- `iso_country`, `iso_currency` -- counted every code as
@@ -28,6 +43,13 @@ seed produces; see
   share: drift now skips, on each column a pass writes, exactly the claims
   that pass overrides -- measured per pass, so a foreign key's null rate is
   still watched.
+- **`polspec drift` can set every drift option.** 0.14.0 added
+  `significance`, `frequency_tolerance` and `distribution_tolerance` to
+  `DriftOptions` and no flags for them; `--significance`,
+  `--frequency-tolerance` and `--distribution-tolerance` now exist, every
+  flag's default is the option's own -- said once, on `DriftOptions` -- and
+  a test holds the command to the options. An option out of range is an
+  `error:` line, not a traceback.
 
 ### Changed
 
@@ -2009,7 +2031,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/MaxwellB13/polspec/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/MaxwellB13/polspec/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/MaxwellB13/polspec/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/MaxwellB13/polspec/compare/v0.12.0...v0.13.0
