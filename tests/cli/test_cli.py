@@ -449,6 +449,8 @@ def test_generate_threads_references_into_a_foreign_key(tmp_path):
         out,
         "--references",
         f"Customers={customers}",
+        "--seed",
+        1,
     )
     assert code == 0
     assert set(pl.read_parquet(out)["customer_id"].to_list()) <= {1, 2, 3}
@@ -457,7 +459,12 @@ def test_generate_threads_references_into_a_foreign_key(tmp_path):
 def test_generate_cartesian(tmp_path):
     spec = _write_yaml_spec(tmp_path)
     out = tmp_path / "c.parquet"
-    assert run_cli("generate", spec, "-n", 1, "-o", out, "--method", "cartesian") == 0
+    assert (
+        run_cli(
+            "generate", spec, "-n", 1, "-o", out, "--method", "cartesian", "--seed", 1
+        )
+        == 0
+    )
     assert set(pl.read_parquet(out)["status"].to_list()) == {"NEW", "PAID"}
 
 

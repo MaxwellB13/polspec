@@ -175,9 +175,11 @@ polspec diff [-h] [--rename OLD=NEW] [--json | --markdown]
 How a data file has moved relative to its schema.
 
 ```
-polspec drift [-h] [--all] [--sample N] [--null-rate-tolerance F] [--no-unseen]
-                     [--max-samples N] [--json | --markdown]
-                     [--fail-on {breaking,any,none}] [--strict-dtypes] [--class NAME]
+polspec drift [-h] [--all] [--sample N] [--significance P]
+                     [--null-rate-tolerance F] [--frequency-tolerance F]
+                     [--distribution-tolerance F] [--no-unseen] [--max-samples N]
+                     [--json | --markdown] [--fail-on {breaking,any,none}]
+                     [--strict-dtypes] [--class NAME]
                      spec data
 ```
 
@@ -187,7 +189,10 @@ polspec drift [-h] [--all] [--sample N] [--null-rate-tolerance F] [--no-unseen]
 | `data` | Path to a CSV, Parquet, NDJSON or IPC file; with --all, a directory of files named after the specs |
 | `--all` | Every spec found under SPEC against DATA/<name>.<suffix> |
 | `--sample` `N` | Measure a random sample of N rows (seeded, so the same every run) |
-| `--null-rate-tolerance` `F` | How far the null rate may sit from null_probability (default: 0.05) |
+| `--significance` `P` | How unlikely, were the spec right, a moved rate, frequency or distribution must be to be reported (default: 0.001) |
+| `--null-rate-tolerance` `F` | The smallest move of a null rate or NaN share worth reporting (default: 0.05) |
+| `--frequency-tolerance` `F` | The smallest move of a weighted column's frequencies worth reporting, as total variation (default: 0.05) |
+| `--distribution-tolerance` `F` | The smallest move of a declared distribution worth reporting, as the KS distance (default: 0.05) |
 | `--no-unseen` | Do not report declared values the data never holds |
 | `--max-samples` `N` | Offending values to carry per finding (default: 10) |
 | `--json` | Print the report as JSON |
