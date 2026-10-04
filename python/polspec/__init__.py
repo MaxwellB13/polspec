@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
 from importlib.metadata import version as _version
 
 from polspec.bound import Bound
@@ -44,7 +45,13 @@ from polspec.validation import (
     validate,
 )
 
-__version__ = _version("polspec")
+try:
+    __version__ = _version("polspec")
+except _PackageNotFoundError:
+    # Run from a source checkout that was never installed -- the docs build
+    # imports it that way, to read the docstrings -- there is no version to
+    # report.
+    __version__ = "0+unknown"
 
 __all__ = [
     "Bound",
