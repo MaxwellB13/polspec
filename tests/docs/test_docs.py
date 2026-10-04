@@ -169,21 +169,46 @@ def test_every_public_name_carries_a_docstring():
     assert not undocumented, f"public but undocumented: {undocumented}"
 
 
-def test_the_llms_files_are_current():
-    """`llms.txt` and `llms-full.txt` are generated and committed, so a page
-    added or reworded without regenerating them is a failure here.
-    """
-    index, full = _generator().build()
-    assert (DOCS / "llms.txt").read_text(encoding="utf-8") == index, (
-        "docs/llms.txt is stale: run `uv run python scripts/generate_llms_txt.py`"
+def test_the_llms_files_are_built_not_committed():
+    """The docs workflow builds them before the site; a committed copy would
+    be a stale one, and every edit used to regenerate 400 KB of it."""
+    ignored = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert {"docs/llms.txt", "docs/llms-full.txt"} <= set(ignored)
+    workflow = (ROOT / ".github" / "workflows" / "docs.yml").read_text(encoding="utf-8")
+    generate = workflow.index("scripts/generate_llms_txt.py\n")
+    assert generate < workflow.index("zensical build")
+
+
+def test_llms_full_txt_carries_every_page():
+    _index, full = _generator().build()
+    config = tomllib.loads((ROOT / "zensical.toml").read_text(encoding="utf-8"))
+    for _section, title, _relative in _generator().walk_nav(config["project"]["nav"]):
+        assert title in full, f"{title} is missing from llms-full.txt"
+    assert len(full) > 100_000  # the pages' text, not only their titles
+
+
+def test_polspec_imports_from_a_checkout_that_was_never_installed():
+    """How the docs workflow imports it, to read the docstrings: without
+    package metadata there is no version to report, and no error."""
+    import subprocess
+    import sys
+
+    probe = (
+        "import importlib.metadata as m\n"
+        "def missing(name): raise m.PackageNotFoundError(name)\n"
+        "m.version = missing\n"
+        "import polspec\n"
+        "print(polspec.__version__)\n"
     )
-    assert (DOCS / "llms-full.txt").read_text(encoding="utf-8") == full, (
-        "docs/llms-full.txt is stale: run `uv run python scripts/generate_llms_txt.py`"
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=False
     )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "0+unknown"
 
 
 def test_llms_txt_follows_the_convention():
-    text = (DOCS / "llms.txt").read_text(encoding="utf-8")
+    text, _full = _generator().build()
     lines = text.splitlines()
     assert lines[0].startswith("# "), "llms.txt opens with the project name as H1"
     assert any(line.startswith("> ") for line in lines[:5]), (

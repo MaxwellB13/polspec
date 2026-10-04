@@ -30,25 +30,22 @@ case at once. When that happens, re-run `maturin develop --release`, or use
 
 ## Generated files
 
-Three files under `docs/` are generated and committed, and a test fails if
-any is stale:
+`docs/reference/cli.md` is generated from the `polspec` command's own parser
+and committed, and a test fails if it is stale: regenerate it after adding,
+removing or rewording a flag.
 
 ```bash
-uv run python scripts/generate_llms_txt.py
+uv run python scripts/generate_cli_reference.py
 ```
 
 `docs/llms.txt` and `docs/llms-full.txt` follow the
 [llms.txt convention](https://llmstxt.org): an index of the documentation and
 its full text, published at the site root so a language model can read the
-library's documentation in one fetch. They are rebuilt from the nav in
-`zensical.toml`, the pages themselves, and -- for the API reference, whose
-source is `:::` directives -- the live docstrings. Regenerate after changing
-any page, the nav, or a public docstring -- and after editing `CHANGELOG.md`,
-which `docs/changelog.md` pulls in whole.
-
-The same command regenerates `docs/reference/cli.md` first, from the
-`polspec` command's own parser (`scripts/generate_cli_reference.py`), so a
-flag added, removed or reworded needs it too.
+library's documentation in one fetch. They are built from the nav in
+`zensical.toml`, the pages, and the live docstrings -- by the docs workflow,
+before the site, and are not committed. To see them locally, run
+`uv run python scripts/generate_llms_txt.py` (it rebuilds the CLI reference
+too); `.gitignore` keeps the output out of a commit.
 
 ## Check your change
 

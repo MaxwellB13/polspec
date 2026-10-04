@@ -178,3 +178,7 @@ benchmarks/baseline.json
 
 # Release plans, kept locally and never committed
 PLAN-*.md
+
+# Built by the docs workflow (scripts/generate_llms_txt.py), not committed.
+docs/llms.txt
+docs/llms-full.txt

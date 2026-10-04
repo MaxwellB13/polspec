@@ -46,9 +46,19 @@ jobs:
         with:
           python-version: "3.13"
 
-      # zensical is pinned by uv.lock through the docs group.
+      # zensical is pinned by uv.lock through the docs group. The project's
+      # own dependencies come too -- the llms generator imports polspec from
+      # source to read its docstrings -- but not the project itself: no Rust
+      # build, since nothing here generates data.
       - name: Install docs tooling
-        run: uv sync --only-group docs --no-install-project
+        run: uv sync --no-dev --group docs --no-install-project
+
+      # llms.txt and llms-full.txt are built here, not committed: every page
+      # and docstring edit used to regenerate 400 KB of tracked text.
+      - name: Generate llms.txt and llms-full.txt
+        env:
+          PYTHONPATH: python
+        run: uv run --no-sync python scripts/generate_llms_txt.py
 
       - name: Build site
         run: uv run --no-sync zensical build --clean --strict

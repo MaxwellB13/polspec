@@ -50,6 +50,16 @@ seed produces; see
   separates repeated combinations hashed NaN as one value and generated
   none of a declared share.
 
+### Internal
+
+- **`docs/llms.txt` and `docs/llms-full.txt` are built by the docs
+  workflow, not committed.** Every page or docstring edit regenerated 400 KB
+  of tracked text -- 78 of the repository's first 148 commits touched it.
+  The site serves the same files, built from the same source. So that the
+  build can import polspec without installing it, `polspec.__version__` is
+  `"0+unknown"` in a checkout that was never installed, where it used to
+  raise.
+
 ## [0.14.0] - 2026-09-29
 
 **A profiled spec says what the data is, and drift notices when that stops
