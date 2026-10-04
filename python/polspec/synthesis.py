@@ -24,6 +24,7 @@ import polars as pl
 
 from polspec.dtypes import dtype_value_limits
 from polspec.errors import GenerationError
+from polspec.frames import sample_rows
 from polspec.generation import generate
 from polspec.profiler import profile_dataframe
 from polspec.reading import read_file
@@ -181,12 +182,7 @@ def _load(source: Source, sample: int | None, seed: int) -> tuple[pl.DataFrame, 
     if frame.height == 0:
         raise ValueError("source has no rows to profile")
     height = frame.height
-    if sample is not None:
-        if sample <= 0:
-            raise ValueError(f"sample must be a positive row count, got {sample}")
-        if sample < height:
-            frame = frame.sample(sample, seed=seed)
-    return frame, height
+    return sample_rows(frame, sample, seed), height
 
 
 def _room_for_keys(spec: TableSpec, rows: int) -> TableSpec:

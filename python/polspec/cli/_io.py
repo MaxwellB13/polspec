@@ -22,6 +22,7 @@ import polars as pl
 
 from polspec import FrameSpec
 from polspec.errors import CliError
+from polspec.frames import sample_rows
 from polspec.reading import _DELIMITED, _parse_declared_temporals
 from polspec.reading import _READERS as _DATA_READERS
 from polspec.registry import Registry, load_module
@@ -74,8 +75,10 @@ def _read_data_file(
         df = _DATA_READERS[suffix](path, **options)
     except Exception as exc:
         raise CliError(f"could not read {path}: {exc}") from exc
-    if sample is not None:
-        df = df.head(sample)
+    try:
+        df = sample_rows(df, sample)
+    except ValueError as exc:
+        raise CliError(str(exc)) from exc
     return _parse_declared_temporals(df, spec) if spec is not None else df
 
 

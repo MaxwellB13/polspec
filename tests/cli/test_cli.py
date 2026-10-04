@@ -13,6 +13,7 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+from helpers import spec_for
 from polspec import ColSpec, FrameSpec
 from polspec.cli import main
 
@@ -121,12 +122,44 @@ def test_schema_infer_unsupported_extension(tmp_path, capsys):
     assert "don't know how to read" in capsys.readouterr().err
 
 
-def test_schema_infer_sample_limits_rows(sample_data, tmp_path):
-    out = tmp_path / "orders.yaml"
-    run_cli("schema", "infer", sample_data, "-o", out, "--sample", "10")
-    spec_cls = FrameSpec.from_yaml(out)
-    # order_id bounds should reflect only the first 10 rows (1..10), not 200.
-    assert spec_cls.spec.columns["order_id"].bounds.max == 10
+def test_schema_infer_samples_rows_from_the_whole_file(sample_data, tmp_path):
+    """`--sample 10` used to read the first ten rows: order_id 1..10 of a
+    file holding 1..200, so the spec rejected the rest. A sample is drawn
+    from the whole file now -- seeded, so the spec is the same every run."""
+    first, second = tmp_path / "first.yaml", tmp_path / "second.yaml"
+    for out in (first, second):
+        assert run_cli("schema", "infer", sample_data, "-o", out, "--sample", "10") == 0
+    assert first.read_text(encoding="utf-8") == second.read_text(encoding="utf-8")
+    bounds = FrameSpec.from_yaml(first).spec.columns["order_id"].bounds
+    assert bounds.max - bounds.min > 50  # ten rows from 1..200, not 1..10
+
+
+def test_drift_samples_rows_from_the_whole_file(tmp_path):
+    """A file sorted by amount: its head is a moved distribution, the whole
+    file is not."""
+    spec_cls = spec_for(
+        ColSpec(
+            pl.Float64,
+            bounds=(0, 100),
+            distribution="normal",
+            distribution_params={"mean": 50, "std": 10},
+        )
+    )
+    data = tmp_path / "sorted.parquet"
+    spec_cls.generate(20_000, seed=1).sort("c").write_parquet(data)
+    spec = tmp_path / "spec.yaml"
+    spec_cls.to_yaml(spec)
+    assert run_cli("drift", spec, data, "--sample", "2000", "--fail-on", "any") == 0
+
+
+def test_a_sample_must_be_a_positive_row_count(sample_data, tmp_path, capsys):
+    assert (
+        run_cli(
+            "schema", "infer", sample_data, "-o", tmp_path / "x.yaml", "--sample", "0"
+        )
+        == 1
+    )
+    assert "sample must be a positive row count" in capsys.readouterr().err
 
 
 def test_schema_infer_py_output_produces_a_generatable_spec(sample_data, tmp_path):

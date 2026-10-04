@@ -39,7 +39,7 @@ polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
 | `--max-unique-enum` `N` | Max distinct values for a string column to become an Enum, when they repeat (default: 50) |
 | `--no-formats` | Do not name the format a text column's values have (email, uuid4, ...) |
 | `--no-bounds` | Skip computing numeric/temporal bounds and string lengths |
-| `--sample` `N` | Profile only the first N rows |
+| `--sample` `N` | Profile a random sample of N rows (seeded, so the same every run) |
 | `--shape` | Fit the distribution each numeric or temporal column follows |
 | `--keys` | Declare an all-distinct integer or text column unique |
 | `--replace` `COL` | Columns whose values must not be carried into the spec |
@@ -186,7 +186,7 @@ polspec drift [-h] [--all] [--sample N] [--null-rate-tolerance F] [--no-unseen]
 | `spec` | A .yaml/.yml spec, or a .py file defining one; with --all, a directory |
 | `data` | Path to a CSV, Parquet, NDJSON or IPC file; with --all, a directory of files named after the specs |
 | `--all` | Every spec found under SPEC against DATA/<name>.<suffix> |
-| `--sample` `N` | Measure only the first N rows |
+| `--sample` `N` | Measure a random sample of N rows (seeded, so the same every run) |
 | `--null-rate-tolerance` `F` | How far the null rate may sit from null_probability (default: 0.05) |
 | `--no-unseen` | Do not report declared values the data never holds |
 | `--max-samples` `N` | Offending values to carry per finding (default: 10) |
