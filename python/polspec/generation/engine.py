@@ -743,7 +743,9 @@ def _list_parts(
     lengths = _generate_dataframe([lengths_plan], n, seed, row_offset)[name]
     total = int(lengths.fill_null(0).sum())
 
-    element_spec = dataclasses.replace(spec._element(), seed_name=seed_key)
+    # A column named "" seeds its elements by that name, as `None` does: a
+    # `seed_name` cannot be empty.
+    element_spec = dataclasses.replace(spec._element(), seed_name=seed_key or None)
     # The elements are drawn per window, not as a window: which element a
     # row starts at depends on every earlier row's length. Each window after
     # the first draws them from a seed of its own, so two batches never

@@ -65,6 +65,14 @@ A lone `unique=True` column is the entity's `PK`; when several columns are
 unique each is marked `UK`, as is every member of a `__unique_together__`
 group, and a foreign-keyed column `FK`.
 
+Mermaid reads a name as one word of ASCII letters, digits, `_` and `-`, so
+a name it cannot read is drawn as the nearest one it can, with its real name
+first in the note: a column `unit price` is drawn
+`unit_price "name: 'unit price'"`, and an entity `2024 Orders` as
+`_2024_Orders`. Two columns that
+would draw alike are told apart by a suffix. The Markdown table escapes a
+`|` or a newline in a name or value, so an awkward name never breaks a row.
+
 ## Several specs in one diagram
 
 A single spec's diagram can only name the entity a key points at. A

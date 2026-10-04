@@ -136,6 +136,11 @@ def test_table_spec_validates_like_a_class_body():
         TableSpec("X", {"a": ColSpec(pl.Int64, col_name="b")})
     with pytest.raises(SpecError, match="non-empty string"):
         TableSpec("", {"a": ColSpec(pl.Int64)})
+    # Before 0.15.1 this constructed, then panicked in Arrow's C interface.
+    with pytest.raises(SpecError, match="contains a NUL character"):
+        TableSpec("X", {"a\x00b": ColSpec(pl.Int64)})
+    with pytest.raises(SpecError, match="contains a NUL character"):
+        TableSpec("X", {"a": ColSpec(pl.Int64)}).rename({"a": "a\x00b"})
 
 
 def test_foreign_key_to_an_unresolved_name_is_allowed():

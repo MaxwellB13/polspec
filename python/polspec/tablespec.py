@@ -142,6 +142,13 @@ class TableSpec:
                 raise SpecError(
                     f"columns[{key!r}] must be a ColSpec, got {type(value).__name__}"
                 )
+            if "\x00" in key:
+                # Arrow's C interface, which carries every generated frame,
+                # holds a field name as a C string; a NUL would end it.
+                raise SpecError(
+                    f"Column name {key!r} contains a NUL character, which no "
+                    "generated frame can carry."
+                )
             if value.col_name is not None and value.col_name != key:
                 raise SpecError(
                     f"columns[{key!r}] declares col_name={value.col_name!r}, which "

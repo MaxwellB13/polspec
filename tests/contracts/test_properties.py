@@ -20,6 +20,7 @@ import contextlib
 import dataclasses
 import datetime as dt
 import importlib.util
+import re
 import string
 import sys
 import tempfile
@@ -45,6 +46,7 @@ from polspec import (
     validate,
 )
 from polspec.formats import FORMATS
+from polspec.render import framespec_to_markdown, framespec_to_mermaid
 from polspec.serialization import from_dict, to_dict, to_python
 
 MAX_ROWS = 120
@@ -318,10 +320,52 @@ def _check_that_holds(name: str, column: ColSpec) -> Check | None:
     return None
 
 
+# Names a renderer or a spec file has to take care over: Markdown's and
+# Mermaid's punctuation, whitespace, a keyword, a key word, a leading digit,
+# letters outside ASCII, the empty string -- and arbitrary text besides.
+_AWKWARD_NAMES = [
+    "a|b",
+    "with space",
+    "",
+    "1st",
+    "class",
+    "PK",
+    "pk",
+    "größe",
+    "名前",
+    "a-b",
+    "a_b",
+    "a b",
+    'quote"d',
+    "back`tick",
+    "new\nline",
+    "slash\\|pipe",
+    "%%",
+]
+NAMES = st.one_of(
+    st.sampled_from(_AWKWARD_NAMES),
+    st.text(st.characters(exclude_categories=("Cs",)), max_size=8),
+).filter(
+    # `flag` is the rule's key, below; a NUL is refused by name.
+    lambda name: name != "flag" and "\x00" not in name
+)
+
+
 @st.composite
-def specs(draw: st.DrawFn) -> TableSpec:
+def specs(
+    draw: st.DrawFn,
+    names: st.SearchStrategy[str] | None = None,
+    spec_name: st.SearchStrategy[str] | None = None,
+) -> TableSpec:
+    """A drawn spec, its columns named `c0`, `c1`... unless `names` draws
+    them, and itself named `Drawn` unless `spec_name` does."""
     drawn = draw(st.lists(columns(), min_size=1, max_size=4))
-    cols = {f"c{i}": column for i, column in enumerate(drawn)}
+    keys = (
+        draw(st.lists(names, min_size=len(drawn), max_size=len(drawn), unique=True))
+        if names is not None
+        else [f"c{i}" for i in range(len(drawn))]
+    )
+    cols = dict(zip(keys, drawn, strict=True))
     if draw(st.booleans()):
         # A rule, keyed on a flag, rewriting a column to some of its own
         # choices: which fit its domain and its dtype by construction.
@@ -347,10 +391,12 @@ def specs(draw: st.DrawFn) -> TableSpec:
     checks = [
         check
         for name, column in cols.items()
-        if draw(st.booleans())
+        if name  # col() takes no empty name
+        and draw(st.booleans())
         and (check := _check_that_holds(name, column)) is not None
     ]
-    return TableSpec("Drawn", cols, checks=checks)
+    name = draw(spec_name) if spec_name is not None else "Drawn"
+    return TableSpec(name, cols, checks=checks)
 
 
 _ROWS = st.integers(0, MAX_ROWS)
@@ -408,6 +454,68 @@ def test_a_drawn_spec_survives_a_python_file(spec, seed):
     reloaded = module.Drawn.spec
     assert reloaded == spec
     assert generate(reloaded, 50, seed=seed).equals(generate(spec, 50, seed=seed))
+
+
+_NAMED = specs(names=NAMES, spec_name=NAMES.filter(bool))
+
+# A `|` splits a GFM table cell -- inside backticks too -- unless an odd run
+# of backslashes escapes it.
+_CELL_BREAK = re.compile(r"(?<!\\)(?:\\\\)*\|")
+
+
+@SETTINGS
+@given(spec=_NAMED, n=_ROWS, seed=_SEEDS)
+def test_any_name_generates_what_it_validates(spec, n, seed):
+    """Before 0.15.1 a list column named "" could not generate."""
+    df = generate(spec, n, seed=seed)
+    assert df.columns == list(spec.columns)
+    validate(spec, df)
+
+
+@SETTINGS
+@given(spec=_NAMED, seed=_SEEDS)
+def test_any_name_survives_a_yaml_file(spec, seed):
+    text = yaml.safe_dump(to_dict(spec), sort_keys=False)
+    reloaded = from_dict(yaml.safe_load(text))
+    assert reloaded == spec
+    assert generate(reloaded, 20, seed=seed).equals(generate(spec, 20, seed=seed))
+
+
+@SETTINGS
+@given(spec=_NAMED)
+def test_any_name_keeps_the_data_dictionary_a_table(spec):
+    """Every row of every table has as many cells as its header, whatever
+    the names, choices and categories hold."""
+    tables: list[list[str]] = [[]]
+    for line in framespec_to_markdown(spec).splitlines():
+        if line.startswith("|"):
+            tables[-1].append(line)
+        elif tables[-1]:
+            tables.append([])
+    for rows in filter(None, tables):
+        assert len({len(_CELL_BREAK.findall(row)) for row in rows}) == 1, rows
+
+
+@SETTINGS
+@given(spec=_NAMED)
+def test_any_name_draws_an_er_diagram_mermaid_reads(spec):
+    """An entity is one word; each attribute a different one, never read as
+    a key; each comment one quoted string on the attribute's own line."""
+    lines = framespec_to_mermaid(spec).splitlines()
+    assert lines[0] == "erDiagram"
+    assert re.fullmatch(r"    [A-Za-z_][A-Za-z0-9_]* \{", lines[1]), lines[1]
+    assert lines[-1] == "    }"
+    attribute = re.compile(
+        r'        \S+ ([A-Za-z_][A-Za-z0-9_-]*)( (PK|UK|FK))?( "[^"]*")?'
+    )
+    names = []
+    for line in lines[2:-1]:
+        match = attribute.fullmatch(line)
+        assert match, line
+        assert "~" not in line, line  # hangs Mermaid 10's lexer
+        names.append(match[1])
+    assert len(names) == len(set(names)) == len(spec.columns)
+    assert not {n.upper() for n in names} & {"PK", "FK", "UK"}
 
 
 def test_the_strategy_reaches_every_kind_of_column():

@@ -7,6 +7,7 @@ generation or validation paths.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -41,6 +42,32 @@ def _write_if_asked(content: str, path: str | Path | None) -> str:
     return content
 
 
+def _row(*cells: str) -> str:
+    """A Markdown table row. A `|` inside a cell -- in backticks too -- would
+    split it, and a newline would end the row, so each is escaped."""
+    return "| " + " | ".join(_cell(c) for c in cells) + " |"
+
+
+def _cell(text: str) -> str:
+    # GitHub's parser reads `\\` as an escaped backslash, so a pipe after an
+    # odd run of them would still split: double the run, then escape the pipe.
+    escaped = re.sub(r"(\\*)\|", lambda m: m[1] * 2 + "\\|", text)
+    return " ".join(escaped.splitlines())
+
+
+def _code(value: object) -> str:
+    """`value` as inline code on one line, fenced by more backticks than any
+    run of them inside it -- a name may hold a backtick, or be empty."""
+    text = " ".join(str(value).splitlines())
+    if not text:
+        return "` `"
+    fence = "`" * (max(map(len, re.findall("`+", text)), default=0) + 1)
+    # CommonMark strips one space from each end of a span, and a backtick at
+    # either end would merge with the fence: a space keeps both apart.
+    padded = text[0] in "` " or text[-1] in "` "
+    return f"{fence} {text} {fence}" if padded else f"{fence}{text}{fence}"
+
+
 def _describe_dtype(dtype: pl.DataType) -> str:
     """A dtype as it reads in a table cell, with long category lists elided."""
     if isinstance(dtype, pl.Enum):
@@ -71,9 +98,9 @@ def _describe_domain(cs) -> str:
     if cs.format is not None:
         extras = cs.extra_values or {}
         also = f", plus {', '.join(extras)}" if extras else ""
-        return f"format `{cs.format}`{also}"
+        return f"format {_code(cs.format)}{also}"
     if cs.pattern is not None:
-        return f"pattern `{cs.pattern}`"
+        return f"pattern {_code(cs.pattern)}"
     if cs.list_length is not None:
         return f"{cs.list_length.min}..{cs.list_length.max} elements"
     return _describe_choices(cs.choices)
@@ -105,11 +132,11 @@ def _overview_section(spec: TableSpec, doc_title: str) -> list[str]:
         f"# {doc_title}",
         "",
         "## Overview",
-        f"- **Schema:** `{spec.name}`",
+        f"- **Schema:** {_code(spec.name)}",
         f"- **Total Columns:** {len(spec.columns)}",
     ]
     if spec.unique_together:
-        groups = ", ".join(f"`{list(g)}`" for g in spec.unique_together)
+        groups = ", ".join(_code(list(g)) for g in spec.unique_together)
         lines.append(f"- **Composite Unique Keys:** {groups}")
     if spec.checks:
         lines.append(f"- **Custom Invariants / Checks:** {len(spec.checks)} check(s)")
@@ -138,15 +165,17 @@ def _column_rows(name: str, cs) -> list[str]:
         f"[{cs.string_length.min}, {cs.string_length.max}]" if cs.string_length else "-"
     )
     rows = [
-        f"| `{name}` "
-        f"| `{_describe_dtype(cs.dtype)}` "
-        f"| {_describe_nullable(cs)} "
-        f"| {str(cs.bounds) if cs.bounds else '-'} "
-        f"| {_describe_domain(cs)} "
-        f"| {length} "
-        f"| {', '.join(f'`{t}`' for t in cs.tags) if cs.tags else '-'} "
-        f"| {f'{len(cs.rules)} rule(s)' if cs.rules else '-'} "
-        f"| {'Yes' if cs.unique else 'No'} |"
+        _row(
+            _code(name),
+            _code(_describe_dtype(cs.dtype)),
+            _describe_nullable(cs),
+            str(cs.bounds) if cs.bounds else "-",
+            _describe_domain(cs),
+            length,
+            ", ".join(_code(t) for t in cs.tags) if cs.tags else "-",
+            f"{len(cs.rules)} rule(s)" if cs.rules else "-",
+            "Yes" if cs.unique else "No",
+        )
     ]
     value_dtype = cs.value_dtype
     if isinstance(value_dtype, pl.Struct):
@@ -172,7 +201,7 @@ def _constraints_section(spec: TableSpec) -> list[str]:
 
     if spec.unique_together:
         lines.extend(["", "### Composite Uniqueness"])
-        lines.extend(f"- Key: `{list(group)}`" for group in spec.unique_together)
+        lines.extend(f"- Key: {_code(list(group))}" for group in spec.unique_together)
 
     if spec.checks:
         lines.extend(["", "### Multi-Column Checks"])
@@ -180,36 +209,36 @@ def _constraints_section(spec: TableSpec) -> list[str]:
             described = (
                 f"\n  - *Description:* {check.description}" if check.description else ""
             )
-            lines.append(f"- **`{check.name}`**: `{check.expr}`{described}")
+            lines.append(f"- **{_code(check.name)}**: {_code(check.expr)}{described}")
 
     if spec.foreign_keys:
         lines.extend(["", "### Foreign Keys"])
         for fk in spec.foreign_keys:
             target = spec.name if fk.references == "self" else fk.references
             lines.append(
-                f"- **`{fk.name}`**: `{list(fk.columns)}` -> "
-                f"`{target}.{list(fk.ref_columns)}`"
+                f"- **{_code(fk.name)}**: {_code(list(fk.columns))} -> "
+                f"{_code(f'{target}.{list(fk.ref_columns)}')}"
             )
 
     if columns_with_rules:
         lines.extend(["", "### Conditional Rules (`ColRule`)"])
         for name, column in columns_with_rules:
-            lines.append(f"- **Column `{name}`**:")
+            lines.append(f"- **Column {_code(name)}**:")
             lines.extend(
-                f"  {index}. When `{rule.when}` -> Choices: `{list(rule.choices)}`"
+                f"  {index}. When {_code(rule.when)} -> Choices: {_code(list(rule.choices))}"
                 for index, rule in enumerate(column.rules, 1)
             )
 
     if columns_with_validators:
         lines.extend(["", "### Column Validators"])
         for name, column in columns_with_validators:
-            lines.append(f"- **Column `{name}`**:")
+            lines.append(f"- **Column {_code(name)}**:")
             for validator in column.validators:
                 described = (
                     f" -- {validator.description}" if validator.description else ""
                 )
                 lines.append(
-                    f"  - **`{validator.name}`**: `{validator.expr}`{described}"
+                    f"  - **{_code(validator.name)}**: {_code(validator.expr)}{described}"
                 )
 
     return lines
@@ -252,15 +281,13 @@ def framespec_to_markdown(
 def _drift_rows(findings: Iterable[DriftFinding]) -> list[str]:
     rows = []
     for finding in findings:
-        column = ", ".join(f"`{c}`" for c in finding.columns) or "-"
+        column = ", ".join(_code(c) for c in finding.columns) or "-"
         # The message already names the column; the table has a column for it.
         detail = finding.message
         prefix = f"Column '{finding.columns[0]}': " if len(finding.columns) == 1 else ""
         if detail.startswith(prefix):
             detail = detail[len(prefix) :]
-        rows.append(
-            f"| {column} | `{finding.code}` | {detail.replace('|', chr(92) + '|')} |"
-        )
+        rows.append(_row(column, _code(finding.code), detail))
     return rows
 
 
@@ -271,9 +298,9 @@ def drift_to_markdown(report: DriftReport, path: str | Path | None = None) -> st
     reviewer has to read is the part at the top.
     """
     what = (
-        f"`{report.old}` -> `{report.new}`"
+        f"{_code(report.old)} -> {_code(report.new)}"
         if report.kind == "diff"
-        else f"{report.new} against `{report.old}`"
+        else f"{report.new} against {_code(report.old)}"
     )
     lines = [f"# Drift: {what}", ""]
     if report.unchanged:
@@ -299,8 +326,69 @@ def drift_to_markdown(report: DriftReport, path: str | Path | None = None) -> st
     return _write_if_asked("\n".join(lines) + "\n", path)
 
 
+# Mermaid reads `PK`, `FK` and `UK` as keys, in any case, wherever they stand
+# alone -- an attribute so named does not parse.
+_MERMAID_KEYS = frozenset({"PK", "FK", "UK"})
+
+
+def _mermaid_word(name: str, allowed: str) -> str:
+    """`name` as one word of Mermaid's ER grammar, in the form every version
+    reads: ASCII letters and digits, the `allowed` punctuation, and not
+    starting with a digit. Mermaid 11 also takes non-ASCII letters; 10 --
+    still what many renderers bundle -- does not."""
+    word = "".join(
+        c if c.isascii() and (c.isalnum() or c in allowed) else "_" for c in name
+    )
+    if not word or not (word[0].isalpha() or word[0] == "_"):
+        word = f"_{word}"
+    return word
+
+
+# Words Mermaid's ER grammar reserves outside an entity's block, found by
+# parsing each with Mermaid 10 and 11: an entity so named does not parse.
+_MERMAID_RESERVED = frozenset(
+    {
+        "class",
+        "classDef",
+        "end",
+        "erDiagram",
+        "many",
+        "one",
+        "style",
+        "subgraph",
+        "to",
+        "u",
+    }
+)
+
+
 def _mermaid_name(name: str) -> str:
-    return "".join(c if c.isalnum() or c == "_" else "_" for c in name)
+    word = _mermaid_word(name, "_")
+    return f"{word}_" if word in _MERMAID_RESERVED else word
+
+
+def _attribute_word(name: str) -> str:
+    word = _mermaid_word(name, "_-")
+    return f"{word}_" if word.upper() in _MERMAID_KEYS else word
+
+
+def _attribute_names(names: Iterable[str]) -> dict[str, str]:
+    """Each column's attribute name: itself where Mermaid can read it, else
+    the nearest word it can, told apart from every other by a suffix."""
+    names = list(names)
+    named = {name: name for name in names if _attribute_word(name) == name}
+    taken = set(named)
+    for name in names:
+        if name in named:
+            continue
+        word = candidate = _attribute_word(name)
+        n = 1
+        while candidate in taken:
+            n += 1
+            candidate = f"{word}_{n}"
+        taken.add(candidate)
+        named[name] = candidate
+    return named
 
 
 def _entity_lines(spec: TableSpec, entity_name: str) -> list[str]:
@@ -311,6 +399,7 @@ def _entity_lines(spec: TableSpec, entity_name: str) -> list[str]:
         for col in fk.columns:
             fk_columns.setdefault(col, fk)
 
+    attribute_names = _attribute_names(spec.columns)
     lines = [f"    {entity_name} {{"]
     for col_name, cs in spec.columns.items():
         dtype = cs.dtype
@@ -341,7 +430,9 @@ def _entity_lines(spec: TableSpec, entity_name: str) -> list[str]:
         elif col_name in fk_columns:
             key_label = "FK"
 
-        comments: list[str] = []
+        attribute = attribute_names[col_name]
+        # A column renamed for Mermaid keeps its real name, first in the note.
+        comments: list[str] = [] if attribute == col_name else [f"name: {col_name!r}"]
         if cs.nullable:
             comments.append("nullable")
         if cs.element_null_probability:
@@ -370,10 +461,14 @@ def _entity_lines(spec: TableSpec, entity_name: str) -> list[str]:
                 f"fields: [{', '.join(f.name for f in cs.value_dtype.fields)}]"
             )
 
-        comment_body = ", ".join(comments).replace('"', "'")
+        # A note is one quoted string on one line. A `~` in it, before a long
+        # tail, hangs Mermaid 10's lexer -- its rule for generic types like
+        # `List~int~` backtracks -- so it is drawn as the look-alike tilde operator.
+        noted = ", ".join(comments).replace('"', "'").replace("~", "\N{TILDE OPERATOR}")
+        comment_body = " ".join(noted.splitlines())
         comment_str = f' "{comment_body}"' if comments else ""
         key_str = f" {key_label}" if key_label else ""
-        lines.append(f"        {type_name} {col_name}{key_str}{comment_str}")
+        lines.append(f"        {type_name} {attribute}{key_str}{comment_str}")
     lines.append("    }")
     return lines
 
@@ -476,7 +571,7 @@ def catspec_to_markdown(
         )
         for k, variants in spec.enums.items():
             var_str = f"[{', '.join(repr(v) for v in variants[:6])}{', ...' if len(variants) > 6 else ''}]"
-            lines.append(f"| `{k}` | {len(variants)} | `{var_str}` |")
+            lines.append(_row(_code(k), str(len(variants)), _code(var_str)))
         lines.append("")
 
     if spec.categoricals:
@@ -496,7 +591,15 @@ def catspec_to_markdown(
                 ch_str = f"[{', '.join(repr(c) for c in choices[:6])}{', ...' if len(choices) > 6 else ''}] ({len(choices)} total)"
             else:
                 ch_str = "-"
-            lines.append(f"| `{k}` | `{cat.name()}` | `{phys}` | `{ns}` | `{ch_str}` |")
+            lines.append(
+                _row(
+                    _code(k),
+                    _code(cat.name()),
+                    _code(phys),
+                    _code(ns),
+                    _code(ch_str),
+                )
+            )
         lines.append("")
 
     content = "\n".join(lines).rstrip() + "\n"
