@@ -112,7 +112,11 @@ takes at least twenty distinct values, every one of them in the format -- or
 99% of rows, with the rest a few repeated stand-ins such as `N/A`, which
 become `extra_values` at their observed shares (not for a `replace`d column:
 its stand-ins would be the source's values). A hostname has to hold a dot.
-`formats=False`, or `--no-formats`, turns it off. A shape polspec has no
+A country or currency column of a few repeated codes stays an `Enum` of
+them, which keeps how often each occurs -- the format would spread the fake
+values over every code; it is named once the column holds more distinct
+codes than `max_unique_enum`, or is `replace`d. `formats=False`, or
+`--no-formats`, turns it off. A shape polspec has no
 format for -- a product code, a postcode -- is still text of its lengths;
 declare a `pattern` on the profiled spec to validate it.
 

@@ -49,8 +49,9 @@ ENUM_MIN_REPEATS = 2
 FORMAT_MIN_DISTINCT = 20
 
 # The formats a column is tried against, most specific first; the first
-# that fits wins. A finite format (a country, a currency) is tried before
-# the column could narrow to an Enum of the codes it happens to hold.
+# that fits wins. A finite format (a country, a currency) is tried only where
+# the column would not narrow to an Enum of the codes it holds, which keeps
+# their frequencies -- see `_profile_textual`.
 FORMAT_ORDER = (
     "uuid4",
     "ipv6",
@@ -135,8 +136,11 @@ def profile_dataframe(
         every value does; or 99% of them do and the rest are at most five
         repeated stand-ins, which become the format's `extra_values`. A
         hostname has to hold a dot: a single word is too weak a sign. A
-        column in `replace` is named a format only when every value has it,
-        since its stand-ins would be values of the source.
+        finite format -- `iso_country`, `iso_currency` -- only where the
+        column would not narrow to an Enum, which keeps its codes'
+        frequencies. A column in `replace` is named a format only when
+        every value has it, since its stand-ins would be values of the
+        source.
 
     Warns
     -----
@@ -410,18 +414,26 @@ def _profile_textual(
     keep_values: bool = True,
 ) -> ColSpec:
     """A String or Categorical column, narrowed to an Enum when it holds few
-    enough distinct values and they repeat."""
+    enough distinct values and they repeat.
+
+    A template format (an email, a UUID) is named before that: its values are
+    identifiers, and an Enum of them would carry the source's own. A finite
+    format (a country, a currency) only where the column would *not* narrow:
+    an Enum of the codes it holds keeps their frequencies, which the format
+    -- every code, evenly -- would throw away.
+    """
     n_unique = non_null.n_unique()
+    narrows = 0 < n_unique <= max_unique_enum and (
+        n_unique * ENUM_MIN_REPEATS <= len(non_null)
+    )
 
     if formats and dtype in (pl.String, pl.Utf8) and n_unique >= FORMAT_MIN_DISTINCT:
-        named = _named_format(non_null, keep_values=keep_values)
+        named = _named_format(non_null, keep_values=keep_values, finite=not narrows)
         if named is not None:
             fmt, extras = named
             return spec(dtype=pl.String, format=fmt, extra_values=extras or None)
 
-    if 0 < n_unique <= max_unique_enum and (
-        n_unique * ENUM_MIN_REPEATS <= len(non_null)
-    ):
+    if narrows:
         categories = non_null.unique().sort().to_list()
         return spec(
             dtype=pl.Enum(categories),
@@ -442,7 +454,7 @@ def _profile_textual(
 
 
 def _named_format(
-    non_null: pl.Series, *, keep_values: bool
+    non_null: pl.Series, *, keep_values: bool, finite: bool = True
 ) -> tuple[str, dict[str, float]] | None:
     """The format `non_null`'s values have, and the stand-ins beside it with
     their shares; None when no format fits.
@@ -450,7 +462,8 @@ def _named_format(
     Asked of the distinct values, weighted by how often each occurs, with
     the check validation uses -- so a spec that names a format accepts the
     data it was named from. A near miss is kept only with `keep_values`:
-    its stand-ins are values of the source.
+    its stand-ins are values of the source. A finite format is tried only
+    with `finite`.
     """
     counts = non_null.value_counts()
     value, count = counts.columns[0], counts.columns[1]
@@ -462,6 +475,8 @@ def _named_format(
     probe = counts.head(1_000)
     for name in FORMAT_ORDER:
         fmt = _lookup_format(name)
+        if fmt.is_finite and not finite:
+            continue
         fits = fmt.check(pl.col(value))
         if name == "hostname":
             fits = fits & pl.col(value).str.contains(".", literal=True)

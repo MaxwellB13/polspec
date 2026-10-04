@@ -313,3 +313,12 @@ def test_a_synthesized_column_has_its_sources_format():
     spec = profile(source, replace=["email"])
     assert spec["email"].format == "email"
     validate(spec, fake)
+
+
+def test_a_skewed_country_column_keeps_its_mix_through_synthesize():
+    codes = ["FR", "DE", "ES", "IT", "NL", "BE", "PT", "IE", "SE", "NO", "DK", "FI",
+             "PL", "CZ", "AT", "CH", "HU", "GR", "RO", "BG", "HR", "SI", "SK", "US"]  # fmt: skip
+    source = pl.DataFrame({"c": ["GB"] * 900 + codes * 4})
+    fake = synthesize(source, 5_000, seed=1)
+    assert (fake["c"] == "GB").mean() == pytest.approx(900 / source.height, abs=0.02)
+    assert set(fake["c"]) <= set(source["c"])

@@ -1174,8 +1174,11 @@ octets, each 0-255). Invalid samples: ['300.1.1.1', 'abc']
 
 A format is one scalar key in a spec file -- `format: email` -- and one
 keyword in generated Python. Neither changes the file format version.
-`from_dataframe()` does not infer formats: guessing `email` from a sample is a
-guess, and the profiler's contract is to describe what is there.
+`from_dataframe()`, `profile()` and `polspec schema infer` name a format
+when at least twenty distinct values have it and every value does -- see
+[Fake data from real data](https://maxwellb13.github.io/polspec/how-to/synthesizing/#how-close-the-fake-data-is) for
+the near misses kept as `extra_values`, and for when a country or currency
+column stays an `Enum` of its codes instead. `formats=False` turns it off.
 
 ---
 
@@ -3053,7 +3056,11 @@ takes at least twenty distinct values, every one of them in the format -- or
 99% of rows, with the rest a few repeated stand-ins such as `N/A`, which
 become `extra_values` at their observed shares (not for a `replace`d column:
 its stand-ins would be the source's values). A hostname has to hold a dot.
-`formats=False`, or `--no-formats`, turns it off. A shape polspec has no
+A country or currency column of a few repeated codes stays an `Enum` of
+them, which keeps how often each occurs -- the format would spread the fake
+values over every code; it is named once the column holds more distinct
+codes than `max_unique_enum`, or is `replace`d. `formats=False`, or
+`--no-formats`, turns it off. A shape polspec has no
 format for -- a product code, a postcode -- is still text of its lengths;
 declare a `pattern` on the profiled spec to validate it.
 
@@ -3798,7 +3805,7 @@ new`.
 | `--max-unique-enum N` | Max distinct values for a string column to become an `Enum`, when they repeat (default 50) |
 | `--no-formats` | Do not name the `format` a text column's values have (email, uuid4, ...) |
 | `--no-bounds` | Skip computing numeric/temporal bounds and string lengths |
-| `--sample N` | Profile only the first N rows |
+| `--sample N` | Profile a random sample of N rows (seeded, so the same every run) |
 | `--shape` | Fit the distribution each numeric or temporal column follows |
 | `--keys` | Declare an all-distinct integer or text column unique |
 | `--replace COL...` | Columns whose values must not be carried into the spec |
@@ -5302,8 +5309,11 @@ formats : bool, default True
     every value does; or 99% of them do and the rest are at most five
     repeated stand-ins, which become the format's `extra_values`. A
     hostname has to hold a dot: a single word is too weak a sign. A
-    column in `replace` is named a format only when every value has it,
-    since its stand-ins would be values of the source.
+    finite format -- `iso_country`, `iso_currency` -- only where the
+    column would not narrow to an Enum, which keeps its codes'
+    frequencies. A column in `replace` is named a format only when
+    every value has it, since its stand-ins would be values of the
+    source.
 
 Warns
 -----
@@ -5699,7 +5709,7 @@ polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
 | `--max-unique-enum` `N` | Max distinct values for a string column to become an Enum, when they repeat (default: 50) |
 | `--no-formats` | Do not name the format a text column's values have (email, uuid4, ...) |
 | `--no-bounds` | Skip computing numeric/temporal bounds and string lengths |
-| `--sample` `N` | Profile only the first N rows |
+| `--sample` `N` | Profile a random sample of N rows (seeded, so the same every run) |
 | `--shape` | Fit the distribution each numeric or temporal column follows |
 | `--keys` | Declare an all-distinct integer or text column unique |
 | `--replace` `COL` | Columns whose values must not be carried into the spec |
@@ -5846,7 +5856,7 @@ polspec drift [-h] [--all] [--sample N] [--null-rate-tolerance F] [--no-unseen]
 | `spec` | A .yaml/.yml spec, or a .py file defining one; with --all, a directory |
 | `data` | Path to a CSV, Parquet, NDJSON or IPC file; with --all, a directory of files named after the specs |
 | `--all` | Every spec found under SPEC against DATA/<name>.<suffix> |
-| `--sample` `N` | Measure only the first N rows |
+| `--sample` `N` | Measure a random sample of N rows (seeded, so the same every run) |
 | `--null-rate-tolerance` `F` | How far the null rate may sit from null_probability (default: 0.05) |
 | `--no-unseen` | Do not report declared values the data never holds |
 | `--max-samples` `N` | Offending values to carry per finding (default: 10) |
@@ -6832,6 +6842,20 @@ seed produces; see
 
 ### Changed
 
+- **A few repeated country or currency codes profile as an `Enum` again.**
+  0.14.0 named the `iso_country` or `iso_currency` format before a column
+  could narrow, so a column nine tenths `GB` profiled as every country
+  evenly, and `synthesize` spread it over 249. A finite format is now named
+  only where the column would not narrow to an `Enum` -- more distinct codes
+  than `max_unique_enum`, or a `replace`d column -- and an `Enum` keeps the
+  codes' frequencies. Template formats (email, UUID, IP, MAC, hostname) are
+  named first, as in 0.14.0.
+- **`--sample N` is a random sample.** `polspec schema infer` and `polspec
+  drift` read a file's first N rows, which for a file sorted by date or by
+  amount is not a sample of it: bounds that reject the rest, a distribution
+  that has "moved". Both now draw N rows at random from the whole file,
+  seeded so the same file gives the same result, as `polspec synthesize`
+  already did; a sample of zero or fewer rows is refused.
 - **A composite unique key's column cannot declare `nan_probability`**, as a
   `unique=True` one cannot: no NaN equals another. The repair that
   separates repeated combinations hashed NaN as one value and generated

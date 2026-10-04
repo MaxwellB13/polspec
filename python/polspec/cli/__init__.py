@@ -89,7 +89,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--sample",
         type=int,
         metavar="N",
-        help="Profile only the first N rows",
+        help="Profile a random sample of N rows (seeded, so the same every run)",
     )
     infer.add_argument(
         "--shape",
@@ -343,7 +343,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Every spec found under SPEC against DATA/<name>.<suffix>",
     )
     drift_parser.add_argument(
-        "--sample", type=int, metavar="N", help="Measure only the first N rows"
+        "--sample",
+        type=int,
+        metavar="N",
+        help="Measure a random sample of N rows (seeded, so the same every run)",
     )
     drift_parser.add_argument(
         "--null-rate-tolerance",

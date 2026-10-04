@@ -36,3 +36,20 @@ def to_lazy(frame: Frame) -> pl.LazyFrame:
 def to_eager(frame: Frame) -> pl.DataFrame:
     """`frame` as a DataFrame, collecting one that is lazy."""
     return frame.collect() if isinstance(frame, pl.LazyFrame) else frame
+
+
+def sample_rows(frame: pl.DataFrame, n: int | None, seed: int = 0) -> pl.DataFrame:
+    """`n` of `frame`'s rows, drawn at random from a fixed `seed` -- or the
+    whole frame, when `n` is None or not fewer rows. The draw comes back in
+    no particular order; nothing that profiles or measures a frame reads one.
+
+    Never the first `n`: a file is often sorted, by date or by key, and its
+    head is not a sample of it.
+    """
+    if n is None:
+        return frame
+    if n <= 0:
+        raise ValueError(f"sample must be a positive row count, got {n}")
+    if n >= frame.height:
+        return frame
+    return frame.sample(n, seed=seed)

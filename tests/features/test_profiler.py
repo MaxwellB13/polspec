@@ -506,3 +506,60 @@ def test_stand_ins_are_listed_most_frequent_first_every_run():
         for _ in range(20)
     }
     assert orders == {("UK (ISO)", "N/A", "TBD")}
+
+
+# ---------------------------------------------------------------------------
+# A finite format, only where the column would not be an Enum
+# ---------------------------------------------------------------------------
+
+_SOME_COUNTRIES = [
+    "GB", "FR", "DE", "ES", "IT", "NL", "BE", "PT", "IE", "SE", "NO", "DK", "FI",
+    "PL", "CZ", "AT", "CH", "HU", "GR", "RO", "BG", "HR", "SI", "SK", "US",
+]  # fmt: skip
+
+
+def test_a_few_repeated_country_codes_keep_their_frequencies():
+    """0.14.0 named the format first, so a column that is nine tenths GB
+    profiled as every country evenly. An Enum of the codes it holds keeps
+    the mix, as 0.13 did."""
+    values = ["GB"] * 900 + _SOME_COUNTRIES[1:] * 4
+    column = profile_dataframe(pl.DataFrame({"c": values}), weights=True)["c"]
+    assert column.format is None
+    assert isinstance(column.dtype, pl.Enum)
+    shares = dict(zip(column.dtype.categories.to_list(), column.weights, strict=True))
+    assert shares["GB"] == pytest.approx(900 / len(values))
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        pytest.param(
+            _values_of("iso_country", 3_000), id="more distinct than max_unique_enum"
+        ),
+        pytest.param(_SOME_COUNTRIES, id="distinct, never repeated"),
+    ],
+)
+def test_a_finite_format_is_named_where_the_column_would_not_be_an_enum(values):
+    column = profile_dataframe(pl.DataFrame({"c": values}))["c"]
+    assert column.format == "iso_country"
+
+
+def test_a_replaced_country_column_is_named_the_format():
+    """A replaced column's codes must not be carried, so its shape is all a
+    spec can say -- the format."""
+    values = ["GB"] * 900 + _SOME_COUNTRIES[1:] * 4
+    column = profile_dataframe(pl.DataFrame({"c": values}), replace=["c"])["c"]
+    assert column.format == "iso_country"
+
+
+def test_currency_codes_follow_the_same_rule():
+    currencies = ["GBP", "EUR", "USD", "CHF", "JPY", "SEK", "NOK", "DKK", "PLN", "CZK",
+                  "HUF", "AUD", "CAD", "NZD", "SGD", "HKD", "CNY", "INR", "ZAR", "MXN"]  # fmt: skip
+    few = profile_dataframe(pl.DataFrame({"c": ["GBP"] * 500 + currencies[1:] * 3}))[
+        "c"
+    ]
+    assert few.format is None and isinstance(few.dtype, pl.Enum)
+    many = profile_dataframe(pl.DataFrame({"c": _values_of("iso_currency", 2_000)}))[
+        "c"
+    ]
+    assert many.format == "iso_currency"

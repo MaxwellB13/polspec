@@ -157,5 +157,8 @@ octets, each 0-255). Invalid samples: ['300.1.1.1', 'abc']
 
 A format is one scalar key in a spec file -- `format: email` -- and one
 keyword in generated Python. Neither changes the file format version.
-`from_dataframe()` does not infer formats: guessing `email` from a sample is a
-guess, and the profiler's contract is to describe what is there.
+`from_dataframe()`, `profile()` and `polspec schema infer` name a format
+when at least twenty distinct values have it and every value does -- see
+[Fake data from real data](synthesizing.md#how-close-the-fake-data-is) for
+the near misses kept as `extra_values`, and for when a country or currency
+column stays an `Enum` of its codes instead. `formats=False` turns it off.

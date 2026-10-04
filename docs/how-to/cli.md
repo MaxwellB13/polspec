@@ -72,7 +72,7 @@ new`.
 | `--max-unique-enum N` | Max distinct values for a string column to become an `Enum`, when they repeat (default 50) |
 | `--no-formats` | Do not name the `format` a text column's values have (email, uuid4, ...) |
 | `--no-bounds` | Skip computing numeric/temporal bounds and string lengths |
-| `--sample N` | Profile only the first N rows |
+| `--sample N` | Profile a random sample of N rows (seeded, so the same every run) |
 | `--shape` | Fit the distribution each numeric or temporal column follows |
 | `--keys` | Declare an all-distinct integer or text column unique |
 | `--replace COL...` | Columns whose values must not be carried into the spec |

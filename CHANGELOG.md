@@ -23,6 +23,20 @@ seed produces; see
 
 ### Changed
 
+- **A few repeated country or currency codes profile as an `Enum` again.**
+  0.14.0 named the `iso_country` or `iso_currency` format before a column
+  could narrow, so a column nine tenths `GB` profiled as every country
+  evenly, and `synthesize` spread it over 249. A finite format is now named
+  only where the column would not narrow to an `Enum` -- more distinct codes
+  than `max_unique_enum`, or a `replace`d column -- and an `Enum` keeps the
+  codes' frequencies. Template formats (email, UUID, IP, MAC, hostname) are
+  named first, as in 0.14.0.
+- **`--sample N` is a random sample.** `polspec schema infer` and `polspec
+  drift` read a file's first N rows, which for a file sorted by date or by
+  amount is not a sample of it: bounds that reject the rest, a distribution
+  that has "moved". Both now draw N rows at random from the whole file,
+  seeded so the same file gives the same result, as `polspec synthesize`
+  already did; a sample of zero or fewer rows is refused.
 - **A composite unique key's column cannot declare `nan_probability`**, as a
   `unique=True` one cannot: no NaN equals another. The repair that
   separates repeated combinations hashed NaN as one value and generated
