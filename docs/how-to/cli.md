@@ -313,9 +313,12 @@ polspec diff main/orders.yaml pr/orders.yaml --markdown --fail-on breaking
 ```
 
 `--strict-dtypes` makes any dtype change breaking, as it does for
-`validate`. `drift` also takes `--null-rate-tolerance`, `--no-unseen`,
-`--max-samples` and `--sample N` — see
-[`DriftOptions`](drift.md#options).
+`validate`. `drift` also takes a flag for every other
+[`DriftOptions`](drift.md#options) field -- `--significance`,
+`--null-rate-tolerance`, `--frequency-tolerance`,
+`--distribution-tolerance`, `--no-unseen`, `--max-samples` -- each
+defaulting to the option's own default, and `--sample N`, a seeded random
+sample of N rows.
 
 ### `drift --all` — every spec against the file named after it
 

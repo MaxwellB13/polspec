@@ -677,12 +677,3 @@ def _pair(data: Any, payload: Any) -> tuple[Any, Any]:
     ):
         raise _bad(data, "expected a two-element list")
     return payload[0], payload[1]
-
-
-def is_predicate_data(value: Any) -> bool:
-    """Whether a YAML value is a predicate in data form (as opposed to a legacy rule condition)."""
-    return (
-        isinstance(value, Mapping)
-        and len(value) == 1
-        and next(iter(value)) in KNOWN_OPS
-    )

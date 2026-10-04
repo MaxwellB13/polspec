@@ -10,6 +10,14 @@ seed produces; see
 
 ### Fixed
 
+- **`polspec drift` can set every drift option.** 0.14.0 added
+  `significance`, `frequency_tolerance` and `distribution_tolerance` to
+  `DriftOptions` and no flags for them; `--significance`,
+  `--frequency-tolerance` and `--distribution-tolerance` now exist, every
+  flag's default is the option's own -- said once, on `DriftOptions` -- and
+  a test holds the command to the options. An option out of range is an
+  `error:` line, not a traceback.
+
 - **A spec drifted from data it describes, three ways.** A column with a
   finite `format` -- `iso_country`, `iso_currency` -- counted every code as
   a declared value, so a profiled country column drifted from its own

@@ -4046,9 +4046,12 @@ polspec diff main/orders.yaml pr/orders.yaml --markdown --fail-on breaking
 ```
 
 `--strict-dtypes` makes any dtype change breaking, as it does for
-`validate`. `drift` also takes `--null-rate-tolerance`, `--no-unseen`,
-`--max-samples` and `--sample N` — see
-[`DriftOptions`](https://maxwellb13.github.io/polspec/how-to/drift/#options).
+`validate`. `drift` also takes a flag for every other
+[`DriftOptions`](https://maxwellb13.github.io/polspec/how-to/drift/#options) field -- `--significance`,
+`--null-rate-tolerance`, `--frequency-tolerance`,
+`--distribution-tolerance`, `--no-unseen`, `--max-samples` -- each
+defaulting to the option's own default, and `--sample N`, a seeded random
+sample of N rows.
 
 ### `drift --all` — every spec against the file named after it
 
@@ -5845,9 +5848,11 @@ polspec diff [-h] [--rename OLD=NEW] [--json | --markdown]
 How a data file has moved relative to its schema.
 
 ```
-polspec drift [-h] [--all] [--sample N] [--null-rate-tolerance F] [--no-unseen]
-                     [--max-samples N] [--json | --markdown]
-                     [--fail-on {breaking,any,none}] [--strict-dtypes] [--class NAME]
+polspec drift [-h] [--all] [--sample N] [--significance P]
+                     [--null-rate-tolerance F] [--frequency-tolerance F]
+                     [--distribution-tolerance F] [--no-unseen] [--max-samples N]
+                     [--json | --markdown] [--fail-on {breaking,any,none}]
+                     [--strict-dtypes] [--class NAME]
                      spec data
 ```
 
@@ -5857,7 +5862,10 @@ polspec drift [-h] [--all] [--sample N] [--null-rate-tolerance F] [--no-unseen]
 | `data` | Path to a CSV, Parquet, NDJSON or IPC file; with --all, a directory of files named after the specs |
 | `--all` | Every spec found under SPEC against DATA/<name>.<suffix> |
 | `--sample` `N` | Measure a random sample of N rows (seeded, so the same every run) |
-| `--null-rate-tolerance` `F` | How far the null rate may sit from null_probability (default: 0.05) |
+| `--significance` `P` | How unlikely, were the spec right, a moved rate, frequency or distribution must be to be reported (default: 0.001) |
+| `--null-rate-tolerance` `F` | The smallest move of a null rate or NaN share worth reporting (default: 0.05) |
+| `--frequency-tolerance` `F` | The smallest move of a weighted column's frequencies worth reporting, as total variation (default: 0.05) |
+| `--distribution-tolerance` `F` | The smallest move of a declared distribution worth reporting, as the KS distance (default: 0.05) |
 | `--no-unseen` | Do not report declared values the data never holds |
 | `--max-samples` `N` | Offending values to carry per finding (default: 10) |
 | `--json` | Print the report as JSON |
@@ -6828,6 +6836,14 @@ seed produces; see
 ## [Unreleased]
 
 ### Fixed
+
+- **`polspec drift` can set every drift option.** 0.14.0 added
+  `significance`, `frequency_tolerance` and `distribution_tolerance` to
+  `DriftOptions` and no flags for them; `--significance`,
+  `--frequency-tolerance` and `--distribution-tolerance` now exist, every
+  flag's default is the option's own -- said once, on `DriftOptions` -- and
+  a test holds the command to the options. An option out of range is an
+  `error:` line, not a traceback.
 
 - **A spec drifted from data it describes, three ways.** A column with a
   finite `format` -- `iso_country`, `iso_currency` -- counted every code as

@@ -27,6 +27,7 @@ from polspec.cli._drift import _FAIL_ON, _cmd_diff, _cmd_drift
 from polspec.cli._schema import _cmd_schema_infer, _cmd_schema_new
 from polspec.cli._synthesize import add_synthesize_parser
 from polspec.cli._test import _cmd_test
+from polspec.drift import DriftOptions
 from polspec.errors import PolspecError
 from polspec.validation import _SWITCHES
 
@@ -348,12 +349,43 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="Measure a random sample of N rows (seeded, so the same every run)",
     )
+    # Every DriftOptions field has a flag (a parity test holds this), and no
+    # flag repeats a default: one not given leaves the option's own.
+    drift_parser.add_argument(
+        "--significance",
+        type=float,
+        metavar="P",
+        help=(
+            "How unlikely, were the spec right, a moved rate, frequency or "
+            f"distribution must be to be reported (default: {_drift_default('significance')})"
+        ),
+    )
     drift_parser.add_argument(
         "--null-rate-tolerance",
         type=float,
-        default=0.05,
         metavar="F",
-        help="How far the null rate may sit from null_probability (default: 0.05)",
+        help=(
+            "The smallest move of a null rate or NaN share worth reporting "
+            f"(default: {_drift_default('null_rate_tolerance')})"
+        ),
+    )
+    drift_parser.add_argument(
+        "--frequency-tolerance",
+        type=float,
+        metavar="F",
+        help=(
+            "The smallest move of a weighted column's frequencies worth reporting, "
+            f"as total variation (default: {_drift_default('frequency_tolerance')})"
+        ),
+    )
+    drift_parser.add_argument(
+        "--distribution-tolerance",
+        type=float,
+        metavar="F",
+        help=(
+            "The smallest move of a declared distribution worth reporting, as "
+            f"the KS distance (default: {_drift_default('distribution_tolerance')})"
+        ),
     )
     drift_parser.add_argument(
         "--no-unseen",
@@ -363,14 +395,21 @@ def _build_parser() -> argparse.ArgumentParser:
     drift_parser.add_argument(
         "--max-samples",
         type=int,
-        default=10,
         metavar="N",
-        help="Offending values to carry per finding (default: 10)",
+        help=(
+            "Offending values to carry per finding "
+            f"(default: {_drift_default('max_samples')})"
+        ),
     )
     add_report_options(drift_parser)
     drift_parser.set_defaults(func=_cmd_drift)
 
     return parser
+
+
+def _drift_default(name: str) -> object:
+    """A `DriftOptions` field's default, for a flag's help: said once, there."""
+    return DriftOptions.__dataclass_fields__[name].default
 
 
 def main(argv: list[str] | None = None) -> int:

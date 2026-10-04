@@ -63,12 +63,26 @@ def _cmd_diff(args: argparse.Namespace) -> int:
 
 
 def _drift_options(args: argparse.Namespace) -> DriftOptions:
-    return DriftOptions(
-        null_rate_tolerance=args.null_rate_tolerance,
-        unseen_values=not args.no_unseen,
-        strict_dtypes=args.strict_dtypes,
-        max_samples=args.max_samples,
-    )
+    """The options the flags give; one not given keeps the option's default."""
+    given = {
+        name: getattr(args, name)
+        for name in (
+            "significance",
+            "null_rate_tolerance",
+            "frequency_tolerance",
+            "distribution_tolerance",
+            "max_samples",
+        )
+        if getattr(args, name) is not None
+    }
+    try:
+        return DriftOptions(
+            unseen_values=not args.no_unseen,
+            strict_dtypes=args.strict_dtypes,
+            **given,
+        )
+    except ValueError as exc:  # a tolerance outside 0..1, and the like
+        raise CliError(str(exc)) from exc
 
 
 def _drift_all(args: argparse.Namespace) -> int:

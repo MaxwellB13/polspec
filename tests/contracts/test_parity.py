@@ -241,3 +241,49 @@ def test_a_class_that_is_not_a_spec_is_refused_by_name():
 
     with pytest.raises(TypeError, match="FrameSpec subclass, got the class dict"):
         polspec.generate(dict, 5)  # ty: ignore[invalid-argument-type]
+
+
+# ---------------------------------------------------------------------------
+# `polspec drift` sets every DriftOptions field
+# ---------------------------------------------------------------------------
+
+# Each field, the flags that set it, and the value they set it to -- never the
+# default, so the test sees the flag reach the option.
+_DRIFT_FLAGS = {
+    "significance": (["--significance", "0.05"], 0.05),
+    "null_rate_tolerance": (["--null-rate-tolerance", "0.2"], 0.2),
+    "frequency_tolerance": (["--frequency-tolerance", "0.2"], 0.2),
+    "distribution_tolerance": (["--distribution-tolerance", "0.2"], 0.2),
+    "unseen_values": (["--no-unseen"], False),
+    "strict_dtypes": (["--strict-dtypes"], True),
+    "max_samples": (["--max-samples", "3"], 3),
+}
+
+
+def test_every_drift_option_has_a_flag():
+    """0.14.0 added three drift options and no flags for them; this is what
+    holds the command to the options from now on."""
+    from polspec.cli import _build_parser
+    from polspec.cli._drift import _drift_options
+    from polspec.drift import DriftOptions
+
+    assert set(_DRIFT_FLAGS) == {f.name for f in dataclasses.fields(DriftOptions)}
+    parser = _build_parser()
+    defaults = _drift_options(parser.parse_args(["drift", "spec.yaml", "data.csv"]))
+    assert defaults == DriftOptions()
+    for name, (flags, value) in _DRIFT_FLAGS.items():
+        assert value != getattr(DriftOptions(), name), name
+        args = parser.parse_args(["drift", "spec.yaml", "data.csv", *flags])
+        assert getattr(_drift_options(args), name) == value, name
+
+
+def test_a_drift_option_out_of_range_is_a_cli_error(tmp_path, capsys):
+    from polspec.cli import main
+
+    spec, data = tmp_path / "s.yaml", tmp_path / "d.csv"
+    spec.write_text(
+        "version: 4\nname: S\ncolumns:\n  a: {dtype: Int64}\n", encoding="utf-8"
+    )
+    data.write_text("a\n1\n", encoding="utf-8")
+    assert main(["drift", str(spec), str(data), "--significance", "2"]) == 1
+    assert "significance must be between 0 and 1" in capsys.readouterr().err

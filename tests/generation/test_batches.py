@@ -212,7 +212,7 @@ def test_sink_ndjson(tmp_path):
 
 def test_sink_nested_directory_creation(tmp_path):
     nested_path = tmp_path / "subdir1" / "subdir2" / "test.parquet"
-    StreamDataSource.sink_parquet(nested_path, n=50, batch_size=25)
+    StreamDataSource.sink_parquet(nested_path, n=50, batch_size=25, seed=1)
     assert nested_path.exists()
     df = pl.read_parquet(nested_path)
     assert df.height == 50
