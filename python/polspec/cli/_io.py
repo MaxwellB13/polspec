@@ -22,13 +22,16 @@ import polars as pl
 
 from polspec import FrameSpec
 from polspec.errors import CliError
-from polspec.frames import sample_rows
+from polspec.frames import json_casts, sample_rows
 from polspec.reading import _DELIMITED, _parse_declared_text
 from polspec.reading import _READERS as _DATA_READERS
 from polspec.registry import Registry, load_module
 
 if TYPE_CHECKING:
     from polspec.tablespec import TableSpec
+
+# Written through `json_casts`: categories as text, no bytes.
+_JSON_SUFFIXES = frozenset({".ndjson", ".jsonl", ".json"})
 
 _DATA_WRITERS = {
     ".csv": pl.DataFrame.write_csv,
@@ -89,6 +92,8 @@ def _write_data_file(df: pl.DataFrame, path: Path) -> None:
             f"don't know how to write {path.suffix!r} files ({path}). "
             f"Supported: {', '.join(sorted(_DATA_WRITERS))}"
         )
+    if path.suffix.lower() in _JSON_SUFFIXES:
+        df = df.with_columns(json_casts(df.schema, error=CliError))
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         writer(df, path)

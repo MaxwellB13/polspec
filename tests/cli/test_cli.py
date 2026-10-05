@@ -409,16 +409,41 @@ def test_generate_writes_a_file_the_readers_read_back(tmp_path, suffix, capsys):
     out = tmp_path / "out" / f"rows{suffix}"
     assert run_cli("generate", spec, "-n", 40, "-o", out, "--seed", 1) == 0
     assert f"Wrote 40 row(s) of Orders to {out}" in capsys.readouterr().out
-    # What generate wrote, the readers read -- through the same suffix map.
-    # (A text format hands dates back as strings, so the shape is what a
-    # round trip can promise; `validate` is asserted on the typed formats.)
+    # What generate wrote, the readers read -- through the same suffix map --
+    # and the spec accepts: a text format's dates are read back as declared.
     from polspec.cli._io import _read_data_file
 
     back = _read_data_file(out, None)
     assert back.height == 40
     assert back.columns == ["order_id", "status", "total", "placed"]
-    if suffix in (".parquet", ".pq", ".arrow"):
-        assert run_cli("validate", spec, out) == 0
+    assert run_cli("validate", spec, out) == 0
+
+
+@pytest.mark.parametrize("suffix", [".ndjson", ".json"])
+def test_generate_to_json_writes_categories_as_text_and_refuses_bytes(
+    tmp_path, suffix, capsys
+):
+    """Before 0.15.1 both panicked inside Polars' JSON writer."""
+    tagged = tmp_path / "tagged.py"
+    tagged.write_text(
+        "import polars as pl\nfrom polspec import ColSpec, FrameSpec\n\n"
+        "class Tagged(FrameSpec):\n"
+        "    tags = ColSpec(pl.List(pl.Enum(['x', 'y'])), list_length=(1, 1))\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / f"tagged{suffix}"
+    assert run_cli("generate", tagged, "-n", 500, "-o", out, "--seed", 1) == 0
+    assert run_cli("validate", tagged, out) == 0
+
+    blob = tmp_path / "blob.py"
+    blob.write_text(
+        "import polars as pl\nfrom polspec import ColSpec, FrameSpec\n\n"
+        "class Blob(FrameSpec):\n    data = ColSpec(pl.Binary)\n",
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+    assert run_cli("generate", blob, "-n", 5, "-o", tmp_path / f"b{suffix}") != 0
+    assert "JSON has no bytes" in capsys.readouterr().err
 
 
 def test_every_reader_has_a_writer():
@@ -1041,6 +1066,26 @@ def test_output_and_failing_split_the_file(tmp_path, capsys):
     assert "__polspec_finding" in failing.columns
     err = capsys.readouterr().err
     assert "2 passing row(s)" in err and "2 failing row(s)" in err
+
+
+def test_failing_holds_each_row_once_so_the_two_files_split_the_input(tmp_path):
+    """Before 0.15.1 `--failing` wrote a row once per claim it broke: the
+    two files held more rows than the input, and a count of rejected rows
+    overcounted."""
+    source, data = _split_files(
+        tmp_path, "1,NEW,10\n2,LOST,500\n3,PAID,500\n4,PAID,30\n1,LOST,20\n"
+    )
+    clean, bad = tmp_path / "clean.csv", tmp_path / "bad.csv"
+    assert run_cli("validate", source, data, "--output", clean, "--failing", bad) == 1
+    passing, failing = pl.read_csv(clean), pl.read_csv(bad)
+    assert passing.height + failing.height == 5
+    # In the file's order, each row once, every claim it breaks named.
+    assert failing["order_id"].to_list() == [1, 2, 3, 1]
+    findings = [set(f.split(",")) for f in failing["__polspec_finding"]]
+    assert findings[0] == {"order_id__unique"}
+    assert findings[1] == {"status__choices", "total__bounds"}
+    assert findings[2] == {"total__bounds"}
+    assert findings[3] == {"order_id__unique", "status__choices"}
 
 
 def test_json_stays_one_document_when_files_are_written(tmp_path, capsys):

@@ -42,12 +42,28 @@ seed produces; see
   only when every list has its width. Anything else stays as it arrived and
   is reported. Every case in the test catalogue JSON can hold now reads back
   equal to what was generated; NaN, which JSON writes as `null`, cannot.
+- **Writing JSON no longer panics on categories.** A list of a few hundred
+  `Enum` or `Categorical` values panicked Polars' JSON writer (1.x and 2.0
+  alike), in `sink_ndjson` and in `polspec generate`, `--output` and
+  `--failing` to `.ndjson`, `.jsonl` or `.json`. Categories are written as
+  their text -- the same file -- and read back as declared.
 - **A list or array column named `""` generates.** It raised a `SpecError`
   about its element's `seed_name`; its values are what a column of any other
   name would draw.
 
 ### Changed
 
+- **`polspec validate --failing` writes each failing row once.** A row
+  breaking several claims was written once per claim, so `--output` and
+  `--failing` held more rows than the file and a count of rejected rows
+  overcounted. Each row is written once now, in the file's order, its
+  `__polspec_finding` naming every claim it broke, comma-separated: the two
+  files split the input exactly. `ValidationReport.failing_rows()` is
+  unchanged -- once per claim, for grouping by claim.
+- **A `Binary` column is refused by name when writing JSON**, which has no
+  bytes, with a `GenerationError` from `sink_ndjson` and an error from the
+  command line, before anything is written. It panicked inside Polars'
+  writer before -- an exception `except Exception` does not catch.
 - **A column name holding a NUL character is refused when the spec is
   declared**, with a `SpecError`. It constructed before, then panicked in
   Arrow's C interface the first time anything generated.
@@ -58,6 +74,10 @@ seed produces; see
   read, whitespace, keywords, leading digits, non-ASCII, the empty string and
   arbitrary text -- and hold generation, validation, YAML, the data
   dictionary and the ER diagram to them. They found the two defects above.
+- The README's example runs in the test suite, on its own, as someone
+  copying it would run it.
+- Every case in the test catalogue is written with `sink_ndjson` and read
+  back with `read()`, and must equal what was generated.
 
 ## [0.15.0] - 2026-10-04
 

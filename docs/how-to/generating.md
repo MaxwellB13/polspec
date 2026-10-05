@@ -202,7 +202,11 @@ polars' own sink. Nothing beyond Polars is needed for any of them.
 
 With `n=0`, Parquet, IPC and CSV still write a valid schema-bearing file.
 A CSV cannot hold a `Duration`, `List` or `Struct` column, so `sink_csv`
-refuses a spec with one; Parquet and IPC keep every dtype.
+refuses a spec with one; Parquet and IPC keep every dtype. JSON holds
+categories, decimals and durations as text, which
+[`read()`](validating.md) reads back as declared; it has no bytes, so
+`sink_ndjson` refuses a `Binary` column, and no NaN, which it writes as
+`null`.
 
 A sink is the shorthand; `Orders.scan(n, seed=1).sink_parquet(path)` is the
 same write with the rest of a lazy plan available — a `filter`, a `select`,
