@@ -266,11 +266,12 @@ dtype check. `--skip CHECK` turns off one kind of check, as the matching
 takes any of `rules`, `validators`, `unique`, `checks`, `foreign_keys`,
 `hierarchy`, `pattern` and `bounds`.
 
-A CSV, TSV or JSON file has no date type, so a date arrives as text. The CLI
-reads each column the spec declares as a `Date`, `Datetime` or `Time` as
-that type when every value in it parses; a column holding a value that does
-not stays text, and is reported as a `dtype` finding rather than turned into
-a null. A `String` column of date-shaped text is left alone. `drift` reads
+A CSV, TSV or JSON file has no date type, so a date arrives as text -- and
+JSON holds a decimal or a duration as text too. The CLI reads each column
+the spec declares as a `Date`, `Datetime`, `Time`, `Decimal` or `Duration`
+as that type when every value in it parses exactly, as
+[`read()`](validating.md) does; a column holding a value that does not stays
+text, and is reported as a `dtype` finding rather than turned into a null. A `String` column of date-shaped text is left alone. `drift` reads
 the same way, and `schema infer`, with no spec to go by, recognises a CSV's
 dates itself.
 

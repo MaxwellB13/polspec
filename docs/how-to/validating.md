@@ -134,6 +134,16 @@ gaps between a CSV and a spec take care of themselves -- a `String` column
 is accepted where an `Enum` or `Categorical` is declared, an integer where a
 float or `Decimal` is, and the values are checked either way.
 
+JSON has a few more gaps, and `read()` closes each the same way, only for
+what the spec declares and only when every value reads exactly. Polars
+writes a `Decimal` as text (`"1.25"`), read back from its digits -- never
+rounded, so `"1.255"` in a two-place column stays text and is reported. It
+writes a `Duration` as ISO 8601 seconds (`"PT3600S"`, `"-PT0.5S"`, `"P0D"`),
+a fixed-size `Array` as a list, dates inside a list or struct as text, and a
+column of nothing but nulls with no type at all; each is read back as
+declared. What JSON cannot hold at all no reader brings back: NaN is
+written as `null`.
+
 In plain Polars, `pl.read_csv("customers.csv", try_parse_dates=True)` comes
 close; the difference is that Polars parses every column that looks like a
 date, where `read()` parses only the ones the spec says are dates.

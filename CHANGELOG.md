@@ -31,6 +31,17 @@ seed produces; see
   would read as another (`ﬁle` as `file`) wrote `class Odd Name(FrameSpec):`.
   It raises `SerializationError` now, before anything is written, naming a
   `spec.with_name(...)` that works and `to_yaml()`, which keeps any name.
+- **What `sink_ndjson` writes, `read()` reads back.** Polars writes a
+  `Decimal` to JSON as text (`"1.25"`), a `Duration` as ISO 8601 seconds
+  (`"PT3600S"`), a fixed-size `Array` as a list, a date inside a list or
+  struct as text, and a column of nothing but nulls with no type -- so a
+  spec's own NDJSON output failed its own validation. `read()`, and the
+  command line through it, now reads each back as the spec declares it,
+  when every value reads exactly: a decimal from its digits and never
+  rounded, a duration with integer arithmetic to the nanosecond, an array
+  only when every list has its width. Anything else stays as it arrived and
+  is reported. Every case in the test catalogue JSON can hold now reads back
+  equal to what was generated; NaN, which JSON writes as `null`, cannot.
 - **A list or array column named `""` generates.** It raised a `SpecError`
   about its element's `seed_name`; its values are what a column of any other
   name would draw.
