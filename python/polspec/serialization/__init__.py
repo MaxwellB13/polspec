@@ -8,6 +8,9 @@ older file forward before it is read.
 
 from __future__ import annotations
 
+import keyword
+import re
+import unicodedata
 import warnings
 from collections.abc import Mapping
 from pathlib import Path
@@ -248,14 +251,52 @@ def from_yaml(
 # ---------------------------------------------------------------------------
 
 
+def _class_name_problem(name: str) -> str | None:
+    """Why `class <name>` would not declare a class of that very name."""
+    if not name.isidentifier():
+        return "is not a Python identifier"
+    if keyword.iskeyword(name) or name == "__debug__":
+        return "is reserved by Python"
+    normalized = unicodedata.normalize("NFKC", name)
+    if normalized != name:
+        return f"would be declared as {normalized!r}, which Python reads it as"
+    return None
+
+
+def _require_class_name(name: str) -> None:
+    """A spec's name is the class `to_python` writes, so it must be one
+    Python declares under that same name -- or nothing is written."""
+    why = _class_name_problem(name)
+    if why is None:
+        return
+    words = re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", name))
+    suggestion = "".join(w[:1].upper() + w[1:] for w in words) or "Spec"
+    if not suggestion[0].isalpha():
+        suggestion = f"Spec{suggestion}"
+    if _class_name_problem(suggestion) is not None:
+        suggestion = "Spec"
+    raise SerializationError(
+        f"Cannot write spec {name!r} as Python: a spec's name is its class "
+        f"name, and this one {why}. Rename it first -- "
+        f"spec.with_name({suggestion!r}) -- or write it with to_yaml(), which "
+        "keeps any name."
+    )
+
+
 def to_python(spec: TableSpec, source: str | Path) -> None:
     """Writes `spec` as a Python module defining a `FrameSpec` subclass.
 
     Columns are declared through `__columns__`, since a name straight from
     data is not always a valid identifier. Checks and validators over raw
     expressions cannot be written and warn.
+
+    The spec's own name is the class name, so it must be one: a name that is
+    not an identifier, or is a keyword, raises `SerializationError` before
+    anything is written. Rename it with `spec.with_name(...)`, or write it
+    with `to_yaml`, which keeps any name.
     """
     require_columns(spec)
+    _require_class_name(spec.name)
     _warn_unserializable(spec, source, "python")
 
     data = tablespec_to_data(spec)
