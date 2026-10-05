@@ -864,3 +864,13 @@ def test_a_time_zoned_datetime_completes_the_round_trip():
     df = spec_cls.generate(ROWS, seed=SEED)
     assert df["c"].dtype == pl.Datetime("us", "UTC")
     spec_cls.validate(df)
+
+
+@pytest.mark.xfail(strict=True, reason="limitations.md: Polars reads it as a pattern")
+@pytest.mark.parametrize("name", ["*", "^c$"])
+def test_a_column_named_as_a_polars_pattern_round_trips(name):
+    """`pl.col("*")` is every column and `pl.col("^c$")` a regular
+    expression, so a column named either is out of reach of polspec's own
+    references to it. Found by the awkward-names property in 0.15.1."""
+    spec = TableSpec("P", {name: ColSpec(pl.Int8), "c": ColSpec(pl.Array(pl.Int8, 1))})
+    validate(spec, generate(spec, ROWS, seed=SEED))

@@ -347,8 +347,14 @@ NAMES = st.one_of(
     st.sampled_from(_AWKWARD_NAMES),
     st.text(st.characters(exclude_categories=("Cs",)), max_size=8),
 ).filter(
-    # `flag` is the rule's key, below; a NUL is refused by name.
-    lambda name: name != "flag" and "\x00" not in name
+    # `flag` is the rule's key, below; a NUL is refused by name; and a name
+    # Polars reads as a pattern is a known limitation (limitations.md).
+    lambda name: (
+        name != "flag"
+        and "\x00" not in name
+        and name != "*"
+        and not (name.startswith("^") and name.endswith("$"))
+    )
 )
 
 

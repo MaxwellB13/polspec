@@ -142,6 +142,12 @@ pinned by a passing test. A NaN, by contrast, is recorded as the column's
   `Array` or `Map` column are drawn afresh in each batch of
   `generate_batches`, a `scan()` or a `sink_*` -- deterministic for a seed,
   but not the values `generate()` would put there past the first batch.
+- **A column named `*`, or `^…$`, cannot be generated or validated.**
+  Polars reads `pl.col("*")` as every column and `pl.col("^id$")` as a
+  regular expression, and polspec refers to its columns by name, so a column
+  so named reaches the wrong columns. Such a spec declares, and then fails
+  with a Polars error. Any other name -- spaces, punctuation, keywords, the
+  empty string -- works.
 - **A unique string favours its longest lengths.** It is drawn uniformly
   from every string its lengths allow, and the longest lengths hold nearly
   all of them.
