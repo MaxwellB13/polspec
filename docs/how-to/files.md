@@ -164,6 +164,21 @@ the file is where you then add them back by hand. `polspec schema infer` uses
 this path when its output ends in `.py`; see
 [Command line](cli.md).
 
+The spec's own name is the class name, so it has to be one Python can
+declare. A `TableSpec` may be named anything — by
+`profile(name="daily orders")`, or a YAML file's `name:` — and one that is
+not an identifier, or
+is a keyword like `class`, raises `SerializationError` before anything is
+written. Rename it, or keep it in YAML, which holds any name:
+
+```python
+from polspec import TableSpec
+from polspec.serialization import to_python
+
+spec = TableSpec("daily orders", {"id": ColSpec(pl.Int64)})
+to_python(spec.with_name("DailyOrders"), "daily_orders.py")
+```
+
 ## Column names from data
 
 `from_yaml` and `to_python` declare columns through `__columns__`, so names

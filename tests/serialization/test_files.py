@@ -16,9 +16,12 @@ from polspec import (
     ColSpec,
     ForeignKey,
     FrameSpec,
+    SerializationError,
+    TableSpec,
     ValidationError,
     col,
 )
+from polspec.serialization import from_yaml, to_python, to_yaml
 from polspec.serialization.fields import colspec_to_data
 
 # ---------------------------------------------------------------------------
@@ -287,6 +290,43 @@ def test_to_python_handles_non_identifier_column_names(tmp_path):
     assert set(Loaded.spec.columns) == {"Unit Price", "_id"}
     df = Loaded.generate(10, seed=1)
     Loaded.validate(df)
+
+
+@pytest.mark.parametrize(
+    ("name", "why", "suggestion"),
+    [
+        ("Odd Name", "is not a Python identifier", "OddName"),
+        ("2024 orders", "is not a Python identifier", "Spec2024Orders"),
+        ("class", "is reserved by Python", "Class"),
+        ("__debug__", "is reserved by Python", "Debug"),
+        ("\N{LATIN SMALL LIGATURE FI}le", "which Python reads it as", "File"),
+        ("Größe Tabelle", "is not a Python identifier", "GrößeTabelle"),
+    ],
+)
+def test_to_python_refuses_a_name_it_cannot_declare(tmp_path, name, why, suggestion):
+    """Before 0.15.1 these wrote `class Odd Name(FrameSpec):`, a module that
+    did not parse. Nothing is written now, and the error says what to do."""
+    spec = TableSpec(name, {"x": ColSpec(pl.Int64)})
+    path = tmp_path / "spec.py"
+    with pytest.raises(SerializationError, match=why) as error:
+        to_python(spec, path)
+    assert repr(name) in str(error.value)
+    assert f"spec.with_name({suggestion!r})" in str(error.value)
+    assert "to_yaml()" in str(error.value)
+    assert not path.exists()
+    # The two ways out both work.
+    to_python(spec.with_name(suggestion), path)
+    assert _exec_python_spec(path)[suggestion].spec == spec.with_name(suggestion)
+    to_yaml(spec, tmp_path / "spec.yaml")
+    assert from_yaml(tmp_path / "spec.yaml") == spec
+
+
+def test_to_python_writes_a_name_that_shadows_its_own_imports(tmp_path):
+    for name in ("pl", "ColSpec", "FrameSpec", "match", "größe"):
+        spec = TableSpec(name, {"x": ColSpec(pl.Int64, bounds=(0, 9))})
+        path = tmp_path / "spec.py"
+        to_python(spec, path)
+        assert _exec_python_spec(path)[name].spec == spec
 
 
 def test_to_python_requires_columns(tmp_path):

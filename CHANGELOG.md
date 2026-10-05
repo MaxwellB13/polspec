@@ -25,6 +25,12 @@ seed produces; see
   Mermaid reserves (`class`, `end`, `one`, ...). A `~` in a note -- a
   choice, a pattern, a name -- is drawn as the look-alike `∼`, since Mermaid
   10's parser hung on it. Names that already read are drawn as before.
+- **`to_python` refuses a spec name it cannot declare, instead of writing a
+  module that does not parse.** A spec's name is the class name, and a
+  `TableSpec` may be named anything: `Odd Name`, `class`, or a name Python
+  would read as another (`ﬁle` as `file`) wrote `class Odd Name(FrameSpec):`.
+  It raises `SerializationError` now, before anything is written, naming a
+  `spec.with_name(...)` that works and `to_yaml()`, which keeps any name.
 - **A list or array column named `""` generates.** It raised a `SpecError`
   about its element's `seed_name`; its values are what a column of any other
   name would draw.

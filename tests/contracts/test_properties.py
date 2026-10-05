@@ -37,6 +37,7 @@ from polspec import (
     Check,
     ColRule,
     ColSpec,
+    SerializationError,
     SpecError,
     TableSpec,
     col,
@@ -440,9 +441,21 @@ def test_a_drawn_spec_survives_a_yaml_file(spec, seed):
 @settings(SETTINGS, max_examples=25)
 @given(spec=specs(), seed=_SEEDS)
 def test_a_drawn_spec_survives_a_python_file(spec, seed):
+    reloaded = _through_python(spec)
+    assert reloaded == spec
+    assert generate(reloaded, 50, seed=seed).equals(generate(spec, 50, seed=seed))
+
+
+def _through_python(spec: TableSpec) -> TableSpec:
+    """`spec` written by `to_python`, imported, and read back -- or the
+    `to_python` error, with nothing left on disk."""
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "drawn_spec.py"
-        to_python(spec, path)
+        try:
+            to_python(spec, path)
+        except SerializationError:
+            assert not path.exists()
+            raise
         module_spec = importlib.util.spec_from_file_location("_drawn_spec", path)
         assert module_spec is not None and module_spec.loader is not None
         module = importlib.util.module_from_spec(module_spec)
@@ -451,9 +464,51 @@ def test_a_drawn_spec_survives_a_python_file(spec, seed):
             module_spec.loader.exec_module(module)
         finally:
             del sys.modules["_drawn_spec"]
-    reloaded = module.Drawn.spec
+    return getattr(module, spec.name).spec
+
+
+def _python_declares(name: str) -> bool:
+    """Whether `class <name>` declares a class under that very name -- asked
+    of Python itself, and only of identifiers, so nothing else is run."""
+    if not name.isidentifier():
+        return False
+    namespace: dict[str, Any] = {}
+    try:
+        exec(f"class {name}: pass", namespace)  # an identifier: nothing else runs
+    except SyntaxError:
+        return False
+    return name in namespace
+
+
+# Spec names `to_python` writes, or refuses: drawn text, names the file's own
+# imports also use, soft keywords, keywords, and names Python normalises.
+_CLASS_NAMES = st.one_of(
+    NAMES.filter(bool),
+    st.sampled_from(
+        [
+            *("Drawn", "pl", "col", "ColSpec", "FrameSpec", "match", "_"),
+            *("größe", "class", "None", "__debug__"),
+            "\N{LATIN SMALL LIGATURE FI}le",  # Python reads it as `file`
+            "\N{ROMAN NUMERAL NINE}",  # ... and this as `IX`
+        ]
+    ),
+)
+
+
+@settings(SETTINGS, max_examples=60)
+@given(spec=specs(names=NAMES, spec_name=_CLASS_NAMES), seed=_SEEDS)
+def test_any_name_is_written_as_python_or_refused_by_name(spec, seed):
+    """Before 0.15.1 a spec named `Odd Name` or `class` wrote a module that
+    did not parse."""
+    try:
+        reloaded = _through_python(spec)
+    except SerializationError as error:
+        assert not _python_declares(spec.name)
+        assert repr(spec.name) in str(error)
+        return
+    assert _python_declares(spec.name)
     assert reloaded == spec
-    assert generate(reloaded, 50, seed=seed).equals(generate(spec, 50, seed=seed))
+    assert generate(reloaded, 20, seed=seed).equals(generate(spec, 20, seed=seed))
 
 
 _NAMED = specs(names=NAMES, spec_name=NAMES.filter(bool))
