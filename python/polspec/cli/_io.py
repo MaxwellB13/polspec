@@ -23,7 +23,7 @@ import polars as pl
 from polspec import FrameSpec
 from polspec.errors import CliError
 from polspec.frames import sample_rows
-from polspec.reading import _DELIMITED, _parse_declared_temporals
+from polspec.reading import _DELIMITED, _parse_declared_text
 from polspec.reading import _READERS as _DATA_READERS
 from polspec.registry import Registry, load_module
 
@@ -79,7 +79,7 @@ def _read_data_file(
         df = sample_rows(df, sample)
     except ValueError as exc:
         raise CliError(str(exc)) from exc
-    return _parse_declared_temporals(df, spec) if spec is not None else df
+    return _parse_declared_text(df, spec) if spec is not None else df
 
 
 def _write_data_file(df: pl.DataFrame, path: Path) -> None:

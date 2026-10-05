@@ -62,7 +62,8 @@ production will reject.
 
     `validate()` raises on any breach; `inspect()` returns every finding as
     data, with the offending rows a filter away. `read()` loads a data file
-    in the spec's terms first, parsing dates that arrived as text.
+    in the spec's terms first, parsing dates, decimals and durations that
+    arrived as text.
 
     [Validating data](how-to/validating.md)
 
