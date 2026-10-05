@@ -20,6 +20,7 @@ from cases import COLUMN_CASES
 from polspec import (
     ColSpec,
     FrameSpec,
+    GenerationError,
     TableSpec,
     generate,
     inspect,
@@ -138,9 +139,8 @@ def test_read_then_validate_cast_is_the_typed_frame(tmp_path):
 def _json_cannot_hold(column: ColSpec) -> str | None:
     """Why a column cannot survive NDJSON at all -- lost on the way out, so
     nothing on the way in can bring it back."""
-    dtype = str(column.dtype)
-    if "Binary" in dtype or "List(Enum" in dtype or "List(Categorical" in dtype:
-        return "Polars 1.x cannot write it to JSON"
+    if "Binary" in str(column.dtype):
+        return "JSON has no bytes: sink_ndjson refuses it by name"
     if column.nan_probability:
         return "JSON has no NaN: Polars writes it as null"
     return None
@@ -160,6 +160,33 @@ def test_what_sink_ndjson_writes_read_reads_back_exactly(tmp_path, case):
     frame = read(spec, path)
     assert not inspect(spec, frame)
     assert validate(spec, frame, cast=True).equals(generate(spec, 300, seed=11))
+
+
+def test_sink_ndjson_refuses_bytes_by_name_instead_of_panicking(tmp_path):
+    """Before 0.15.1 a `Binary` column panicked inside Polars' JSON writer,
+    an exception `except Exception` does not catch."""
+    spec = TableSpec("T", {"blob": ColSpec(pl.List(pl.Binary))})
+    path = tmp_path / "t.ndjson"
+    with pytest.raises(GenerationError, match=r"'blob' is List\(Binary\).*Parquet"):
+        sink_ndjson(spec, path, 10, seed=1)
+    assert not path.exists()
+
+
+def test_categories_are_written_as_text_and_read_back(tmp_path):
+    """A list of a few hundred categories panicked Polars' JSON writer."""
+    spec = TableSpec(
+        "T",
+        {
+            "tags": ColSpec(pl.List(pl.Enum(["x", "y"])), list_length=(1, 1)),
+            "kind": ColSpec(pl.Categorical, choices=["a", "b"]),
+        },
+    )
+    path = tmp_path / "t.ndjson"
+    sink_ndjson(spec, path, 500, seed=1)
+    assert path.read_text(encoding="utf-8").startswith('{"tags":["')
+    frame = read(spec, path)
+    assert not inspect(spec, frame)
+    assert validate(spec, frame, cast=True).equals(generate(spec, 500, seed=1))
 
 
 def _ndjson(tmp_path, values: dict[str, list]) -> Path:

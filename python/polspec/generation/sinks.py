@@ -15,7 +15,8 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from polspec.frames import Method, References
+from polspec.errors import GenerationError
+from polspec.frames import Method, References, json_casts
 from polspec.generation.pipeline import requires_whole_frame
 from polspec.generation.scan import scan
 from polspec.tablespec import SpecLike, as_table_spec, require_columns
@@ -129,7 +130,13 @@ def sink_ndjson(
 ) -> None:
     """Generates `n` rows and streams them to a newline-delimited JSON file in batches.
 
+    JSON holds a category as its text, so an `Enum` or `Categorical` column
+    is written as one -- which `read()` reads back as declared. JSON has no
+    bytes: a spec with a `Binary` column raises `GenerationError` before
+    anything is written, rather than panicking Polars' writer.
+
     Extra keyword arguments go to `pl.LazyFrame.sink_ndjson`.
     """
     lf, target = _scan(spec, path, n, batch_size, method, seed, references)
-    lf.sink_ndjson(target, **kwargs)
+    casts = json_casts(lf.collect_schema(), error=GenerationError)
+    lf.with_columns(casts).sink_ndjson(target, **kwargs)

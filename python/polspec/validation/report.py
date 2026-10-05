@@ -211,10 +211,39 @@ class ValidationReport:
             )
         return pl.concat(parts, how="vertical_relaxed")
 
+    def _failing_once(self) -> pl.LazyFrame:
+        """Every row that violates a row-level finding, once and in the
+        frame's order, its `__polspec_finding` naming each finding it
+        violates, comma-separated in the report's order -- the quarantine
+        file `polspec validate --failing` writes, which with
+        `passing_rows()` splits a frame exactly."""
+        row_level = [f for f in self.findings if f.row_level]
+        if not row_level:
+            return self.failing_rows()
+        indexed = self.frame.with_row_index(_ROW_INDEX)
+        hits = pl.concat(
+            [
+                f.rows(indexed).select(
+                    _ROW_INDEX, pl.lit(f.key, dtype=pl.String).alias(FINDING_COLUMN)
+                )
+                for f in row_level
+            ]
+        )
+        named = hits.group_by(_ROW_INDEX, maintain_order=True).agg(
+            pl.col(FINDING_COLUMN).unique(maintain_order=True).str.join(",")
+        )
+        return (
+            indexed.join(named, on=_ROW_INDEX, how="inner")
+            .sort(_ROW_INDEX)
+            .drop(_ROW_INDEX)
+        )
+
     def passing_rows(self) -> pl.LazyFrame:
-        """Every row no finding touched, lazily and in the frame's order --
-        the complement of `failing_rows()`, so the two split a frame into
-        what passed and what to quarantine.
+        """Every row no finding touched, lazily and in the frame's order.
+
+        With the rows of any row-level finding -- each once, however many
+        claims it breaks; `failing_rows()` lists a row once per claim -- the
+        two split a frame into what passed and what to quarantine.
 
         Raises `ValueError` when a structural finding (a wrong `dtype`,
         `missing_columns`, `extra_columns`, `foreign_key_unresolved`) is in

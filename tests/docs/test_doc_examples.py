@@ -1,4 +1,4 @@
-"""Every Python example in `docs/` is executed.
+"""Every Python example in `docs/` and the README is executed.
 
 The rest of `test_docs.py` checks that the documentation *points* at things
 that exist -- every exported name reachable, every link resolving, every page
@@ -165,6 +165,19 @@ def test_a_pages_examples_run(page: Path, tmp_path: Path, monkeypatch) -> None:
                 f"    <!-- docs: raises -->   if it demonstrates this error\n"
                 f"    <!-- docs: warns -->    if it demonstrates this warning"
             )
+
+
+def test_the_readmes_examples_run_on_their_own(tmp_path: Path, monkeypatch) -> None:
+    """The first code anyone copies, run as they would run it: with nothing
+    declared beforehand, no preamble, no markers."""
+    readme = DOCS.parent / "README.md"
+    blocks = _blocks(readme)
+    assert blocks, "README.md has no python example"
+    monkeypatch.chdir(tmp_path)
+    namespace: dict[str, object] = {"__name__": "readme_example"}
+    for line, marker, code in blocks:
+        assert marker is None, f"README.md:{line} needs no marker"
+        exec(compile(code, f"README.md:{line}", "exec"), namespace)
 
 
 def test_every_page_with_examples_is_covered() -> None:
