@@ -8,6 +8,26 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-10-05
+
+**What polspec writes, it reads back -- and a person can open.** A patch
+release from the 0.15.0 review, about the edges rather than the core: the
+documents, diagrams and spec files polspec writes for people, the NDJSON it
+writes for itself, and the quarantine file `--failing` writes. Each fix
+makes something that failed work, or refuses it by name, and is pinned by a
+test that fails on 0.15.0. The property tests now draw awkward names --
+pipes, spaces, keywords, the empty string -- and found two more defects of
+their own.
+
+**Changed, on purpose:** `--failing` writes each failing row once, naming
+every claim it broke. A `Binary` column is refused when writing JSON, and a
+column name holding a NUL when the spec is declared; both panicked inside
+Polars before.
+
+**No seeded output changes.** Every spec that constructs under 0.15.0
+generates what it did -- checked against the published 0.15.0 across 463
+cases -- and no spec file needs migrating.
+
 ### Fixed
 
 - **`to_markdown()` keeps its tables whole, whatever the names.** A `|` in a
@@ -78,6 +98,10 @@ seed produces; see
   copying it would run it.
 - Every case in the test catalogue is written with `sink_ndjson` and read
   back with `read()`, and must equal what was generated.
+- A newly known limitation, found by the same properties: a column named
+  `*` or `^…$` cannot be generated or validated, since Polars reads
+  `pl.col()` of either as a pattern. It is listed in Known limitations and
+  pinned by a strict xfail, so the day it works the suite says so.
 
 ## [0.15.0] - 2026-10-04
 
@@ -2102,7 +2126,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.15.1...HEAD
+[0.15.1]: https://github.com/MaxwellB13/polspec/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/MaxwellB13/polspec/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/MaxwellB13/polspec/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/MaxwellB13/polspec/compare/v0.13.0...v0.13.1
