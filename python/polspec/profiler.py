@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 
 import polars as pl
 
+from polspec import frames
 from polspec.bound import Bound
 from polspec.constants import DEFAULT_NULL_PROBABILITY
 from polspec.dtypes import MAP, field_dtypes, map_entries
@@ -213,6 +214,7 @@ def _profile_column(
     carried over; `top` is False for a struct's field or a list's element,
     which cannot be declared unique.
     """
+    series = frames.plain(series)  # `name` carries the real name
     dtype = series.dtype
     non_null = series.drop_nulls()
     nullable, null_probability = _nullability(series, total_rows)
@@ -477,9 +479,9 @@ def _named_format(
         fmt = _lookup_format(name)
         if fmt.is_finite and not finite:
             continue
-        fits = fmt.check(pl.col(value))
+        fits = fmt.check(frames.column(value))
         if name == "hostname":
-            fits = fits & pl.col(value).str.contains(".", literal=True)
+            fits = fits & frames.column(value).str.contains(".", literal=True)
         misses = probe.select((~fits.fill_null(False)).sum()).item()
         if misses > allowed_misses:
             continue

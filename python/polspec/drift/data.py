@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import polars as pl
 
+from polspec import frames
 from polspec.bound import Bound
 from polspec.domain import Domain, is_textual
 from polspec.dtypes import field_dtypes, map_entries
@@ -137,6 +138,7 @@ class Observed:
         cls, series: pl.Series, declared: ColSpec, options: DriftOptions
     ) -> Observed:
         """Measures `series` in the terms `declared` uses."""
+        series = frames.plain(series)
         values = series.drop_nulls()
         measured: dict[str, Any] = {
             "dtype": series.dtype,

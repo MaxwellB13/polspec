@@ -342,19 +342,17 @@ _AWKWARD_NAMES = [
     "new\nline",
     "slash\\|pipe",
     "%%",
+    # Names Polars reads as patterns: every column, and regular expressions.
+    "*",
+    "^c0$",
+    "^.*$",
 ]
 NAMES = st.one_of(
     st.sampled_from(_AWKWARD_NAMES),
     st.text(st.characters(exclude_categories=("Cs",)), max_size=8),
 ).filter(
-    # `flag` is the rule's key, below; a NUL is refused by name; and a name
-    # Polars reads as a pattern is a known limitation (limitations.md).
-    lambda name: (
-        name != "flag"
-        and "\x00" not in name
-        and name != "*"
-        and not (name.startswith("^") and name.endswith("$"))
-    )
+    # `flag` is the rule's key, below; a NUL is refused by name.
+    lambda name: name != "flag" and "\x00" not in name
 )
 
 
@@ -470,7 +468,7 @@ def _through_python(spec: TableSpec) -> TableSpec:
             module_spec.loader.exec_module(module)
         finally:
             del sys.modules["_drawn_spec"]
-    return getattr(module, spec.name).spec
+    return vars(module)[spec.name].spec  # `__dict__` is a name too
 
 
 def _python_declares(name: str) -> bool:

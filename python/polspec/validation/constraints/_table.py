@@ -11,6 +11,7 @@ import polars as pl
 if TYPE_CHECKING:
     from polspec.check import Check
 
+from polspec import frames
 from polspec.validation.constraints._base import Constraint, struct_of
 from polspec.validation.report import FindingCode
 
@@ -72,8 +73,10 @@ def frame_constraints(
         columns = tuple(group)
         if not all(c in df_col_names for c in columns):
             continue
-        key_struct = pl.struct([pl.col(c) for c in columns])
-        all_present = pl.all_horizontal([pl.col(c).is_not_null() for c in columns])
+        key_struct = pl.struct(frames.columns(columns))
+        all_present = pl.all_horizontal(
+            [frames.column(c).is_not_null() for c in columns]
+        )
         constraints.append(
             _CompositeUnique(
                 key=f"composite_{index}",

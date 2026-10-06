@@ -7,6 +7,7 @@ from collections.abc import Mapping
 
 import polars as pl
 
+from polspec import frames
 from polspec._ffi import permuted_indices
 from polspec.errors import GenerationError
 from polspec.foreign_key import ForeignKey
@@ -32,7 +33,7 @@ def unique_parent_shortfall(
     if len(local_cols) != 1 or not columns[local_cols[0]].unique:
         return None
     ref_cols = list(fk.ref_columns)
-    distinct = parent_df.select(ref_cols).drop_nulls().unique().height
+    distinct = parent_df.select(frames.columns(ref_cols)).drop_nulls().unique().height
     if distinct >= rows:
         return None
     return (
@@ -82,7 +83,11 @@ def apply_foreign_key(
     local_cols = list(fk.columns)
     ref_cols = list(fk.ref_columns)
 
-    parent_keys = parent_df.select(ref_cols).drop_nulls().unique(maintain_order=True)
+    parent_keys = (
+        parent_df.select(frames.columns(ref_cols))
+        .drop_nulls()
+        .unique(maintain_order=True)
+    )
     if parent_keys.height == 0:
         raise GenerationError(
             f"ForeignKey '{fk.name}' cannot generate values: the referenced "
@@ -108,11 +113,11 @@ def apply_foreign_key(
 
     exprs = []
     for local_col, ref_col in zip(local_cols, ref_cols, strict=True):
-        sampled_col = sampled_rows[ref_col].cast(df.schema[local_col])
+        sampled_col = frames.plain(sampled_rows[ref_col]).cast(df.schema[local_col])
         exprs.append(
-            pl.when(pl.col(local_col).is_not_null())
+            pl.when(frames.column(local_col).is_not_null())
             .then(pl.lit(sampled_col))
-            .otherwise(pl.col(local_col))
+            .otherwise(frames.column(local_col))
             .alias(local_col)
         )
     return df.with_columns(exprs)

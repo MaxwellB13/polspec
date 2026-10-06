@@ -29,6 +29,7 @@ from typing import Any, Literal
 import polars as pl
 
 from polspec.errors import SpecError
+from polspec.frames import column
 from polspec.scalars import TAGS as SCALAR_TAGS
 from polspec.scalars import from_plain, to_plain
 
@@ -225,7 +226,7 @@ class Col(Pred):
     name: str
 
     def to_expr(self) -> pl.Expr:
-        return pl.col(self.name)
+        return column(self.name)
 
     def to_data(self) -> dict[str, str]:
         return {"col": self.name}
@@ -565,7 +566,12 @@ class _StrNamespace:
 
 
 def col(name: str) -> Col:
-    """A reference to a column, the starting point of every predicate."""
+    """A reference to a column, the starting point of every predicate.
+
+    Exactly the column named `name`: unlike `pl.col`, `col("*")` is the
+    column named `*`, not every column, and `col("^id$")` is not a regular
+    expression.
+    """
     if not isinstance(name, str) or not name:
         raise SpecError(f"col() takes a non-empty column name, got {name!r}")
     return Col(name)

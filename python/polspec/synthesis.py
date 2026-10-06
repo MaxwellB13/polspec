@@ -22,6 +22,7 @@ from collections.abc import Sequence
 
 import polars as pl
 
+from polspec import frames
 from polspec.dtypes import dtype_value_limits
 from polspec.errors import GenerationError
 from polspec.frames import sample_rows
@@ -159,7 +160,7 @@ def synthesized(
     # values; a stand-in for the source has the source's own dtypes.
     # Column by column: `DataFrame.cast` skips a mapping's "" key.
     fake = fake.with_columns(
-        pl.col(c).cast(dtype)
+        frames.column(c).cast(dtype)
         for c, dtype in frame.schema.items()
         if fake.schema[c] != dtype
     )

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
+from polspec import frames
 from polspec.domain import is_textual
 from polspec.validation.report import FindingCode
 
@@ -64,7 +65,7 @@ def rule_constraints(
     its declaration does not accept, ends the list: the rows it would have
     claimed are unknown, so no later rule can be checked.
     """
-    column = pl.col(name)
+    column = frames.column(name)
     constraints: list[Constraint] = []
     claimed = pl.lit(False)
 

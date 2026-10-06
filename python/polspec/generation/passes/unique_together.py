@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
+from polspec import frames
 from polspec.domain import Domain
 from polspec.errors import GenerationError
 from polspec.generation.engine import generate_random
@@ -73,8 +74,8 @@ def apply_unique_together(
     if df.height == 0:
         return df
 
-    present = pl.all_horizontal([pl.col(m).is_not_null() for m in members])
-    key = pl.struct([pl.col(m) for m in members])
+    present = pl.all_horizontal([frames.column(m).is_not_null() for m in members])
+    key = pl.struct(frames.columns(members))
     # `is_first_distinct` leaves one row per combination alone; every later
     # row using it is a repeat to be moved.
     repeats = present & ~key.is_first_distinct()
@@ -107,7 +108,10 @@ def apply_unique_together(
     for _ in range(MAX_ROUNDS):
         fresh = generate_random(resampled, rows.len(), rng.randrange(2**63))
         df = df.with_columns(
-            [df[name].scatter(rows, fresh[name]) for name in resampled]
+            [
+                frames.plain(df[name]).scatter(rows, fresh[name]).alias(name)
+                for name in resampled
+            ]
         )
         rows = repeated_rows(df)
         if rows.len() == 0:
