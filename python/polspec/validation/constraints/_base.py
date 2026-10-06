@@ -14,6 +14,7 @@ from typing import Any
 
 import polars as pl
 
+from polspec import frames
 from polspec.dtypes import element_dtype, field_dtypes, map_entries, typed_values
 from polspec.validation.report import Finding, FindingCode
 
@@ -234,4 +235,4 @@ def sample_source(column: pl.Expr, dtype: pl.DataType) -> pl.Expr:
 
 def struct_of(names: Sequence[str]) -> pl.Expr | None:
     """A struct of the named columns, for sampling multi-column claims."""
-    return pl.struct([pl.col(n) for n in names]) if names else None
+    return pl.struct(frames.columns(names)) if names else None

@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
+from polspec import frames
 from polspec.frames import Method, References
 from polspec.generation.pipeline import (
     check_counts,
@@ -138,7 +139,7 @@ def scan(
             # meaning what it declares -- and the reader has to apply it,
             # since polars hands the predicate over rather than keeping it.
             kept = batch if predicate is None else batch.filter(predicate)
-            yield kept.select(wanted)
+            yield kept.select(frames.columns(wanted))
 
     register = pl.io.plugins.register_io_source
     return register(

@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import polars as pl
 
+from polspec import frames
 from polspec.constants import FILLED_IN
 from polspec.errors import ValidationError
 
@@ -230,7 +231,7 @@ class ValidationReport:
             ]
         )
         named = hits.group_by(_ROW_INDEX, maintain_order=True).agg(
-            pl.col(FINDING_COLUMN).unique(maintain_order=True).str.join(",")
+            frames.column(FINDING_COLUMN).unique(maintain_order=True).str.join(",")
         )
         return (
             indexed.join(named, on=_ROW_INDEX, how="inner")

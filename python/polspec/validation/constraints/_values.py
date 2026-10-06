@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
+from polspec import frames
 from polspec.domain import is_textual
 from polspec.dtypes import (
     dtype_value_limits,
@@ -310,7 +311,7 @@ def column_constraints(
     compile at all. For the same reason `df_col_names` is the columns a claim
     may *read*: present, and of a compatible dtype if declared.
     """
-    column = pl.col(name)
+    column = frames.column(name)
     constraints: list[Constraint] = []
 
     if not spec.nullable:

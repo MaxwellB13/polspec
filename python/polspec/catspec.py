@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import polars as pl
 
+from polspec import frames
 from polspec.dtypes import DtypeLike
 from polspec.errors import SpecError
 from polspec.serialization.dtypes import categories_from_data, physical_from_name
@@ -507,7 +508,7 @@ class CatSpec(metaclass=_CatSpecMeta):
                 enums[col_name] = dtype.categories.to_list()
             elif is_categorical_dtype(dtype):
                 categoricals[col_name] = _categories_of(dtype, col_name)
-                non_null = frame[col_name].drop_nulls()
+                non_null = frames.plain(frame[col_name]).drop_nulls()
                 if len(non_null) > 0:
                     choices[col_name] = non_null.unique().sort().to_list()
 
@@ -719,7 +720,7 @@ def _infer_from_frame(
             continue
 
         if is_categorical_dtype(dtype):
-            non_null = df[col_name].drop_nulls()
+            non_null = frames.plain(df[col_name]).drop_nulls()
             physical = default_physical or _auto_physical(non_null.n_unique())
             categoricals[col_name] = _categories_of(dtype, col_name, physical)
             if len(non_null) > 0:
@@ -731,7 +732,7 @@ def _infer_from_frame(
         if _skipped(col_name, include, exclude_patterns):
             continue
 
-        non_null = df[col_name].drop_nulls()
+        non_null = frames.plain(df[col_name]).drop_nulls()
         if len(non_null) == 0:
             continue
 

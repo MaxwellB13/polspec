@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
+from polspec import frames
 from polspec._ffi import column_plan
 from polspec._ffi import generate_dataframe as _generate_dataframe
 from polspec.bound import Bound
@@ -529,13 +530,15 @@ def generate_random(
     finished: dict[str, pl.Series] = {}
     for name, spec in columns.items():
         if name in scalars:
+            values = raw.pop(name)
+            if frames.is_pattern(name):
+                # Finished under a plain name -- see `frames.plain` -- and
+                # seeded by its own, so its NaNs are the ones it would draw.
+                values = frames.plain(values)
+                spec = dataclasses.replace(spec, seed_name=spec.seed_name or name)
             finished[name] = _with_nans(
-                _finish(raw.pop(name), spec, domains[name]),
-                spec,
-                n,
-                seed,
-                row_offset,
-            )
+                _finish(values, spec, domains[name]), spec, n, seed, row_offset
+            ).alias(name)
         else:
             finished[name] = _generate_column(name, spec, n, seed, row_offset)
     # From a list, which is several times cheaper for a wide frame than a
@@ -559,6 +562,12 @@ def _generate_column(
     likes and every value is drawn by the code that draws a column of its
     own type.
     """
+    if frames.is_pattern(name):
+        # Many Series methods select their Series by name, so one named as a
+        # pattern loses itself. Drawn under a plain name and seeded by its
+        # own, it holds exactly the values it would have.
+        seeded = dataclasses.replace(spec, seed_name=spec.seed_name or name)
+        return _generate_column(frames.PLAIN, seeded, n, seed, row_offset).alias(name)
     kind = column_kind(spec.dtype)
     if kind == "null":
         # Nothing to draw: every value of a Null column is null.
@@ -781,7 +790,7 @@ def _wrap_list(
     grouped = (
         pl.DataFrame({"__row": row_of_element, name: elements})
         .group_by("__row", maintain_order=True)
-        .agg(pl.col(name))
+        .agg(frames.column(name))
     )
     cells = (
         pl.DataFrame({"__row": pl.int_range(0, n, eager=True)})
@@ -790,7 +799,9 @@ def _wrap_list(
             pl.when(pl.lit(lengths).is_null())
             .then(None)
             .otherwise(
-                pl.col(name).fill_null(pl.lit([], dtype=pl.List(spec.value_dtype)))
+                frames.column(name).fill_null(
+                    pl.lit([], dtype=pl.List(spec.value_dtype))
+                )
             )
             .alias(name)
         )[name]
@@ -941,7 +952,7 @@ def generate_cartesian(
         coverage_df = pl.concat([coverage_df, filler_df], how="horizontal_extend")
 
     spread = [name for name in columns if name not in unique_columns]
-    coverage_df = coverage_df.select(spread)
+    coverage_df = coverage_df.select(frames.columns(spread))
 
     if coverage_n < n:
         topup_df = generate_random(
@@ -959,4 +970,4 @@ def generate_cartesian(
         )
         coverage_df = pl.concat([coverage_df, distinct_df], how="horizontal_extend")
 
-    return coverage_df.select(list(columns.keys()))
+    return coverage_df.select(frames.columns(columns))

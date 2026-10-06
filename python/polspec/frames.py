@@ -10,12 +10,23 @@ agree with each other the day `references=` learns to take a path, or
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any, Literal
 
 import polars as pl
+import polars.selectors as cs
 
-__all__ = ["Frame", "Method", "References", "to_eager", "to_lazy"]
+__all__ = [
+    "Frame",
+    "Method",
+    "References",
+    "column",
+    "columns",
+    "is_pattern",
+    "plain",
+    "to_eager",
+    "to_lazy",
+]
 
 Frame = pl.DataFrame | pl.LazyFrame
 
@@ -26,6 +37,45 @@ References = Mapping[Any, Frame] | None
 
 #: How `generate` draws its rows. See `polspec.generation.generate`.
 Method = Literal["random", "cartesian"]
+
+
+def column(name: str) -> pl.Expr:
+    """A reference to the column named `name`, exactly.
+
+    `pl.col("*")` is every column and `pl.col("^id$")` a regular expression,
+    so a column named either is out of reach of `pl.col`. Those names are
+    selected by name instead; every other name is the `pl.col` it always
+    was, so the expressions validation compiles are unchanged for it.
+    """
+    return cs.by_name(name).as_expr() if is_pattern(name) else pl.col(name)
+
+
+def plain(series: pl.Series) -> pl.Series:
+    """`series`, renamed when its name is a pattern.
+
+    Many `Series` methods run as a selection of the Series by its own name,
+    so one named `^c$` -- a pattern that does not match itself -- loses
+    itself: `fill_null`, `is_null`, `unique` and `explode` all fail on it, in
+    Polars 1 and 2. Code that measures a column's values, rather than naming
+    it, takes the Series through here first.
+    """
+    return series.alias(PLAIN) if is_pattern(series.name) else series
+
+
+#: The name a Series named as a pattern is measured, or drawn, under.
+PLAIN = "__polspec_value"
+
+
+def is_pattern(name: str) -> bool:
+    """Whether Polars reads `name`, given as a column name, as a pattern: `*`
+    for every column, or `^...$` for a regular expression."""
+    return name == "*" or (name.startswith("^") and name.endswith("$"))
+
+
+def columns(names: Iterable[str]) -> list[pl.Expr]:
+    """`column` for each of `names`, for a `select` or a `struct` -- which,
+    given the names as strings, would read them as patterns too."""
+    return [column(name) for name in names]
 
 
 def to_lazy(frame: Frame) -> pl.LazyFrame:
@@ -74,7 +124,7 @@ def json_casts(schema: Mapping[str, Any], *, error: type[Exception]) -> list[pl.
             )
         text = _categories_as_text(dtype)
         if text != dtype:
-            casts.append(pl.col(name).cast(text))
+            casts.append(column(name).cast(text))
     return casts
 
 

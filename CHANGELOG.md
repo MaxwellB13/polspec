@@ -8,6 +8,27 @@ seed produces; see
 
 ## [Unreleased]
 
+### Fixed
+
+- **A column named `*`, or `^…$`, works like any other.** Polars reads
+  `pl.col("*")` as every column and `pl.col("^id$")` as a regular
+  expression, and so do `select`, `group_by`, `pl.struct`, `drop` and a
+  join's keys given the name as a string. Every place polspec names a column
+  now refers to it exactly -- generation, validation, foreign keys,
+  profiling, drift, `read()` -- through one helper, `frames.column`, which
+  is the same `pl.col` as before for every other name. Many Polars `Series`
+  methods also select their Series by its own name, so a Series named
+  `^c$`, a pattern that does not match itself, fails `fill_null`,
+  `is_null`, `unique` or `explode` in Polars 1 and 2. polspec measures such
+  a column under a plain name, and draws it under a plain name seeded by
+  its own, so its values are what any name would draw. Known limitation
+  since 0.15.1; the test that pinned it now passes.
+
+### Changed
+
+- **`col("*")` in a check means the column named `*`**, as `col()` means a
+  column everywhere else -- not every column. Likewise `col("^id$")`.
+
 ## [0.15.1] - 2026-10-05
 
 **What polspec writes, it reads back -- and a person can open.** A patch

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
+from polspec import frames
 from polspec._ffi import column_plan
 from polspec._ffi import generate_dataframe as _generate_dataframe
 from polspec.dtypes import typed_values
@@ -65,7 +66,7 @@ def apply_column_rules(
     if df.height == 0 or not spec.rules:
         return df
     rng = random.Random(seed)
-    column = df[name]
+    column = frames.plain(df[name])  # renamed back below
     claimed = column.is_null()
     for rule in spec.rules:
         mask = df.select(rule._expr().fill_null(False)).to_series() & ~claimed

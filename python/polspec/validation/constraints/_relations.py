@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
+from polspec import frames
 from polspec.validation.report import Finding, FindingCode
 
 if TYPE_CHECKING:
@@ -65,12 +66,14 @@ def foreign_key_findings(
             continue
 
         key_expr = (
-            pl.col(local_cols[0]) if len(local_cols) == 1 else pl.struct(local_cols)
+            frames.column(local_cols[0])
+            if len(local_cols) == 1
+            else pl.struct(frames.columns(local_cols))
         )
         present = (
-            pl.col(local_cols[0]).is_not_null()
+            frames.column(local_cols[0]).is_not_null()
             if len(local_cols) == 1
-            else pl.all_horizontal([pl.col(c).is_not_null() for c in local_cols])
+            else pl.all_horizontal([frames.column(c).is_not_null() for c in local_cols])
         )
         # A key may legitimately span dtypes -- a String column referencing
         # an Enum primary key, which declaration allows and generation
@@ -79,21 +82,37 @@ def foreign_key_findings(
         # the frame under validation, so `rows()` returns it as it was. A
         # parent value the local dtype cannot hold becomes null and matches
         # nothing, which is right: the column could never have held it.
+        # Both sides join on keys renamed alike: a join takes its keys by
+        # name or expression, and a column named as a pattern is neither
+        # until it is renamed.
+        keys = [f"__polspec_key{i}" for i in range(len(local_cols))]
         parent_keys = parent_lf.select(
             [
-                pl.col(ref_col).cast(local_schema[local_col], strict=False)
-                if parent_schema[ref_col] != local_schema[local_col]
-                else pl.col(ref_col)
-                for local_col, ref_col in zip(local_cols, ref_cols, strict=True)
+                (
+                    frames.column(ref_col).cast(local_schema[local_col], strict=False)
+                    if parent_schema[ref_col] != local_schema[local_col]
+                    else frames.column(ref_col)
+                ).alias(key)
+                for local_col, ref_col, key in zip(
+                    local_cols, ref_cols, keys, strict=True
+                )
             ]
         ).unique()
 
         def orphans_of(
-            frame: pl.LazyFrame, _p=present, _k=parent_keys, _l=local_cols, _r=ref_cols
+            frame: pl.LazyFrame, _p=present, _k=parent_keys, _l=local_cols, _keys=keys
         ) -> pl.LazyFrame:
-            return frame.filter(_p).join(_k, left_on=_l, right_on=_r, how="anti")
+            renamed = [
+                frames.column(c).alias(k) for c, k in zip(_l, _keys, strict=True)
+            ]
+            return (
+                frame.filter(_p)
+                .with_columns(renamed)
+                .join(_k, on=_keys, how="anti")
+                .drop(_keys)
+            )
 
-        stats = orphans_of(lf.select(local_cols)).select(
+        stats = orphans_of(lf.select(frames.columns(local_cols))).select(
             pl.len().alias("cnt"),
             key_expr.unique(maintain_order=True)
             .head(MAX_SAMPLES)
@@ -162,7 +181,7 @@ def hierarchy_constraints(
     """The part of a hierarchy that fits the single aggregation pass."""
     if hierarchy.child not in df_col_names:
         return []
-    column = pl.col(hierarchy.child)
+    column = frames.column(hierarchy.child)
     return [
         _SingleParent(
             key=f"{hierarchy.child}__single_parent",
@@ -241,7 +260,9 @@ def hierarchy_findings(
         return []  # reported through missing_cols instead
 
     edges = (
-        lf.select(pl.col(child).alias("node"), pl.col(parent).alias("anc"))
+        lf.select(
+            frames.column(child).alias("node"), frames.column(parent).alias("anc")
+        )
         .filter(pl.col("node").is_not_null() & pl.col("anc").is_not_null())
         .collect(**collect_kwargs)
     )
@@ -265,7 +286,7 @@ def hierarchy_findings(
         if values.is_empty():
             continue
         offenders = values.to_list()
-        mask = pl.col(child).is_in(offenders)
+        mask = frames.column(child).is_in(offenders)
         count = int(lf.select(mask.sum()).collect(**collect_kwargs).item())
         samples = offenders[:MAX_SAMPLES]
         findings.append(

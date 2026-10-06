@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
+from polspec import frames
 from polspec._ffi import column_plan
 from polspec._ffi import generate_dataframe as _generate_dataframe
 from polspec.errors import GenerationError
@@ -256,7 +257,7 @@ def apply_hierarchy(
             running += size
         rows, values = _cycle_edits(levels, parent_index, offsets, cycles, rng)
         edges = edges.with_columns(
-            edges[parent]
+            frames.plain(edges[parent])
             .scatter(pl.Series(rows, dtype=pl.UInt32), pl.Series(values))
             .alias(parent)
         )
@@ -275,7 +276,9 @@ def apply_hierarchy(
         # arbitrary sample of it.
         rows = pl.Series(range(self_references), dtype=pl.UInt32)
         edges = edges.with_columns(
-            edges[parent].scatter(rows, edges[child].gather(rows)).alias(parent)
+            frames.plain(edges[parent])
+            .scatter(rows, frames.plain(edges[child]).gather(rows))
+            .alias(parent)
         )
 
     return df.with_columns(edges[child].alias(child), edges[parent].alias(parent))

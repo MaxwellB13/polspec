@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
+from polspec import frames
 from polspec.dtypes import element_dtype
 from polspec.tablespec import as_table_spec
 
@@ -144,7 +145,9 @@ def _parse_declared_text(df: pl.DataFrame, spec: TableSpec) -> pl.DataFrame:
             values = _parse_temporal(df[name], column.dtype)
         else:
             values = _parse_nested(df, name, column.dtype, arrived)
-        if values is not None and _nulls(values) == _nulls(df[name]):
+        if values is not None and _nulls(frames.plain(values)) == _nulls(
+            frames.plain(df[name])
+        ):
             parsed.append(values)
     return df.with_columns(parsed) if parsed else df
 
@@ -154,7 +157,7 @@ def _parse_nested(
 ) -> pl.Series | None:
     """Column `name` read as `declared` wherever the file held it otherwise,
     or None where there is nothing to read -- or it does not read."""
-    plan = _arrival(pl.col(name), declared, arrived)
+    plan = _arrival(frames.column(name), declared, arrived)
     if plan is None:
         return None
     try:

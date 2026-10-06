@@ -16,7 +16,9 @@ from dataclasses import dataclass
 from typing import Any, Literal, overload
 
 import polars as pl
+import polars.selectors as cs
 
+from polspec import frames
 from polspec._options import accepted_options, options_from
 from polspec.errors import ValidationError
 from polspec.frames import References, to_lazy
@@ -355,7 +357,8 @@ def _apply_transformations(
 ) -> pl.LazyFrame:
     """Drops, adds, casts and reorders once validation has passed."""
     if extra and options.extra_cols == "drop":
-        lf = lf.drop(extra)
+        # A selector, which `drop` takes, and which reads every name literally.
+        lf = lf.drop(cs.by_name(extra))
 
     if missing and options.missing_cols == "add":
         lf = lf.with_columns(
@@ -365,7 +368,7 @@ def _apply_transformations(
     schema = lf.collect_schema()
     if options.cast:
         cast_exprs = [
-            pl.col(name).cast(spec.dtype)
+            frames.column(name).cast(spec.dtype)
             for name, spec in columns.items()
             if name in schema and schema[name] != spec.dtype
         ]
@@ -376,4 +379,6 @@ def _apply_transformations(
     # survived.
     present = schema.names()
     declared = [c for c in columns if c in present]
-    return lf.select(declared + [c for c in present if c not in columns])
+    return lf.select(
+        frames.columns(declared + [c for c in present if c not in columns])
+    )

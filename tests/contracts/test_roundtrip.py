@@ -40,9 +40,11 @@ from polspec import (
     col,
     generate,
     generate_batches,
+    inspect,
     profile,
     validate,
 )
+from polspec.drift import drift
 from polspec.formats import FORMATS
 from polspec.serialization import from_dict, to_dict
 
@@ -866,11 +868,93 @@ def test_a_time_zoned_datetime_completes_the_round_trip():
     spec_cls.validate(df)
 
 
-@pytest.mark.xfail(strict=True, reason="limitations.md: Polars reads it as a pattern")
-@pytest.mark.parametrize("name", ["*", "^c$"])
-def test_a_column_named_as_a_polars_pattern_round_trips(name):
+PATTERN_NAMES = ["*", "^c$", "^.*$"]
+
+
+def _pattern_named() -> TableSpec:
+    """A column per name Polars reads as a pattern, beside the columns those
+    patterns would match -- each claim polspec checks, on each."""
+    return TableSpec(
+        "P",
+        {
+            "*": ColSpec(pl.Int16, bounds=(0, 999), unique=True),
+            "^c$": ColSpec(pl.List(pl.Int8), bounds=(0, 9), list_length=(0, 3)),
+            "^.*$": ColSpec(pl.Enum(["x", "y"]), nullable=True),
+            "c": ColSpec(pl.Int8, bounds=(0, 5)),
+            "d": ColSpec(pl.String, choices=["p", "q"]),
+            "ref": ColSpec(pl.Int16, bounds=(0, 999), nullable=True),
+        },
+        checks=[Check(col("*") >= 0, name="star_at_least_0")],
+        unique_together=[("^.*$", "*")],
+        foreign_keys=[ForeignKey("ref", references="self", ref_columns="*")],
+    )
+
+
+@pytest.mark.parametrize("method", ["random", "cartesian"])
+def test_a_column_named_as_a_polars_pattern_round_trips(method):
     """`pl.col("*")` is every column and `pl.col("^c$")` a regular
-    expression, so a column named either is out of reach of polspec's own
-    references to it. Found by the awkward-names property in 0.15.1."""
-    spec = TableSpec("P", {name: ColSpec(pl.Int8), "c": ColSpec(pl.Array(pl.Int8, 1))})
-    validate(spec, generate(spec, ROWS, seed=SEED))
+    expression. Through 0.15.1 a column named either was out of reach of
+    polspec's own references to it; found by the awkward-names property."""
+    spec = _pattern_named()
+    df = generate(spec, ROWS, seed=SEED, method=method)
+    assert df.columns == list(spec.columns)
+    assert validate(spec, df).equals(df)
+    batched = pl.concat(list(generate_batches(spec, ROWS, batch_size=70, seed=SEED)))
+    validate(spec, batched)
+
+
+def test_a_pattern_named_column_is_judged_alone():
+    """Each claim on a pattern-named column is about that column: breaking
+    one is one finding, with that column's rows -- not every column's."""
+    spec = _pattern_named()
+    df = generate(spec, ROWS, seed=SEED)
+    bad = df.with_columns(
+        pl.when(pl.int_range(pl.len()) < 3).then(-1).otherwise(pl.col("c")).alias("c")
+    )
+    report = inspect(spec, bad)
+    assert {f.key for f in report.findings} >= {"c__bounds"}
+    assert all(f.columns != ("*",) for f in report.findings), report.findings
+    assert report.passing_rows().collect().height == ROWS - 3
+    star = df.with_columns(pl.lit(5000, dtype=pl.Int16).alias("*"))
+    keys = {f.key for f in inspect(spec, star).findings}
+    assert "*__bounds" in keys and "c__bounds" not in keys
+
+
+def test_pattern_named_columns_profile_drift_and_survive_a_file(tmp_path):
+    spec = _pattern_named()
+    df = generate(spec, ROWS, seed=SEED)
+    profiled = profile(df)
+    assert list(profiled.columns) == list(df.columns)
+    validate(profiled, df)
+    assert drift(spec, df).unchanged
+    assert from_dict(to_dict(spec)) == spec
+
+
+def test_a_column_is_referred_to_through_frames_column_only():
+    """`pl.col(name)` reads a name as a pattern; `frames.column` does not. A
+    `pl.col` of anything but a literal outside `frames.py` would bring back
+    the bug the tests above pin, for whichever names reach it."""
+    import ast
+    from pathlib import Path
+
+    import polspec
+
+    root = Path(polspec.__file__).parent
+    offenders = []
+    for path in sorted(root.rglob("*.py")):
+        if path.name == "frames.py":
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            is_col = (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "col"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "pl"
+            )
+            if is_col and not all(
+                isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+                for arg in node.args
+            ):
+                offenders.append(f"{path.relative_to(root)}:{node.lineno}")
+    assert not offenders, f"pl.col of a variable; use frames.column: {offenders}"
