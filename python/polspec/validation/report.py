@@ -201,6 +201,7 @@ class ValidationReport:
         Adds a `__polspec_finding` column naming the finding's key, so a row
         violating several claims appears once per claim.
         """
+        self._require_finding_column_free()
         parts = [
             f.rows(self.frame).with_columns(pl.lit(f.key).alias(FINDING_COLUMN))
             for f in self.findings
@@ -221,23 +222,36 @@ class ValidationReport:
         row_level = [f for f in self.findings if f.row_level]
         if not row_level:
             return self.failing_rows()
-        indexed = self.frame.with_row_index(_ROW_INDEX)
+        self._require_finding_column_free()
+        index = self._row_index()
+        indexed = self.frame.with_row_index(index)
         hits = pl.concat(
             [
                 f.rows(indexed).select(
-                    _ROW_INDEX, pl.lit(f.key, dtype=pl.String).alias(FINDING_COLUMN)
+                    index, pl.lit(f.key, dtype=pl.String).alias(FINDING_COLUMN)
                 )
                 for f in row_level
             ]
         )
-        named = hits.group_by(_ROW_INDEX, maintain_order=True).agg(
+        named = hits.group_by(index, maintain_order=True).agg(
             frames.column(FINDING_COLUMN).unique(maintain_order=True).str.join(",")
         )
-        return (
-            indexed.join(named, on=_ROW_INDEX, how="inner")
-            .sort(_ROW_INDEX)
-            .drop(_ROW_INDEX)
-        )
+        return indexed.join(named, on=index, how="inner").sort(index).drop(index)
+
+    def _row_index(self) -> str:
+        """A row index's name, one the frame does not already have."""
+        return frames.fresh(_ROW_INDEX, self.frame.collect_schema().names())
+
+    def _require_finding_column_free(self) -> None:
+        """`FINDING_COLUMN` names the findings a row breaks; a frame that has
+        a column of that name would lose it to them, so it is refused."""
+        if FINDING_COLUMN in self.frame.collect_schema().names():
+            raise ValueError(
+                f"The frame has a column named {FINDING_COLUMN!r}, which is "
+                "where failing rows name the claims they break "
+                "(`polspec.validation.FINDING_COLUMN`); rename it to list "
+                "failing rows"
+            )
 
     def passing_rows(self) -> pl.LazyFrame:
         """Every row no finding touched, lazily and in the frame's order.
@@ -263,11 +277,12 @@ class ValidationReport:
         # Each finding locates its rows on a frame carrying a row index, which
         # a filter and an anti-join both keep; what is left is every row none
         # of them found.
-        indexed = self.frame.with_row_index(_ROW_INDEX)
-        failed = pl.concat([f.rows(indexed).select(_ROW_INDEX) for f in self.findings])
+        index = self._row_index()
+        indexed = self.frame.with_row_index(index)
+        failed = pl.concat([f.rows(indexed).select(index) for f in self.findings])
         return indexed.join(
-            failed.unique(), on=_ROW_INDEX, how="anti", maintain_order="left"
-        ).drop(_ROW_INDEX)
+            failed.unique(), on=index, how="anti", maintain_order="left"
+        ).drop(index)
 
     def to_dict(self) -> dict[str, Any]:
         """This report as JSON-ready data: the spec, the verdict, the findings."""

@@ -22,10 +22,12 @@ __all__ = [
     "References",
     "column",
     "columns",
+    "fresh",
     "is_pattern",
     "plain",
     "to_eager",
     "to_lazy",
+    "value_counts",
 ]
 
 Frame = pl.DataFrame | pl.LazyFrame
@@ -64,6 +66,28 @@ def plain(series: pl.Series) -> pl.Series:
 
 #: The name a Series named as a pattern is measured, or drawn, under.
 PLAIN = "__polspec_value"
+
+#: The name of `value_counts`' count column, beside `PLAIN`: Polars' own
+#: default, `count`, is a name a column of data can have.
+COUNT = "__polspec_count"
+
+
+def value_counts(series: pl.Series) -> pl.DataFrame:
+    """`series`' distinct values and how often each occurs, as the columns
+    `PLAIN` and `COUNT` -- whatever the series is named, `count` included."""
+    return series.alias(PLAIN).value_counts(name=COUNT)
+
+
+def fresh(base: str, taken: Iterable[str]) -> str:
+    """`base`, or `base_1`, `base_2`... -- the first not in `taken`. A helper
+    column polspec adds beside the data's own takes its name from here, so
+    no name is reserved from the data."""
+    taken = set(taken)
+    name, n = base, 0
+    while name in taken:
+        n += 1
+        name = f"{base}_{n}"
+    return name
 
 
 def is_pattern(name: str) -> bool:

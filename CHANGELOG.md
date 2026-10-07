@@ -24,6 +24,19 @@ seed produces; see
   its own, so its values are what any name would draw. Known limitation
   since 0.15.1; the test that pinned it now passes.
 
+- **polspec's helper columns no longer take a name the data has.** A list
+  column named `__row` could not be generated; a column named
+  `__polspec_row` made `passing_rows()`, and `--output` with `--failing`,
+  raise `DuplicateError`; a column named `count` made `profile()` raise,
+  since Polars' `value_counts` names its own column that. Each helper
+  column now takes a name absent from the frame, or polspec measures the
+  data under names of its own.
+- **`failing_rows()` no longer writes over a column named
+  `__polspec_finding`.** It wrote the finding keys over the data's own
+  column of that name, silently; it raises `ValueError` now, naming the
+  column, and `polspec validate --failing` refuses before writing either
+  file.
+
 ### Changed
 
 - **`col("*")` in a check means the column named `*`**, as `col()` means a

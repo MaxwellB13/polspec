@@ -263,11 +263,11 @@ def _domain_counts(values: pl.Series, domain: Domain) -> tuple[int, ...]:
     else:
         observed = values
         declared = pl.Series(declared_values, dtype=values.dtype, strict=False)
-    counts = observed.value_counts()
+    counts = frames.value_counts(observed)
     seen = dict(
         zip(
-            counts[counts.columns[0]].to_list(),
-            counts[counts.columns[1]].to_list(),
+            counts[frames.PLAIN].to_list(),
+            counts[frames.COUNT].to_list(),
             strict=True,
         )
     )

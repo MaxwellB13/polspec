@@ -24,7 +24,7 @@ from polspec.constants import LARGE_FRAME_BYTES
 from polspec.errors import CliError
 from polspec.generation.pipeline import describe_bytes
 from polspec.tablespec import TableSpec
-from polspec.validation import validate
+from polspec.validation import FINDING_COLUMN, validate
 
 if TYPE_CHECKING:
     import polars as pl
@@ -108,6 +108,13 @@ def _write_split(
             file=sys.stderr,
         )
         return
+    if args.failing and FINDING_COLUMN in report.frame.collect_schema().names():
+        # Before either file: a half-written split is worse than none.
+        raise CliError(
+            f"the data has a column named {FINDING_COLUMN!r}, the column "
+            "--failing names each row's broken claims in; rename it, or "
+            "leave out --failing"
+        )
     if args.output:
         passing = report.passing_rows().collect()
         typed = validate(spec, passing, references=references, cast=True, **options)

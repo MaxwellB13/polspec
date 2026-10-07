@@ -17,10 +17,15 @@ from polspec import (
     Finding,
     ForeignKey,
     FrameSpec,
+    TableSpec,
     ValidationError,
     ValidationReport,
     col,
+    inspect,
+    profile,
+    validate,
 )
+from polspec.drift import drift
 from polspec.validation import FINDING_COLUMN
 
 
@@ -283,3 +288,59 @@ def test_a_structural_finding_has_no_passing_rows_to_give():
     wrong = MIXED.with_columns(pl.col("id").cast(pl.String))
     with pytest.raises(ValueError, match="id__dtype judge the whole frame"):
         Keyed.inspect(wrong).passing_rows()
+
+
+# ---------------------------------------------------------------------------
+# polspec's helper columns never take a name the data has
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["__polspec_row", "__polspec_row_1", "__polspec_key"])
+def test_a_column_named_like_a_helper_keeps_the_split_exact(name):
+    """Before 0.16.0 a column named `__polspec_row` -- the report's own row
+    index -- made `passing_rows()` and `--failing` raise `DuplicateError`."""
+    spec = TableSpec(
+        "T",
+        {
+            name: ColSpec(pl.Int64),
+            "x": ColSpec(pl.Int64, bounds=(0, 5)),
+            "ref": ColSpec(pl.Int64, nullable=True),
+        },
+        foreign_keys=[ForeignKey("ref", references="self", ref_columns=name)],
+    )
+    frame = pl.DataFrame(
+        {name: [1, 2, 3, 4], "x": [1, 9, 2, 9], "ref": [None, 1, 7, 2]}
+    )
+    report = inspect(spec, frame)
+    assert {f.key for f in report.findings} == {"x__bounds", "fk:fk_ref__self"}
+    passing = report.passing_rows().collect()
+    failing = report._failing_once().collect()
+    assert passing[name].to_list() == [1]
+    assert failing[name].to_list() == [2, 3, 4]
+    assert passing.columns == frame.columns
+    assert failing.columns == [*frame.columns, FINDING_COLUMN]
+
+
+def test_a_column_named_like_the_finding_column_is_refused_not_overwritten():
+    """Before 0.16.0 `failing_rows()` wrote the finding keys over a column of
+    the data named `__polspec_finding`."""
+    spec = TableSpec("T", {FINDING_COLUMN: ColSpec(pl.Int64, bounds=(0, 5))})
+    report = inspect(spec, pl.DataFrame({FINDING_COLUMN: [1, 9]}))
+    for method in (report.failing_rows, report._failing_once):
+        with pytest.raises(ValueError, match="has a column named '__polspec_finding'"):
+            method()
+    assert report.passing_rows().collect()[FINDING_COLUMN].to_list() == [1]
+
+
+@pytest.mark.parametrize(
+    "name", ["count", "_fits", "__polspec_value", "__polspec_count"]
+)
+def test_a_column_named_like_a_count_profiles_and_drifts(name):
+    """Before 0.16.0 `profile()` raised on a column named `count`: Polars'
+    `value_counts` names its own column that."""
+    emails = [f"user{i}@example.com" for i in range(40)]
+    frame = pl.DataFrame({name: emails * 5})
+    spec = profile(frame)
+    assert spec[name].format == "email"
+    validate(spec, frame)
+    assert drift(spec, frame).unchanged

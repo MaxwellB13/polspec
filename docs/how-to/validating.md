@@ -77,6 +77,12 @@ quarantined = report.failing_rows().collect()
 quarantined.group_by(FINDING_COLUMN).len()   # how many rows each claim caught
 ```
 
+It is the one name polspec adds to your rows, so a frame that already has a
+column called `__polspec_finding` is refused by name -- rename it -- rather
+than losing that column to the finding keys. Every other name works: the
+helper columns polspec uses along the way take names the frame does not
+have.
+
 `passing_rows()` is the other half: every row no finding touched, in the
 frame's order, so the two split a frame into what to keep and what to send
 back. A duplicate key fails both of its rows, and an orphaned foreign key its
