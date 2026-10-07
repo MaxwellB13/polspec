@@ -182,3 +182,7 @@ PLAN-*.md
 # Built by the docs workflow (scripts/generate_llms_txt.py), not committed.
 docs/llms.txt
 docs/llms-full.txt
+
+# The render check's parsers (scripts/deep/render), installed by npm.
+scripts/deep/render/node_modules/
+scripts/deep/render/package-lock.json

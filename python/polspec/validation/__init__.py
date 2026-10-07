@@ -171,7 +171,7 @@ def inspect(
     spec = as_table_spec(spec)
     require_columns(spec)
     opts = _options_from(options, **option_kwargs)
-    lf = to_lazy(frames.aligned(df))
+    lf = to_lazy(df)
     columns = dict(spec.columns)
 
     df_schema = lf.collect_schema()
@@ -249,7 +249,14 @@ def inspect(
         )
     )
 
-    collect_kwargs: dict[str, Any] = {"engine": "streaming"} if opts.streaming else {}
+    # The in-memory engine unless streaming is asked for. Polars 2.0.0 runs a
+    # lazy query on its streaming engine by default, and that engine panics
+    # on validation's aggregation over a list column -- `list.eval` beside a
+    # `filter` -- for some frames (scripts/deep/polars2_eval_chunks_repro.py).
+    # On Polars 1 this is the engine a lazy query already ran on.
+    collect_kwargs: dict[str, Any] = {
+        "engine": "streaming" if opts.streaming else "in-memory"
+    }
 
     if constraints:
         aggregations = [expr for c in constraints for expr in c.aggregations()]

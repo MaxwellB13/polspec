@@ -20,7 +20,6 @@ __all__ = [
     "Frame",
     "Method",
     "References",
-    "aligned",
     "column",
     "columns",
     "fresh",
@@ -111,26 +110,6 @@ def to_lazy(frame: Frame) -> pl.LazyFrame:
 def to_eager(frame: Frame) -> pl.DataFrame:
     """`frame` as a DataFrame, collecting one that is lazy."""
     return frame.collect() if isinstance(frame, pl.LazyFrame) else frame
-
-
-def aligned(frame: Frame) -> Frame:
-    """`frame`, rechunked when its columns are chunked differently -- and
-    otherwise exactly `frame`, uncopied.
-
-    Polars 2.0.0 panics on a lazy `select` that runs `list.eval` over a frame
-    whose columns' chunk boundaries differ, which is validation's single
-    aggregation over a list column of a frame concatenated from parts (as
-    `generate_batches` makes). Reading the boundaries is metadata only, so
-    the frames `generate()` and the readers return, whose columns line up,
-    cost nothing. A `LazyFrame` is passed through: it has no chunks to read.
-    """
-    if not isinstance(frame, pl.DataFrame) or frame.width < 2:
-        return frame
-    columns = frame.iter_columns()
-    first = next(columns).chunk_lengths()
-    if any(series.chunk_lengths() != first for series in columns):
-        return frame.rechunk()
-    return frame
 
 
 def sample_rows(frame: pl.DataFrame, n: int | None, seed: int = 0) -> pl.DataFrame:
