@@ -37,6 +37,15 @@ seed produces; see
   column, and `polspec validate --failing` refuses before writing either
   file.
 
+- **Validating a frame whose columns are chunked differently no longer
+  panics on Polars 2.0.0.** Polars 2.0.0 panics on a lazy `select` running
+  `list.eval` over such a frame, which is validation's single aggregation
+  over a list column of a frame concatenated from parts -- found by the
+  batched property, about one draw in 25,000, and reproduced without
+  polspec. `inspect` and `validate` rechunk such a frame first. The check
+  reads chunk boundaries only, so a frame whose columns line up -- every
+  frame `generate()` and the readers return -- is not copied.
+
 ### Changed
 
 - **`col("*")` in a check means the column named `*`**, as `col()` means a
