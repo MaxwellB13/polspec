@@ -1088,6 +1088,27 @@ def test_failing_holds_each_row_once_so_the_two_files_split_the_input(tmp_path):
     assert findings[3] == {"order_id__unique", "status__choices"}
 
 
+def test_failing_refuses_a_column_named_like_its_own_before_writing(tmp_path, capsys):
+    """`--failing` names each row's broken claims in `__polspec_finding`; a
+    file with a column of that name is refused before either file is
+    written, rather than losing the column."""
+    source = tmp_path / "d.py"
+    source.write_text(
+        "import polars as pl\n"
+        "from polspec import ColSpec, FrameSpec\n\n"
+        "class D(FrameSpec):\n"
+        "    __columns__ = {'__polspec_finding': ColSpec(pl.Int64),"
+        " 'x': ColSpec(pl.Int64, bounds=(0, 5))}\n",
+        encoding="utf-8",
+    )
+    data = tmp_path / "d.csv"
+    data.write_text("__polspec_finding,x\n1,3\n2,9\n", encoding="utf-8")
+    clean, bad = tmp_path / "ok.csv", tmp_path / "bad.csv"
+    assert run_cli("validate", source, data, "--output", clean, "--failing", bad) != 0
+    assert "column named '__polspec_finding'" in capsys.readouterr().err
+    assert not clean.exists() and not bad.exists()
+
+
 def test_json_stays_one_document_when_files_are_written(tmp_path, capsys):
     source, data = _split_files(tmp_path, "1,NEW,10\n2,LOST,20\n")
     run_cli("validate", source, data, "--json", "--output", tmp_path / "c.parquet")

@@ -85,7 +85,11 @@ def foreign_key_findings(
         # Both sides join on keys renamed alike: a join takes its keys by
         # name or expression, and a column named as a pattern is neither
         # until it is renamed.
-        keys = [f"__polspec_key{i}" for i in range(len(local_cols))]
+        taken = set(local_schema) | set(parent_schema)
+        keys = []
+        for _ in local_cols:
+            keys.append(frames.fresh("__polspec_key", taken))
+            taken.add(keys[-1])
         parent_keys = parent_lf.select(
             [
                 (

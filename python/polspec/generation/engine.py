@@ -787,14 +787,15 @@ def _wrap_list(
     elements, cut into cells by the lengths; a null length is a null cell."""
     n = len(lengths)
     row_of_element = _row_of_element(lengths)
+    row = frames.fresh("__polspec_row", [name])
     grouped = (
-        pl.DataFrame({"__row": row_of_element, name: elements})
-        .group_by("__row", maintain_order=True)
+        pl.DataFrame({row: row_of_element, name: elements})
+        .group_by(row, maintain_order=True)
         .agg(frames.column(name))
     )
     cells = (
-        pl.DataFrame({"__row": pl.int_range(0, n, eager=True)})
-        .join(grouped, on="__row", how="left", maintain_order="left")
+        pl.DataFrame({row: pl.int_range(0, n, eager=True)})
+        .join(grouped, on=row, how="left", maintain_order="left")
         .with_columns(
             pl.when(pl.lit(lengths).is_null())
             .then(None)

@@ -467,8 +467,8 @@ def _named_format(
     its stand-ins are values of the source. A finite format is tried only
     with `finite`.
     """
-    counts = non_null.value_counts()
-    value, count = counts.columns[0], counts.columns[1]
+    counts = frames.value_counts(non_null)
+    value, count = frames.PLAIN, frames.COUNT
     total = len(non_null)
     # A format tolerates at most FORMAT_MAX_EXTRAS distinct misses -- none,
     # without `keep_values` -- so a probe of any thousand distinct values
@@ -485,8 +485,8 @@ def _named_format(
         misses = probe.select((~fits.fill_null(False)).sum()).item()
         if misses > allowed_misses:
             continue
-        judged = counts.with_columns(fits.fill_null(False).alias("_fits"))
-        passing = judged.filter(pl.col("_fits"))
+        judged = counts.with_columns(fits.fill_null(False).alias("__polspec_fits"))
+        passing = judged.filter(pl.col("__polspec_fits"))
         if passing.height < FORMAT_MIN_DISTINCT:
             continue
         passing_rows = int(passing[count].sum())
@@ -494,7 +494,7 @@ def _named_format(
             return name, {}
         # Most frequent first, then by value: `value_counts` keeps no order,
         # and a spec file should not change between runs on the same data.
-        failing = judged.filter(~pl.col("_fits")).sort(
+        failing = judged.filter(~pl.col("__polspec_fits")).sort(
             [count, value], descending=[True, False]
         )
         if (
@@ -539,13 +539,11 @@ def _empirical_weights(
     """
     if len(non_null) == 0:
         return None
-    counts = non_null.value_counts()
-    # By position: the values' column is named for the series, which may be
-    # named "", and Polars will not index a column by the empty name.
+    counts = frames.value_counts(non_null)
     observed = dict(
         zip(
-            counts[counts.columns[0]].to_list(),
-            counts[counts.columns[1]].to_list(),
+            counts[frames.PLAIN].to_list(),
+            counts[frames.COUNT].to_list(),
             strict=True,
         )
     )

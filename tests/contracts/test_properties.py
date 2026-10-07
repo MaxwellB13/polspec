@@ -31,7 +31,7 @@ from typing import Any
 import polars as pl
 import pytest
 import yaml
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 from polspec import (
     Check,
@@ -41,6 +41,7 @@ from polspec import (
     SpecError,
     TableSpec,
     col,
+    frames,
     generate,
     generate_batches,
     inspect,
@@ -346,6 +347,16 @@ _AWKWARD_NAMES = [
     "*",
     "^c0$",
     "^.*$",
+    # Names polspec or Polars use for helper columns beside the data's own.
+    "__row",
+    "__idx",
+    "__pool",
+    "__polspec_row",
+    "__polspec_key",
+    "__polspec_value",
+    "__polspec_count",
+    "count",
+    "len",
 ]
 NAMES = st.one_of(
     st.sampled_from(_AWKWARD_NAMES),
@@ -529,6 +540,29 @@ def test_any_name_generates_what_it_validates(spec, n, seed):
     df = generate(spec, n, seed=seed)
     assert df.columns == list(spec.columns)
     validate(spec, df)
+
+
+@SETTINGS
+@given(spec=_NAMED, n=st.integers(1, MAX_ROWS), seed=_SEEDS)
+def test_any_name_splits_a_frame_into_passing_and_failing_exactly(spec, n, seed):
+    """Every third row loses its first column's value, which the spec does
+    not allow: the rows `passing_rows()` keeps and the rows `--failing`
+    writes are the frame, each row once, whatever the columns are named."""
+    first = next(iter(spec.columns))
+    assume(not spec.columns[first].nullable)
+    df = generate(spec, n, seed=seed)
+    bad = df.with_columns(
+        pl.when(pl.int_range(pl.len()) % 3 == 0)
+        .then(pl.lit(None, dtype=df.schema[first]))
+        .otherwise(frames.column(first))
+        .alias(first)
+    )
+    report = inspect(spec, bad)
+    passing = report.passing_rows().collect()
+    failing = report._failing_once().collect()
+    assert passing.height + failing.height == n
+    assert failing.height >= (n + 2) // 3
+    assert passing.columns == bad.columns
 
 
 @SETTINGS
