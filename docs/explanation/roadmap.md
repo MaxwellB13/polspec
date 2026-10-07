@@ -123,8 +123,8 @@ Two things this project has made no compatibility promise about yet:
   constructed under 0.12.0, 0.13.1 nothing that constructed under 0.13.0,
   0.14.0 nothing that constructed under 0.13.1 -- a column declaring
   `nan_probability` draws its NaN from a draw of its own -- 0.15.0
-  nothing that constructed under 0.14.0, and 0.15.1 nothing that
-  constructed under 0.15.0.
+  nothing that constructed under 0.14.0, 0.15.1 nothing that constructed
+  under 0.15.0, and 0.16.0 nothing that constructed under 0.15.1.
 
 The first of those is easier to live with than it sounds, because a spec file
 now says which format wrote it. Every file `to_yaml()` writes carries

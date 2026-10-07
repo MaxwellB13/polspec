@@ -31,7 +31,6 @@ from polspec import (
     ForeignKey,
     TableSpec,
     col,
-    frames,
     generate,
     generate_batches,
     inspect,
@@ -273,11 +272,11 @@ def _chunked(series: pl.Series, sizes: list[int]) -> pl.Series:
 
 
 def test_a_frame_concatenated_from_batches_validates_however_it_is_chunked():
-    """Polars 2.0.0 panics on a lazy `select` running `list.eval` over a
-    frame whose columns are chunked differently -- validation's aggregation
-    over a list column of exactly this frame, its batches concatenated
-    without a rechunk (27 chunks against 20). Found by the batched property
-    on 2.0.0, about one draw in 25,000; `inspect` rechunks such a frame."""
+    """Polars 2.0.0's streaming engine -- the default for a lazy query --
+    panics on validation's aggregation over a list column of this frame, its
+    columns chunked differently as 2.0.0's `concat` of batches leaves them.
+    Found by the batched property on 2.0.0, about one draw in 25,000;
+    validation runs on the in-memory engine."""
     spec = TableSpec(
         "Drawn",
         {
@@ -313,21 +312,25 @@ def test_a_frame_concatenated_from_batches_validates_however_it_is_chunked():
     validate(spec, frame)
 
 
-def test_a_frame_whose_columns_line_up_is_not_copied():
-    """The check reads chunk boundaries only: a frame `generate()` returns,
-    or one already chunked alike, goes on uncopied."""
-    whole = generate(
-        TableSpec("T", {"a": ColSpec(pl.Int8), "b": ColSpec(pl.Int8)}), 50, seed=1
+def test_a_list_of_categories_arriving_beside_a_null_column_validates():
+    """The same Polars 2.0.0 panic on a two-row, single-chunk frame: a list
+    of categories with declared choices beside a column of nulls -- found by
+    the arrival property, where rechunking does not help."""
+    spec = TableSpec(
+        "D",
+        {
+            "c1": ColSpec(pl.Boolean, nullable=True, null_probability=0.9),
+            "c2": ColSpec(
+                pl.List(pl.Categorical),
+                nullable=True,
+                list_length=(0, 2),
+                choices=["oGodMQ", "C", "easHk", "NpyYi"],
+            ),
+        },
     )
-    assert frames.aligned(whole) is whole
-    alike = pl.concat([whole.head(20), whole.tail(30)], rechunk=False)
-    assert frames.aligned(alike) is alike
-    misaligned = pl.DataFrame(
-        [
-            pl.concat([whole["a"].head(20), whole["a"].tail(30)], rechunk=False),
-            pl.concat([whole["b"].head(10), whole["b"].tail(40)], rechunk=False),
-        ]
+    frame = pl.DataFrame(
+        {"c1": [None, None], "c2": [["easHk", "NpyYi"], []]},
+        schema={"c1": pl.Boolean, "c2": pl.List(pl.Categorical)},
     )
-    fixed = frames.aligned(misaligned)
-    assert fixed is not misaligned and fixed.equals(misaligned)
-    assert fixed["a"].n_chunks() == fixed["b"].n_chunks() == 1
+    assert not inspect(spec, frame)
+    validate(spec, frame)

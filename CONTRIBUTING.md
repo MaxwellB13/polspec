@@ -93,6 +93,35 @@ uv run --group docs zensical serve           # live preview
 uv run --group docs zensical build --strict  # what the docs workflow runs
 ```
 
+## Deep runs
+
+CI runs each property in `tests/contracts/test_properties.py` as many times
+as it affords. Before a release, or after a change to generation,
+validation or rendering, run them deep -- on the locked Polars and on the
+newest 2.x:
+
+```bash
+POLSPEC_DEEP_EXAMPLES=3000 uv run pytest tests/contracts/test_properties.py
+POLSPEC_DEEP_EXAMPLES=3000 uv run --with "polars==2.0.0" pytest -p no:cacheprovider tests/contracts/test_properties.py
+```
+
+A failure prints the shrunk spec and a `@reproduce_failure` blob that
+replays it. A failure seen once in thousands of draws is still a failure:
+every defect the last few reviews found sat that far out.
+
+What polspec writes for people is checked by the parsers people read it
+with: drawn specs' ER diagrams with Mermaid 11 and 10, their data
+dictionaries' tables with GitHub-flavoured Markdown rules (Node needed):
+
+```bash
+cd scripts/deep/render && npm install && cd -
+uv run python scripts/deep/render/run.py 400
+```
+
+`scripts/deep/polars2_eval_chunks_repro.py` reproduces, without polspec,
+the Polars 2.0.0 streaming-engine panic that validation avoids by running on
+the in-memory engine; run it on a new Polars to see whether it is fixed.
+
 ## Conventions
 
 - **Generate and validate must agree.** Anything `generate()` produces,

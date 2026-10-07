@@ -12,6 +12,10 @@ listed -- and every one must
 
 A failure prints the smallest spec Hypothesis could shrink it to, which is a
 case for the catalogue once it is fixed.
+
+CI runs each property as many times as it affords. A deep run sets
+`POLSPEC_DEEP_EXAMPLES` -- say 3000 -- and runs every one that many times,
+on whichever Polars is installed; see CONTRIBUTING.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ import contextlib
 import dataclasses
 import datetime as dt
 import importlib.util
+import os
 import re
 import string
 import sys
@@ -37,6 +42,7 @@ from polspec import (
     Check,
     ColRule,
     ColSpec,
+    GenerationError,
     SerializationError,
     SpecError,
     TableSpec,
@@ -47,16 +53,27 @@ from polspec import (
     inspect,
     validate,
 )
+from polspec.drift import drift
 from polspec.formats import FORMATS
 from polspec.render import framespec_to_markdown, framespec_to_mermaid
 from polspec.serialization import from_dict, to_dict, to_python
 
 MAX_ROWS = 120
 
+# A deep run's count for every property, or 0 for each one's own.
+DEEP_EXAMPLES = int(os.environ.get("POLSPEC_DEEP_EXAMPLES", "0"))
+
+
+def _examples(usual: int) -> int:
+    return DEEP_EXAMPLES or usual
+
+
 # Generating and validating a frame is milliseconds, not microseconds, and a
-# drawn spec is large; neither is a sign of a slow test.
+# drawn spec is large; neither is a sign of a slow test. A failure prints a
+# blob that replays it with `@reproduce_failure`.
 SETTINGS = settings(
-    max_examples=150,
+    max_examples=_examples(150),
+    print_blob=True,
     deadline=None,
     suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large],
 )
@@ -453,7 +470,7 @@ def test_a_drawn_spec_survives_a_yaml_file(spec, seed):
     assert generate(reloaded, 50, seed=seed).equals(generate(spec, 50, seed=seed))
 
 
-@settings(SETTINGS, max_examples=25)
+@settings(SETTINGS, max_examples=_examples(25))
 @given(spec=specs(), seed=_SEEDS)
 def test_a_drawn_spec_survives_a_python_file(spec, seed):
     reloaded = _through_python(spec)
@@ -510,7 +527,7 @@ _CLASS_NAMES = st.one_of(
 )
 
 
-@settings(SETTINGS, max_examples=60)
+@settings(SETTINGS, max_examples=_examples(60))
 @given(spec=specs(names=NAMES, spec_name=_CLASS_NAMES), seed=_SEEDS)
 def test_any_name_is_written_as_python_or_refused_by_name(spec, seed):
     """Before 0.15.1 a spec named `Odd Name` or `class` wrote a module that
@@ -524,6 +541,19 @@ def test_any_name_is_written_as_python_or_refused_by_name(spec, seed):
     assert _python_declares(spec.name)
     assert reloaded == spec
     assert generate(reloaded, 20, seed=seed).equals(generate(spec, 20, seed=seed))
+
+
+@settings(SETTINGS, max_examples=_examples(30))
+@given(spec=specs(), seed=_SEEDS)
+def test_a_drawn_spec_does_not_drift_from_its_own_output(spec, seed):
+    """0.14.0's promise, over specs nobody wrote down: data a spec generated
+    -- enough of it for the statistics to speak -- is not drift from it."""
+    try:
+        frame = generate(spec, 3_000, seed=seed)
+    except GenerationError:
+        assume(False)  # a unique domain smaller than 3,000 rows, refused by name
+    report = drift(spec, frame)
+    assert report.unchanged, report.findings
 
 
 _NAMED = specs(names=NAMES, spec_name=NAMES.filter(bool))

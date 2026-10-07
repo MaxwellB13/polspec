@@ -8,6 +8,33 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-07
+
+**Any column name.** The review of 0.15.1, on the day Polars 2.0.0 was
+released, found one class of defect: a column polspec could not reach. A
+column named `*` or `^…$` is a pattern to Polars; a column named `__row`,
+`__polspec_row` or `count` collided with a helper column of polspec's or
+Polars' own; and `failing_rows()` wrote over a column named
+`__polspec_finding`. Every name now works, and that one is refused by name.
+The property tests draw all of them, and a test keeps a bare `pl.col` of a
+column name out of the package.
+
+**Polars 2.0.0.** The suite passes on it unchanged, and CI runs it on every
+pull request. A panic in Polars 2.0.0's streaming engine, on validation's
+aggregation over a list column, is avoided by validating on the in-memory
+engine. polspec still declares `polars<2`; 0.17.0 widens that to `<3`, and
+lowers the floor to 1.39.
+
+**Changed, on purpose:** `col("*")` in a check means the column named `*`.
+
+**No seeded output changes.** Every spec that constructs under 0.15.1
+generates what it did -- checked against the published 0.15.1 across
+463 cases -- and no spec file needs migrating.
+
+**Performance is flat.** Validation, drift, profiling and synthesis time the
+same as 0.15.1, interleaved run for run on a million rows; an ordinary
+column name compiles to exactly the expressions it did.
+
 ### Fixed
 
 - **A column named `*`, or `^…$`, works like any other.** Polars reads
@@ -23,7 +50,6 @@ seed produces; see
   a column under a plain name, and draws it under a plain name seeded by
   its own, so its values are what any name would draw. Known limitation
   since 0.15.1; the test that pinned it now passes.
-
 - **polspec's helper columns no longer take a name the data has.** A list
   column named `__row` could not be generated; a column named
   `__polspec_row` made `passing_rows()`, and `--output` with `--failing`,
@@ -36,20 +62,34 @@ seed produces; see
   column of that name, silently; it raises `ValueError` now, naming the
   column, and `polspec validate --failing` refuses before writing either
   file.
-
-- **Validating a frame whose columns are chunked differently no longer
-  panics on Polars 2.0.0.** Polars 2.0.0 panics on a lazy `select` running
-  `list.eval` over such a frame, which is validation's single aggregation
-  over a list column of a frame concatenated from parts -- found by the
-  batched property, about one draw in 25,000, and reproduced without
-  polspec. `inspect` and `validate` rechunk such a frame first. The check
-  reads chunk boundaries only, so a frame whose columns line up -- every
-  frame `generate()` and the readers return -- is not copied.
+- **Validating a list column no longer panics on Polars 2.0.0.** Polars
+  2.0.0 runs a lazy query on its streaming engine by default, and that
+  engine panics on validation's single aggregation over a list column --
+  `list.eval` beside a `filter` -- for some frames: one concatenated from
+  batches, whose columns are chunked differently, and a two-row frame of a
+  list of categories beside a column of nulls. Found by the batched and
+  arrival properties, about one draw in 25,000, and reproduced without
+  polspec. Validation runs on the in-memory engine unless `streaming=True`
+  is asked for -- the engine a lazy query already ran on in Polars 1, and
+  faster on 2.0.0 too (26 ms against 34 ms for a million rows).
 
 ### Changed
 
 - **`col("*")` in a check means the column named `*`**, as `col()` means a
   column everywhere else -- not every column. Likewise `col("^id$")`.
+
+### Internal
+
+- The lock moves to Polars 1.44.2, and the required Polars 2 CI job from
+  the 2.0.0rc2 release candidate to 2.0.0.
+- `POLSPEC_DEEP_EXAMPLES=3000 uv run pytest tests/contracts/test_properties.py`
+  runs every property 3,000 times; CONTRIBUTING has a *Deep runs* section.
+  A new property holds generated data to 0.14.0's promise: a spec does not
+  drift from its own output.
+- `scripts/deep/render/` parses drawn specs' ER diagrams with Mermaid 11
+  and 10 and their data dictionaries with GitHub-flavoured Markdown rules;
+  `scripts/deep/polars2_eval_chunks_repro.py` reproduces the Polars 2.0.0
+  panic without polspec, for the upstream report.
 
 ## [0.15.1] - 2026-10-05
 
@@ -2169,7 +2209,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.15.1...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/MaxwellB13/polspec/compare/v0.15.1...v0.16.0
 [0.15.1]: https://github.com/MaxwellB13/polspec/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/MaxwellB13/polspec/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/MaxwellB13/polspec/compare/v0.13.1...v0.14.0
