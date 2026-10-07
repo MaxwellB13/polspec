@@ -171,7 +171,7 @@ def inspect(
     spec = as_table_spec(spec)
     require_columns(spec)
     opts = _options_from(options, **option_kwargs)
-    lf = to_lazy(df)
+    lf = to_lazy(frames.aligned(df))
     columns = dict(spec.columns)
 
     df_schema = lf.collect_schema()

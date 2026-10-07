@@ -31,6 +31,7 @@ from polspec import (
     ForeignKey,
     TableSpec,
     col,
+    frames,
     generate,
     generate_batches,
     inspect,
@@ -259,3 +260,74 @@ def test_projecting_a_scan_cannot_change_what_a_column_holds(name, method):
         for subset in itertools.combinations(spec.columns, size):
             projected = lf.select(subset).collect()
             assert projected.equals(whole.select(subset)), subset
+
+
+def _chunked(series: pl.Series, sizes: list[int]) -> pl.Series:
+    """`series` in chunks of `sizes` rows, each a Series of its own -- as a
+    batch is -- rather than a slice of one buffer."""
+    values, parts, start = series.to_list(), [], 0
+    for size in sizes:
+        parts.append(pl.Series(series.name, values[start : start + size], series.dtype))
+        start += size
+    return pl.concat(parts, rechunk=False)
+
+
+def test_a_frame_concatenated_from_batches_validates_however_it_is_chunked():
+    """Polars 2.0.0 panics on a lazy `select` running `list.eval` over a
+    frame whose columns are chunked differently -- validation's aggregation
+    over a list column of exactly this frame, its batches concatenated
+    without a rechunk (27 chunks against 20). Found by the batched property
+    on 2.0.0, about one draw in 25,000; `inspect` rechunks such a frame."""
+    spec = TableSpec(
+        "Drawn",
+        {
+            "c0": ColSpec(
+                pl.List(pl.Enum(["LhCB", "UX", "lfaz", "dMixyX", "f"])),
+                nullable=True,
+                null_probability=0.15793906434049723,
+                list_length=(2, 3),
+                weights=[1 / 3, 4.857979561927767, 3.2679425436102743, 1.9, 1 / 3],
+            ),
+            "c2": ColSpec(
+                pl.Boolean,
+                nullable=True,
+                null_probability=3.8116806693526224e-15,
+                weights=[6.713186804849229, 8.318356618249505],
+            ),
+        },
+    )
+    whole = pl.concat(list(generate_batches(spec, 28, batch_size=1, seed=95))).rechunk()
+    # The chunk boundaries Polars 2.0.0's `concat` left; 1.x keeps columns
+    # aligned there, so they are laid out by hand for every version.
+    layout = {
+        "c0": [1] * 8 + [2] + [1] * 18,
+        "c2": [1, 1, 1, 4, 1, 1, 1, 4, 1, 2] + [1] * 9 + [2],
+    }
+    frame = pl.DataFrame(
+        [_chunked(whole[name], sizes) for name, sizes in layout.items()]
+    )
+    assert [frame[name].chunk_lengths() for name in layout] == list(layout.values())
+    report = inspect(spec, frame)
+    assert not report
+    assert report.passing_rows().collect().height == 28
+    validate(spec, frame)
+
+
+def test_a_frame_whose_columns_line_up_is_not_copied():
+    """The check reads chunk boundaries only: a frame `generate()` returns,
+    or one already chunked alike, goes on uncopied."""
+    whole = generate(
+        TableSpec("T", {"a": ColSpec(pl.Int8), "b": ColSpec(pl.Int8)}), 50, seed=1
+    )
+    assert frames.aligned(whole) is whole
+    alike = pl.concat([whole.head(20), whole.tail(30)], rechunk=False)
+    assert frames.aligned(alike) is alike
+    misaligned = pl.DataFrame(
+        [
+            pl.concat([whole["a"].head(20), whole["a"].tail(30)], rechunk=False),
+            pl.concat([whole["b"].head(10), whole["b"].tail(40)], rechunk=False),
+        ]
+    )
+    fixed = frames.aligned(misaligned)
+    assert fixed is not misaligned and fixed.equals(misaligned)
+    assert fixed["a"].n_chunks() == fixed["b"].n_chunks() == 1
