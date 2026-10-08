@@ -208,7 +208,14 @@ def _arrival(
         values = expr if inner is None else expr.list.eval(inner[0])
         # The shape, not the element type: nothing else is cast here.
         shaped = pl.Array(elements, declared.size)
-        return values.cast(shaped), shaped
+        # A null list stays a null array: Polars before 1.43 casts one to an
+        # array of nulls.
+        rebuilt = (
+            pl.when(expr.is_null())
+            .then(pl.lit(None, dtype=shaped))
+            .otherwise(values.cast(shaped))
+        )
+        return rebuilt, shaped
     if isinstance(declared, pl.Struct) and isinstance(arrived, pl.Struct):
         declared_fields = {f.name: _instance(f.dtype) for f in declared.fields}
         fields, dtypes, changed = [], [], False

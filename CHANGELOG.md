@@ -8,6 +8,26 @@ seed produces; see
 
 ## [Unreleased]
 
+### Fixed
+
+- **polspec works on Polars 1.39 to 1.43.** Every test passes on the latest
+  patch of each, from 1.39.0, where 24 failed before. Each cause was a
+  Polars feature newer than 1.39, or a Polars bug fixed since:
+  - cartesian generation joined its columns with
+    `concat(how="horizontal_extend")`, which Polars has from 1.42 -- while
+    1.42 deprecates `how="horizontal"`; it uses `DataFrame.hstack` now;
+  - an `Array`'s elements were checked with `arr.eval`, which before 1.42
+    refuses a bounds check's values and, on an `Array` of `Decimal` or
+    `Duration`, panicked; they are checked as a list's are;
+  - Polars before 1.43 writes an `Array` with null rows to JSON wrongly --
+    a null row as `[null, null]`, the rows after it shifted -- so
+    `sink_ndjson` and the command line write an `Array` as the list it is in
+    JSON;
+  - `read()` rebuilt an array's null row as an array of nulls on Polars
+    before 1.43; it stays null.
+
+  The declared bound changes in a later pass of this release.
+
 ## [0.16.0] - 2026-10-07
 
 **Any column name.** The review of 0.15.1, on the day Polars 2.0.0 was
