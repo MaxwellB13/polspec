@@ -142,6 +142,16 @@ pinned by a passing test. A NaN, by contrast, is recorded as the column's
   `Array` or `Map` column are drawn afresh in each batch of
   `generate_batches`, a `scan()` or a `sink_*` -- deterministic for a seed,
   but not the values `generate()` would put there past the first batch.
+- **A non-uniform distribution's values may differ between operating
+  systems.** `normal`, `lognormal`, `exponential`, `gamma`, `beta` and
+  `poisson` are sampled through `exp`, `ln` and `pow`, which come from the
+  platform's math library -- Polars enables it for the whole build -- and
+  Windows, Linux and macOS may round their last bit differently. A
+  rejection sampler (`gamma`, `beta`) can then accept a different draw, and
+  every value after it differs. The same seed is the same data on one
+  operating system, on every Polars polspec supports; a `uniform` column,
+  and every other declaration, is the same everywhere. Portable sampling,
+  which removes this, is planned before 1.0.
 - **On Polars 1.39, a nullable struct with no fields holds no nulls.**
   Polars 1.39 cannot hold a null in a `Struct({})`; 1.40 and later can. Such
   a column generates every row present there, which its spec still accepts,

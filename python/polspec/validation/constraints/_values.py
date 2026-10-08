@@ -17,6 +17,8 @@ import polars as pl
 from polspec import frames
 from polspec.domain import is_textual
 from polspec.dtypes import (
+    ARRAY_EVAL_ANY,
+    ARRAY_EVAL_FILTERS,
     dtype_value_limits,
     element_dtype,
     field_dtypes,
@@ -596,16 +598,20 @@ def _list_constraints(
             )
         )
 
-    # An Array's elements are checked as a list's are. `arr.eval` refuses an
-    # expression that changes how many elements there are -- a bounds
-    # claim's values, filtered -- on Polars before 1.42; `list.eval` takes it
-    # on every version.
-    listed = column.arr.to_list() if isinstance(actual_dtype, pl.Array) else column
+    is_array = isinstance(actual_dtype, pl.Array)
+    # An Array's elements are checked through a list where `arr.eval` would
+    # refuse the expression (before Polars 1.42) or panic on it (a bounds
+    # claim's values, filtered, on an Array of Decimal or Duration, before
+    # 1.43). Otherwise `arr.eval`, which is the faster.
+    listed = column.arr.to_list() if is_array else column
 
     def any_element(mask: pl.Expr) -> pl.Expr:
+        if is_array and ARRAY_EVAL_ANY:
+            # An Array of booleans, which has its own `any`.
+            return column.arr.eval(mask).arr.any()
         return listed.list.eval(mask).list.any()
 
-    elements = listed.list
+    elements = column.arr if is_array and ARRAY_EVAL_FILTERS else listed.list
     if not spec.element_null_probability:
         # A declared element null rate says nulls belong inside the list.
         constraints.append(

@@ -37,6 +37,19 @@ def element_dtype(dtype: pl.List | pl.Array) -> pl.DataType:
 # Reached through getattr so the module imports, and type-checks, on both.
 MAP: Any = getattr(pl, "Map", None)
 
+# Polars' version as (major, minor), for the few places supporting Polars
+# 1.39 onwards needs to know it.
+_MAJOR, _MINOR = (int(n) for n in pl.__version__.split(".")[:2])
+POLARS_VERSION = (_MAJOR, _MINOR)
+
+# Whether `arr.eval` takes any element expression: before 1.42 it refuses
+# one Polars cannot prove keeps every element -- `is_in`, a filter.
+ARRAY_EVAL_ANY = POLARS_VERSION >= (1, 42)
+
+# Whether `arr.eval` can filter an Array of any element type: before 1.43,
+# filtering an Array of Decimal or Duration panics.
+ARRAY_EVAL_FILTERS = POLARS_VERSION >= (1, 43)
+
 
 def map_parts(dtype: object) -> tuple[pl.DataType, pl.DataType] | None:
     """A `Map`'s key and value dtypes, each as an instance -- or None for any

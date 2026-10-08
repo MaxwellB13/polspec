@@ -8,6 +8,30 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-08
+
+**Every Polars from 1.39 to 2.x.** polspec declared `polars>=1.44.1,<2`;
+it declares `>=1.39,<3` now, and makes it true. Below 1.43 it had 24
+failing tests: Polars features newer than 1.39, and Polars bugs fixed
+since, each worked around in the one place it touched. CI tests the floor,
+the newest 1.x and the newest 2.x on every pull request, and the same seed
+generates the same data on all of them -- every seeded catalogue case is
+compared against a stored digest of its values, on each. Comparing them
+across operating systems too found one thing that never held: values drawn
+from a non-uniform distribution may differ between Windows, Linux and macOS
+(Known limitations). They are the same on every Polars on one OS.
+
+**No seeded output changes.** Every spec that constructs under 0.16.0
+generates what it did -- checked against the published 0.16.0 across 463
+cases, and on every Polars from 1.39.0 to 2.0.0 across 356 -- and no spec
+file needs migrating.
+
+**Performance is flat** on Polars 1.44 and 2.0: validation, drift,
+profiling, synthesis and cartesian generation time the same as 0.16.0,
+interleaved run for run. On 1.43 and later, an `Array`'s elements are
+checked exactly as before; below it, through a list, which older Polars
+needs.
+
 ### Fixed
 
 - **polspec works on Polars 1.39 to 1.43.** Every test passes on the latest
@@ -17,8 +41,9 @@ seed produces; see
     `concat(how="horizontal_extend")`, which Polars has from 1.42 -- while
     1.42 deprecates `how="horizontal"`; it uses `DataFrame.hstack` now;
   - an `Array`'s elements were checked with `arr.eval`, which before 1.42
-    refuses a bounds check's values and, on an `Array` of `Decimal` or
-    `Duration`, panicked; they are checked as a list's are;
+    refuses an `is_in` or a filter and, before 1.43, panicked filtering an
+    `Array` of `Decimal` or `Duration`; on those versions they are checked
+    as a list's are, and from 1.43 exactly as before;
   - Polars before 1.43 writes an `Array` with null rows to JSON wrongly --
     a null row as `[null, null]`, the rows after it shifted -- so
     `sink_ndjson` and the command line write an `Array` as the list it is in
@@ -32,7 +57,9 @@ seed produces; see
   declared `>=1.44.1,<2`. CI tests the floor (1.39.0), the newest 1.x (the
   lock) and the newest 2.x on every pull request. A seed generates the same
   data on every one: the seeded catalogue's values are compared, case for
-  case, against a stored reference on each. On Polars 1.39 alone, a nullable
+  case, against a stored reference on each -- a column drawn from a
+  non-uniform distribution on the operating system that recorded it. On
+  Polars 1.39 alone, a nullable
   struct with no fields holds no nulls (Known limitations).
 
 ### Internal
@@ -2247,7 +2274,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/MaxwellB13/polspec/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/MaxwellB13/polspec/compare/v0.15.1...v0.16.0
 [0.15.1]: https://github.com/MaxwellB13/polspec/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/MaxwellB13/polspec/compare/v0.14.0...v0.15.0
