@@ -10,7 +10,9 @@ round trip per inner dtype is pinned in `test_roundtrip.py`.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
+from decimal import Decimal
 
 import polars as pl
 import pytest
@@ -23,6 +25,9 @@ from polspec import (
     TableSpec,
     ValidationError,
     col,
+    generate,
+    inspect,
+    validate,
 )
 from polspec.drift import diff, drift
 
@@ -430,3 +435,26 @@ def test_an_array_of_several_chunks_validates(dtype):
     (finding,) = spec_for(column).inspect(chunked)
     assert finding.code == "choices"
     assert finding.samples == (values[0], values[1])
+
+
+@pytest.mark.parametrize(
+    ("dtype", "bounds", "below"),
+    [
+        (pl.Array(pl.Decimal(12, 2), 2), (0, 100), Decimal("-1")),
+        (
+            pl.Array(pl.Duration("us"), 2),
+            (dt.timedelta(0), dt.timedelta(days=3)),
+            dt.timedelta(seconds=-1),
+        ),
+    ],
+    ids=["decimal", "duration"],
+)
+def test_a_bounded_array_of_a_type_stored_as_integers_validates(dtype, bounds, below):
+    """Polars before 1.43 panicked on `arr.eval` filtering an Array of
+    Decimal or Duration -- validation's bounds check on its elements. They
+    are checked as a list's are now, on every supported Polars."""
+    spec = TableSpec("T", {"c": ColSpec(dtype, bounds=bounds, nullable=True)})
+    df = generate(spec, 200, seed=1)
+    validate(spec, df)
+    bad = pl.concat([pl.DataFrame({"c": pl.Series([[below, below]], dtype=dtype)}), df])
+    assert [f.key for f in inspect(spec, bad).findings] == ["c__bounds"]

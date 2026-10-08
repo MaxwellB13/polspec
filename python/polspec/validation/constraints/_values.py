@@ -596,17 +596,16 @@ def _list_constraints(
             )
         )
 
-    is_array = isinstance(actual_dtype, pl.Array)
+    # An Array's elements are checked as a list's are. `arr.eval` refuses an
+    # expression that changes how many elements there are -- a bounds
+    # claim's values, filtered -- on Polars before 1.42; `list.eval` takes it
+    # on every version.
+    listed = column.arr.to_list() if isinstance(actual_dtype, pl.Array) else column
 
     def any_element(mask: pl.Expr) -> pl.Expr:
-        # `arr.eval` hands back an Array of booleans, which has its own `any`.
-        return (
-            column.arr.eval(mask).arr.any()
-            if is_array
-            else column.list.eval(mask).list.any()
-        )
+        return listed.list.eval(mask).list.any()
 
-    elements = column.arr if is_array else column.list
+    elements = listed.list
     if not spec.element_null_probability:
         # A declared element null rate says nulls belong inside the list.
         constraints.append(

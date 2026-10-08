@@ -142,6 +142,10 @@ pinned by a passing test. A NaN, by contrast, is recorded as the column's
   `Array` or `Map` column are drawn afresh in each batch of
   `generate_batches`, a `scan()` or a `sink_*` -- deterministic for a seed,
   but not the values `generate()` would put there past the first batch.
+- **On Polars 1.39, a nullable struct with no fields holds no nulls.**
+  Polars 1.39 cannot hold a null in a `Struct({})`; 1.40 and later can. Such
+  a column generates every row present there, which its spec still accepts,
+  and `null_probability` is not met.
 - **A unique string favours its longest lengths.** It is drawn uniformly
   from every string its lengths allow, and the longest lengths hold nearly
   all of them.
