@@ -47,6 +47,8 @@ Orders.validate(orders)                        # ~27 ms; raises on any breach
 - **Fast.** The generator is a Rust extension that fills columns in
   parallel. `validate()` compiles every check on every column into one
   Polars aggregation, so a wide table costs about what a narrow one does.
+  Timings here are from a laptop; more are in
+  [Comparison](https://maxwellb13.github.io/polspec/explanation/comparison/).
 - **Lazy and streaming.** `scan()` is a `LazyFrame`: filter and project it
   like any other. The sinks write Parquet, IPC, CSV or NDJSON in batches,
   never holding the frame in memory, and a unique column stays unique
@@ -76,77 +78,62 @@ Orders.validate(orders)                        # ~27 ms; raises on any breach
 
 ## A quick tour
 
-**Generate lazily.** Nothing is drawn until you collect, and Polars pushes
-your filter and projection into the scan:
+### Generate lazily
+
+`scan()` returns a `LazyFrame`, so Polars pushes filters and projections into it:
 
 ```python
 paid = (
-    Orders.scan(10_000_000, seed=1)       # a LazyFrame
+    Orders.scan(10_000_000, seed=1)
     .filter(pl.col("status") == "PAID")
     .select("order_id", "total")
-    .collect()                            # ten million rows drawn in ~0.2 s
+    .collect()                                            # ~0.2 s
 )
-Orders.sink_parquet("orders.parquet", 1_000_000, seed=1)   # streamed, in batches
+Orders.sink_parquet("orders.parquet", 1_000_000, seed=1)  # streamed in batches
 ```
 
-**Validate, and act on the findings.** `inspect()` never raises. It reports
-everything, and hands back the rows each finding is about:
+### Validate and quarantine
+
+`inspect()` never raises: it reports every finding, with the rows behind it.
 
 ```python
 broken = orders.with_columns(
     pl.when(pl.col("order_id") % 1_000 == 0).then(-1.0).otherwise("total").alias("total")
 )
-report = Orders.inspect(broken)
-clean = report.passing_rows().collect()   # 998,947 rows; quarantine the rest
+report = Orders.inspect(broken)          # 1 finding: 1,053 totals out of bounds
+clean = report.passing_rows().collect()  # the other 998,947 rows
 ```
 
-```text
-Validation failed for DataFrame against 'Orders' (1 error(s) found):
-  - Column 'total': found 1053 value(s) out of bounds [0, 5000] (min found: -1.0, ...)
-```
-
-**Start from real data.** Profile a frame you already have, and polspec finds
-what it can declare:
+### Profile real data
 
 ```python
 from polspec import profile, synthesize
 
-spec = profile(orders.head(100_000), name="Orders")
-spec["total"].distribution    # 'lognormal', fitted
-spec["email"].format          # 'email'
-spec["status"].weights        # (0.20209, 0.50006, 0.29785)
-
-fake = synthesize(orders.head(100_000), seed=1)   # a stand-in with the same shape
+spec = profile(orders.head(100_000))
+spec["total"].distribution                         # 'lognormal', fitted
+fake = synthesize(orders.head(100_000), seed=1)    # a stand-in with the same shape
 ```
 
-**Watch for drift.** Compare next month's data with the spec:
+### Catch drift
 
 ```python
-next_month = orders.with_columns(
-    pl.when(pl.col("status") == "NEW").then(pl.lit("PAID")).otherwise("status")
-    .cast(orders.schema["status"]).alias("status")
-)
-print(Orders.drift(next_month))
+print(Orders.drift(orders.filter(pl.col("status") != "NEW")))
 ```
 
 ```text
 Drift: 0 breaking, 2 compatible, DataFrame against 'Orders'
   - [compatible] Column 'status': 1 of 3 declared value(s) never appear: ['NEW']
-  - [compatible] Column 'status': frequencies moved by 20.0% over 1,000,000 value(s): ...
+  - [compatible] Column 'status': frequencies moved by 20.0% over 800,231 value(s): ...
 ```
 
-**Use it from the command line** in a pipeline or CI job:
+### From the command line
 
 ```bash
-polspec schema infer orders.csv -o orders_spec.py       # a spec from data
+polspec schema infer orders.csv -o orders_spec.py
 polspec validate orders_spec.py orders.csv --failing rejected.csv
-polspec drift orders_spec.py orders.csv --markdown      # for a pull-request comment
+polspec drift orders_spec.py orders.csv --markdown
 polspec generate orders_spec.py -n 1000000 -o fixture.parquet --seed 1
 ```
-
-Timings are from a laptop, warm. More numbers, and comparisons with NumPy
-and hand-written fixtures, are in
-[Comparison](https://maxwellb13.github.io/polspec/explanation/comparison/).
 
 ## Install
 
