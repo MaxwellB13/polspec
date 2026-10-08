@@ -16,7 +16,10 @@ failing tests: Polars features newer than 1.39, and Polars bugs fixed
 since, each worked around in the one place it touched. CI tests the floor,
 the newest 1.x and the newest 2.x on every pull request, and the same seed
 generates the same data on all of them -- every seeded catalogue case is
-compared against a stored digest of its values, on each.
+compared against a stored digest of its values, on each. Comparing them
+across operating systems too found one thing that never held: values drawn
+from a non-uniform distribution may differ between Windows, Linux and macOS
+(Known limitations). They are the same on every Polars on one OS.
 
 **No seeded output changes.** Every spec that constructs under 0.16.0
 generates what it did -- checked against the published 0.16.0 across 463
@@ -54,7 +57,9 @@ needs.
   declared `>=1.44.1,<2`. CI tests the floor (1.39.0), the newest 1.x (the
   lock) and the newest 2.x on every pull request. A seed generates the same
   data on every one: the seeded catalogue's values are compared, case for
-  case, against a stored reference on each. On Polars 1.39 alone, a nullable
+  case, against a stored reference on each -- a column drawn from a
+  non-uniform distribution on the operating system that recorded it. On
+  Polars 1.39 alone, a nullable
   struct with no fields holds no nulls (Known limitations).
 
 ### Internal

@@ -11,6 +11,15 @@ between Polars majors: each row as Python objects, written as JSON. So a
 Polars release that changes what a seed draws, or how a value comes back,
 fails here, on the CI job that runs it -- the floor, the lock, the newest.
 
+One kind of case is held to its own operating system: a column drawn from
+a non-uniform distribution. Its sampler uses `exp`, `ln` and `pow` from the
+platform's math library -- Polars enables `num-traits`' standard-library
+math for the whole build, `rand_distr` included -- and those may round the
+last bit differently on Windows, glibc and macOS; a rejection sampler
+(gamma, beta) can then accept a different draw. Such a case's digest is
+recorded per platform (`case@win32`) and skipped where none is recorded
+(Known limitations).
+
 A deliberate change to seeded output rewrites the file:
 
     POLSPEC_WRITE_SEEDED=1 uv run pytest tests/contracts/test_seeded.py
@@ -24,6 +33,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -44,6 +54,20 @@ from polspec import (
 
 REFERENCE = Path(__file__).with_name("seeded.json")
 WRITE = os.environ.get("POLSPEC_WRITE_SEEDED") == "1"
+
+
+# Column cases whose values come through the platform's math library.
+PLATFORM_MATH = frozenset(
+    name
+    for name, column in COLUMN_CASES.items()
+    if column.distribution not in (None, "uniform")
+)
+
+
+def _key(case: str) -> str:
+    """The reference key a case is recorded under: per platform for one
+    drawn through the platform's math library."""
+    return f"{case}@{sys.platform}" if case.split("/")[0] in PLATFORM_MATH else case
 
 
 def _digest(frame: pl.DataFrame) -> str:
@@ -143,7 +167,7 @@ def test_write_the_reference():
     """Not a check: writes `seeded.json` from the installed Polars, keeping
     the digests of cases this Polars cannot generate (`Map` needs Polars 2)."""
     written = _reference() if REFERENCE.exists() else {}
-    written.update({name: _digest(make()) for name, make in CASES.items()})
+    written.update({_key(name): _digest(make()) for name, make in CASES.items()})
     REFERENCE.write_text(
         json.dumps(written, indent=1, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -153,8 +177,11 @@ def test_write_the_reference():
 @pytest.mark.parametrize("case", sorted(CASES))
 def test_a_seed_generates_the_same_data_on_every_polars(case):
     reference = _reference()
-    assert case in reference, f"{case} has no digest: rewrite seeded.json (see above)"
-    assert _digest(CASES[case]()) == reference[case], (
+    key = _key(case)
+    if key != case and key not in reference:
+        pytest.skip(f"no {sys.platform} digest: a platform-math case (see above)")
+    assert key in reference, f"{case} has no digest: rewrite seeded.json (see above)"
+    assert _digest(CASES[case]()) == reference[key], (
         f"{case}: the seeded output changed on Polars {pl.__version__}"
     )
 
@@ -162,5 +189,5 @@ def test_a_seed_generates_the_same_data_on_every_polars(case):
 def test_every_reference_digest_has_a_case():
     """A case removed from the catalogue takes its digest with it -- except
     one this Polars cannot draw (`Map`, before Polars 2)."""
-    stale = set(_reference()) - set(CASES)
+    stale = {key.split("@")[0] for key in _reference()} - set(CASES)
     assert all("Map" in name for name in stale), sorted(stale)

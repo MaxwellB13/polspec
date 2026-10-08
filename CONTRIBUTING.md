@@ -127,8 +127,11 @@ the in-memory engine; run it on a new Polars to see whether it is fixed.
 `tests/contracts/test_seeded.py` checks that a seed generates the same data
 as `tests/contracts/seeded.json` records, case for case, on whichever Polars
 runs it -- so CI's floor, lock and newest jobs each hold every supported
-Polars to it. A change that alters seeded output on purpose rewrites the
-reference, and says so in the changelog:
+Polars to it. A column drawn from a non-uniform distribution is recorded
+per operating system (`case@win32`): its sampler uses the platform's math
+library, so the rewrite records only the OS it runs on, and the others skip
+it (Known limitations). A change that alters seeded output on purpose
+rewrites the reference, and says so in the changelog:
 
 ```bash
 POLSPEC_WRITE_SEEDED=1 uv run pytest tests/contracts/test_seeded.py
