@@ -117,8 +117,9 @@ pip install polspec      # alternative
 
 The generator is a compiled Rust extension, but wheels are published for Linux
 (x86_64, aarch64), macOS (Intel and Apple silicon) and Windows (x86_64), so
-installing needs no Rust toolchain. At runtime polspec needs Polars and
-PyYAML, and on Windows `tzdata` for time-zone data.
+installing needs no Rust toolchain. At runtime polspec needs Polars --
+any release from 1.39, Polars 2 included, generating the same data for the
+same seed on each -- and PyYAML, and on Windows `tzdata` for time-zone data.
 
 Building from a checkout — which does need Rust and
 [maturin](https://www.maturin.rs) — is covered in

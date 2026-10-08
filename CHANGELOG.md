@@ -26,7 +26,25 @@ seed produces; see
   - `read()` rebuilt an array's null row as an array of nulls on Polars
     before 1.43; it stays null.
 
-  The declared bound changes in a later pass of this release.
+### Changed
+
+- **polspec supports Polars 1.39 to 2.x: `polars>=1.39,<3`**, where it
+  declared `>=1.44.1,<2`. CI tests the floor (1.39.0), the newest 1.x (the
+  lock) and the newest 2.x on every pull request. A seed generates the same
+  data on every one: the seeded catalogue's values are compared, case for
+  case, against a stored reference on each. On Polars 1.39 alone, a nullable
+  struct with no fields holds no nulls (Known limitations).
+
+### Internal
+
+- `tests/contracts/test_seeded.py` holds the seeded output to a reference,
+  `seeded.json`: a digest of the values each catalogue case generates --
+  every column case whole, batched and scanned, every dtype, the
+  table-level features. It digests the values rather than `hash_rows`,
+  whose hash differs between Polars majors.
+  `POLSPEC_WRITE_SEEDED=1` rewrites it, for a deliberate change.
+- CI: the newest-polars job resolves Polars 2.x and is the required Polars 2
+  run; the pinned 2.0.0 job and the pre-release job are gone.
 
 ## [0.16.0] - 2026-10-07
 

@@ -43,8 +43,9 @@ uv add polspec           # preferred
 pip install polspec      # alternative
 ```
 
-Wheels are published for Linux (x86_64, aarch64), macOS (Intel and Apple
-silicon) and Windows (x86_64), so using polspec needs no Rust toolchain.
+polspec works with Polars 1.39 and later, Polars 2 included. Wheels are
+published for Linux (x86_64, aarch64), macOS (Intel and Apple silicon) and
+Windows (x86_64), so using polspec needs no Rust toolchain.
 Building from a checkout is covered in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Documentation

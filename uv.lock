@@ -723,7 +723,7 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "polars", specifier = ">=1.44.1,<2" },
+    { name = "polars", specifier = ">=1.39,<3" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "tzdata", marker = "sys_platform == 'win32'", specifier = ">=2024.1" },
 ]

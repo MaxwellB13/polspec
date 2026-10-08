@@ -122,6 +122,21 @@ uv run python scripts/deep/render/run.py 400
 the Polars 2.0.0 streaming-engine panic that validation avoids by running on
 the in-memory engine; run it on a new Polars to see whether it is fixed.
 
+## Seeded output
+
+`tests/contracts/test_seeded.py` checks that a seed generates the same data
+as `tests/contracts/seeded.json` records, case for case, on whichever Polars
+runs it -- so CI's floor, lock and newest jobs each hold every supported
+Polars to it. A change that alters seeded output on purpose rewrites the
+reference, and says so in the changelog:
+
+```bash
+POLSPEC_WRITE_SEEDED=1 uv run pytest tests/contracts/test_seeded.py
+POLSPEC_WRITE_SEEDED=1 uv run --with "polars==2.0.0" pytest -p no:cacheprovider tests/contracts/test_seeded.py
+```
+
+The second run adds the cases only Polars 2 can generate (`Map`).
+
 ## Conventions
 
 - **Generate and validate must agree.** Anything `generate()` produces,
