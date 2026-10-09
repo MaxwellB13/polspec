@@ -123,7 +123,7 @@ def _write_split(
     if args.failing:
         # Each row once, naming every claim it breaks: with --output, the
         # file is split exactly, whatever a row breaks.
-        failing = report._failing_once().collect()
+        failing = report.failing_rows(once=True).collect()
         _write_data_file(failing, Path(args.failing))
         print(
             f"Wrote {failing.height} failing row(s) to {args.failing}", file=sys.stderr

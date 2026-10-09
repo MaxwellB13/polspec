@@ -43,6 +43,7 @@ nav = [
       { "Specs" = "reference/api/specs.md" },
       { "Registry and categories" = "reference/api/registry.md" },
       { "Generation" = "reference/api/generation.md" },
+      { "Files and documents" = "reference/api/files.md" },
       { "Validation" = "reference/api/validation.md" },
       { "Drift" = "reference/api/drift.md" },
       { "Profiling" = "reference/api/profiling.md" },

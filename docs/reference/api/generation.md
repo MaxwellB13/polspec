@@ -20,7 +20,7 @@ or a `FrameSpec` class, which stands for its `.spec` -- and every one has a
 
 ## estimated_size
 
-::: polspec.sizing.estimated_size
+::: polspec.estimated_size
 
 ## sink_parquet
 

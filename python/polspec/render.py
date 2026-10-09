@@ -30,6 +30,8 @@ __all__ = [
     "framespec_to_markdown",
     "framespec_to_mermaid",
     "registry_to_mermaid",
+    "to_markdown",
+    "to_mermaid",
 ]
 
 
@@ -657,3 +659,53 @@ def catspec_to_mermaid(
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
     return content
+
+
+def to_markdown(
+    spec: TableSpec | type, path: str | Path | None = None, *, title: str | None = None
+) -> str:
+    """A Markdown data dictionary of `spec` -- a `TableSpec` or a `FrameSpec`
+    class: an overview, a table of its columns, and its constraints.
+
+    Parameters
+    ----------
+    spec : TableSpec | FrameSpec class
+        What to document.
+    path : str | Path, optional
+        Also write the Markdown to this file.
+    title : str, optional
+        The document's title. Defaults to the spec's name.
+
+    Returns
+    -------
+    str
+        The Markdown. A `|` or a newline in any name or value is escaped, so
+        no name breaks the table.
+    """
+    return framespec_to_markdown(spec, path, title=title)
+
+
+def to_mermaid(
+    spec: TableSpec | type, path: str | Path | None = None, *, title: str | None = None
+) -> str:
+    """A Mermaid entity-relationship diagram of `spec` -- a `TableSpec` or a
+    `FrameSpec` class: one entity, its columns and keys, and the foreign keys
+    it holds. `Registry.to_mermaid` draws several specs and the keys between
+    them.
+
+    Parameters
+    ----------
+    spec : TableSpec | FrameSpec class
+        What to draw.
+    path : str | Path, optional
+        Also write the diagram to this file.
+    title : str, optional
+        The entity's name. Defaults to the spec's name.
+
+    Returns
+    -------
+    str
+        The diagram. A name Mermaid cannot read is drawn as the nearest one
+        it can, with its real name first in the note.
+    """
+    return framespec_to_mermaid(spec, path, title=title)

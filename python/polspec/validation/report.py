@@ -195,12 +195,29 @@ class ValidationReport:
         """The rows violating one finding, lazily."""
         return finding.rows(self.frame)
 
-    def failing_rows(self) -> pl.LazyFrame:
-        """Every row that violates a row-level finding, lazily.
+    def failing_rows(self, *, once: bool = False) -> pl.LazyFrame:
+        """Every row that violates a row-level finding, lazily, with a
+        `__polspec_finding` column (`FINDING_COLUMN`) naming what it broke.
 
-        Adds a `__polspec_finding` column naming the finding's key, so a row
-        violating several claims appears once per claim.
+        Parameters
+        ----------
+        once : bool, default False
+            By default a row violating several claims appears once per
+            claim, its finding column naming one -- the shape to group or
+            filter by claim. With `once=True` each row appears once, in the
+            frame's order, its finding column naming every claim it broke,
+            comma-separated: the quarantine view, which with
+            `passing_rows()` splits a frame exactly. `polspec validate
+            --failing` writes this view.
+
+        Raises
+        ------
+        ValueError
+            When the frame already has a column named `FINDING_COLUMN`,
+            which these rows would lose.
         """
+        if once:
+            return self._failing_once()
         self._require_finding_column_free()
         parts = [
             f.rows(self.frame).with_columns(pl.lit(f.key).alias(FINDING_COLUMN))

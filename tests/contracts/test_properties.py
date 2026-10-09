@@ -589,7 +589,7 @@ def test_any_name_splits_a_frame_into_passing_and_failing_exactly(spec, n, seed)
     )
     report = inspect(spec, bad)
     passing = report.passing_rows().collect()
-    failing = report._failing_once().collect()
+    failing = report.failing_rows(once=True).collect()
     assert passing.height + failing.height == n
     assert failing.height >= (n + 2) // 3
     assert passing.columns == bad.columns

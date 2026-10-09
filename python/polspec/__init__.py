@@ -17,7 +17,7 @@ from polspec.errors import (
     SpecError,
     ValidationError,
 )
-from polspec.expr import Pred, col
+from polspec.expr import Pred, col, lit
 from polspec.foreign_key import ForeignKey
 from polspec.framespec import FrameSpec
 from polspec.generation import (
@@ -33,7 +33,10 @@ from polspec.hierarchy import Hierarchy
 from polspec.profiler import profile_dataframe
 from polspec.reading import read
 from polspec.registry import Registry
+from polspec.render import to_markdown, to_mermaid
 from polspec.rules import ColRule
+from polspec.serialization import from_yaml, to_python, to_yaml
+from polspec.sizing import estimated_size
 from polspec.spec import ColSpec
 from polspec.synthesis import profile, synthesize
 from polspec.tablespec import TableSpec
@@ -80,9 +83,12 @@ __all__ = [
     "ValidationOptions",
     "ValidationReport",
     "col",
+    "estimated_size",
+    "from_yaml",
     "generate",
     "generate_batches",
     "inspect",
+    "lit",
     "profile",
     "profile_dataframe",
     "read",
@@ -92,5 +98,9 @@ __all__ = [
     "sink_ndjson",
     "sink_parquet",
     "synthesize",
+    "to_markdown",
+    "to_mermaid",
+    "to_python",
+    "to_yaml",
     "validate",
 ]

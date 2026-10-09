@@ -570,3 +570,17 @@ def test_legacy_dict_rules_in_yaml_still_load(tmp_path):
     assert loaded.spec["carrier"].rules[0].when.equals(col("region") == "UK")
     df = loaded.generate(100, seed=1)
     assert df.filter(pl.col("region") == "UK")["carrier"].unique().to_list() == ["RM"]
+
+
+def test_the_top_level_file_functions_take_either_kind_of_spec(tmp_path):
+    """0.18.0: `polspec.to_yaml`, `from_yaml` and `to_python` at the top level,
+    and a `FrameSpec` class accepted where a `TableSpec` is."""
+    import polspec
+
+    class Small(FrameSpec):
+        id = ColSpec(pl.Int64, bounds=(1, 9))
+
+    polspec.to_yaml(Small, tmp_path / "small.yaml")
+    assert polspec.from_yaml(tmp_path / "small.yaml") == Small.spec
+    polspec.to_python(Small, tmp_path / "small.py")
+    assert _exec_python_spec(tmp_path / "small.py")["Small"].spec == Small.spec

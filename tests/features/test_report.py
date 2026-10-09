@@ -274,3 +274,23 @@ def test_markdown_fences_a_name_holding_backticks():
     md = framespec_to_markdown(spec)
     assert "| ``back`tick`` |" in md
     assert "| ` ` |" in md  # an empty name is still a code span, not "``"
+
+
+# ---------------------------------------------------------------------------
+# The top-level forms (0.18.0): each takes a TableSpec or a FrameSpec class
+# ---------------------------------------------------------------------------
+
+
+def test_the_top_level_renderers_match_the_framespec_methods():
+    import polspec
+
+    class Orders(FrameSpec):
+        order_id = ColSpec(pl.Int64, unique=True)
+        status = ColSpec(pl.Enum(["NEW", "PAID"]))
+
+    for spec in (Orders, Orders.spec):
+        assert polspec.to_markdown(spec) == Orders.to_markdown()
+        assert polspec.to_mermaid(spec) == Orders.to_mermaid()
+    assert polspec.to_markdown(Orders, title="Orders table").startswith(
+        "# Orders table"
+    )
