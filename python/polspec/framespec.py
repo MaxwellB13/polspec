@@ -33,7 +33,7 @@ from polspec.errors import SpecError
 from polspec.foreign_key import ForeignKey
 from polspec.frames import Method, References
 from polspec.hierarchy import Hierarchy
-from polspec.profiler import profile_dataframe
+from polspec.profiler import profile_columns
 from polspec.render import framespec_to_markdown, framespec_to_mermaid
 from polspec.spec import ColSpec
 from polspec.tablespec import TableSpec, parse_unique_together
@@ -358,10 +358,10 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         records observed `(min, max)` for numeric and temporal columns and
         `(min_len, max_len)` for strings and binary. `shape`, `detect_unique`
         and `replace` describe more, for a spec that will generate a stand-in
-        for the data: see `polspec.profile_dataframe`, and `polspec.profile`
-        for all of them at once.
+        for the data: `polspec.profile` takes the same switches, every one
+        on by default.
         """
-        columns = profile_dataframe(
+        columns = profile_columns(
             df,
             weights=weights,
             max_unique_enum=max_unique_enum,

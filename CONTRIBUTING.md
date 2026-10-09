@@ -140,6 +140,22 @@ POLSPEC_WRITE_SEEDED=1 uv run --with "polars==2.0.0" pytest -p no:cacheprovider 
 
 The second run adds the cases only Polars 2 can generate (`Map`).
 
+## Deprecations
+
+A public name is never renamed or removed in place. It is deprecated first:
+it keeps working, unchanged, and each use warns with a `DeprecationWarning`
+naming what to use instead and the release it goes in.
+
+- Mark a function with `polspec._deprecation.deprecated(old, use=...)`, or
+  call `warn_deprecated` where a decorator does not fit (an argument, an
+  attribute).
+- A name deprecated in 0.x is removed in 1.0, and after at least one minor
+  release of warning. In 1.x a removal waits for the next major, after at
+  least two minor releases of warning.
+- Say so in the changelog under *Deprecated*, with the replacement; mark it
+  "(deprecated)" in the API reference; and test that it warns and still
+  works.
+
 ## Conventions
 
 - **Generate and validate must agree.** Anything `generate()` produces,

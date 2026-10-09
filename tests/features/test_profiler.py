@@ -3,6 +3,7 @@
 import warnings
 
 import polars as pl
+import polspec
 import pytest
 from polspec import (
     Bound,
@@ -11,10 +12,9 @@ from polspec import (
     TableSpec,
     generate,
     inspect,
-    profile_dataframe,
 )
 from polspec.formats import FORMATS
-from polspec.profiler import ENUM_MIN_REPEATS, FORMAT_MIN_DISTINCT
+from polspec.profiler import ENUM_MIN_REPEATS, FORMAT_MIN_DISTINCT, profile_columns
 
 
 def test_from_dataframe_basic():
@@ -246,7 +246,7 @@ def test_from_dataframe_temporal_and_binary(tmp_path):
 def _profiled_with_warnings(df: pl.DataFrame, **options) -> tuple[dict, list[str]]:
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        columns = profile_dataframe(df, **options)
+        columns = profile_columns(df, **options)
     return columns, [str(w.message) for w in caught]
 
 
@@ -314,7 +314,7 @@ def test_from_dataframe_records_a_nan_share_and_warns_only_for_an_infinity():
 
 def test_a_column_with_the_empty_name_profiles_with_its_weights():
     df = pl.DataFrame({"": ["x", "y", "x", "x", "y", "x"], "b": [1, 2, 3, 4, 5, 6]})
-    columns = profile_dataframe(df, weights=True)
+    columns = profile_columns(df, weights=True)
     assert columns[""].dtype == pl.Enum(["x", "y"])
     assert columns[""].weights == pytest.approx((2 / 3, 1 / 3))
 
@@ -323,7 +323,7 @@ def test_a_null_column_profiles_as_nothing_but_nulls():
     """However many rows -- none included, where a rate cannot be measured."""
     null = pl.Series([None, None], dtype=pl.Null)
     for df in (pl.DataFrame({"z": null}), pl.DataFrame({"z": null}).head(0)):
-        column = profile_dataframe(df)["z"]
+        column = profile_columns(df)["z"]
         assert (column.dtype, column.nullable, column.null_probability) == (
             pl.Null,
             True,
@@ -341,7 +341,7 @@ def test_text_of_distinct_values_stays_text_however_few():
     and the spec rejected every other name. Values have to repeat -- each
     at least twice on average -- to be categories."""
     names = [f"person_{i}" for i in range(40)]
-    column = profile_dataframe(pl.DataFrame({"name": names}))["name"]
+    column = profile_columns(pl.DataFrame({"name": names}))["name"]
     assert column.dtype == pl.String
     assert column.string_length == Bound(8, 9)
 
@@ -357,29 +357,27 @@ def test_text_of_distinct_values_stays_text_however_few():
     ],
 )
 def test_an_enum_needs_each_value_twice_on_average(values, narrowed):
-    column = profile_dataframe(pl.DataFrame({"c": values}))["c"]
+    column = profile_columns(pl.DataFrame({"c": values}))["c"]
     assert isinstance(column.dtype, pl.Enum) == narrowed
     assert ENUM_MIN_REPEATS == 2
 
 
 def test_nulls_do_not_count_as_repeats():
     values = ["a", None, "b", None, None, None]
-    assert profile_dataframe(pl.DataFrame({"c": values}))["c"].dtype == pl.String
+    assert profile_columns(pl.DataFrame({"c": values}))["c"].dtype == pl.String
 
 
 def test_a_categorical_of_distinct_values_stays_categorical():
     series = pl.Series("c", ["a", "b", "c"], dtype=pl.Categorical)
-    column = profile_dataframe(series.to_frame())["c"]
+    column = profile_columns(series.to_frame())["c"]
     assert column.dtype == pl.Categorical()
 
 
 def test_a_lists_elements_need_repeats_too():
     df = pl.DataFrame({"tags": [["red", "blue"], ["green"], ["gold", "teal"]]})
-    assert profile_dataframe(df)["tags"].dtype == pl.List(pl.String)
+    assert profile_columns(df)["tags"].dtype == pl.List(pl.String)
     repeated = pl.DataFrame({"tags": [["red", "blue"], ["red"], ["blue", "red"]]})
-    assert profile_dataframe(repeated)["tags"].dtype == pl.List(
-        pl.Enum(["blue", "red"])
-    )
+    assert profile_columns(repeated)["tags"].dtype == pl.List(pl.Enum(["blue", "red"]))
 
 
 # ---------------------------------------------------------------------------
@@ -397,7 +395,7 @@ def test_a_column_of_one_format_is_named_for_it(format_name):
     """Every format polspec can generate, recognised from its own values --
     before a finite one could narrow to an Enum of the codes seen."""
     values = _values_of(format_name, 200)
-    column = profile_dataframe(pl.DataFrame({"c": values}))["c"]
+    column = profile_columns(pl.DataFrame({"c": values}))["c"]
     assert (column.dtype, column.format, column.extra_values) == (
         pl.String,
         format_name,
@@ -410,7 +408,7 @@ def test_a_column_of_one_format_is_named_for_it(format_name):
 
 def test_too_few_distinct_values_are_not_evidence_of_a_format():
     few = _values_of("email", FORMAT_MIN_DISTINCT - 1) * 3
-    column = profile_dataframe(pl.DataFrame({"c": few}))["c"]
+    column = profile_columns(pl.DataFrame({"c": few}))["c"]
     assert column.format is None
     assert isinstance(column.dtype, pl.Enum)
 
@@ -419,7 +417,7 @@ def test_a_hostname_needs_a_dot():
     """A single word passes the hostname check -- `localhost` is one -- so a
     column of first names would be hostnames; inference asks for more."""
     names = [f"name{letter}" for letter in "abcdefghijklmnopqrstuvwxyz"] * 2
-    assert profile_dataframe(pl.DataFrame({"c": names}))["c"].format is None
+    assert profile_columns(pl.DataFrame({"c": names}))["c"].format is None
 
 
 def _near_miss(stand_ins: int, repeats: int) -> list[str]:
@@ -432,7 +430,7 @@ def test_a_near_miss_keeps_its_stand_ins_as_extra_values():
     """The case `extra_values` was built for: ISO countries, and a few rows
     of `UK (ISO)`."""
     values = _values_of("iso_country", 2_000)[:1_000] + ["UK (ISO)"] * 6
-    column = profile_dataframe(pl.DataFrame({"c": values}))["c"]
+    column = profile_columns(pl.DataFrame({"c": values}))["c"]
     assert column.format == "iso_country"
     assert dict(column.extra_values) == {"UK (ISO)": pytest.approx(6 / 1_006)}
     assert not inspect(TableSpec("T", {"c": column}), pl.DataFrame({"c": values}))
@@ -449,7 +447,7 @@ def test_a_near_miss_keeps_its_stand_ins_as_extra_values():
 )
 def test_a_near_miss_is_a_few_repeated_stand_ins(stand_ins, repeats, named):
     values = _near_miss(stand_ins, repeats)
-    column = profile_dataframe(pl.DataFrame({"c": values}))["c"]
+    column = profile_columns(pl.DataFrame({"c": values}))["c"]
     assert (column.format == "iso_country") is named
 
 
@@ -457,23 +455,23 @@ def test_a_replaced_column_is_named_a_format_but_keeps_no_stand_ins():
     """`replace=` keeps a column's values out of the spec: the format is a
     shape, not values, so it stays; stand-ins are values of the source."""
     exact = _values_of("email", 100)
-    column = profile_dataframe(pl.DataFrame({"c": exact}), replace=["c"])["c"]
+    column = profile_columns(pl.DataFrame({"c": exact}), replace=["c"])["c"]
     assert column.format == "email"
     near = _values_of("iso_country", 2_000)[:1_000] + ["UK (ISO)"] * 6
-    column = profile_dataframe(pl.DataFrame({"c": near}), replace=["c"])["c"]
+    column = profile_columns(pl.DataFrame({"c": near}), replace=["c"])["c"]
     assert column.format is None and column.dtype == pl.String
 
 
 def test_formats_false_profiles_text_as_before():
     values = _values_of("email", 100)
-    column = profile_dataframe(pl.DataFrame({"c": values}), formats=False)["c"]
+    column = profile_columns(pl.DataFrame({"c": values}), formats=False)["c"]
     assert column.format is None and column.string_length is not None
 
 
 def test_a_categorical_column_is_not_named_a_format():
     """A format describes a String; a Categorical keeps its dtype."""
     values = pl.Series(_values_of("email", 100), dtype=pl.Categorical)
-    column = profile_dataframe(values.to_frame("c"))["c"]
+    column = profile_columns(values.to_frame("c"))["c"]
     assert column.format is None
 
 
@@ -485,14 +483,14 @@ def test_a_lists_elements_and_a_structs_fields_name_their_format():
             "s": [{"host": h} for h in _values_of("hostname", 30)],
         }
     )
-    columns = profile_dataframe(frame)
+    columns = profile_columns(frame)
     assert columns["l"].format == "email"
     assert columns["s"].fields["host"].format == "hostname"
 
 
 def test_a_unique_key_of_uuids_is_both():
     ids = _values_of("uuid4", 150)
-    column = profile_dataframe(pl.DataFrame({"id": ids}), detect_unique=True)["id"]
+    column = profile_columns(pl.DataFrame({"id": ids}), detect_unique=True)["id"]
     assert (column.format, column.unique) == ("uuid4", True)
 
 
@@ -502,7 +500,7 @@ def test_stand_ins_are_listed_most_frequent_first_every_run():
     countries = _values_of("iso_country", 2_000)[:1_000]
     values = countries + ["N/A"] * 2 + ["UK (ISO)"] * 4 + ["TBD"] * 2
     orders = {
-        tuple(profile_dataframe(pl.DataFrame({"c": values}))["c"].extra_values)
+        tuple(profile_columns(pl.DataFrame({"c": values}))["c"].extra_values)
         for _ in range(20)
     }
     assert orders == {("UK (ISO)", "N/A", "TBD")}
@@ -523,7 +521,7 @@ def test_a_few_repeated_country_codes_keep_their_frequencies():
     profiled as every country evenly. An Enum of the codes it holds keeps
     the mix, as 0.13 did."""
     values = ["GB"] * 900 + _SOME_COUNTRIES[1:] * 4
-    column = profile_dataframe(pl.DataFrame({"c": values}), weights=True)["c"]
+    column = profile_columns(pl.DataFrame({"c": values}), weights=True)["c"]
     assert column.format is None
     assert isinstance(column.dtype, pl.Enum)
     shares = dict(zip(column.dtype.categories.to_list(), column.weights, strict=True))
@@ -540,7 +538,7 @@ def test_a_few_repeated_country_codes_keep_their_frequencies():
     ],
 )
 def test_a_finite_format_is_named_where_the_column_would_not_be_an_enum(values):
-    column = profile_dataframe(pl.DataFrame({"c": values}))["c"]
+    column = profile_columns(pl.DataFrame({"c": values}))["c"]
     assert column.format == "iso_country"
 
 
@@ -548,18 +546,56 @@ def test_a_replaced_country_column_is_named_the_format():
     """A replaced column's codes must not be carried, so its shape is all a
     spec can say -- the format."""
     values = ["GB"] * 900 + _SOME_COUNTRIES[1:] * 4
-    column = profile_dataframe(pl.DataFrame({"c": values}), replace=["c"])["c"]
+    column = profile_columns(pl.DataFrame({"c": values}), replace=["c"])["c"]
     assert column.format == "iso_country"
 
 
 def test_currency_codes_follow_the_same_rule():
     currencies = ["GBP", "EUR", "USD", "CHF", "JPY", "SEK", "NOK", "DKK", "PLN", "CZK",
                   "HUF", "AUD", "CAD", "NZD", "SGD", "HKD", "CNY", "INR", "ZAR", "MXN"]  # fmt: skip
-    few = profile_dataframe(pl.DataFrame({"c": ["GBP"] * 500 + currencies[1:] * 3}))[
-        "c"
-    ]
+    few = profile_columns(pl.DataFrame({"c": ["GBP"] * 500 + currencies[1:] * 3}))["c"]
     assert few.format is None and isinstance(few.dtype, pl.Enum)
-    many = profile_dataframe(pl.DataFrame({"c": _values_of("iso_currency", 2_000)}))[
-        "c"
-    ]
+    many = profile_columns(pl.DataFrame({"c": _values_of("iso_currency", 2_000)}))["c"]
     assert many.format == "iso_currency"
+
+
+# ---------------------------------------------------------------------------
+# One profiler: `profile`, with `profile_dataframe` deprecated onto it
+# ---------------------------------------------------------------------------
+
+
+def _frame() -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "id": range(1, 201),
+            "kind": ["a", "b", "a", "c"] * 50,
+            "amount": [float(i % 37) * 1.5 for i in range(200)],
+        }
+    )
+
+
+def test_profile_dataframe_is_deprecated_for_profile_and_still_works():
+    frame = _frame()
+    with pytest.warns(
+        DeprecationWarning,
+        match=r"profile_dataframe is deprecated.*polspec\.profile\(df, weights=False",
+    ):
+        columns = polspec.profile_dataframe(frame, max_unique_enum=10)
+    # The replacement the warning names gives the same columns.
+    profiled = polspec.profile(
+        frame, weights=False, shape=False, detect_unique=False, max_unique_enum=10
+    )
+    assert columns == dict(profiled.columns)
+
+
+def test_profile_switches_default_on_and_turn_off():
+    frame = _frame()
+    full = polspec.profile(frame)
+    assert full["kind"].weights is not None
+    assert full["id"].unique
+    bare = polspec.profile(
+        frame, weights=False, detect_unique=False, calculate_bounds=False, shape=False
+    )
+    assert bare["kind"].weights is None
+    assert not bare["id"].unique
+    assert bare["amount"].bounds is None

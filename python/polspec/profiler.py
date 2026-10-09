@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 import polars as pl
 
 from polspec import frames
+from polspec._deprecation import deprecated
 from polspec.bound import Bound
 from polspec.constants import DEFAULT_NULL_PROBABILITY
 from polspec.dtypes import MAP, field_dtypes, map_entries
@@ -88,7 +89,7 @@ class _Options:
     infinite: list[tuple[str, int]] = field(default_factory=list)
 
 
-def profile_dataframe(
+def profile_columns(
     df: pl.DataFrame,
     *,
     weights: bool = False,
@@ -101,6 +102,10 @@ def profile_dataframe(
     formats: bool = True,
 ) -> dict[str, ColSpec]:
     """Infers ColSpec column definitions by profiling an existing DataFrame.
+
+    Internal: `polspec.profile` is the public way in, and returns these
+    columns as a `TableSpec`. Its defaults record weights, shapes and
+    uniqueness, which these leave off.
 
     Parameters
     ----------
@@ -561,3 +566,35 @@ def _boolean_weights(non_null: pl.Series) -> tuple[float, float] | None:
     if total == 0:
         return (0.5, 0.5)
     return (false_count / total, true_count / total)
+
+
+@deprecated(
+    "polspec.profile_dataframe",
+    use="polspec.profile(df, weights=False, shape=False, detect_unique=False).columns",
+)
+def profile_dataframe(
+    df: pl.DataFrame,
+    *,
+    weights: bool = False,
+    max_unique_enum: int = 50,
+    calculate_bounds: bool = True,
+    shape: bool = False,
+    detect_unique: bool = False,
+    replace: Sequence[str] = (),
+    seed: int = 0,
+    formats: bool = True,
+) -> dict[str, ColSpec]:
+    """The columns `polspec.profile` would describe, as a dict, with every
+    switch off by default. `profile` takes the same switches, on by default,
+    and returns a `TableSpec`."""
+    return profile_columns(
+        df,
+        weights=weights,
+        max_unique_enum=max_unique_enum,
+        calculate_bounds=calculate_bounds,
+        shape=shape,
+        detect_unique=detect_unique,
+        replace=replace,
+        seed=seed,
+        formats=formats,
+    )

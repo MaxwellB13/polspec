@@ -18,6 +18,7 @@ owns only the inner loop that fills arrays with values.
 | `foreign_key` | `ForeignKey` — referential integrity, declared |
 | `_ffi` | The only module that imports the Rust extension (lazily), building plans and re-raising its errors as `GenerationError` |
 | `errors` | The `PolspecError` hierarchy |
+| `_deprecation` | `deprecated`/`warn_deprecated` — the one way a name is deprecated: a `DeprecationWarning` naming its replacement and its removal release |
 | `domain` | `Domain` — the values a column may hold, read by generation, validation, foreign keys and drift alike |
 | `pass_order` | `Pass`/`order` — which rewrite of a generated frame runs first, from what each reads and writes; checked at declaration, followed at generation |
 | `validation` | `inspect` and `validate` over a `TableSpec`: every claim becomes a `Constraint` that produces a `Finding`. The `constraints/` package holds them by kind: `_values` (one value's domain, bounds, length, format, pattern, recursing into a struct's fields and lifted over a list's elements), `_rules`, `_table` (composite keys, checks), `_relations` (foreign keys, hierarchy); `report.py` holds `Finding` and `ValidationReport` |

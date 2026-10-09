@@ -8,6 +8,21 @@ seed produces; see
 
 ## [Unreleased]
 
+### Added
+
+- **`profile()` takes the switches `profile_dataframe` had**: `weights`,
+  `shape`, `detect_unique` and `calculate_bounds`, each on by default --
+  what `profile()` already did -- so one profiler covers both uses.
+
+### Deprecated
+
+- **`profile_dataframe`**, removed in 1.0. Each call warns, and still works.
+  The same columns are
+  `profile(df, weights=False, shape=False, detect_unique=False).columns`.
+  This is polspec's first deprecation: a public name now warns for at least
+  one minor release before it goes, rather than changing in place
+  (CONTRIBUTING, *Deprecations*).
+
 ## [0.17.0] - 2026-10-08
 
 **Every Polars from 1.39 to 2.x.** polspec declared `polars>=1.44.1,<2`;

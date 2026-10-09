@@ -27,7 +27,7 @@ from polspec.dtypes import dtype_value_limits
 from polspec.errors import GenerationError
 from polspec.frames import sample_rows
 from polspec.generation import generate
-from polspec.profiler import profile_dataframe
+from polspec.profiler import profile_columns
 from polspec.reading import read_file
 from polspec.tablespec import TableSpec
 
@@ -45,6 +45,10 @@ def profile(
     seed: int = 0,
     max_unique_enum: int = 50,
     formats: bool = True,
+    weights: bool = True,
+    shape: bool = True,
+    detect_unique: bool = True,
+    calculate_bounds: bool = True,
 ) -> TableSpec:
     """A spec describing `source` well enough to generate a stand-in for it.
 
@@ -70,8 +74,24 @@ def profile(
         and not in `replace` -- becomes an `Enum` of them.
     formats : bool, default True
         Name the `format` a text column's values have -- an email, a UUID,
-        an IP, a country code -- so its fake values have it too. See
-        `profile_dataframe`.
+        an IP, a country code -- so its fake values have it too: when at
+        least 20 distinct values have one of `email`, `uuid4`, `ipv4`,
+        `ipv6`, `mac`, `hostname`, `iso_country` or `iso_currency`, and
+        every value does -- or 99% do, and the rest are at most five
+        repeated stand-ins, which become its `extra_values`.
+    weights : bool, default True
+        Record each category's observed frequency, for categorical, enum and
+        boolean columns.
+    shape : bool, default True
+        Fit the distribution each numeric or temporal column follows, so it
+        generates that shape rather than uniformly between its extremes.
+        Needs `calculate_bounds`.
+    detect_unique : bool, default True
+        Declare an integer or text column `unique=True` when every one of at
+        least a hundred values is distinct.
+    calculate_bounds : bool, default True
+        Record the observed extremes of numeric and temporal columns, and the
+        length range of text and binary ones.
 
     Returns
     -------
@@ -80,12 +100,13 @@ def profile(
         category frequencies, fitted distribution and uniqueness.
     """
     frame, _ = _load(source, sample, seed)
-    columns = profile_dataframe(
+    columns = profile_columns(
         frame,
-        weights=True,
+        weights=weights,
         max_unique_enum=max_unique_enum,
-        shape=True,
-        detect_unique=True,
+        calculate_bounds=calculate_bounds,
+        shape=shape,
+        detect_unique=detect_unique,
         replace=replace,
         seed=seed,
         formats=formats,
