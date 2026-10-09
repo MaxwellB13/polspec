@@ -314,7 +314,7 @@ def test_a_column_named_like_a_helper_keeps_the_split_exact(name):
     report = inspect(spec, frame)
     assert {f.key for f in report.findings} == {"x__bounds", "fk:fk_ref__self"}
     passing = report.passing_rows().collect()
-    failing = report._failing_once().collect()
+    failing = report.failing_rows(once=True).collect()
     assert passing[name].to_list() == [1]
     assert failing[name].to_list() == [2, 3, 4]
     assert passing.columns == frame.columns
@@ -326,9 +326,9 @@ def test_a_column_named_like_the_finding_column_is_refused_not_overwritten():
     the data named `__polspec_finding`."""
     spec = TableSpec("T", {FINDING_COLUMN: ColSpec(pl.Int64, bounds=(0, 5))})
     report = inspect(spec, pl.DataFrame({FINDING_COLUMN: [1, 9]}))
-    for method in (report.failing_rows, report._failing_once):
+    for once in (False, True):
         with pytest.raises(ValueError, match="has a column named '__polspec_finding'"):
-            method()
+            report.failing_rows(once=once)
     assert report.passing_rows().collect()[FINDING_COLUMN].to_list() == [1]
 
 

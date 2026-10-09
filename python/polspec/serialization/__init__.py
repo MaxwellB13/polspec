@@ -38,7 +38,7 @@ from polspec.serialization.fields import (
     tablespec_to_data,
 )
 from polspec.serialization.migrations import FORMAT_VERSION, migrate
-from polspec.tablespec import TableSpec, require_columns
+from polspec.tablespec import SpecLike, TableSpec, as_table_spec, require_columns
 
 if TYPE_CHECKING:
     from polspec.catspec import CatSpec
@@ -183,12 +183,14 @@ def from_dict(
 # ---------------------------------------------------------------------------
 
 
-def to_yaml(spec: TableSpec, source: str | Path) -> None:
-    """Writes `spec` to a human-readable YAML file at `source`.
+def to_yaml(spec: SpecLike, source: str | Path) -> None:
+    """Writes `spec` -- a `TableSpec` or a `FrameSpec` class -- to a
+    human-readable YAML file at `source`.
 
     Defaults are omitted so the file shows only what was declared. Checks and
     validators over raw expressions cannot be written and warn.
     """
+    spec = as_table_spec(spec)
     require_columns(spec)
     _warn_unserializable(spec, source, "yaml")
     dumped = dump_yaml(to_dict(spec), source)
@@ -283,8 +285,9 @@ def _require_class_name(name: str) -> None:
     )
 
 
-def to_python(spec: TableSpec, source: str | Path) -> None:
-    """Writes `spec` as a Python module defining a `FrameSpec` subclass.
+def to_python(spec: SpecLike, source: str | Path) -> None:
+    """Writes `spec` -- a `TableSpec` or a `FrameSpec` class -- as a Python
+    module defining a `FrameSpec` subclass.
 
     Columns are declared through `__columns__`, since a name straight from
     data is not always a valid identifier. Checks and validators over raw
@@ -295,6 +298,7 @@ def to_python(spec: TableSpec, source: str | Path) -> None:
     anything is written. Rename it with `spec.with_name(...)`, or write it
     with `to_yaml`, which keeps any name.
     """
+    spec = as_table_spec(spec)
     require_columns(spec)
     _require_class_name(spec.name)
     _warn_unserializable(spec, source, "python")

@@ -10,6 +10,17 @@ seed produces; see
 
 ### Added
 
+- **The public names that lived only in submodules are at the top level**:
+  `to_yaml`, `from_yaml`, `to_python`, `to_markdown`, `to_mermaid` -- each
+  taking a `TableSpec` or a `FrameSpec` class, as every verb does, and each
+  the function of the same name `FrameSpec` has a method for -- `lit`,
+  beside `col`, and `estimated_size`. The submodule paths still work: they
+  are the same functions. The API reference has a *Files and documents*
+  page.
+- **`ValidationReport.failing_rows(once=True)`**: each failing row once,
+  naming every claim it broke -- the quarantine view `--failing` writes,
+  which with `passing_rows()` splits a frame exactly. The default is
+  unchanged.
 - **`profile()` takes the switches `profile_dataframe` had**: `weights`,
   `shape`, `detect_unique` and `calculate_bounds`, each on by default --
   what `profile()` already did -- so one profiler covers both uses.

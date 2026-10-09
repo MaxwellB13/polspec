@@ -250,8 +250,9 @@ they are validated again with `cast=True`, so the file is one the spec
 accepts -- and `--failing PATH` writes the rows that did not, each once, in
 the file's order, with a `__polspec_finding` column naming every claim it
 broke, comma-separated. The two files split the input exactly: their rows
-add up to the file's. (In Python, `failing_rows()` lists a row once per
-claim instead, for grouping by claim.) Either or both; the
+add up to the file's. (In Python, `report.failing_rows(once=True)` is the
+same view; plain `failing_rows()` lists a row once per claim, for grouping
+by claim.) Either or both; the
 extension picks the format, as for `generate`, and the exit status still
 says whether the whole file passed, so a pipeline can quarantine the bad
 rows and fail the step. A structural finding (a missing column, a wrong

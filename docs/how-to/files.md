@@ -173,7 +173,7 @@ written. Rename it, or keep it in YAML, which holds any name:
 
 ```python
 from polspec import TableSpec
-from polspec.serialization import to_python
+from polspec import to_python
 
 spec = TableSpec("daily orders", {"id": ColSpec(pl.Int64)})
 to_python(spec.with_name("DailyOrders"), "daily_orders.py")

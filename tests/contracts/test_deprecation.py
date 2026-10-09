@@ -60,3 +60,17 @@ def test_a_deprecated_name_is_labelled_in_the_api_reference(name):
     pages = "\n".join(p.read_text(encoding="utf-8") for p in reference.glob("*.md"))
     assert f"## {name} (deprecated)" in pages
     assert f"`{name}`][polspec.{name}] (deprecated)" in pages
+
+
+def test_the_public_names_0_18_adds_are_at_the_top_level():
+    """The names `PLAN-1.0.0` found only in submodules -- each the object
+    its submodule holds, so either path is the same function."""
+    from polspec import expr, render, serialization, sizing
+
+    assert polspec.to_yaml is serialization.to_yaml
+    assert polspec.from_yaml is serialization.from_yaml
+    assert polspec.to_python is serialization.to_python
+    assert polspec.to_markdown is render.to_markdown
+    assert polspec.to_mermaid is render.to_mermaid
+    assert polspec.lit is expr.lit
+    assert polspec.estimated_size is sizing.estimated_size

@@ -10,6 +10,7 @@ cannot describe a signature the code does not have.
 | [`ColRule`][polspec.ColRule] | [Columns](columns.md) |
 | [`Check`][polspec.Check] | [Columns](columns.md) |
 | [`col`][polspec.col] | [Predicates](predicates.md) |
+| [`lit`][polspec.lit] | [Predicates](predicates.md) |
 | [`Pred`][polspec.Pred] | [Predicates](predicates.md) |
 | [`TableSpec`][polspec.TableSpec] | [Specs](specs.md) |
 | [`FrameSpec`][polspec.FrameSpec] | [Specs](specs.md) |
@@ -20,10 +21,16 @@ cannot describe a signature the code does not have.
 | [`generate`][polspec.generate] | [Generation](generation.md) |
 | [`generate_batches`][polspec.generate_batches] | [Generation](generation.md) |
 | [`scan`][polspec.scan] | [Generation](generation.md) |
+| [`estimated_size`][polspec.estimated_size] | [Generation](generation.md) |
 | [`sink_parquet`][polspec.sink_parquet] | [Generation](generation.md) |
 | [`sink_ipc`][polspec.sink_ipc] | [Generation](generation.md) |
 | [`sink_csv`][polspec.sink_csv] | [Generation](generation.md) |
 | [`sink_ndjson`][polspec.sink_ndjson] | [Generation](generation.md) |
+| [`to_yaml`][polspec.to_yaml] | [Files and documents](files.md) |
+| [`from_yaml`][polspec.from_yaml] | [Files and documents](files.md) |
+| [`to_python`][polspec.to_python] | [Files and documents](files.md) |
+| [`to_markdown`][polspec.to_markdown] | [Files and documents](files.md) |
+| [`to_mermaid`][polspec.to_mermaid] | [Files and documents](files.md) |
 | [`read`][polspec.read] | [Validation](validation.md) |
 | [`inspect`][polspec.inspect] | [Validation](validation.md) |
 | [`validate`][polspec.validate] | [Validation](validation.md) |

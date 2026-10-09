@@ -65,7 +65,13 @@ report.rows(bad).collect()        # just the rows violating that one claim
 report.failing_rows().collect()   # every violating row, with a `__polspec_finding`
                                   # column naming the claim (a row violating two
                                   # claims appears twice)
+report.failing_rows(once=True).collect()  # each violating row once, naming
+                                          # every claim it broke
 ```
+
+`once=True` is the quarantine view: with `passing_rows()` it splits a frame
+exactly, every row in one or the other, and it is what
+`polspec validate --failing` writes.
 
 The column `failing_rows()` adds is named by `polspec.validation.FINDING_COLUMN`
 rather than spelled out, so grouping by it does not hard-code the name:
