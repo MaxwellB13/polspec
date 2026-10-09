@@ -8,6 +8,22 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-09
+
+**What you can import is what polspec promises.** The public API is now
+written down: `polspec`'s `__all__`, which gains the seven names that
+lived only in submodules, plus three public submodules,
+`polspec.drift`, `polspec.validation` and `polspec.serialization`. Every
+other module says it is internal, and a test holds the docs, the
+docstrings and the command line to that line. There is one profiler,
+`profile()`, and a public quarantine view, `failing_rows(once=True)`.
+
+**Nothing that worked breaks.** This is polspec's first release with
+deprecations: `profile_dataframe` and serialization's field tables still
+work, warn, and go at 1.0. **No seeded output changes**: every catalogue
+case generates what 0.17.0 does, checked against the published 0.17.0
+across 463 cases. No spec file needs migrating.
+
 ### Added
 
 - **The public names that lived only in submodules are at the top level**:
@@ -2315,7 +2331,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/MaxwellB13/polspec/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/MaxwellB13/polspec/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/MaxwellB13/polspec/compare/v0.15.1...v0.16.0
 [0.15.1]: https://github.com/MaxwellB13/polspec/compare/v0.15.0...v0.15.1
