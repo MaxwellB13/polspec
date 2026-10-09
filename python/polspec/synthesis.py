@@ -12,6 +12,8 @@ fitted shapes, string lengths, null rates, a float's NaN share. Nothing else doe
 no relationship between columns, which are profiled one at a time. A column
 named in `replace=` carries over its shape and not its values: text in it
 is never an `Enum` of the values the source holds.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

@@ -16,6 +16,8 @@ generate a stand-in for the data (`polspec.synthesize`):
 - `replace=` names columns whose *values* must not be carried into the
   spec: a text column among them is never narrowed to an `Enum` of the
   values it holds, and carries no weights.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

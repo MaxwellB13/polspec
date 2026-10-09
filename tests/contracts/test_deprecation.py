@@ -74,3 +74,28 @@ def test_the_public_names_0_18_adds_are_at_the_top_level():
     assert polspec.to_mermaid is render.to_mermaid
     assert polspec.lit is expr.lit
     assert polspec.estimated_size is sizing.estimated_size
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "CHECK_FIELDS",
+        "COLRULE_FIELDS",
+        "COLSPEC_FIELDS",
+        "FK_FIELDS",
+        "TABLESPEC_FIELDS",
+    ],
+)
+def test_the_field_tables_left_serialization_and_still_work(name):
+    """`polspec.serialization` exported its field tables until 0.18; they are
+    internal now, and the old path warns until 1.0."""
+    from polspec import serialization
+    from polspec.serialization import fields
+
+    assert name not in serialization.__all__
+    with pytest.warns(
+        DeprecationWarning, match=f"polspec.serialization.{name}"
+    ) as caught:
+        table = getattr(serialization, name)
+    assert table is getattr(fields, name)
+    assert caught[0].filename == __file__, "the warning points at the caller"

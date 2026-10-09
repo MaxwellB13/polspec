@@ -11,6 +11,8 @@ dtype and checks nothing else about it. Everything else is left for
 
 The command line reads through the same table, so what `polspec validate`
 accepts and what `read()` accepts are one list.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations
@@ -53,6 +55,9 @@ _READERS: dict[str, Callable[..., pl.DataFrame]] = {
 
 # The text formats a CSV reader can be asked to recognise dates in.
 _DELIMITED = frozenset({".csv", ".tsv"})
+
+# The extensions `read`, `read_file` and the command line read.
+SUFFIXES: tuple[str, ...] = tuple(_READERS)
 
 
 def _reader(path: Path) -> Callable[..., pl.DataFrame]:
@@ -122,10 +127,10 @@ def read(
     """
     path = Path(path)
     frame = _reader(path)(path, **reader_options)
-    return _parse_declared_text(frame, as_table_spec(spec))
+    return parse_declared_text(frame, as_table_spec(spec))
 
 
-def _parse_declared_text(df: pl.DataFrame, spec: TableSpec) -> pl.DataFrame:
+def parse_declared_text(df: pl.DataFrame, spec: TableSpec) -> pl.DataFrame:
     """Each column `spec` declares in a type the file could not hold, read as
     what it declares -- when every value parses exactly.
 

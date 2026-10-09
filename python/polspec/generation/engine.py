@@ -1,3 +1,8 @@
+"""The engine: a column's values drawn from its declaration.
+
+Internal: not part of the public API.
+"""
+
 from __future__ import annotations
 
 import dataclasses

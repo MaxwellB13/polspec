@@ -14,6 +14,8 @@ Each subclass also inherits the built-in its failure is a kind of
 `except ValueError` still catches a bad declaration without knowing polspec's
 hierarchy. Plain argument misuse -- a negative row count, an unknown
 `method=` -- stays a bare `ValueError`, as it would in any Python API.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

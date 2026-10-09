@@ -17,6 +17,8 @@ declaration has no null *rate* to measure.
 Severity follows one rule, and where the rule is about dtypes it is the
 same function validation uses, so drift never has a second opinion about
 what would fail.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

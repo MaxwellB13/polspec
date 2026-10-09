@@ -5,6 +5,8 @@ ranges: these are the hard limits a value must satisfy to survive being stored
 in the dtype and read back out into Python. Both the declaration-time bounds
 check (`ColSpec`) and the generation-time clamp (`engine`) need them, and
 neither module may import the other, so they live here.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

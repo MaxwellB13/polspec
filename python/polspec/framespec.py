@@ -14,6 +14,8 @@ of the class namespace *before* the class exists, so a column can be named
 attributes are still reachable as `Orders.order_id`, through a fallback that
 only runs when ordinary attribute lookup fails; `Orders.col("schema")` and
 `Orders.spec["schema"]` reach a column whatever it is called.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

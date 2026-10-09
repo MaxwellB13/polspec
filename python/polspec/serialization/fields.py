@@ -7,6 +7,8 @@ one entry here. A parity test asserts every dataclass field has one.
 
 Each `Field` knows its key, how to turn a value into YAML-safe data and back,
 how to render it as Python source, and when to leave it out of a file.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

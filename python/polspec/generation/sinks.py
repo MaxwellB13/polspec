@@ -6,6 +6,8 @@ fit in memory. What each sink adds over calling that itself is the argument
 checking, the parent directory, and a signature that names the options
 rather than taking them as `**kwargs` -- a typo fails at the call site
 rather than inside a writer several frames away.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

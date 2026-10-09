@@ -24,7 +24,7 @@ from polspec import (
     TableSpec,
 )
 from polspec.drift.fields import FIELD_COMPARATORS, TABLE_COMPARATORS
-from polspec.serialization import (
+from polspec.serialization.fields import (
     CHECK_FIELDS,
     COLRULE_FIELDS,
     COLSPEC_FIELDS,

@@ -6,4 +6,6 @@ hierarchy's shape, a composite key's distinctness. Each is a function of the
 frame, the declaration and a seed, and `polspec.pass_order` decides the order
 they run in. The declarations they read (`ColRule`, `ForeignKey`,
 `Hierarchy`) live beside `ColSpec`, and know nothing of these.
+
+Internal: not part of the public API.
 """

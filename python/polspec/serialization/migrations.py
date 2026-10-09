@@ -28,6 +28,8 @@ claim: a float that does not say otherwise holds no NaN, which a reader too
 old to know the key would not check. Its version lets such a reader refuse
 the file by name rather than read it more loosely than it was written. Every
 file carries the current version, so a reader that old refuses them all.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

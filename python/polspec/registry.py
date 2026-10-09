@@ -12,6 +12,8 @@ draws the relationships between them.
 
 A registry is declared, not global: two notebooks or test modules may each
 define an `Orders`, and neither should silently see the other's.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import polars as pl
 
 from polspec import generation, serialization, validation
-from polspec.catspec import CatSpec, _declared_categories_from, as_catspec
+from polspec.catspec import CatSpec, as_catspec, declared_categories_from
 from polspec.errors import (
     MultiValidationError,
     PolspecError,
@@ -325,7 +327,7 @@ class Registry:
                             f"the shared categories define {key!r} as {expected}"
                         )
                 elif kind == "categorical" and isinstance(dtype, pl.Categorical):
-                    declared_cats = _declared_categories_from(dtype)
+                    declared_cats = declared_categories_from(dtype)
                     expected_cats = cats.get_categorical(key)
                     if declared_cats is not None and (
                         declared_cats.name() != expected_cats.name()

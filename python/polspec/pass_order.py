@@ -10,6 +10,8 @@ validation checks it against.
 The graph is decided by the spec alone, so a spec whose passes cannot be
 ordered is rejected at declaration rather than silently generating data that
 fails its own round-trip.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

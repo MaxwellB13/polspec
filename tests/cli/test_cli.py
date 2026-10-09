@@ -447,9 +447,10 @@ def test_generate_to_json_writes_categories_as_text_and_refuses_bytes(
 
 
 def test_every_reader_has_a_writer():
-    from polspec.cli._io import _DATA_READERS, _DATA_WRITERS
+    from polspec.cli._io import _DATA_WRITERS
+    from polspec.reading import SUFFIXES
 
-    assert set(_DATA_READERS) == set(_DATA_WRITERS)
+    assert set(SUFFIXES) == set(_DATA_WRITERS)
 
 
 def test_generate_is_reproducible_by_seed(tmp_path):
@@ -1012,7 +1013,7 @@ def test_validate_skip_turns_off_a_kind_of_check(tmp_path, capsys):
 
 
 def test_validate_skip_takes_every_switch_and_nothing_else(tmp_path, capsys):
-    from polspec.validation import _SWITCHES
+    from polspec.validation import SWITCHES
 
     source = _temporal_spec(tmp_path)
     data = tmp_path / "events.csv"
@@ -1021,7 +1022,7 @@ def test_validate_skip_takes_every_switch_and_nothing_else(tmp_path, capsys):
         "2024-06-01,2024-01-01T00:00:00,2024-01-01T00:00:00+0000,12:00:00,x\n",
         encoding="utf-8",
     )
-    every = [arg for name in _SWITCHES for arg in ("--skip", name)]
+    every = [arg for name in SWITCHES for arg in ("--skip", name)]
     assert run_cli("validate", source, data, *every) == 0
     with pytest.raises(SystemExit):
         run_cli("validate", source, data, "--skip", "nope")

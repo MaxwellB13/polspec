@@ -23,11 +23,6 @@ from yaml.representer import RepresenterError
 from polspec.errors import SerializationError
 from polspec.serialization.dtypes import physical_name
 from polspec.serialization.fields import (
-    CHECK_FIELDS,
-    COLRULE_FIELDS,
-    COLSPEC_FIELDS,
-    FK_FIELDS,
-    TABLESPEC_FIELDS,
     Ctx,
     check_to_source,
     check_unknown_keys,
@@ -45,12 +40,7 @@ if TYPE_CHECKING:
     from polspec.registry import Registry
 
 __all__ = [
-    "CHECK_FIELDS",
-    "COLRULE_FIELDS",
-    "COLSPEC_FIELDS",
-    "FK_FIELDS",
     "FORMAT_VERSION",
-    "TABLESPEC_FIELDS",
     "catspec_from_dict",
     "catspec_from_yaml",
     "catspec_to_dict",
@@ -65,6 +55,31 @@ __all__ = [
     "to_python",
     "to_yaml",
 ]
+
+# The field tables, exported here until 0.18 and internal since: each still
+# works, and warns, until 1.0.
+_MOVED_FIELDS = frozenset(
+    {
+        "CHECK_FIELDS",
+        "COLRULE_FIELDS",
+        "COLSPEC_FIELDS",
+        "FK_FIELDS",
+        "TABLESPEC_FIELDS",
+    }
+)
+
+
+def __getattr__(name: str) -> Any:
+    if name in _MOVED_FIELDS:
+        from polspec import _deprecation
+        from polspec.serialization import fields
+
+        _deprecation.warn_deprecated(
+            f"polspec.serialization.{name}",
+            use="the keys the Spec files reference lists",
+        )
+        return getattr(fields, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +412,11 @@ def catspec_from_dict(
     strict: bool = True,
     source: str = "registry data",
 ) -> CatSpec:
+    """A `CatSpec` from its data form, the inverse of `catspec_to_dict`.
+
+    An older format version is migrated first. `strict=False` warns about
+    an unknown key rather than raising; `source` names the data in errors.
+    """
     from polspec.catspec import CatSpec
 
     current = migrate(data, "catspec", source)
@@ -409,6 +429,8 @@ def catspec_from_dict(
 
 
 def catspec_to_yaml(catspec: CatSpec, source: str | Path | None = None) -> str | None:
+    """A `CatSpec` as YAML: written to `source` when one is given, else
+    returned as text."""
     dumped = dump_yaml(
         {"version": FORMAT_VERSION, **catspec_to_dict(catspec)},
         source if source is not None else "a category registry",
@@ -422,6 +444,7 @@ def catspec_to_yaml(catspec: CatSpec, source: str | Path | None = None) -> str |
 
 
 def catspec_from_yaml(source: str | Path, *, strict: bool = True) -> CatSpec:
+    """The `CatSpec` a YAML file holds, as `catspec_to_yaml` writes it."""
     path = Path(source)
     if not path.exists():
         raise FileNotFoundError(f"CatSpec file not found: {source}")
@@ -457,6 +480,13 @@ def registry_from_dict(
     source: str = "registry data",
     base: Path | None = None,
 ) -> Registry:
+    """A `Registry` from its data form, the inverse of `registry_to_dict`.
+
+    `categories` may be the categories themselves or the path of a
+    category file, resolved against `base` -- which `registry_from_yaml`
+    sets to the registry file's directory. `strict` and `source` are as
+    for `catspec_from_dict`.
+    """
     from polspec.registry import Registry
 
     current = migrate(data, "registry", source)
@@ -471,7 +501,7 @@ def registry_from_dict(
         if base is None:
             raise SerializationError(
                 f"{source}: 'categories' names a file ({declared!r}); read the "
-                "registry with from_yaml so the path can be resolved"
+                "registry with registry_from_yaml so the path can be resolved"
             )
         path = Path(declared)
         categories = catspec_from_yaml(path if path.is_absolute() else base / path)
@@ -506,6 +536,8 @@ def registry_from_dict(
 
 
 def registry_to_yaml(registry: Registry, source: str | Path) -> None:
+    """A `Registry` written to `source` as one YAML file: its specs keyed by
+    name, and its categories."""
     for spec in registry.specs:
         _warn_unserializable(spec, source, "yaml")
     p = Path(source)
@@ -515,6 +547,8 @@ def registry_to_yaml(registry: Registry, source: str | Path) -> None:
 
 
 def registry_from_yaml(source: str | Path, *, strict: bool = True) -> Registry:
+    """The `Registry` a YAML file holds, as `registry_to_yaml` writes it. A
+    `categories:` path is read relative to the file."""
     path = Path(source)
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     return registry_from_dict(raw, strict=strict, source=str(source), base=path.parent)

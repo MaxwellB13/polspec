@@ -7,6 +7,8 @@ the order `polspec.pass_order` derives from what each reads and writes.
 `generate_batches` streams the same pipeline in windows; `scan` is a
 `LazyFrame` over it (`scan.py`), and the `sink_*` functions write one out
 (`sinks.py`).
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

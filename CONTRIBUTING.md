@@ -140,6 +140,21 @@ POLSPEC_WRITE_SEEDED=1 uv run --with "polars==2.0.0" pytest -p no:cacheprovider 
 
 The second run adds the cases only Polars 2 can generate (`Map`).
 
+## The public API
+
+The public API is `polspec.__all__` and the `__all__` of `polspec.drift`,
+`polspec.validation` and `polspec.serialization`. Every other module's
+docstring ends `Internal: not part of the public API.`, and a new module
+needs that line. `tests/contracts/test_boundary.py` holds the line:
+
+- the docs and README import only public names;
+- every public class and function has a docstring;
+- no module imports another module's `_private` names (a private module,
+  such as `cli._io`, shares its names with its own package);
+- the CLI reaches into no `_private` attribute. It uses polspec as a user
+  would, or a helper the owning module exposes for it without an
+  underscore (`reading.parse_declared_text`).
+
 ## Deprecations
 
 A public name is never renamed or removed in place. It is deprecated first:

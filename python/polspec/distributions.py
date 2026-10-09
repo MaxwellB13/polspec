@@ -4,6 +4,8 @@ Aliases are resolved here, at declaration, and only here: the Rust engine
 (`src/dist.rs`) reads the canonical names exactly and exports its own table as
 `distribution_params()`, which `tests/test_engine.py` compares with
 `DISTRIBUTIONS` so the two sides cannot drift.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

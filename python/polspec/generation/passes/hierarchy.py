@@ -1,6 +1,9 @@
 """`Hierarchy` as a pass: the two link columns rewritten as a forest of the
 declared shape, and -- when asked -- damaged on purpose with cycles and
-self-references for a graph walk to fail against."""
+self-references for a graph walk to fail against.
+
+Internal: not part of the public API.
+"""
 
 from __future__ import annotations
 

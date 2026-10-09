@@ -90,6 +90,19 @@ each define an `Orders` — but it leaves edges:
 - **A single spec's `to_mermaid()` still draws one entity.** The whole
   picture is `registry.to_mermaid()`.
 
+## The public API is what `polspec` exports
+
+What you can import from `polspec` -- the names in its `__all__`, which
+the [API reference](../reference/api/index.md) documents -- is the public
+API, along with three submodules: `polspec.drift` (`drift`, `diff` and
+their reports), `polspec.validation` (`FINDING_COLUMN` and the report
+types) and `polspec.serialization` (the `CatSpec`, `Registry` and dict
+forms of a spec file). Each has an `__all__`, and only those names are
+public. Every other module is internal and says so in its docstring:
+it can change in any release, without a deprecation. A public name is
+never renamed or removed in place: it warns first, for at least one minor
+release, and a name deprecated in 0.x goes at 1.0.
+
 ## YAML format and generated values may change
 
 Two things this project has made no compatibility promise about yet:
@@ -175,9 +188,10 @@ though — not core.
 ## Deferred on purpose
 
 **`ColSpec` holding a `Domain` instead of `bounds`/`choices`/`format`.**
-`polspec.domain.Domain` is already the one definition generation,
-validation, foreign keys and drift read; `ColSpec` still stores the three
-fields it is derived from, and every module re-derives it. Folding the fields
+The internal `Domain`, what a column may hold, is already the one
+definition generation, validation, foreign keys and drift read; `ColSpec`
+still stores the three fields it is derived from, and every module
+re-derives it. Folding the fields
 into the domain would remove that repetition and nothing a user can see, at
 the cost of touching every attribute read in the library. It has been
 considered and set aside at each of the last three releases. The condition

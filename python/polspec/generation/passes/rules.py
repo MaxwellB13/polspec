@@ -1,5 +1,8 @@
 """`ColRule` as a pass: the rows a rule's condition matches get a value drawn
-from its choices, first matching rule first."""
+from its choices, first matching rule first.
+
+Internal: not part of the public API.
+"""
 
 from __future__ import annotations
 

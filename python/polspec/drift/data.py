@@ -13,6 +13,8 @@ different question: it narrows a small String column to an Enum and records
 temporal extremes as physical integers, both of which a comparison would
 then have to undo. Asking the frame the comparison's own questions is
 shorter than translating the profiler's answers.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

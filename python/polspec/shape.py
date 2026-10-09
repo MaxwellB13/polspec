@@ -17,6 +17,8 @@ uniform, as it always was. Pure Polars: no SciPy, no NumPy.
 Every value here is *physical*: a date as its day count, a datetime or a
 duration as an integer in its unit, a decimal scaled to its integer form --
 the units the engine draws in, and so the units its parameters are in.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

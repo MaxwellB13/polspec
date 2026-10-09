@@ -1,5 +1,8 @@
 """`ForeignKey` as a pass: a key's column overwritten with its parent's keys,
-drawn with replacement -- or, for a unique column, as a permutation of them."""
+drawn with replacement -- or, for a unique column, as a permutation of them.
+
+Internal: not part of the public API.
+"""
 
 from __future__ import annotations
 

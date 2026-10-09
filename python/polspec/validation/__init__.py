@@ -98,7 +98,7 @@ _Options = ValidationOptions
 # second spelling reachable through `inspect` alone, which is what it used to
 # be: `inspect(spec, df, unique=False)` worked and `validate(spec, df,
 # unique=False)` did not.
-_SWITCHES = (
+SWITCHES = (
     "rules",
     "validators",
     "unique",
@@ -108,7 +108,7 @@ _SWITCHES = (
     "pattern",
     "bounds",
 )
-_RENAMED_OPTIONS = {f"validate_{name}": name for name in _SWITCHES}
+_RENAMED_OPTIONS = {f"validate_{name}": name for name in SWITCHES}
 _ACCEPTED_OPTIONS = accepted_options(ValidationOptions, renames=_RENAMED_OPTIONS)
 
 

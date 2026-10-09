@@ -22,6 +22,8 @@ Generation can then be asked for the opposite on purpose. `cycles=` and
 to survive, and `validate()` reports them, so a test can assert that its own
 resolver and polspec agree about what is broken. The pass that builds the
 shape, and breaks it, is `polspec.generation.passes.hierarchy`.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

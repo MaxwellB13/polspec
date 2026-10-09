@@ -23,8 +23,7 @@ import polars as pl
 from polspec import FrameSpec
 from polspec.errors import CliError
 from polspec.frames import json_casts, sample_rows
-from polspec.reading import _DELIMITED, _parse_declared_text
-from polspec.reading import _READERS as _DATA_READERS
+from polspec.reading import SUFFIXES, parse_declared_text, read_file
 from polspec.registry import Registry, load_module
 
 if TYPE_CHECKING:
@@ -67,22 +66,20 @@ def _read_data_file(
     Polars recognise dates in a CSV itself -- `schema infer`'s case, where
     there is no declaration to go by.
     """
-    suffix = path.suffix.lower()
-    if suffix not in _DATA_READERS:
+    if path.suffix.lower() not in SUFFIXES:
         raise CliError(
             f"don't know how to read {path.suffix!r} files ({path}). "
-            f"Supported: {', '.join(sorted(_DATA_READERS))}"
+            f"Supported: {', '.join(sorted(SUFFIXES))}"
         )
-    options = {"try_parse_dates": True} if infer_dates and suffix in _DELIMITED else {}
     try:
-        df = _DATA_READERS[suffix](path, **options)
+        df = read_file(path, infer_dates=infer_dates)
     except Exception as exc:
         raise CliError(f"could not read {path}: {exc}") from exc
     try:
         df = sample_rows(df, sample)
     except ValueError as exc:
         raise CliError(str(exc)) from exc
-    return _parse_declared_text(df, spec) if spec is not None else df
+    return parse_declared_text(df, spec) if spec is not None else df
 
 
 def _write_data_file(df: pl.DataFrame, path: Path) -> None:
@@ -114,7 +111,7 @@ def _data_file_for(directory: Path, name: str) -> Path | None:
     None when the spec has no file there."""
     found = [
         candidate
-        for suffix in _DATA_READERS
+        for suffix in SUFFIXES
         if (candidate := directory / f"{name}{suffix}").exists()
     ]
     if len(found) > 1:
