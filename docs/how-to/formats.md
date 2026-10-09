@@ -18,7 +18,7 @@ Users.validate(df)   # passes -- which is the point
 Without a format, a column carrying a validator as ordinary as
 `col("email").str.contains("@")` could not be generated to satisfy its own
 spec. With one it can, because the sampler and the validator are one
-declaration in `polspec.formats`, reviewed in one diff and pinned by one
+declaration in polspec's table of formats, reviewed in one diff and pinned by one
 round-trip test per format.
 
 ## The formats

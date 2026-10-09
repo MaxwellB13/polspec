@@ -9,6 +9,8 @@ pool -- used to draw their seeds from one `random.Random` in declaration
 order, so inserting a rules column shifted every later pass. They now mix
 the frame seed with a stable key by the same construction the engine uses,
 ported here so the two never disagree about what "keyed by name" means.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

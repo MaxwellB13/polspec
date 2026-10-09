@@ -1,3 +1,8 @@
+"""`ColSpec` -- one column, declared.
+
+Internal: not part of the public API.
+"""
+
 from __future__ import annotations
 
 import dataclasses

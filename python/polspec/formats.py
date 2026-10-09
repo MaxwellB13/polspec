@@ -21,6 +21,8 @@ unambiguous validator; a `pattern=<regex>` would need a regex-to-sampler
 compiler, and has no answer for `.*`. What a format promises is syntax:
 `format="email"` generates a well-formed address, not a deliverable one, and
 validates the shape, not the existence.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

@@ -17,6 +17,8 @@ One codec for every place a value is written, so a bound, a choice and a
 literal cannot disagree about how a time is spelt. It lives outside
 `polspec.serialization` because a predicate (`polspec.expr`) is a
 declaration, and writes its own data form.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

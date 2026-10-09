@@ -10,6 +10,8 @@ buffers on top -- most visibly for `Decimal` and `List`, which are assembled
 in Polars rather than filled by the engine -- so a peak is higher than this
 by a factor that depends on the dtype, and no estimate from a schema can
 know it. Against a frame of scalar columns it is within a percent or two.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

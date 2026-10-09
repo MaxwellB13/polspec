@@ -1,3 +1,9 @@
+"""`Bound` -- an inclusive range, for numeric bounds, temporal ranges and
+string lengths.
+
+Internal: not part of the public API.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

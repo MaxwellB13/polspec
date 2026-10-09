@@ -3,6 +3,8 @@
 Kept out of `framespec` and `catspec` so those modules describe what a spec
 *is* rather than how it is printed. Nothing here is reachable from the
 generation or validation paths.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

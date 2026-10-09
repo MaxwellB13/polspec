@@ -5,6 +5,8 @@ many rows, a few sample values, and, for row-level findings, a way to get
 the offending rows back as a frame. A `ValidationReport` is every finding
 for one frame against one spec, with the frame kept lazily so nothing is
 materialised until asked for.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

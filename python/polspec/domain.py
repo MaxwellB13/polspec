@@ -11,6 +11,8 @@ to fit inside the child's -- and whether it does is decidable from the two
 declarations alone. `rejects` is that decision, so a contradiction is
 reported at declaration instead of surfacing as generated data that fails
 its own spec.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

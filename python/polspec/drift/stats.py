@@ -13,6 +13,8 @@ difference at least this large if the declaration were exactly right.
 
 Each matches SciPy's function of the same purpose (`binomtest`,
 `chisquare`, `ks_2samp(method="asymp")`); the test suite holds them to it.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

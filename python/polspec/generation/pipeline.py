@@ -5,6 +5,8 @@ independently, then the passes in `polspec.generation.passes` rewrite the
 finished frame, in the order `polspec.pass_order` derives from what each
 reads and writes. `generate_batches` runs the same pipeline window by
 window; `scan` and the sinks are built on it.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

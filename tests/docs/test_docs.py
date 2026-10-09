@@ -325,7 +325,7 @@ def test_the_colspec_field_reference_has_a_row_per_field():
     import dataclasses
 
     from polspec import ColSpec
-    from polspec.serialization import COLSPEC_FIELDS
+    from polspec.serialization.fields import COLSPEC_FIELDS
 
     rows = TABLE_KEY.findall(
         (REFERENCE / "colspec-fields.md").read_text(encoding="utf-8")
@@ -338,15 +338,15 @@ def test_the_colspec_field_reference_has_a_row_per_field():
 def test_the_spec_file_reference_names_every_key_the_reader_takes():
     """Each table on the page is the reader's own list of keys for that
     kind of mapping -- no more, no fewer."""
-    from polspec.serialization import (
+    from polspec.serialization import __dict__ as serialization
+    from polspec.serialization import fields
+    from polspec.serialization.fields import (
         CHECK_FIELDS,
         COLRULE_FIELDS,
         COLSPEC_FIELDS,
         FK_FIELDS,
         TABLESPEC_FIELDS,
-        fields,
     )
-    from polspec.serialization import __dict__ as serialization
 
     page = REFERENCE / "spec-files.md"
     written = {f.name for f in FK_FIELDS} - {"target"}  # never written to a file

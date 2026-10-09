@@ -6,6 +6,8 @@ facts that make the message actionable, and a way to locate the offending
 rows later. All constraints are collected first and evaluated together, so
 validating fifty columns costs one scan rather than fifty. Foreign keys are
 the exception: each needs its own anti-join.
+
+Internal: not part of the public API.
 """
 
 from polspec.validation.constraints._base import (

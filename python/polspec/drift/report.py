@@ -13,6 +13,8 @@ that satisfied the old declaration could fail the new one -- or, against
 data, when this frame fails this spec. Everything else is *compatible*.
 Direction lives in the code (`domain_widened`, `domain_narrowed`), so a
 second axis is not needed.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

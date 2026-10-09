@@ -24,6 +24,16 @@ seed produces; see
 - **`profile()` takes the switches `profile_dataframe` had**: `weights`,
   `shape`, `detect_unique` and `calculate_bounds`, each on by default --
   what `profile()` already did -- so one profiler covers both uses.
+- **The public API is written down, and tested.** It is `polspec`'s
+  `__all__`, and the `__all__` of `polspec.drift`, `polspec.validation` and
+  `polspec.serialization`. Every other module says in its docstring that it
+  is internal, and may change in any release (Roadmap and stability, *The
+  public API is what `polspec` exports*). A test holds the line: the docs
+  import only public names, every public class and function has a
+  docstring, and no module takes another's private names -- the command
+  line included, which now uses only what `reading`, `validation` and
+  `catspec` expose for it. The serialization functions for a `CatSpec` and
+  a `Registry` gained the docstrings they lacked.
 
 ### Deprecated
 
@@ -33,6 +43,11 @@ seed produces; see
   This is polspec's first deprecation: a public name now warns for at least
   one minor release before it goes, rather than changing in place
   (CONTRIBUTING, *Deprecations*).
+- **`polspec.serialization`'s field tables** (`COLSPEC_FIELDS`,
+  `TABLESPEC_FIELDS`, `COLRULE_FIELDS`, `CHECK_FIELDS`, `FK_FIELDS`),
+  removed in 1.0. They describe polspec's own codec and were never
+  documented; the *Spec files* reference lists the keys a file holds. They
+  are out of the module's `__all__`, and each still works, and warns.
 
 ## [0.17.0] - 2026-10-08
 

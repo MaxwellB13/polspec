@@ -1,3 +1,8 @@
+"""`Check` -- a claim about a whole row, made across its columns.
+
+Internal: not part of the public API.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

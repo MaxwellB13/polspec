@@ -15,6 +15,8 @@ parsing and templating, not new behaviour.
     polspec generate orders.yaml -n 1000 -o orders.parquet --seed 1
     polspec diff orders_v1.yaml orders_v2.yaml --markdown
     polspec drift orders.yaml orders.parquet --fail-on breaking
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ from polspec.cli._synthesize import add_synthesize_parser
 from polspec.cli._test import _cmd_test
 from polspec.drift import DriftOptions
 from polspec.errors import PolspecError
-from polspec.validation import _SWITCHES
+from polspec.validation import SWITCHES
 
 try:
     from importlib.metadata import version as _pkg_version
@@ -199,11 +201,11 @@ def _build_parser() -> argparse.ArgumentParser:
     validate.add_argument(
         "--skip",
         action="append",
-        choices=_SWITCHES,
+        choices=SWITCHES,
         metavar="CHECK",
         help=(
             "Turn off one kind of check, as validate_CHECK=False does; repeat "
-            f"for several. One of: {', '.join(_SWITCHES)}"
+            f"for several. One of: {', '.join(SWITCHES)}"
         ),
     )
     validate.add_argument(

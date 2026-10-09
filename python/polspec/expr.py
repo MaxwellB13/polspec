@@ -16,6 +16,8 @@ and which columns it reads (`root_names`).
 Comparison operators build predicates, as they do on `pl.Expr`, so a `Pred`
 has no truth value: `bool(col("a") == 1)` raises. Compare two predicates
 structurally with `Pred.equals`.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

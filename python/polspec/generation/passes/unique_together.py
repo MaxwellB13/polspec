@@ -13,6 +13,8 @@ everywhere.
 Rows where any member is null are exempt, matching how the composite key is
 validated: a null means "no value", and two rows that both lack one are not
 two rows sharing a combination.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

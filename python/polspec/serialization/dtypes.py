@@ -6,6 +6,8 @@ naming the dtype (`{Enum: [...]}`, `{Datetime: {time_unit: us}}`), and a
 namespace and physical dtype so two specs sharing it still share it after a
 round-trip. Registry references (`$categories.STATUS`) resolve against the
 `CatSpec` handed to the reader.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

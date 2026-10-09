@@ -7,6 +7,8 @@ consistent, and pure operations that derive one spec from another.
 
 Every verb the library offers -- generate, validate, serialize, render --
 takes a `TableSpec`. `FrameSpec` classmethods forward to them with `cls.spec`.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

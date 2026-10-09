@@ -6,6 +6,8 @@ all move frames between the eager and lazy forms. Each module used to declare
 its own copy of both aliases and its own coercer, which is four places to
 agree with each other the day `references=` learns to take a path, or
 `method=` gains a third value.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

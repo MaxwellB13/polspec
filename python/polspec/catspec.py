@@ -28,6 +28,8 @@ the same way whichever form declared it:
 Naming an entry always gives back the *dtype*, ready for `ColSpec(...)`. The
 pieces underneath are reached by asking for them: `get_enum` for a category
 list, `get_categorical` for a `pl.Categories`, `get_choices` for a domain pool.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations
@@ -89,7 +91,7 @@ def _auto_physical(n_unique: int) -> DtypeLike:
     return pl.UInt32
 
 
-def _declared_categories_from(value: object) -> pl.Categories | None:
+def declared_categories_from(value: object) -> pl.Categories | None:
     """The Categories a value declares, if it declares one at all.
 
     Accepts either a bare `pl.Categories(...)` or a `pl.Categorical(...)`
@@ -160,7 +162,7 @@ def _entry_of(key: str, value: Any, owner: str) -> tuple[Kind, Any] | None:
     """What a class-body assignment declares, or None if it declares nothing."""
     if isinstance(value, pl.Enum):
         return ("enum", value.categories.to_list())
-    categories = _declared_categories_from(value)
+    categories = declared_categories_from(value)
     if categories is None:
         return None
     if not categories.name():
@@ -327,7 +329,7 @@ class CatSpec(metaclass=_CatSpecMeta):
         if isinstance(value, str):
             return pl.Categories(name, physical=physical_from_name(value))
         if isinstance(value, pl.DataType):
-            declared = _declared_categories_from(value)
+            declared = declared_categories_from(value)
             return (
                 declared
                 if declared is not None
@@ -675,7 +677,7 @@ def _categories_of(
     dtype: pl.DataType, name: str, physical: DtypeLike | None = None
 ) -> pl.Categories:
     """The shared registry a Categorical column already names, or a new one."""
-    declared = _declared_categories_from(dtype)
+    declared = declared_categories_from(dtype)
     if declared is not None:
         return declared
     return pl.Categories(name, physical=physical or pl.UInt32)

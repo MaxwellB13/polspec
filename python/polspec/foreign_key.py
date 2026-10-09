@@ -2,6 +2,8 @@
 
 The pass that fills a key's column from its parent is
 `polspec.generation.passes.foreign_keys`.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations
