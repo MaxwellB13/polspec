@@ -6,14 +6,14 @@
 //! exactly. `PARAMS` is exported to Python so a test can assert the two sides
 //! agree on names, defaults and which parameters must be positive.
 //!
-//! The samplers themselves are in `samplers.rs`, on `libm`, so a seed draws
+//! The samplers themselves are in `samplers.rs`, on `math.rs`, so a seed draws
 //! the same values on every platform.
 
 use std::collections::HashMap;
 
 use rand::Rng;
 
-use crate::samplers::{Beta, Exp, Gamma, Libm, LogNormal, Normal, Poisson};
+use crate::samplers::{Beta, Exp, Gamma, LogNormal, Normal, Poisson, Portable};
 
 /// One parameter of a distribution: canonical name, default, positivity.
 pub struct ParamSpec {
@@ -136,7 +136,7 @@ impl Distribution {
             }
             "poisson" => {
                 let lambda = get("lambda")?;
-                Distribution::Poisson(Poisson::new::<Libm>(lambda).ok_or_else(|| {
+                Distribution::Poisson(Poisson::new::<Portable>(lambda).ok_or_else(|| {
                     format!(
                         "Invalid poisson distribution parameters for column '{column}': \
                          lambda {lambda} is above the largest supported, {}",
@@ -145,7 +145,7 @@ impl Distribution {
                 })?)
             }
             "gamma" => Distribution::Gamma(Gamma::new(get("shape")?, get("scale")?)),
-            "beta" => Distribution::Beta(Beta::new(get("alpha")?, get("beta")?)),
+            "beta" => Distribution::Beta(Beta::new::<Portable>(get("alpha")?, get("beta")?)),
             _ => unreachable!("params_of accepted the name"),
         })
     }
@@ -167,12 +167,12 @@ impl Distribution {
     pub fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> f64 {
         match self {
             Distribution::Uniform => unreachable!("uniform is sampled over the typed range"),
-            Distribution::Normal(d) => d.sample::<Libm, R>(rng),
-            Distribution::LogNormal(d) => d.sample::<Libm, R>(rng),
-            Distribution::Exp(d) => d.sample::<Libm, R>(rng),
-            Distribution::Poisson(d) => d.sample::<Libm, R>(rng),
-            Distribution::Gamma(d) => d.sample::<Libm, R>(rng),
-            Distribution::Beta(d) => d.sample::<Libm, R>(rng),
+            Distribution::Normal(d) => d.sample::<Portable, R>(rng),
+            Distribution::LogNormal(d) => d.sample::<Portable, R>(rng),
+            Distribution::Exp(d) => d.sample::<Portable, R>(rng),
+            Distribution::Poisson(d) => d.sample::<Portable, R>(rng),
+            Distribution::Gamma(d) => d.sample::<Portable, R>(rng),
+            Distribution::Beta(d) => d.sample::<Portable, R>(rng),
         }
     }
 }

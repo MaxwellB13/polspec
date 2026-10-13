@@ -15,6 +15,7 @@ exactly what it did before any of this existed.
 from __future__ import annotations
 
 import datetime as dt
+import math
 from pathlib import Path
 
 import numpy as np
@@ -153,6 +154,28 @@ def test_the_shape_fitted_is_the_shape_drawn_from(values, dtype, expected):
     series = pl.Series(values).cast(dtype)
     fitted = fit(series, Bound(series.min(), series.max()), dtype, seed=0)
     assert (fitted.distribution if fitted else None) == expected
+
+
+@pytest.mark.parametrize(
+    ("values", "dtype"),
+    [
+        (np.random.default_rng(2).lognormal(3, 0.8, 5_000), pl.Float64),
+        (np.random.default_rng(2).beta(2, 5, 5_000), pl.Float64),
+        (np.random.default_rng(2).gamma(2.5, 4.0, 5_000), pl.Float64),
+    ],
+    ids=["lognormal", "beta", "gamma"],
+)
+def test_a_fitted_parameter_keeps_twelve_significant_digits(values, dtype):
+    """Measured with the platform's float maths -- a log-normal's through
+    `ln` -- a parameter could differ in its last bit between operating
+    systems; at 12 digits that difference rounds away."""
+    series = pl.Series(values).cast(dtype)
+    fitted = fit(series, Bound(series.min(), series.max()), dtype, seed=0)
+    assert fitted is not None
+    for value in fitted.params.values():
+        assert value == float(f"{value:.12g}")
+        # A last-bit difference in what it was rounded from rounds away.
+        assert float(f"{math.nextafter(value, math.inf):.12g}") == value
 
 
 def test_a_key_is_all_distinct_and_integer_or_text(real):

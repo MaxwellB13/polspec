@@ -92,6 +92,8 @@ the source:
   draws with the data. The closest wins if it beats drawing evenly between
   the extremes; otherwise the column stays even. A log-normal amount comes
   out log-normal, a bell-curved age bell-curved, and a count as counts.
+  The fitted parameters keep 12 significant digits, so the spec reads
+  cleanly and, in practice, profiles the same on every operating system.
 - **Keys.** An integer or text column whose values are all distinct, over
   at least a hundred of them, is declared unique, and the fake one is
   distinct too. Asked for more rows than the key's range holds, the range

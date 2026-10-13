@@ -14,6 +14,13 @@ the observed values -- by the two-sample Kolmogorov-Smirnov distance -- wins,
 if it beats drawing uniformly by a margin; otherwise the column stays
 uniform, as it always was. Pure Polars: no SciPy, no NumPy.
 
+Each fitted parameter is rounded to 12 significant digits. The moments
+behind it are measured with the platform's floating-point maths -- a
+log-normal's through `ln` -- which may differ in the last bit between
+operating systems; rounding makes that difference vanish in all but the
+rarest case, so a profiled spec, and what `synthesize()` draws from it, is
+the same everywhere in practice. It also keeps a spec file readable.
+
 Every value here is *physical*: a date as its day count, a datetime or a
 duration as an integer in its unit, a decimal scaled to its integer form --
 the units the engine draws in, and so the units its parameters are in.
@@ -123,13 +130,30 @@ def _number(value: Any) -> float:
     return float(value)
 
 
+# Significant digits a fitted parameter keeps.
+_DIGITS = 12
+
+
+def _portable(params: dict[str, float]) -> dict[str, float]:
+    """`params`, each rounded to `_DIGITS` significant digits."""
+    return {name: float(f"{value:.{_DIGITS}g}") for name, value in params.items()}
+
+
 def _candidates(
     observed: pl.Series, dtype: pl.DataType
 ) -> list[tuple[str, dict[str, float]]]:
     """Each distribution that could describe `observed`, fitted by the
-    method of moments. Only shapes the values' support allows: the engine
-    draws without a location shift, so a positive-only shape is offered only
-    for positive values, and a beta only for values inside [0, 1]."""
+    method of moments, its parameters rounded (`_portable`). Only shapes the
+    values' support allows: the engine draws without a location shift, so a
+    positive-only shape is offered only for positive values, and a beta only
+    for values inside [0, 1]."""
+    return [(name, _portable(params)) for name, params in _fitted(observed, dtype)]
+
+
+def _fitted(
+    observed: pl.Series, dtype: pl.DataType
+) -> list[tuple[str, dict[str, float]]]:
+    """The method-of-moments fits `_candidates` offers, at full precision."""
     mean, std = _number(observed.mean()), _number(observed.std())
     lo, hi = _number(observed.min()), _number(observed.max())
     if not std > 0 or not math.isfinite(std):

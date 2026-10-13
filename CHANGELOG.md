@@ -15,14 +15,24 @@ seed produces; see
   `gamma`, `beta`, `poisson`) could differ between Windows, Linux and
   macOS: its sampler took `exp`, `ln` and `pow` from each platform's math
   library, which round the last bit differently on a few inputs. The
-  samplers are now polspec's own -- `rand_distr`'s algorithms, ported
-  draw for draw onto the pure-Rust `libm` -- so those functions round the
-  same way everywhere. **Seeded output changes** for such columns wherever
-  the platform's library and `libm` disagree. On Windows that is `lognormal`
-  and `beta` columns only: `normal`, `exponential`, `gamma` and `poisson`
+  samplers are now polspec's own: `rand_distr`'s algorithms, ported draw
+  for draw, with `exp`, `ln` and `pow` from a port of Arm's
+  optimized-routines -- the algorithms glibc uses, kept to plain IEEE
+  arithmetic -- which round the same way everywhere and are as fast as a
+  platform's own; a `lognormal` column draws faster than before.
+  **Seeded output changes** for such columns wherever the platform's library
+  and the port disagree. On Windows that is a `lognormal` column and a
+  batched `beta` column only: `normal`, `exponential`, `gamma` and `poisson`
   columns draw what 0.18.0 drew. A sampler draws the same random
   numbers as before, so where a value changes, it changes from the first
   draw the libraries disagree on.
+- **`profile()` rounds a fitted distribution's parameters to 12
+  significant digits** -- `mean: 1.08778398481`, not
+  `1.0877839848116615`. They are measured with the platform's float maths
+  (a log-normal's through `ln`), which may differ in the last bit between
+  operating systems; rounded, a profiled spec, and what `synthesize()`
+  draws from it, is the same on each in practice. A spec file reads more
+  cleanly too. A spec declared or loaded from a file is unaffected.
 
 ## [0.18.0] - 2026-10-09
 

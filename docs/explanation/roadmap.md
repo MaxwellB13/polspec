@@ -137,9 +137,15 @@ Two things this project has made no compatibility promise about yet:
   0.14.0 nothing that constructed under 0.13.1 -- a column declaring
   `nan_probability` draws its NaN from a draw of its own -- 0.15.0
   nothing that constructed under 0.14.0, 0.15.1 nothing that constructed
-  under 0.15.0, 0.16.0 nothing that constructed under 0.15.1, and 0.17.0
-  nothing that constructed under 0.16.0 -- on any Polars it supports, from
-  1.39 to 2.x, whose seeded output is the same.
+  under 0.15.0, 0.16.0 nothing that constructed under 0.15.1, 0.17.0
+  nothing that constructed under 0.16.0, and 0.18.0 nothing that
+  constructed under 0.17.0 -- on any Polars it supports, from 1.39 to 2.x,
+  whose seeded output is the same. 0.19.0 made it the same on every
+  operating system too: the samplers' `exp`, `ln` and `pow` are polspec's
+  own, the same everywhere, rather than each platform's math library, so
+  `lognormal` and `beta` columns changed, once, wherever the two
+  disagreed; `normal`, `exponential`, `gamma` and `poisson` columns drew
+  what they did on Windows.
 
 The first of those is easier to live with than it sounds, because a spec file
 now says which format wrote it. Every file `to_yaml()` writes carries

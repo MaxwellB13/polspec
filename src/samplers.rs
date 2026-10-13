@@ -17,8 +17,9 @@
 //! those disagree in the last bit on a few inputs. A last-bit difference in
 //! an accept/reject test changes how many random numbers a draw consumes,
 //! and with it every later value in the chunk. Here those three functions
-//! come from `Math`, which in the engine is the pure-Rust `libm`:
-//! bit-identical everywhere. Everything else a sampler computes (`sqrt`,
+//! come from `Math`, which in the engine is `math.rs` -- Arm's
+//! optimized-routines, the algorithms glibc uses, ported to plain IEEE
+//! arithmetic: bit-identical everywhere, and as fast as a platform's own. Everything else a sampler computes (`sqrt`,
 //! `floor`, `abs`, `+ - * /`) is exactly rounded by IEEE 754, so it is the
 //! same everywhere already.
 //!
@@ -40,21 +41,21 @@ pub trait Math {
     fn pow(x: f64, y: f64) -> f64;
 }
 
-/// The pure-Rust `libm`: the same bits on every platform.
-pub enum Libm {}
+/// `math.rs`: Arm's algorithms, the same bits on every platform.
+pub enum Portable {}
 
-impl Math for Libm {
+impl Math for Portable {
     #[inline(always)]
     fn exp(x: f64) -> f64 {
-        libm::exp(x)
+        crate::math::exp(x)
     }
     #[inline(always)]
     fn ln(x: f64) -> f64 {
-        libm::log(x)
+        crate::math::ln(x)
     }
     #[inline(always)]
     fn pow(x: f64, y: f64) -> f64 {
-        libm::pow(x, y)
+        crate::math::pow(x, y)
     }
 }
 
@@ -104,7 +105,6 @@ where
 }
 
 /// A standard normal draw.
-#[inline]
 pub fn standard_normal<M: Math, R: Rng + ?Sized>(rng: &mut R) -> f64 {
     let pdf = |x: f64| M::exp(-x * x / 2.0);
     let zero_case = |rng: &mut R, u: f64| {
@@ -152,7 +152,6 @@ impl Normal {
         Normal { mean, std }
     }
 
-    #[inline]
     pub fn sample<M: Math, R: Rng + ?Sized>(&self, rng: &mut R) -> f64 {
         self.mean + self.std * standard_normal::<M, R>(rng)
     }
@@ -184,7 +183,6 @@ impl Exp {
         }
     }
 
-    #[inline]
     pub fn sample<M: Math, R: Rng + ?Sized>(&self, rng: &mut R) -> f64 {
         standard_exp::<M, R>(rng) * self.lambda_inverse
     }
@@ -258,7 +256,6 @@ impl Gamma {
         })
     }
 
-    #[inline]
     pub fn sample<M: Math, R: Rng + ?Sized>(&self, rng: &mut R) -> f64 {
         match &self.0 {
             GammaRepr::Large(g) => g.sample_unscaled::<M, R>(rng) * (g.d * g.scale),
@@ -296,11 +293,17 @@ pub struct Beta {
     b: f64,
     switched_params: bool,
     algorithm: BetaAlgorithm,
+    /// `ln 4` and `ln 5`, which the reference computes on every iteration
+    /// (`std`'s `ln` folds to a constant; `math::ln` does not): computed once,
+    /// with the same function, so every draw is unchanged.
+    ln4: f64,
+    ln5: f64,
 }
 
 impl Beta {
     /// `alpha` and `beta` are positive (the caller checks).
-    pub fn new(alpha: f64, beta: f64) -> Self {
+    pub fn new<M: Math>(alpha: f64, beta: f64) -> Self {
+        let (ln4, ln5) = (M::ln(4.), M::ln(5.));
         // The reference's notation: `a` the smaller parameter, `b` the larger.
         let (a0, b0) = (alpha, beta);
         let (a, b, switched_params) = if a0 < b0 {
@@ -317,6 +320,8 @@ impl Beta {
                 b,
                 switched_params,
                 algorithm: BetaAlgorithm::BB { alpha, beta, gamma },
+                ln4,
+                ln5,
             }
         } else {
             // Here `a` is the larger parameter.
@@ -336,6 +341,8 @@ impl Beta {
                     kappa1,
                     kappa2,
                 },
+                ln4,
+                ln5,
             }
         }
     }
@@ -343,7 +350,6 @@ impl Beta {
     // `!(a < b)` is the reference's test, and not `a >= b`: a NaN must
     // accept, as it does there.
     #[allow(clippy::neg_cmp_op_on_partial_ord)]
-    #[inline]
     pub fn sample<M: Math, R: Rng + ?Sized>(&self, rng: &mut R) -> f64 {
         let mut w;
         match self.algorithm {
@@ -353,9 +359,9 @@ impl Beta {
                 let v = beta * M::ln(u1 / (1.0 - u1));
                 w = self.a * M::exp(v);
                 let z = u1 * u1 * u2;
-                let r = gamma * v - M::ln(4.);
+                let r = gamma * v - self.ln4;
                 let s = self.a + r - w;
-                if s + 1.0 + M::ln(5.) >= 5. * z {
+                if s + 1.0 + self.ln5 >= 5. * z {
                     break;
                 }
                 let t = M::ln(z);
@@ -394,7 +400,7 @@ impl Beta {
                 }
                 let v = beta * M::ln(u1 / (1.0 - u1));
                 w = self.a * M::exp(v);
-                if !(alpha * (M::ln(alpha / (self.b + w)) + v) - M::ln(4.) < M::ln(z)) {
+                if !(alpha * (M::ln(alpha / (self.b + w)) + v) - self.ln4 < M::ln(z)) {
                     break;
                 }
             },
@@ -645,7 +651,7 @@ mod tests {
         }
         // BB (both above 1) and BC, each way round.
         for (alpha, beta) in [(2.0, 5.0), (5.0, 2.0), (0.5, 0.5), (0.4, 3.0), (3.0, 0.4)] {
-            let d = Beta::new(alpha, beta);
+            let d = Beta::new::<Std>(alpha, beta);
             let r = rand_distr::Beta::new(alpha, beta).unwrap();
             agrees("beta", |g| d.sample::<Std, _>(g), |g| r.sample(g));
         }
@@ -679,11 +685,11 @@ mod tests {
             ),
             (
                 "beta, BB",
-                Box::new(|g| Beta::new(2.0, 5.0).sample::<M, _>(g)),
+                Box::new(|g| Beta::new::<M>(2.0, 5.0).sample::<M, _>(g)),
             ),
             (
                 "beta, BC",
-                Box::new(|g| Beta::new(0.5, 0.5).sample::<M, _>(g)),
+                Box::new(|g| Beta::new::<M>(0.5, 0.5).sample::<M, _>(g)),
             ),
             (
                 "poisson, Knuth",
@@ -706,27 +712,41 @@ mod tests {
 
     /// The engine's draws, pinned: a digest of 100,000 per case, recorded on
     /// Windows and checked by CI on Linux, so the samplers draw the same
-    /// values on both. A change to a sampler -- or to `libm` -- is a red test
+    /// values on both. A change to a sampler -- or to `math.rs` -- is a red test
     /// here rather than a quiet change of seeded output.
     #[test]
     fn the_engines_draws_are_pinned() {
         let pinned = [
             ("normal", 0x7ea1_b296_6218_770c),
-            ("lognormal", 0xe5d8_9963_844f_3273),
+            ("lognormal", 0x58f7_65bb_0543_a0d1),
             ("exponential", 0x33a4_2765_43c1_7358),
-            ("gamma, shape < 1", 0x00da_6894_f31d_dc72),
+            ("gamma, shape < 1", 0x0b8d_d184_e503_60b8),
             ("gamma", 0xc364_0d86_b7b8_bb6b),
-            ("beta, BB", 0xddaa_806a_330d_accc),
-            ("beta, BC", 0x2016_5f7d_194a_b0bd),
+            ("beta, BB", 0x4c71_6bd9_a3d6_659d),
+            ("beta, BC", 0x975e_281f_bb23_1f8a),
             ("poisson, Knuth", 0x756f_4018_df3e_37a5),
             ("poisson, rejection", 0x12a6_c018_df3e_37a5),
         ];
-        let drawn = cases::<Libm>();
+        let drawn = cases::<Portable>();
         assert_eq!(drawn.len(), pinned.len());
+        let mut changed = Vec::new();
         for ((name, draw), (pinned_name, pin)) in drawn.iter().zip(pinned) {
             assert_eq!(*name, pinned_name);
-            assert_eq!(digest(draw.as_ref()), pin, "{name}: the draws changed");
+            let now = digest(draw.as_ref());
+            if now != pin {
+                changed.push(format!("(\"{name}\", 0x{now:016x})"));
+            }
         }
+        // On a deliberate change, the message is the new table.
+        assert!(
+            changed.is_empty(),
+            "the draws changed:
+{}",
+            changed.join(
+                ",
+"
+            )
+        );
     }
 
     /// Mean and variance over 10^6 draws, within a few standard errors:
@@ -749,43 +769,47 @@ mod tests {
         let expected: [(&str, Draw, f64, f64); 7] = [
             (
                 "normal",
-                Box::new(|g| Normal::new(2.0, 3.0).sample::<Libm, _>(g)),
+                Box::new(|g| Normal::new(2.0, 3.0).sample::<Portable, _>(g)),
                 2.0,
                 9.0,
             ),
             (
                 "lognormal",
-                Box::new(|g| LogNormal::new(0.0, 0.5).sample::<Libm, _>(g)),
+                Box::new(|g| LogNormal::new(0.0, 0.5).sample::<Portable, _>(g)),
                 (0.125f64).exp(),
                 ((0.25f64).exp() - 1.0) * (0.25f64).exp(),
             ),
             (
                 "exponential",
-                Box::new(|g| Exp::new(4.0).sample::<Libm, _>(g)),
+                Box::new(|g| Exp::new(4.0).sample::<Portable, _>(g)),
                 0.25,
                 0.0625,
             ),
             (
                 "gamma, shape < 1",
-                Box::new(|g| Gamma::new(0.3, 2.0).sample::<Libm, _>(g)),
+                Box::new(|g| Gamma::new(0.3, 2.0).sample::<Portable, _>(g)),
                 0.6,
                 1.2,
             ),
             (
                 "gamma",
-                Box::new(|g| Gamma::new(2.5, 1.5).sample::<Libm, _>(g)),
+                Box::new(|g| Gamma::new(2.5, 1.5).sample::<Portable, _>(g)),
                 3.75,
                 5.625,
             ),
             (
                 "beta",
-                Box::new(|g| Beta::new(2.0, 5.0).sample::<Libm, _>(g)),
+                Box::new(|g| Beta::new::<Portable>(2.0, 5.0).sample::<Portable, _>(g)),
                 2.0 / 7.0,
                 10.0 / (49.0 * 8.0),
             ),
             (
                 "poisson",
-                Box::new(|g| Poisson::new::<Libm>(50.0).unwrap().sample::<Libm, _>(g)),
+                Box::new(|g| {
+                    Poisson::new::<Portable>(50.0)
+                        .unwrap()
+                        .sample::<Portable, _>(g)
+                }),
                 50.0,
                 50.0,
             ),
