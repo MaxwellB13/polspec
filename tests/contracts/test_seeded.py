@@ -16,7 +16,7 @@ CI runs it on Windows, Linux and macOS, against one digest per case. A
 column drawn from a non-uniform distribution is the case that once differed
 between them: until 0.19 its sampler took `exp`, `ln` and `pow` from each
 platform's math library, which round the last bit differently. The
-samplers now use the pure-Rust `libm` (`src/samplers.rs`), so there is one
+samplers' maths is polspec's own (`src/math.rs`), so there is one
 digest for every platform, and a platform that drew differently would fail
 here.
 

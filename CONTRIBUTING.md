@@ -128,8 +128,9 @@ the in-memory engine; run it on a new Polars to see whether it is fixed.
 as `tests/contracts/seeded.json` records, case for case, on whichever Polars
 runs it -- so CI's floor, lock and newest jobs each hold every supported
 Polars to it. It runs on Windows, Linux and macOS against the same
-digests: the samplers take `exp`, `ln` and `pow` from the pure-Rust `libm`,
-never the platform's math library, so a seed draws the same bits on each
+digests: the samplers take `exp`, `ln` and `pow` from `src/math.rs`, a port
+of Arm's optimized-routines in plain IEEE arithmetic, never the platform's
+math library, so a seed draws the same bits on each
 (`src/samplers.rs`; keep it that way). A change that alters seeded output on
 purpose rewrites the reference, and says so in the changelog:
 
@@ -142,8 +143,11 @@ The second run adds the cases only Polars 2 can generate (`Map`).
 
 The samplers in `src/samplers.rs` are ported from `rand_distr`, which
 stays a dev-dependency so a test can check the port draw for draw. Another
-test pins a digest of each sampler's draws: a change to one, or to `libm`,
-fails `cargo test` first, before it changes any seeded output.
+test pins a digest of each sampler's draws: a change to one, or to `math.rs`,
+fails `cargo test` first, before it changes any seeded output. `math.rs`
+never uses a fused multiply-add (Rust never contracts `a * b + c` into one
+itself; don't call `mul_add`): one rounds differently from the two
+operations it replaces, and only some hardware has it.
 
 ## The public API
 

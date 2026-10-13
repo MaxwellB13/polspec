@@ -151,8 +151,9 @@ Distribution parameter *aliases* live only in `polspec/distributions.py` and
 are resolved when a column is declared; `src/dist.rs` reads canonical keys and
 exports its table as `distribution_params()`, which a test compares with the
 Python one. The draws themselves are `src/samplers.rs`: `rand_distr`'s
-algorithms, ported onto the pure-Rust `libm` so that `exp`, `ln` and `pow`
-round the same way on every platform, and a seed draws the same values on
+algorithms, with `exp`, `ln` and `pow` from `src/math.rs` (a port of Arm's
+optimized-routines, the algorithms glibc uses, in plain IEEE arithmetic) so
+that they round the same way on every platform, and a seed draws the same values on
 Windows, Linux and macOS. Each column's seed is derived from the frame seed and the column
 *name* (`sample.rs`), so inserting a column never reshuffles its neighbours.
 `src/sample.rs` and `src/unique.rs` have no Python types and carry the unit

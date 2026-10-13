@@ -6,6 +6,8 @@
 //! - `dist.rs` -- the distributions and their canonical parameters.
 //! - `samplers.rs` -- drawing from them, the same on every platform
 //!   (`ziggurat_tables.rs` holds their constants).
+//! - `math.rs` -- `exp`, `ln` and `pow`, the same bits on every platform
+//!   (`math_tables.rs` holds their tables).
 //! - `sample.rs` -- filling a column, in seeded parallel chunks.
 //! - `unique.rs` -- filling a column whose values must all differ.
 //! - `permute.rs` -- the keyed permutation behind both, and behind a unique
@@ -13,6 +15,8 @@
 
 mod dist;
 mod format;
+mod math;
+mod math_tables;
 mod permute;
 mod plan;
 mod sample;

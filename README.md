@@ -74,7 +74,7 @@ Orders.validate(orders)                        # ~27 ms; raises on any breach
 - **A CLI for your pipeline.** `polspec validate`, `generate`, `drift` and
   `synthesize`, with exit codes for CI.
 - **Deterministic.** The same seed gives the same data on every Polars from
-  1.39 to 2.x, checked case by case in CI.
+  1.39 to 2.x, on Windows, Linux and macOS, checked case by case in CI.
 
 ## A quick tour
 
