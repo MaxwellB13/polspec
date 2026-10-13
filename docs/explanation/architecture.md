@@ -150,7 +150,10 @@ Python value exactly, so `Int64` and `UInt64` bounds keep every bit.
 Distribution parameter *aliases* live only in `polspec/distributions.py` and
 are resolved when a column is declared; `src/dist.rs` reads canonical keys and
 exports its table as `distribution_params()`, which a test compares with the
-Python one. Each column's seed is derived from the frame seed and the column
+Python one. The draws themselves are `src/samplers.rs`: `rand_distr`'s
+algorithms, ported onto the pure-Rust `libm` so that `exp`, `ln` and `pow`
+round the same way on every platform, and a seed draws the same values on
+Windows, Linux and macOS. Each column's seed is derived from the frame seed and the column
 *name* (`sample.rs`), so inserting a column never reshuffles its neighbours.
 `src/sample.rs` and `src/unique.rs` have no Python types and carry the unit
 tests `cargo test` runs; `python/polspec/_polspec.pyi` is the stub, and a test asserts its names

@@ -38,7 +38,12 @@ pyo3-polars = { version = "0.28.0", features = [
     "dtype-categorical",
     "dtype-full",
 ] }
+libm = "0.2.16"
 rand = "0.10"
-rand_distr = "0.6"
 rand_xoshiro = "0.8"
 rayon = "1.12.0"
+
+[dev-dependencies]
+# The samplers in `samplers.rs` are ported from rand_distr; a test runs both
+# from one seed and checks every draw matches. Tests only: nothing ships.
+rand_distr = "0.6"

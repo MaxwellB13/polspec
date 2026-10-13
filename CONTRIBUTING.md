@@ -127,11 +127,11 @@ the in-memory engine; run it on a new Polars to see whether it is fixed.
 `tests/contracts/test_seeded.py` checks that a seed generates the same data
 as `tests/contracts/seeded.json` records, case for case, on whichever Polars
 runs it -- so CI's floor, lock and newest jobs each hold every supported
-Polars to it. A column drawn from a non-uniform distribution is recorded
-per operating system (`case@win32`): its sampler uses the platform's math
-library, so the rewrite records only the OS it runs on, and the others skip
-it (Known limitations). A change that alters seeded output on purpose
-rewrites the reference, and says so in the changelog:
+Polars to it. It runs on Windows, Linux and macOS against the same
+digests: the samplers take `exp`, `ln` and `pow` from the pure-Rust `libm`,
+never the platform's math library, so a seed draws the same bits on each
+(`src/samplers.rs`; keep it that way). A change that alters seeded output on
+purpose rewrites the reference, and says so in the changelog:
 
 ```bash
 POLSPEC_WRITE_SEEDED=1 uv run pytest tests/contracts/test_seeded.py
@@ -139,6 +139,11 @@ POLSPEC_WRITE_SEEDED=1 uv run --with "polars==2.0.0" pytest -p no:cacheprovider 
 ```
 
 The second run adds the cases only Polars 2 can generate (`Map`).
+
+The samplers in `src/samplers.rs` are ported from `rand_distr`, which
+stays a dev-dependency so a test can check the port draw for draw. Another
+test pins a digest of each sampler's draws: a change to one, or to `libm`,
+fails `cargo test` first, before it changes any seeded output.
 
 ## The public API
 

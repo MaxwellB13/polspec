@@ -5,12 +5,15 @@
 //! by the time a plan reaches this module every key is canonical and read
 //! exactly. `PARAMS` is exported to Python so a test can assert the two sides
 //! agree on names, defaults and which parameters must be positive.
+//!
+//! The samplers themselves are in `samplers.rs`, on `libm`, so a seed draws
+//! the same values on every platform.
 
 use std::collections::HashMap;
 
 use rand::Rng;
-use rand::distr::Distribution as _;
-use rand_distr::{Beta, Exp, Gamma, LogNormal, Normal, Poisson};
+
+use crate::samplers::{Beta, Exp, Gamma, Libm, LogNormal, Normal, Poisson};
 
 /// One parameter of a distribution: canonical name, default, positivity.
 pub struct ParamSpec {
@@ -68,12 +71,12 @@ pub fn names() -> Vec<&'static str> {
 #[derive(Clone, Copy, Debug)]
 pub enum Distribution {
     Uniform,
-    Normal(Normal<f64>),
-    LogNormal(LogNormal<f64>),
-    Exp(Exp<f64>),
-    Poisson(Poisson<f64>),
-    Gamma(Gamma<f64>),
-    Beta(Beta<f64>),
+    Normal(Normal),
+    LogNormal(LogNormal),
+    Exp(Exp),
+    Poisson(Poisson),
+    Gamma(Gamma),
+    Beta(Beta),
 }
 
 impl Distribution {
@@ -116,17 +119,12 @@ impl Distribution {
             }
             Ok(value)
         };
-        let invalid = |e: &dyn std::fmt::Display| {
-            format!("Invalid {name} distribution parameters for column '{column}': {e}")
-        };
+        // Every parameter is finite, and positive where it must be, so each
+        // sampler accepts it; only a Poisson lambda has an upper limit.
         Ok(match name {
             "uniform" => Distribution::Uniform,
-            "normal" => Normal::new(get("mean")?, get("std")?)
-                .map(Distribution::Normal)
-                .map_err(|e| invalid(&e))?,
-            "lognormal" => LogNormal::new(get("mean")?, get("std")?)
-                .map(Distribution::LogNormal)
-                .map_err(|e| invalid(&e))?,
+            "normal" => Distribution::Normal(Normal::new(get("mean")?, get("std")?)),
+            "lognormal" => Distribution::LogNormal(LogNormal::new(get("mean")?, get("std")?)),
             "exponential" => {
                 let has_scale = params.is_some_and(|m| m.contains_key("scale"));
                 let rate = if has_scale {
@@ -134,19 +132,20 @@ impl Distribution {
                 } else {
                     get("rate")?
                 };
-                Exp::new(rate)
-                    .map(Distribution::Exp)
-                    .map_err(|e| invalid(&e))?
+                Distribution::Exp(Exp::new(rate))
             }
-            "poisson" => Poisson::new(get("lambda")?)
-                .map(Distribution::Poisson)
-                .map_err(|e| invalid(&e))?,
-            "gamma" => Gamma::new(get("shape")?, get("scale")?)
-                .map(Distribution::Gamma)
-                .map_err(|e| invalid(&e))?,
-            "beta" => Beta::new(get("alpha")?, get("beta")?)
-                .map(Distribution::Beta)
-                .map_err(|e| invalid(&e))?,
+            "poisson" => {
+                let lambda = get("lambda")?;
+                Distribution::Poisson(Poisson::new::<Libm>(lambda).ok_or_else(|| {
+                    format!(
+                        "Invalid poisson distribution parameters for column '{column}': \
+                         lambda {lambda} is above the largest supported, {}",
+                        Poisson::MAX_LAMBDA
+                    )
+                })?)
+            }
+            "gamma" => Distribution::Gamma(Gamma::new(get("shape")?, get("scale")?)),
+            "beta" => Distribution::Beta(Beta::new(get("alpha")?, get("beta")?)),
             _ => unreachable!("params_of accepted the name"),
         })
     }
@@ -168,12 +167,12 @@ impl Distribution {
     pub fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> f64 {
         match self {
             Distribution::Uniform => unreachable!("uniform is sampled over the typed range"),
-            Distribution::Normal(d) => d.sample(rng),
-            Distribution::LogNormal(d) => d.sample(rng),
-            Distribution::Exp(d) => d.sample(rng),
-            Distribution::Poisson(d) => d.sample(rng),
-            Distribution::Gamma(d) => d.sample(rng),
-            Distribution::Beta(d) => d.sample(rng),
+            Distribution::Normal(d) => d.sample::<Libm, R>(rng),
+            Distribution::LogNormal(d) => d.sample::<Libm, R>(rng),
+            Distribution::Exp(d) => d.sample::<Libm, R>(rng),
+            Distribution::Poisson(d) => d.sample::<Libm, R>(rng),
+            Distribution::Gamma(d) => d.sample::<Libm, R>(rng),
+            Distribution::Beta(d) => d.sample::<Libm, R>(rng),
         }
     }
 }

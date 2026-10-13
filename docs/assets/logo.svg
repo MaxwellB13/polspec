@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">polspec: a polar bear in round glasses</title>
+  <!-- head and ears -->
+  <g fill="#A8CEF8">
+    <circle cx="128" cy="150" r="48"/>
+    <circle cx="384" cy="150" r="48"/>
+    <ellipse cx="256" cy="290" rx="190" ry="165"/>
+  </g>
+  <!-- inner ears -->
+  <g fill="#7FB4F0">
+    <circle cx="128" cy="150" r="24"/>
+    <circle cx="384" cy="150" r="24"/>
+  </g>
+  <!-- muzzle, nose and mouth -->
+  <ellipse cx="256" cy="372" rx="84" ry="62" fill="#FFFFFF"/>
+  <ellipse cx="256" cy="350" rx="30" ry="20" fill="#2C5C9E"/>
+  <path d="M256 368 V386 M228 384 Q242 400 256 386 Q270 400 284 384"
+        fill="none" stroke="#2C5C9E" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- glasses: big round lenses, eyes peering through -->
+  <g stroke="#2C5C9E" stroke-width="18">
+    <circle cx="182" cy="250" r="62" fill="#FFFFFF"/>
+    <circle cx="330" cy="250" r="62" fill="#FFFFFF"/>
+    <path d="M244 250 H268" fill="none"/>
+  </g>
+  <circle cx="192" cy="254" r="16" fill="#2C5C9E"/>
+  <circle cx="320" cy="254" r="16" fill="#2C5C9E"/>
+</svg>
