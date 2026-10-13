@@ -2130,6 +2130,7 @@ dependencies = [
 name = "polspec"
 version = "0.0.0"
 dependencies = [
+ "libm",
  "polars",
  "polars-arrow",
  "polars-core",

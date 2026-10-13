@@ -4,6 +4,8 @@
 //! - `plan.rs` -- `ColumnPlan`, the typed instructions for one column.
 //! - `format.rs` -- `Template`, the shape of a string with a format.
 //! - `dist.rs` -- the distributions and their canonical parameters.
+//! - `samplers.rs` -- drawing from them, the same on every platform
+//!   (`ziggurat_tables.rs` holds their constants).
 //! - `sample.rs` -- filling a column, in seeded parallel chunks.
 //! - `unique.rs` -- filling a column whose values must all differ.
 //! - `permute.rs` -- the keyed permutation behind both, and behind a unique
@@ -14,7 +16,9 @@ mod format;
 mod permute;
 mod plan;
 mod sample;
+mod samplers;
 mod unique;
+mod ziggurat_tables;
 
 use polars::prelude::*;
 use pyo3::exceptions::PyValueError;
