@@ -163,19 +163,39 @@ impl Distribution {
     }
 
     /// One draw. `Uniform` is sampled by the caller over its own typed range.
-    #[inline(always)]
+    /// A column loop uses `with_sampler!` instead, so it is specialized to
+    /// its one sampler rather than matching on every value.
     pub fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> f64 {
-        match self {
-            Distribution::Uniform => unreachable!("uniform is sampled over the typed range"),
-            Distribution::Normal(d) => d.sample::<Portable, R>(rng),
-            Distribution::LogNormal(d) => d.sample::<Portable, R>(rng),
-            Distribution::Exp(d) => d.sample::<Portable, R>(rng),
-            Distribution::Poisson(d) => d.sample::<Portable, R>(rng),
-            Distribution::Gamma(d) => d.sample::<Portable, R>(rng),
-            Distribution::Beta(d) => d.sample::<Portable, R>(rng),
-        }
+        with_sampler!(
+            self,
+            unreachable!("uniform is sampled over the typed range"),
+            |d| d.sample::<Portable, R>(rng)
+        )
     }
 }
+
+/// `$uniform` for a uniform distribution; otherwise `$body`, with `$d` the
+/// sampler, expanded once per sampler type.
+///
+/// A column loop written in `$body` is monomorphized for each distribution
+/// -- a `gamma` column's loop holds the gamma sampler and nothing else --
+/// rather than one loop matching on the distribution for every value with
+/// every sampler inlined into it, which bloats the loop and slows them all.
+#[macro_export]
+macro_rules! with_sampler {
+    ($dist:expr, $uniform:expr, |$d:ident| $body:expr) => {
+        match $dist {
+            $crate::dist::Distribution::Uniform => $uniform,
+            $crate::dist::Distribution::Normal($d) => $body,
+            $crate::dist::Distribution::LogNormal($d) => $body,
+            $crate::dist::Distribution::Exp($d) => $body,
+            $crate::dist::Distribution::Poisson($d) => $body,
+            $crate::dist::Distribution::Gamma($d) => $body,
+            $crate::dist::Distribution::Beta($d) => $body,
+        }
+    };
+}
+pub(crate) use with_sampler;
 
 #[cfg(test)]
 mod tests {

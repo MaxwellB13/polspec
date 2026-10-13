@@ -143,7 +143,9 @@ fn exp_core<const TAIL: bool>(x: f64, xtail: f64, sign_bias: u64) -> (f64, u64, 
 }
 
 /// `e^x`.
-#[inline]
+// A call, not inlined: inlined at every call site, its tables and
+// polynomials bloat the column loop that inlines every sampler.
+#[inline(never)]
 pub fn exp(x: f64) -> f64 {
     let mut abstop = top12(x) & 0x7ff;
     let tiny = top12(f64::from_bits((1023 - 54) << 52)); // 0x1p-54
@@ -177,7 +179,9 @@ pub fn exp(x: f64) -> f64 {
 }
 
 /// `ln x`.
-#[inline]
+// A call, not inlined: inlined at every call site, its tables and
+// polynomials bloat the column loop that inlines every sampler.
+#[inline(never)]
 pub fn ln(x: f64) -> f64 {
     const OFF: u64 = 0x3fe6_0000_0000_0000;
     const LO: u64 = (1.0f64 - 0.0625).to_bits(); // 1 - 0x1p-4
@@ -346,7 +350,9 @@ fn zeroinfnan(i: u64) -> bool {
 }
 
 /// `x^y`.
-#[inline]
+// A call, not inlined: inlined at every call site, its tables and
+// polynomials bloat the column loop that inlines every sampler.
+#[inline(never)]
 pub fn pow(x: f64, y: f64) -> f64 {
     let mut sign_bias = 0;
     let mut ix = x.to_bits();

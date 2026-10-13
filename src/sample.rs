@@ -29,8 +29,9 @@ use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 
-use crate::dist::Distribution;
+use crate::dist::with_sampler;
 use crate::plan::{ColumnPlan, Kind};
+use crate::samplers::Portable;
 
 pub const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 const DEFAULT_WIDE_INT_BOUND: i64 = 1_000_000;
@@ -213,17 +214,19 @@ macro_rules! impl_gen_int_column {
             let range = uniform(lo, hi, plan)?;
             let dist = plan.distribution;
 
-            numeric_column::<$polars_type, _>(plan, n, seed, move |rng| match dist {
-                Distribution::Uniform => range.sample(rng),
-                _ => {
-                    let val = dist.sample(rng);
+            // One loop per distribution (see `with_sampler!`).
+            with_sampler!(
+                dist,
+                numeric_column::<$polars_type, _>(plan, n, seed, move |rng| range.sample(rng)),
+                |d| numeric_column::<$polars_type, _>(plan, n, seed, move |rng| {
+                    let val = d.sample::<Portable, _>(rng);
                     let rounded = if val.is_nan() { lo as f64 } else { val.round() };
                     // The f64 clamp tames a sample of any magnitude; the
                     // integer clamp undoes the rounding `lo as f64` and
                     // `hi as f64` suffer near the ends of i64/u64.
                     (rounded.clamp(lo as f64, hi as f64) as $native_type).clamp(lo, hi)
-                }
-            })
+                })
+            )
         }
     };
 }
@@ -268,13 +271,14 @@ macro_rules! impl_gen_float_column {
             let range = uniform(lo, hi, plan)?;
             let dist = plan.distribution;
 
-            numeric_column::<$polars_type, _>(plan, n, seed, move |rng| match dist {
-                Distribution::Uniform => range.sample(rng),
-                _ => {
-                    let val = dist.sample(rng) as $native_type;
+            with_sampler!(
+                dist,
+                numeric_column::<$polars_type, _>(plan, n, seed, move |rng| range.sample(rng)),
+                |d| numeric_column::<$polars_type, _>(plan, n, seed, move |rng| {
+                    let val = d.sample::<Portable, _>(rng) as $native_type;
                     if val.is_nan() { lo } else { val.clamp(lo, hi) }
-                }
-            })
+                })
+            )
         }
     };
 }
