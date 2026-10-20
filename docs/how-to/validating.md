@@ -250,6 +250,7 @@ Orders.validate(
     validate_checks=True,
     validate_foreign_keys=True,
     validate_hierarchy=True,
+    validate_order=True,
     validate_pattern=True,
     validate_bounds=True,
 )

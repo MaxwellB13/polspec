@@ -1,4 +1,5 @@
-"""What the frame as a whole asserts: composite uniqueness and `__checks__`."""
+"""What the frame as a whole asserts: composite uniqueness, `__checks__`,
+and the order its rows come in."""
 
 from __future__ import annotations
 
@@ -29,6 +30,52 @@ class _CompositeUnique(Constraint):
             f"Composite unique key {list(self.columns)} violated: found {count} "
             f"duplicate row(s). Duplicate samples: {samples}"
         )
+
+
+@dataclass(kw_only=True)
+class _Order(Constraint):
+    columns: tuple[str, ...] = ()
+    descending: tuple[bool, ...] = ()
+    code: FindingCode = "order"
+
+    def involved(self) -> tuple[str, ...]:
+        return self.columns
+
+    def details(self, stats: dict[str, list]) -> dict[str, Any]:
+        return {"order_by": list(self.columns), "descending": list(self.descending)}
+
+    def message(self, count: int, samples: list, stats: dict[str, list]) -> str:
+        return (
+            f"Rows out of order by {_described(self.columns, self.descending)}: "
+            f"{count} row(s) belong before the row above them. Samples: {samples}"
+        )
+
+
+def _described(columns: Sequence[str], descending: Sequence[bool]) -> str:
+    return ", ".join(
+        f"{name} (descending)" if desc else name
+        for name, desc in zip(columns, descending, strict=True)
+    )
+
+
+def _out_of_order(columns: Sequence[str], descending: Sequence[bool]) -> pl.Expr:
+    """Each row that belongs before the row above it, as `DataFrame.sort(by,
+    descending, nulls_last=True)` orders rows.
+
+    Each column becomes its dense rank, which orders values exactly as that
+    sort does -- NaN, categories and every dtype alike -- with a null ranked
+    after every value. The ranks then compare as tuples, the first column
+    the major key: a row is out of order when the tuple above it is greater.
+    """
+    ranks = [
+        frames.column(name).rank("dense", descending=desc).fill_null(pl.len() + 1)
+        for name, desc in zip(columns, descending, strict=True)
+    ]
+    later = pl.lit(False)
+    for rank in reversed(ranks):
+        above = rank.shift(1)
+        later = (above > rank) | ((above == rank) & later)
+    return later.fill_null(False)
 
 
 @dataclass(kw_only=True)
@@ -65,9 +112,23 @@ def frame_constraints(
     unique_together: Sequence[Sequence[str]] | None,
     checks: Sequence[Check] | None,
     df_col_names: Sequence[str],
+    *,
+    order: tuple[Sequence[str], Sequence[bool]] | None = None,
 ) -> list[Constraint]:
     """Constraints spanning several columns rather than belonging to one."""
     constraints: list[Constraint] = []
+
+    if order is not None and order[0] and all(c in df_col_names for c in order[0]):
+        columns, descending = tuple(order[0]), tuple(order[1])
+        constraints.append(
+            _Order(
+                key="order",
+                mask=_out_of_order(columns, descending),
+                sample_expr=struct_of(columns),
+                columns=columns,
+                descending=descending,
+            )
+        )
 
     for index, group in enumerate(unique_together or ()):
         columns = tuple(group)

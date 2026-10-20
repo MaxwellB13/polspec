@@ -92,9 +92,11 @@ def _type_checking_init(cls: type) -> ast.FunctionDef:
     raise AssertionError(f"{cls.__name__} declares no TYPE_CHECKING __init__")
 
 
-@pytest.mark.parametrize("cls", [ColSpec, Check, ForeignKey], ids=lambda c: c.__name__)
+@pytest.mark.parametrize(
+    "cls", [ColSpec, Check, ForeignKey, TableSpec], ids=lambda c: c.__name__
+)
 def test_the_declared_constructor_matches_the_fields(cls):
-    """`ColSpec`, `Check` and `ForeignKey` annotate their fields with what an
+    """`ColSpec`, `Check`, `ForeignKey` and `TableSpec` annotate their fields with what an
     instance *holds* and spell out what the constructor *accepts* in an
     `__init__` that exists only for type checkers. The dataclass generates
     the real one from the fields, so the two must name the same parameters

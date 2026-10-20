@@ -106,6 +106,16 @@ def _pop_hierarchy(ns: dict[str, Any]) -> Hierarchy | None:
     return None
 
 
+def _pop_order(ns: dict[str, Any]) -> tuple[Any, Any] | None:
+    """`__order_by__` and `__descending__`, or None when the body declares
+    no order of its own."""
+    if "__order_by__" not in ns:
+        if "__descending__" in ns:
+            raise SpecError("__descending__ needs an __order_by__ to apply to")
+        return None
+    return ns.pop("__order_by__"), ns.pop("__descending__", False)
+
+
 def _pop_unique_together(ns: dict[str, Any]) -> Any:
     for attr in ("__unique_together__", "unique_together"):
         if attr in ns and _is_declaration_value(ns[attr]):
@@ -123,6 +133,7 @@ def _build_table_spec(
     foreign_keys: Sequence[ForeignKey],
     unique_together: Any,
     hierarchy: Hierarchy | None,
+    order: tuple[Any, Any] | None = None,
 ) -> tuple[TableSpec, dict[str, str]]:
     """Merges inherited specs with a class body's own declarations.
 
@@ -207,6 +218,14 @@ def _build_table_spec(
                 hierarchy = parent.spec.hierarchy
                 break
 
+    # An order, too: the nearest parent's, unless the body declares its own.
+    if order is None:
+        for parent in parents:
+            if parent.spec.order_by:
+                order = (parent.spec.order_by, parent.spec.descending)
+                break
+    order_by, descending = order if order is not None else ((), False)
+
     spec = TableSpec(
         name,
         columns,
@@ -214,6 +233,8 @@ def _build_table_spec(
         unique_together=all_unique,
         foreign_keys=all_fks,
         hierarchy=hierarchy,
+        order_by=order_by,
+        descending=descending,
     )
     return spec, attr_to_col
 
@@ -241,6 +262,7 @@ class _FrameSpecMeta(type):
         )
         unique_together = _pop_unique_together(ns)
         hierarchy = _pop_hierarchy(ns)
+        order = _pop_order(ns)
         # A non-ColSpec value assigned over an inherited column attribute
         # removes that column; the value itself stays an ordinary attribute.
         removed = {
@@ -264,6 +286,7 @@ class _FrameSpecMeta(type):
                 foreign_keys,
                 unique_together,
                 hierarchy,
+                order,
             )
         return cls
 
@@ -775,6 +798,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         validate_checks: bool | None = None,
         validate_foreign_keys: bool | None = None,
         validate_hierarchy: bool | None = None,
+        validate_order: bool | None = None,
         validate_pattern: bool | None = None,
         validate_bounds: bool | None = None,
         cast: bool | None = None,
@@ -802,6 +826,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
                 validate_checks=validate_checks,
                 validate_foreign_keys=validate_foreign_keys,
                 validate_hierarchy=validate_hierarchy,
+                validate_order=validate_order,
                 validate_pattern=validate_pattern,
                 validate_bounds=validate_bounds,
                 cast=cast,
@@ -826,6 +851,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         validate_checks: bool | None = None,
         validate_foreign_keys: bool | None = None,
         validate_hierarchy: bool | None = None,
+        validate_order: bool | None = None,
         validate_pattern: bool | None = None,
         validate_bounds: bool | None = None,
         cast: bool | None = None,
@@ -849,6 +875,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         validate_checks: bool | None = None,
         validate_foreign_keys: bool | None = None,
         validate_hierarchy: bool | None = None,
+        validate_order: bool | None = None,
         validate_pattern: bool | None = None,
         validate_bounds: bool | None = None,
         cast: bool | None = None,
@@ -871,6 +898,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         validate_checks: bool | None = None,
         validate_foreign_keys: bool | None = None,
         validate_hierarchy: bool | None = None,
+        validate_order: bool | None = None,
         validate_pattern: bool | None = None,
         validate_bounds: bool | None = None,
         cast: bool | None = None,
@@ -895,7 +923,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             spec, its FrameSpec class, or its name.
         extra_cols, missing_cols, strict_dtypes, cast, streaming
             The structural options, named as on `ValidationOptions`.
-        validate_rules, validate_validators, validate_unique, validate_checks, validate_foreign_keys, validate_hierarchy, validate_pattern, validate_bounds
+        validate_rules, validate_validators, validate_unique, validate_checks, validate_foreign_keys, validate_hierarchy, validate_order, validate_pattern, validate_bounds
             The check switches: `validate_` in front of the field they set.
 
         Notes
@@ -918,6 +946,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
                 validate_checks=validate_checks,
                 validate_foreign_keys=validate_foreign_keys,
                 validate_hierarchy=validate_hierarchy,
+                validate_order=validate_order,
                 validate_pattern=validate_pattern,
                 validate_bounds=validate_bounds,
                 cast=cast,

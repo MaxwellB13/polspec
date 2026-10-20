@@ -51,6 +51,7 @@ FindingCode = Literal[
     "hierarchy_multi_parent",
     "hierarchy_cycle",
     "hierarchy_depth",
+    "order",
 ]
 
 FINDING_COLUMN = "__polspec_finding"

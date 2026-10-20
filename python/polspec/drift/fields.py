@@ -1102,6 +1102,25 @@ def _compare_hierarchy(old: TableSpec, new: TableSpec) -> list[DriftFinding]:
     )
 
 
+def _compare_order(old: TableSpec, new: TableSpec) -> list[DriftFinding]:
+    """An order added, or changed, is breaking -- rows that came in any
+    order before must now come in this one -- and one removed, compatible.
+    `order_by` and `descending` are one claim, compared here together."""
+
+    def order(spec: TableSpec) -> list[tuple[tuple[str, ...], tuple[bool, ...]]]:
+        return [(tuple(spec.order_by), tuple(spec.descending))] if spec.order_by else []
+
+    return _table_named(
+        "order_by",
+        order(old),
+        order(new),
+        lambda o: ", ".join(
+            f"{name} desc" if desc else name for name, desc in zip(*o, strict=True)
+        ),
+        lambda o: o[0],
+    )
+
+
 TABLE_COMPARATORS: dict[str, TableComparator] = {
     "name": _table_ignore,  # a spec's name is what the report is *about*
     "columns": _table_ignore,  # compared column by column by the runner
@@ -1109,6 +1128,8 @@ TABLE_COMPARATORS: dict[str, TableComparator] = {
     "unique_together": _compare_unique_together,
     "foreign_keys": _compare_foreign_keys,
     "hierarchy": _compare_hierarchy,
+    "order_by": _compare_order,
+    "descending": _table_ignore,  # compared with `order_by`, as one claim
 }
 
 
