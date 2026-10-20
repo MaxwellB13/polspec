@@ -1,7 +1,8 @@
 # What FrameSpec.from_dataframe() infers from test_synthesize.golden_frame()
 # with no options. 0.13.0 added opt-in profiling and this pinned that the
 # default did not move; 0.14.0 moved it on purpose (Enums need repeats, a
-# text column names its format). Regenerate only on purpose.
+# text column names its format), and 0.20.0 writes a date column's bounds
+# as dates, not day counts. Regenerate only on purpose.
 version: 4
 name: Profiled
 columns:
@@ -36,8 +37,8 @@ columns:
   day:
     dtype: Date
     bounds:
-    - 19723
-    - 19812
+    - 2024-01-01
+    - 2024-03-30
     null_probability: 0.0
   tags:
     dtype:

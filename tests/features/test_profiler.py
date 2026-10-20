@@ -599,3 +599,72 @@ def test_profile_switches_default_on_and_turn_off():
     assert bare["kind"].weights is None
     assert not bare["id"].unique
     assert bare["amount"].bounds is None
+
+
+# ---------------------------------------------------------------------------
+# Temporal bounds, as a person writes them
+# ---------------------------------------------------------------------------
+
+
+def _temporal_frame(n: int = 300) -> pl.DataFrame:
+    import datetime as dt
+
+    return pl.DataFrame(
+        {
+            "day": pl.date_range(
+                dt.date(2024, 1, 1),
+                dt.date(2024, 1, 1) + dt.timedelta(days=n - 1),
+                eager=True,
+            ),
+            "at": pl.datetime_range(
+                dt.datetime(2024, 3, 1),
+                dt.datetime(2024, 3, 1) + dt.timedelta(hours=n - 1),
+                "1h",
+                eager=True,
+                time_zone="Europe/London",
+            ),
+            "ns": pl.Series([1_700_000_000_123_456_789 + 7 * i for i in range(n)]).cast(
+                pl.Datetime("ns")
+            ),
+            "clock": pl.Series(
+                [i * 123_456_789_011 % 86_400_000_000_000 for i in range(n)]
+            ).cast(pl.Time),
+            "took": pl.Series([1001 * i for i in range(n)]).cast(pl.Duration("ns")),
+        }
+    )
+
+
+def test_temporal_bounds_are_dates_and_times_not_integers():
+    import datetime as dt
+
+    frame = _temporal_frame()
+    spec = polspec.profile(frame, detect_order=False)
+    assert spec["day"].bounds.min == dt.date(2024, 1, 1)
+    assert spec["at"].bounds.min == dt.datetime(2024, 3, 1, tzinfo=dt.UTC)
+    assert str(spec["at"].bounds.min.tzinfo) == "Europe/London"
+    assert isinstance(spec["clock"].bounds.max, dt.time)
+    assert isinstance(spec["took"].bounds.max, dt.timedelta)
+    polspec.validate(spec, frame)
+
+
+def test_a_nanosecond_columns_bounds_round_outward_to_the_microsecond():
+    """Python stops at the microsecond: the minimum rounds down and the
+    maximum up, so every value the column holds stays inside."""
+    import datetime as dt
+
+    frame = _temporal_frame()
+    spec = polspec.profile(frame, detect_order=False)
+    assert spec["ns"].bounds.min == dt.datetime(2023, 11, 14, 22, 13, 20, 123456)
+    # The largest is ...123458882 ns: up to ...123459 µs.
+    assert spec["ns"].bounds.max == dt.datetime(2023, 11, 14, 22, 13, 20, 123459)
+    assert spec["took"].bounds.max == dt.timedelta(microseconds=300)
+    polspec.validate(spec, frame)
+
+
+def test_a_bound_python_cannot_hold_stays_an_integer():
+    """A time at the last nanosecond of the day would round up to 24:00,
+    which no `time` holds: the bound stays the physical integer."""
+    frame = pl.DataFrame({"late": pl.Series([86_399_999_999_999] * 60).cast(pl.Time)})
+    spec = polspec.profile(frame)
+    assert spec["late"].bounds.max == 86_399_999_999_999
+    polspec.validate(spec, frame)

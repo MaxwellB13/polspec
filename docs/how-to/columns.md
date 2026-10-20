@@ -165,6 +165,11 @@ ColSpec(pl.Int64, bounds=(None, 0))    # non-positive
     S.validate(pl.DataFrame({"n": [10**15]}))   # accepted — no upper limit
     ```
 
+    A `unique=True` 64- or 128-bit integer with no bounds at all is the
+    one exception: when the frame needs more distinct values than the
+    default range holds, the range widens upward to fit it, rather than
+    refusing an ID column its dtype could hold.
+
     This mirrors how `bounds=None` already behaves rather than adding a third
     rule.
 
