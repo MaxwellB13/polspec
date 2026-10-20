@@ -26,7 +26,8 @@ Profile a data file into a YAML schema.
 ```
 polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
                             [--max-unique-enum N] [--no-formats] [--no-bounds]
-                            [--sample N] [--shape] [--keys] [--replace COL [COL ...]]
+                            [--sample N] [--shape] [--keys] [--order]
+                            [--replace COL [COL ...]]
                             source
 ```
 
@@ -42,6 +43,7 @@ polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
 | `--sample` `N` | Profile a random sample of N rows (seeded, so the same every run) |
 | `--shape` | Fit the distribution each numeric or temporal column follows |
 | `--keys` | Declare an all-distinct integer or text column unique |
+| `--order` | Declare order_by when the rows come sorted by a column |
 | `--replace` `COL` | Columns whose values must not be carried into the spec |
 
 ## `polspec schema new`

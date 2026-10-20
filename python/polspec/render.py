@@ -142,6 +142,12 @@ def _overview_section(spec: TableSpec, doc_title: str) -> list[str]:
     if spec.unique_together:
         groups = ", ".join(_code(list(g)) for g in spec.unique_together)
         lines.append(f"- **Composite Unique Keys:** {groups}")
+    if spec.order_by:
+        order = ", ".join(
+            f"{_code(name)} (descending)" if desc else _code(name)
+            for name, desc in zip(spec.order_by, spec.descending, strict=True)
+        )
+        lines.append(f"- **Row Order:** {order}")
     if spec.checks:
         lines.append(f"- **Custom Invariants / Checks:** {len(spec.checks)} check(s)")
     if spec.foreign_keys:

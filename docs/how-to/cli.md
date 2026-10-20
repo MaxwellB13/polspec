@@ -75,6 +75,7 @@ new`.
 | `--sample N` | Profile a random sample of N rows (seeded, so the same every run) |
 | `--shape` | Fit the distribution each numeric or temporal column follows |
 | `--keys` | Declare an all-distinct integer or text column unique |
+| `--order` | Declare `order_by` when the rows come sorted by a column |
 | `--replace COL...` | Columns whose values must not be carried into the spec |
 
 Treat the output as a draft. It describes the sample it saw — edit bounds,

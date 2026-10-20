@@ -8,6 +8,7 @@ into two groups worth keeping straight:
 | `ColRule` | yes | yes |
 | `ForeignKey` | yes, when given parent data | yes |
 | `unique=True`, `__unique_together__` | yes | yes |
+| `__order_by__` | yes | yes |
 | `ColSpec.validators`, `__checks__` | no | yes |
 
 The last row is validation-only by design: both wrap arbitrary Polars
@@ -197,6 +198,64 @@ A foreign-keyed member is never resampled — that would break the key — so th
 repair works with the other members. If *every* member is foreign-keyed there
 is nothing it can move, and generation says so rather than returning data that
 fails its own validation.
+
+## Row order — `__order_by__`
+
+An event log, a time series, a table a window function or `join_asof` reads
+-- each comes in an order. `__order_by__` declares it, as
+`DataFrame.sort(by)` takes it: the first column is the major key.
+
+```python
+import datetime as dt
+
+
+class Events(FrameSpec):
+    __order_by__ = ["user_id", "ts"]   # each user's events, in time order
+    user_id = ColSpec(pl.Int64, bounds=(1, 500))
+    ts      = ColSpec(pl.Datetime("us"),
+                      bounds=(dt.datetime(2024, 1, 1), dt.datetime(2024, 7, 1)))
+    kind    = ColSpec(pl.Enum(["view", "click", "buy"]))
+
+events = Events.generate(10_000, seed=1)
+Events.validate(events)
+```
+
+One column, `["ts"]`, is one order across the frame; listing a key first, as
+here, is an order within each key. `__descending__` turns a column high to
+low -- one bool for every column, or one per column:
+
+```python
+class Latest(FrameSpec):
+    __order_by__ = ["user_id", "ts"]
+    __descending__ = [False, True]     # each user's newest first
+    user_id = ColSpec(pl.Int64, bounds=(1, 500))
+    ts      = ColSpec(pl.Datetime("us"))
+```
+
+Nulls come last, either way.
+
+`generate()` sorts whole rows, after everything else: each value keeps the
+row it was generated in, so every rule, check, composite key, foreign key
+and hierarchy the rows satisfy, they still satisfy. The sort is stable, so
+the same seed gives the same frame. `validate()` reports each row that
+belongs before the one above it, under the finding code `order`; skip it
+with `validate_order=False`, or `--skip order` on the command line.
+
+An order is a property of the whole frame, so the streaming verbs refuse an
+ordered spec, as they refuse a hierarchy -- write `generate()`'s frame out
+instead:
+
+<!-- docs: raises -->
+```python
+Events.scan(10_000)
+# SpecError: Events declares order_by ['user_id', 'ts'], which scan cannot
+# produce: the rows' order is a property of the whole frame, and each batch
+# is generated on its own.
+```
+
+`profile()` declares an order it finds: the first column of single values,
+with at least 20 distinct, whose rows come sorted one way or the other. An
+order within each key is yours to declare.
 
 ## Referential integrity — `ForeignKey`
 
