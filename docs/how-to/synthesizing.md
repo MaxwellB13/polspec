@@ -101,6 +101,9 @@ the source:
   null rows as well, so it can widen by a little even at the source's size.
 - **Categories and nulls.** Category frequencies and null rates are
   measured and reproduced.
+- **Order.** When the rows come sorted by a column -- a timestamp, an
+  increasing ID -- the spec declares it as `order_by`, and the fake rows come
+  sorted the same way.
 
 What columns do *together* is not kept: a fake `age` does not follow a fake
 `status`, and a fake child row's key does not point at a fake parent. A
@@ -150,5 +153,5 @@ polspec synthesize customers.parquet -o fake_customers.parquet \
 `--spec` writes the profiled spec beside the data, so the fake data can be
 reproduced -- `polspec generate fake_customers.yaml -n 1000000 --seed 1`
 -- and the spec reviewed. `polspec schema infer` takes the same profiling
-steps one at a time, as `--shape`, `--keys` and `--replace`; see
+steps one at a time, as `--shape`, `--keys`, `--order` and `--replace`; see
 [Command line](cli.md).

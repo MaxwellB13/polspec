@@ -27,7 +27,10 @@ from polspec import (
     generate,
     generate_batches,
     inspect,
+    profile,
     scan,
+    synthesize,
+    to_markdown,
     to_python,
     to_yaml,
     validate,
@@ -278,3 +281,82 @@ def test_adding_an_order_is_breaking_and_removing_one_compatible():
     assert (removed.code, removed.severity) == ("constraint_removed", "compatible")
     changed = diff(Events.spec, Events.spec.with_order_by("ts")).findings
     assert sorted(f.severity for f in changed) == ["breaking", "compatible"]
+
+
+# ---------------------------------------------------------------------------
+# Profiling and rendering
+# ---------------------------------------------------------------------------
+
+
+def _log(n: int = 3_000) -> pl.DataFrame:
+    """A log: in time order, a user that repeats, an amount that does not
+    sort."""
+    start = dt.datetime(2024, 1, 1)
+    return pl.DataFrame(
+        {
+            "user": [i % 7 for i in range(n)],
+            "ts": [start + dt.timedelta(minutes=i) for i in range(n)],
+            "amount": [float((i * 37) % 101) for i in range(n)],
+        }
+    )
+
+
+@pytest.mark.parametrize("descending", [False, True])
+def test_profile_declares_the_order_a_frame_comes_in(descending):
+    log = _log().reverse() if descending else _log()
+    spec = profile(log)
+    assert (spec.order_by, spec.descending) == (("ts",), (descending,))
+    validate(spec, log)
+
+
+def test_profile_takes_no_order_from_chance_or_shuffled_rows():
+    # Sorted, but by five values: an order that could be chance.
+    few = pl.DataFrame({"k": sorted(i % 5 for i in range(500))})
+    assert profile(few).order_by == ()
+    shuffled = _log().sample(fraction=1.0, shuffle=True, seed=1)
+    assert profile(shuffled).order_by == ()
+    assert profile(_log(), detect_order=False).order_by == ()
+
+
+def test_a_sorted_column_with_nulls_last_is_still_an_order():
+    log = _log().with_columns(
+        pl.when(pl.int_range(pl.len()) >= 2_900)
+        .then(None)
+        .otherwise(pl.col("ts"))
+        .alias("ts")
+    )
+    assert profile(log).order_by == ("ts",)
+
+
+def test_a_sample_keeps_the_sources_order():
+    """`sample=` draws rows at random but keeps them in file order, so a
+    sorted file's profile still sees its order."""
+    assert profile(_log(), sample=500).order_by == ("ts",)
+
+
+def test_synthesized_rows_come_in_the_sources_order():
+    fake = synthesize(_log(), 1_000, seed=2)
+    assert fake["ts"].is_sorted()
+
+
+def test_from_dataframe_detects_an_order_only_when_asked():
+    assert FrameSpec.from_dataframe(_log()).spec.order_by == ()
+    asked = FrameSpec.from_dataframe(_log(), detect_order=True)
+    assert asked.spec.order_by == ("ts",)
+
+
+def test_schema_infer_declares_an_order_with_order(tmp_path):
+    from polspec.cli import main
+
+    source = tmp_path / "log.parquet"
+    _log().write_parquet(source)
+    plain, ordered = tmp_path / "plain.yaml", tmp_path / "ordered.yaml"
+    assert main(["schema", "infer", str(source), "-o", str(plain)]) == 0
+    assert main(["schema", "infer", str(source), "-o", str(ordered), "--order"]) == 0
+    assert from_yaml(plain).order_by == ()
+    assert from_yaml(ordered).order_by == ("ts",)
+
+
+def test_the_markdown_names_the_order():
+    text = to_markdown(Events.spec)
+    assert "- **Row Order:** `user`, `ts` (descending)" in text

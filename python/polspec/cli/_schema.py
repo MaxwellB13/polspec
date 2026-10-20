@@ -39,6 +39,7 @@ def _cmd_schema_infer(args: argparse.Namespace) -> int:
                 calculate_bounds=not args.no_bounds,
                 shape=args.shape,
                 detect_unique=args.keys,
+                detect_order=args.order,
                 replace=args.replace or (),
             )
         except ValueError as exc:  # a name in --replace the file lacks

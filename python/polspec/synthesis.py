@@ -29,6 +29,7 @@ from polspec.dtypes import dtype_value_limits
 from polspec.errors import GenerationError
 from polspec.frames import sample_rows
 from polspec.generation import generate
+from polspec.profiler import detect_order as detect_order_of
 from polspec.profiler import profile_columns
 from polspec.reading import read_file
 from polspec.tablespec import TableSpec
@@ -51,6 +52,7 @@ def profile(
     shape: bool = True,
     detect_unique: bool = True,
     calculate_bounds: bool = True,
+    detect_order: bool = True,
 ) -> TableSpec:
     """A spec describing `source` well enough to generate a stand-in for it.
 
@@ -94,6 +96,12 @@ def profile(
     calculate_bounds : bool, default True
         Record the observed extremes of numeric and temporal columns, and the
         length range of text and binary ones.
+    detect_order : bool, default True
+        Declare `order_by` when the rows come sorted by a column of single
+        values -- either way, nulls last, with at least 20 distinct values,
+        so not by chance -- so a stand-in comes sorted too. The first such
+        column, in column order. A sample keeps the source's row order, so
+        a sorted file's sample shows it.
 
     Returns
     -------
@@ -113,7 +121,11 @@ def profile(
         seed=seed,
         formats=formats,
     )
-    return TableSpec(name, columns)
+    order = detect_order_of(frame) if detect_order else None
+    if order is None:
+        return TableSpec(name, columns)
+    order_by, descending = order
+    return TableSpec(name, columns, order_by=order_by, descending=descending)
 
 
 def synthesize(

@@ -12,7 +12,7 @@ Internal: not part of the public API.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Literal
 
 import polars as pl
@@ -116,8 +116,10 @@ def to_eager(frame: Frame) -> pl.DataFrame:
 
 def sample_rows(frame: pl.DataFrame, n: int | None, seed: int = 0) -> pl.DataFrame:
     """`n` of `frame`'s rows, drawn at random from a fixed `seed` -- or the
-    whole frame, when `n` is None or not fewer rows. The draw comes back in
-    no particular order; nothing that profiles or measures a frame reads one.
+    whole frame, when `n` is None or not fewer rows. The rows come back in
+    the order they had in `frame`: a sorted file's sample is sorted too, so
+    a profile can still see its order, and a sample read by eye reads in
+    file order.
 
     Never the first `n`: a file is often sorted, by date or by key, and its
     head is not a sample of it.
@@ -128,7 +130,34 @@ def sample_rows(frame: pl.DataFrame, n: int | None, seed: int = 0) -> pl.DataFra
         raise ValueError(f"sample must be a positive row count, got {n}")
     if n >= frame.height:
         return frame
-    return frame.sample(n, seed=seed)
+    position = fresh("__polspec_position", frame.columns)
+    return (
+        frame.with_row_index(position)
+        .sample(n, seed=seed)
+        .sort(position)
+        .drop(position)
+    )
+
+
+def out_of_order(columns: Sequence[str], descending: Sequence[bool]) -> pl.Expr:
+    """Each row that belongs before the row above it, as `DataFrame.sort(by,
+    descending, nulls_last=True)` orders rows -- what `order_by` claims, so
+    validation and the profiler test it alike.
+
+    Each column becomes its dense rank, which orders values exactly as that
+    sort does -- NaN, categories and every dtype alike -- with a null ranked
+    after every value. The ranks then compare as tuples, the first column
+    the major key: a row is out of order when the tuple above it is greater.
+    """
+    ranks = [
+        column(name).rank("dense", descending=desc).fill_null(pl.len() + 1)
+        for name, desc in zip(columns, descending, strict=True)
+    ]
+    later = pl.lit(False)
+    for rank in reversed(ranks):
+        above = rank.shift(1)
+        later = (above > rank) | ((above == rank) & later)
+    return later.fill_null(False)
 
 
 def json_casts(schema: Mapping[str, Any], *, error: type[Exception]) -> list[pl.Expr]:

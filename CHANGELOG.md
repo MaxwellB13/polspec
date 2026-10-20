@@ -23,7 +23,21 @@ seed produces; see
   attributes, and drift reports an order added as breaking. The streaming
   verbs -- `generate_batches`, `scan()` and the sinks -- refuse an ordered
   spec, naming why, as they refuse a hierarchy: an order is a property of
-  the whole frame.
+  the whole frame. The Markdown render names the order.
+- **`profile()` declares the order a frame comes in**: the first column of
+  single values -- at least 20 of them distinct, so not by chance -- whose
+  rows come sorted either way, nulls last. So `synthesize()`'s fake rows
+  come in the source's order. `detect_order=False` turns it off;
+  `FrameSpec.from_dataframe(detect_order=True)` and `polspec schema infer
+  --order` turn it on, as `detect_unique` and `--keys` are. An order within
+  each key is the user's to declare.
+
+### Changed
+
+- **A sample keeps its source's row order.** `profile(sample=...)` and the
+  command line's `--sample` draw the same rows as before, for the same
+  seed, but in the order the file has them, not shuffled: a sorted file's
+  sample is sorted too, and reads in file order.
 
 ## [0.19.0] - 2026-10-13
 

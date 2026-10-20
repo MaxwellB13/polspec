@@ -105,6 +105,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Declare an all-distinct integer or text column unique",
     )
     infer.add_argument(
+        "--order",
+        action="store_true",
+        help="Declare order_by when the rows come sorted by a column",
+    )
+    infer.add_argument(
         "--replace",
         nargs="+",
         action="extend",

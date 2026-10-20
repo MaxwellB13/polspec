@@ -58,26 +58,6 @@ def _described(columns: Sequence[str], descending: Sequence[bool]) -> str:
     )
 
 
-def _out_of_order(columns: Sequence[str], descending: Sequence[bool]) -> pl.Expr:
-    """Each row that belongs before the row above it, as `DataFrame.sort(by,
-    descending, nulls_last=True)` orders rows.
-
-    Each column becomes its dense rank, which orders values exactly as that
-    sort does -- NaN, categories and every dtype alike -- with a null ranked
-    after every value. The ranks then compare as tuples, the first column
-    the major key: a row is out of order when the tuple above it is greater.
-    """
-    ranks = [
-        frames.column(name).rank("dense", descending=desc).fill_null(pl.len() + 1)
-        for name, desc in zip(columns, descending, strict=True)
-    ]
-    later = pl.lit(False)
-    for rank in reversed(ranks):
-        above = rank.shift(1)
-        later = (above > rank) | ((above == rank) & later)
-    return later.fill_null(False)
-
-
 @dataclass(kw_only=True)
 class _FrameCheck(Constraint):
     check: Check
@@ -123,7 +103,7 @@ def frame_constraints(
         constraints.append(
             _Order(
                 key="order",
-                mask=_out_of_order(columns, descending),
+                mask=frames.out_of_order(columns, descending),
                 sample_expr=struct_of(columns),
                 columns=columns,
                 descending=descending,

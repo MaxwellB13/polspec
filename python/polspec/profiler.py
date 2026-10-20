@@ -33,7 +33,7 @@ from polspec import frames
 from polspec._deprecation import deprecated
 from polspec.bound import Bound
 from polspec.constants import DEFAULT_NULL_PROBABILITY
-from polspec.dtypes import MAP, field_dtypes, map_entries
+from polspec.dtypes import MAP, field_dtypes, map_entries, map_parts
 from polspec.formats import lookup as _lookup_format
 from polspec.shape import fit, physical, with_fit
 from polspec.spec import ColSpec, is_categorical_dtype
@@ -89,6 +89,51 @@ class _Options:
     # values gave it, as (path, infinities): said once, after. A NaN needs no
     # word -- the column's `nan_probability` records it.
     infinite: list[tuple[str, int]] = field(default_factory=list)
+
+
+# Distinct values a column needs before its order is taken to be the
+# frame's, and not chance: a short or repetitive column is often sorted by
+# accident. The same bar a format clears.
+ORDER_MIN_DISTINCT = 20
+
+
+def detect_order(df: pl.DataFrame) -> tuple[tuple[str, ...], bool] | None:
+    """The column `df`'s rows come sorted by, and whether high to low: the
+    first, in column order, of single values -- at least
+    `ORDER_MIN_DISTINCT` of them distinct -- that is sorted one way or the
+    other, nulls last. None when no column is.
+
+    Tested exactly as validation tests `order_by` (`frames.out_of_order`),
+    so the order recorded is one the frame passes. One column only: a
+    per-key order (`["user_id", "ts"]`) is the user's to declare.
+
+    Internal: `profile` and `FrameSpec.from_dataframe` are the ways in.
+    """
+    candidates = [
+        name
+        for name, dtype in df.schema.items()
+        if not dtype.is_nested() and map_parts(dtype) is None
+    ]
+    if not candidates or df.height < ORDER_MIN_DISTINCT:
+        return None
+    measured = df.select(
+        *(
+            frames.column(name).drop_nulls().n_unique().alias(f"{i}:distinct")
+            for i, name in enumerate(candidates)
+        ),
+        *(
+            frames.out_of_order([name], [desc]).sum().alias(f"{i}:{desc}")
+            for i, name in enumerate(candidates)
+            for desc in (False, True)
+        ),
+    ).row(0, named=True)
+    for i, name in enumerate(candidates):
+        if measured[f"{i}:distinct"] < ORDER_MIN_DISTINCT:
+            continue
+        for desc in (False, True):
+            if measured[f"{i}:{desc}"] == 0:
+                return (name,), desc
+    return None
 
 
 def profile_columns(

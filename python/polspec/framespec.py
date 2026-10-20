@@ -35,6 +35,7 @@ from polspec.errors import SpecError
 from polspec.foreign_key import ForeignKey
 from polspec.frames import Method, References
 from polspec.hierarchy import Hierarchy
+from polspec.profiler import detect_order as detect_order_of
 from polspec.profiler import profile_columns
 from polspec.render import framespec_to_markdown, framespec_to_mermaid
 from polspec.spec import ColSpec
@@ -371,6 +372,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         shape: bool = False,
         detect_unique: bool = False,
         replace: Sequence[str] = (),
+        detect_order: bool = False,
     ) -> type[FrameSpec]:
         """Infers a spec by profiling an existing DataFrame.
 
@@ -381,10 +383,10 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         code -- names it, unless `formats=False`.
         `calculate_bounds`
         records observed `(min, max)` for numeric and temporal columns and
-        `(min_len, max_len)` for strings and binary. `shape`, `detect_unique`
-        and `replace` describe more, for a spec that will generate a stand-in
-        for the data: `polspec.profile` takes the same switches, every one
-        on by default.
+        `(min_len, max_len)` for strings and binary. `shape`, `detect_unique`,
+        `detect_order` and `replace` describe more, for a spec that will
+        generate a stand-in for the data: `polspec.profile` takes the same
+        switches, every one on by default.
         """
         columns = profile_columns(
             df,
@@ -396,7 +398,13 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             detect_unique=detect_unique,
             replace=replace,
         )
-        return cls.from_spec(TableSpec(name, columns))
+        order = detect_order_of(df) if detect_order else None
+        if order is None:
+            return cls.from_spec(TableSpec(name, columns))
+        order_by, descending = order
+        return cls.from_spec(
+            TableSpec(name, columns, order_by=order_by, descending=descending)
+        )
 
     # ------------------------------------------------------------------
     # Introspection
