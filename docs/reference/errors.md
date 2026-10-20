@@ -59,6 +59,7 @@ through `report.rows(finding)`; structural ones describe the frame's shape.
 | `unique` | row-level | a `unique=True` column holds duplicates |
 | `unique_together` | row-level | a composite key holds duplicate combinations |
 | `check` | row-level | a `__checks__` predicate is false |
+| `order` | row-level | a row belongs before the row above it, by the spec's `order_by`; `details` name the order |
 | `foreign_key` | row-level | a key value has no matching parent row (also structural when the parent lacks the referenced columns) |
 
 ## Drift codes

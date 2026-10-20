@@ -473,6 +473,8 @@ def test_equality_reads_every_field():
             ForeignKey("parent", references="self", ref_columns="child")
         ),
         "hierarchy": base.with_hierarchy(Hierarchy(child="child", parent="parent")),
+        "order_by": base.with_order_by("child"),
+        "descending": base.with_order_by("child", "parent", descending=[False, True]),
     }
     assert set(changed) == {f.name for f in dataclasses.fields(TableSpec)}
     for field, other in changed.items():

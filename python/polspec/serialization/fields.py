@@ -566,6 +566,16 @@ TABLESPEC_FIELDS: tuple[Field, ...] = (
         from_data=lambda v, ctx, path: hierarchy_from_data(v, ctx, path),
         since=3,
     ),
+    # An added optional key on version 4: a file without it declares no
+    # order, which is what an older reader assumes of it.
+    Field("order_by", omit_if=_if_falsy, to_data=list, since=4),
+    Field(
+        "descending",
+        omit_if=lambda flags, spec: not any(flags),
+        # One flag for every column when they agree, as `sort` takes it.
+        to_data=lambda flags: flags[0] if len(set(flags)) == 1 else list(flags),
+        since=4,
+    ),
 )
 
 # Keys a spec file may carry that are not TableSpec fields.

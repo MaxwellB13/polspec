@@ -8,6 +8,23 @@ seed produces; see
 
 ## [Unreleased]
 
+### Added
+
+- **`order_by`: rows that come sorted.** A spec declares the columns its
+  rows are sorted by, as `DataFrame.sort` takes them --
+  `__order_by__ = ["user_id", "ts"]`, with `__descending__` for the
+  direction -- for event logs, time series and anything a window function,
+  `join_asof` or a keep-the-latest dedup reads in order. `generate()` sorts
+  whole rows last, so every rule, check, composite key, foreign key and
+  hierarchy still holds; `validate()` reports each row that belongs before
+  the one above it (finding code `order`, skipped with
+  `validate_order=False` or `--skip order`). Nulls come last. A spec file
+  carries it as `order_by:` and `descending:`, `to_python` as the class
+  attributes, and drift reports an order added as breaking. The streaming
+  verbs -- `generate_batches`, `scan()` and the sinks -- refuse an ordered
+  spec, naming why, as they refuse a hierarchy: an order is a property of
+  the whole frame.
+
 ## [0.19.0] - 2026-10-13
 
 **The same seed, the same data, on every operating system.** A column

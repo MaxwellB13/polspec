@@ -74,6 +74,7 @@ class ValidationOptions:
     checks: bool = True
     foreign_keys: bool = True
     hierarchy: bool = True
+    order: bool = True
     pattern: bool = True
     bounds: bool = True
     cast: bool = False
@@ -105,6 +106,7 @@ SWITCHES = (
     "checks",
     "foreign_keys",
     "hierarchy",
+    "order",
     "pattern",
     "bounds",
 )
@@ -246,6 +248,7 @@ def inspect(
             spec.unique_together if opts.unique else None,
             spec.checks if opts.checks else None,
             readable,
+            order=(spec.order_by, spec.descending) if opts.order else None,
         )
     )
 
@@ -317,7 +320,8 @@ def validate(
         The fields of `ValidationOptions`, one at a time, with the check
         switches spelled `validate_rules`, `validate_validators`,
         `validate_unique`, `validate_checks`, `validate_foreign_keys`,
-        `validate_hierarchy`, `validate_pattern` and `validate_bounds`. See
+        `validate_hierarchy`, `validate_order`, `validate_pattern` and
+        `validate_bounds`. See
         `ValidationOptions` for what each means and what it defaults to; an
         unknown name raises `TypeError` naming the closest match.
 

@@ -348,6 +348,12 @@ def to_python(spec: SpecLike, source: str | Path) -> None:
         body.append(f"    __foreign_keys__ = [{fks}]")
     if spec.hierarchy is not None:
         body.append(f"    __hierarchy__ = {hierarchy_to_source(spec.hierarchy)}")
+    if spec.order_by:
+        body.append(f"    __order_by__ = {list(spec.order_by)!r}")
+        if any(spec.descending):
+            flags = spec.descending
+            written = flags[0] if len(set(flags)) == 1 else list(flags)
+            body.append(f"    __descending__ = {written!r}")
     if persistable_checks:
         checks = ", ".join(check_to_source(c) for c in persistable_checks)
         body.append(f"    __checks__ = [{checks}]")

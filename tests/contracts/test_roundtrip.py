@@ -94,6 +94,32 @@ def test_column_roundtrips(case):
     assert_roundtrip(_spec_for(case, COLUMN_CASES[case]))
 
 
+_SORTABLE = sorted(
+    name
+    for name, column in COLUMN_CASES.items()
+    if not column.dtype.is_nested() and "map" not in name.lower()
+)
+
+
+@pytest.mark.parametrize("descending", [False, True], ids=["asc", "desc"])
+@pytest.mark.parametrize("case", _SORTABLE)
+def test_an_ordered_column_roundtrips(case, descending):
+    """Every column a spec can order by, either way: the frame comes sorted,
+    exactly as Polars sorts it, and validates -- whatever the values hold
+    (nulls, NaN, categories, extremes)."""
+    spec = TableSpec(
+        f"Ordered_{case}",
+        {"c": COLUMN_CASES[case]},
+        order_by=["c"],
+        descending=descending,
+    )
+    spec_cls = type(spec.name, (FrameSpec,), {"__tablespec__": spec})
+    df = assert_roundtrip(spec_cls)
+    assert df.equals(
+        df.sort("c", descending=descending, nulls_last=True, maintain_order=True)
+    )
+
+
 def test_a_unique_column_with_no_room_refuses_by_name():
     """The one thing generation cannot do is invent a 301st Int8.
 

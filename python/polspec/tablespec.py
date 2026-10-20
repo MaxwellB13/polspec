@@ -24,6 +24,7 @@ import polars as pl
 
 from polspec.check import Check
 from polspec.domain import Domain
+from polspec.dtypes import map_parts
 from polspec.errors import SpecError
 from polspec.foreign_key import ForeignKey, default_fk_name
 from polspec.hierarchy import Hierarchy
@@ -32,6 +33,53 @@ from polspec.spec import ColSpec, column_kind
 
 if TYPE_CHECKING:
     from polspec.catspec import CatSpec
+
+
+def parse_order(
+    order_by: Any, descending: Any
+) -> tuple[tuple[str, ...], tuple[bool, ...]]:
+    """`order_by` as a tuple of column names, and `descending` as one flag
+    per name: what `DataFrame.sort(by, descending=...)` takes, normalised.
+
+    A single name may be given bare, and `descending` as one bool for every
+    column. With no order, `descending` must not ask for one.
+    """
+    if order_by is None:
+        order_by = ()
+    if isinstance(order_by, str):
+        order_by = (order_by,)
+    if not isinstance(order_by, Sequence) or not all(
+        isinstance(name, str) for name in order_by
+    ):
+        raise SpecError(
+            f"order_by must be a column name or a sequence of them, got {order_by!r}"
+        )
+    names = tuple(order_by)
+    if (
+        isinstance(descending, Sequence)
+        and not isinstance(descending, str)
+        and not descending
+    ):
+        descending = False  # none given: ascending, every column
+    if isinstance(descending, bool):
+        flags = (descending,) * len(names)
+        if not names and descending:
+            raise SpecError("descending=True asks for an order, but order_by is empty")
+    elif isinstance(descending, Sequence) and all(
+        isinstance(flag, bool) for flag in descending
+    ):
+        flags = tuple(descending)
+        if len(flags) != len(names):
+            raise SpecError(
+                f"descending gives {len(flags)} flag(s) for the {len(names)} "
+                f"column(s) of order_by {list(names)}: give one per column, or "
+                "one bool for all of them"
+            )
+    else:
+        raise SpecError(
+            f"descending must be a bool or a sequence of bools, got {descending!r}"
+        )
+    return names, flags
 
 
 def parse_unique_together(val: Any) -> tuple[tuple[str, ...], ...]:
@@ -113,6 +161,14 @@ class TableSpec:
         Referential-integrity constraints.
     hierarchy : Hierarchy | None
         Declares two columns as a parent/child edge list; see `Hierarchy`.
+    order_by : Sequence[str]
+        Columns the rows come sorted by, the first the major key, as
+        `DataFrame.sort(by)` takes them: `["ts"]` for one order across the
+        frame, `["user_id", "ts"]` for an order within each user. Nulls come
+        last. `generate()` sorts its rows so, and `validate()` checks them.
+    descending : bool | Sequence[bool]
+        Whether each `order_by` column runs high to low: one bool for all of
+        them, or one per column.
 
     Notes
     -----
@@ -126,6 +182,25 @@ class TableSpec:
     unique_together: Sequence[Sequence[str]] = ()
     foreign_keys: Sequence[ForeignKey] = ()
     hierarchy: Hierarchy | None = None
+    # What an instance holds, normalised; what the constructor accepts is
+    # spelled out in the `__init__` below, which exists only for type
+    # checkers.
+    order_by: tuple[str, ...] = ()
+    descending: tuple[bool, ...] = ()
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            name: str,
+            columns: Mapping[str, ColSpec] = MappingProxyType({}),
+            checks: Sequence[Check] = (),
+            unique_together: Sequence[Sequence[str]] = (),
+            foreign_keys: Sequence[ForeignKey] = (),
+            hierarchy: Hierarchy | None = None,
+            order_by: str | Sequence[str] = (),
+            descending: bool | Sequence[bool] = False,
+        ) -> None: ...
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name:
@@ -167,6 +242,9 @@ class TableSpec:
             "foreign_keys",
             _dedupe(tuple(self.foreign_keys), ForeignKey, "foreign_keys"),
         )
+        order_by, descending = parse_order(self.order_by, self.descending)
+        object.__setattr__(self, "order_by", order_by)
+        object.__setattr__(self, "descending", descending)
 
         self._validate_seed_names()
         self._validate_rules()
@@ -175,6 +253,7 @@ class TableSpec:
         self._validate_checks()
         self._validate_foreign_keys()
         self._validate_hierarchy()
+        self._validate_order()
         self._validate_pass_order()
 
     # ------------------------------------------------------------------
@@ -251,6 +330,28 @@ class TableSpec:
                         "NaN equals another, so a key has nothing to say about "
                         "one. Drop one or the other on this column."
                     )
+
+    def _validate_order(self) -> None:
+        seen: set[str] = set()
+        for col_name in self.order_by:
+            if col_name not in self.columns:
+                raise SpecError(
+                    f"order_by {list(self.order_by)} references unknown column "
+                    f"{col_name!r}"
+                )
+            if col_name in seen:
+                raise SpecError(
+                    f"order_by {list(self.order_by)} names {col_name!r} twice"
+                )
+            seen.add(col_name)
+            dtype = self.columns[col_name].dtype
+            # Polars sorts nested values too, but by rules a spec should not
+            # promise and a reader would have to look up.
+            if dtype.is_nested() or map_parts(dtype) is not None:
+                raise SpecError(
+                    f"order_by names {col_name!r}, a {dtype} column: order by "
+                    "a column of single values"
+                )
 
     def _validate_checks(self) -> None:
         seen: dict[str, Check] = {}
@@ -452,6 +553,8 @@ class TableSpec:
             and self.unique_together == other.unique_together
             and self.foreign_keys == other.foreign_keys
             and self.hierarchy == other.hierarchy
+            and self.order_by == other.order_by
+            and self.descending == other.descending
         )
 
     def __hash__(self) -> int:
@@ -562,6 +665,13 @@ class TableSpec:
             unique_together=(*self.unique_together, *(tuple(g) for g in groups)),
         )
 
+    def with_order_by(
+        self, *names: str, descending: bool | Sequence[bool] = False
+    ) -> TableSpec:
+        """A copy of this spec whose rows come sorted by `names`; with none,
+        a copy with no order."""
+        return dataclasses.replace(self, order_by=names, descending=descending)
+
     def _require_columns(self, names: Sequence[str], verb: str) -> None:
         unknown = [n for n in names if n not in self.columns]
         if unknown:
@@ -572,8 +682,10 @@ class TableSpec:
     def _without(self, dropped: set[str]) -> dict[str, Any]:
         """Constraint fields with every mention of `dropped` columns removed.
 
-        A composite key, foreign key or check that loses a member is removed
-        whole -- a check says nothing once a column it compares is gone. A
+        A composite key, foreign key, check or order that loses a member is
+        removed whole -- a check says nothing once a column it compares is
+        gone, and an order without one of its columns is not the order
+        declared. A
         rule on a surviving column that points at a dropped one is left for
         validation to reject: silently dropping a rule would change what the
         surviving column generates.
@@ -592,6 +704,11 @@ class TableSpec:
                 None
                 if self.hierarchy is not None and dropped & set(self.hierarchy.columns)
                 else self.hierarchy
+            ),
+            **(
+                {"order_by": (), "descending": ()}
+                if dropped & set(self.order_by)
+                else {}
             ),
         }
 
@@ -613,8 +730,8 @@ class TableSpec:
     def rename(self, mapping: Mapping[str, str]) -> TableSpec:
         """Renames columns, rewriting every constraint that names them.
 
-        Rules, validators, checks, composite keys, foreign keys and the
-        hierarchy are rewritten. A validator or check written as a raw
+        Rules, validators, checks, composite keys, foreign keys, the
+        hierarchy and the order are rewritten. A validator or check written as a raw
         `pl.Expr` cannot be: rewriting Polars expressions is not something
         this library does, so renaming a column one names is refused. Write it
         with `col()`, whose predicates rename like everything else.
@@ -684,6 +801,7 @@ class TableSpec:
             ),
             foreign_keys=tuple(foreign_keys),
             hierarchy=hierarchy,
+            order_by=tuple(new_name(c) for c in self.order_by),
         )
 
     def with_catspec(self, catspec: CatSpec | type[CatSpec]) -> TableSpec:

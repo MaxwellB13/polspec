@@ -27,6 +27,8 @@ every key still at its default.
 | `foreign_keys` | A list of foreign keys |
 | `checks` | A list of checks |
 | `hierarchy` | A hierarchy |
+| `order_by` | The columns the rows come sorted by, the first the major key |
+| `descending` | Whether each `order_by` column runs high to low: `true`, or a list of one flag per column |
 
 ### A column
 

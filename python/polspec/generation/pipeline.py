@@ -19,6 +19,7 @@ from typing import Any
 
 import polars as pl
 
+from polspec import frames
 from polspec.constants import LARGE_FRAME_BYTES
 from polspec.errors import GenerationError, SpecError
 from polspec.frames import Method, References, to_eager
@@ -78,6 +79,16 @@ def requires_whole_frame(spec: TableSpec, verb: str) -> None:
             "every reference points at another row of the same frame, and each "
             "batch is generated on its own. Use generate() for a hierarchy, and "
             "write the frame out yourself."
+        )
+    if spec.order_by:
+        # Rows in order across a stream would need every row before the
+        # first could be written -- and an order within each key, every row
+        # of that key, which batches scatter.
+        raise SpecError(
+            f"{spec.name} declares order_by {list(spec.order_by)}, which {verb} "
+            "cannot produce: the rows' order is a property of the whole frame, "
+            "and each batch is generated on its own. Use generate() for an "
+            "ordered frame, and write it out yourself."
         )
 
 
@@ -184,6 +195,10 @@ def generate(
     declaration. Past four gibibytes that is a warning naming the estimate;
     `max_bytes=` makes it a refusal instead, and `max_bytes=0` silences both.
 
+    A spec declaring `order_by` has its rows sorted by those columns last,
+    after every pass: each value keeps its row, so every claim the rows make
+    about their own columns still holds. Nulls come last.
+
     The whole frame is built before this returns. `scan()` is the lazy
     verb: it generates as the plan is collected, so only the columns and
     rows a plan asks for are made.
@@ -195,7 +210,7 @@ def generate(
     _check_size(spec, n, max_bytes)
     check_method(method)
 
-    return _window(
+    frame = _window(
         spec,
         n,
         _frame_seed(seed),
@@ -203,6 +218,21 @@ def generate(
         references=references,
         cycles=cycles,
         self_references=self_references,
+    )
+    return ordered(frame, spec)
+
+
+def ordered(frame: pl.DataFrame, spec: TableSpec) -> pl.DataFrame:
+    """`frame`'s rows sorted as `spec.order_by` declares: whole rows, so
+    every value stays beside the others in its row. Stable, so rows that
+    tie keep the order they were generated in."""
+    if not spec.order_by:
+        return frame
+    return frame.sort(
+        frames.columns(spec.order_by),
+        descending=list(spec.descending),
+        nulls_last=True,
+        maintain_order=True,
     )
 
 
