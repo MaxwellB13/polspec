@@ -652,10 +652,11 @@ class Registry:
 
         return serialization.registry_from_dict(data, strict=strict)
 
-    def to_yaml(self, source: str | Path) -> None:
-        """Writes every spec, and the declared categories, to one file."""
-
-        serialization.registry_to_yaml(self, source)
+    def to_yaml(self, source: str | Path | None = None) -> str | None:
+        """Every spec, and the declared categories, as one YAML document:
+        written to the file `source`, or, with no `source`, returned as
+        text."""
+        return serialization.registry_to_yaml(self, source)
 
     @classmethod
     def from_yaml(cls, source: str | Path, *, strict: bool = True) -> Registry:

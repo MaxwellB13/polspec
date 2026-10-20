@@ -406,11 +406,9 @@ def _profile_column(
         return _shaped(described, non_null, options)
 
     if dtype.is_temporal():
-        # Temporal bounds are recorded as the physical integer the dtype
-        # stores, matching what the generation path expects back.
-        values = non_null.to_physical() if len(non_null) else non_null
         described = spec(
-            dtype=dtype, bounds=_extent(values, int, options.calculate_bounds)
+            dtype=dtype,
+            bounds=_temporal_extent(non_null, dtype, options.calculate_bounds),
         )
         return _shaped(described, non_null, options)
 
@@ -572,6 +570,39 @@ def _nullability(series: pl.Series, total_rows: int) -> tuple[bool, float]:
     if total_rows > 0:
         return True, float(null_count / total_rows)
     return True, DEFAULT_NULL_PROBABILITY
+
+
+def _temporal_extent(
+    values: pl.Series, dtype: pl.DataType, calculate_bounds: bool
+) -> Bound | None:
+    """The observed extremes of a date, time, datetime or duration column, as
+    a person writes them: a `date`, a `time`, a `datetime` -- in the
+    column's time zone -- or a `timedelta`.
+
+    Python's types stop at the microsecond, so a nanosecond column's
+    extremes round outward to one: the minimum down, the maximum up, and
+    every value still inside. Where Python cannot hold the result -- a year
+    outside 1 to 9999, a time that would round up to 24:00 -- the bounds
+    stay the physical integers the dtype stores, which generate the same.
+    """
+    if not calculate_bounds or len(values) == 0:
+        return None
+    physical_values = values.to_physical()
+    extremes = physical_values.to_frame("v").select(
+        pl.col("v").min().alias("lo"), pl.col("v").max().alias("hi")
+    )
+    observed = tuple(int(v) for v in extremes.row(0))
+    lo, hi = observed
+    nanoseconds = dtype == pl.Time or getattr(dtype, "time_unit", None) == "ns"
+    if nanoseconds:
+        lo, hi = lo // 1000 * 1000, -(-hi // 1000) * 1000
+    try:
+        low, high = pl.Series([lo, hi]).cast(dtype, strict=True).to_list()
+    except (pl.exceptions.PolarsError, OverflowError, ValueError):
+        return Bound(*observed)
+    if low is None or high is None:
+        return Bound(*observed)
+    return Bound(low, high)
 
 
 def _extent(values: pl.Series, cast, calculate_bounds: bool) -> Bound | None:

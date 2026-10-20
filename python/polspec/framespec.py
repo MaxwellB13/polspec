@@ -470,14 +470,17 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     # ------------------------------------------------------------------
 
     @classmethod
-    def to_yaml(cls, source: str | Path) -> None:
-        """Writes this spec to a human-readable YAML file at `source`."""
-        serialization.to_yaml(cls.spec, source)
+    def to_yaml(cls, source: str | Path | None = None) -> str | None:
+        """This spec as human-readable YAML: written to the file `source`, or,
+        with no `source`, returned as text."""
+        return serialization.to_yaml(cls.spec, source)
 
     @classmethod
-    def to_python(cls, source: str | Path) -> None:
-        """Writes this spec as an importable Python module defining a subclass."""
-        serialization.to_python(cls.spec, source)
+    def to_python(cls, source: str | Path | None = None) -> str | None:
+        """This spec as an importable Python module defining a subclass:
+        written to the file `source`, or, with no `source`, returned as
+        text."""
+        return serialization.to_python(cls.spec, source)
 
     # ------------------------------------------------------------------
     # Generation

@@ -31,8 +31,23 @@ seed produces; see
   `FrameSpec.from_dataframe(detect_order=True)` and `polspec schema infer
   --order` turn it on, as `detect_unique` and `--keys` are. An order within
   each key is the user's to declare.
+- **A spec as text.** `to_yaml(spec)` and `to_python(spec)` -- and
+  `registry_to_yaml`, and the `FrameSpec` and `Registry` methods -- return
+  the text when given no path, as `to_markdown` and `catspec_to_yaml`
+  already did.
 
 ### Changed
+
+- **A profiled date, time, datetime or duration column's bounds are dates
+  and times**, as a person writes them -- `[2024-01-01, 2024-12-31]`, not
+  `[19723, 20088]` -- in the column's time zone. A nanosecond column's
+  bounds round outward to the microsecond, Python's limit, so every value
+  stays inside; a bound Python cannot hold stays the integer. The data
+  generated is the same.
+- **A `unique=True` `Int64` or `UInt64` (or 128-bit) column with no bounds
+  makes room for the frame.** Its default range, +-1,000,000, refused a
+  frame of more than 2,000,001 rows; it now widens upward to fit. Only
+  where it refused before, so nothing that generated changes.
 
 - **A sample keeps its source's row order.** `profile(sample=...)` and the
   command line's `--sample` draw the same rows as before, for the same

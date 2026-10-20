@@ -11,6 +11,9 @@ Loaded = FrameSpec.from_yaml("orders.yaml")
 Loaded.generate(1_000, seed=1)
 ```
 
+With no path, `to_yaml()` and `to_python()` return the text instead of
+writing it -- for a test, a notebook or a review.
+
 The output is plain, readable YAML — defaults are omitted so the file shows
 only what you actually declared:
 

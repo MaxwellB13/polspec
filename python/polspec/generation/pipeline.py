@@ -11,6 +11,7 @@ Internal: not part of the public API.
 
 from __future__ import annotations
 
+import dataclasses
 import difflib
 import random
 import warnings
@@ -20,7 +21,7 @@ from typing import Any
 import polars as pl
 
 from polspec import frames
-from polspec.constants import LARGE_FRAME_BYTES
+from polspec.constants import DEFAULT_WIDE_INT_BOUND, LARGE_FRAME_BYTES
 from polspec.errors import GenerationError, SpecError
 from polspec.frames import Method, References, to_eager
 from polspec.generation.engine import generate_cartesian, generate_random
@@ -90,6 +91,38 @@ def requires_whole_frame(spec: TableSpec, verb: str) -> None:
             "and each batch is generated on its own. Use generate() for an "
             "ordered frame, and write it out yourself."
         )
+
+
+# The integer dtypes whose undeclared range is the default, not the dtype's.
+_WIDE_INTS = (pl.Int64, pl.UInt64, pl.Int128, pl.UInt128)
+
+
+def room_for_open_keys(spec: TableSpec, n: int) -> TableSpec:
+    """`spec` with each unique 64- or 128-bit integer column that declares no
+    bounds given room for `n` distinct values.
+
+    With no bounds, such a column draws from the default range,
+    +-1,000,000, which holds 2,000,001 values -- a refusal for a key column
+    of a larger frame, in a dtype that holds 9e18. The range widens upward
+    from the default's lower end until it holds `n`. Only where the default
+    is too small, so a frame that generates today generates the same; a
+    column that declares bounds keeps them, as they are a claim.
+    """
+    widened: dict[str, ColSpec] = {}
+    for name, column in spec.columns.items():
+        if (
+            not column.unique
+            or column.bounds is not None
+            or column.choices is not None
+            or column.format is not None
+            or column.dtype not in _WIDE_INTS
+        ):
+            continue
+        low = 0 if column.dtype.is_unsigned_integer() else -DEFAULT_WIDE_INT_BOUND
+        if DEFAULT_WIDE_INT_BOUND - low + 1 >= n:
+            continue
+        widened[name] = dataclasses.replace(column, bounds=(low, low + n - 1))
+    return spec.with_columns(widened) if widened else spec
 
 
 def check_counts(n: int, batch_size: int | None = None) -> None:
@@ -209,6 +242,7 @@ def generate(
     _check_faults(spec, cycles, self_references)
     _check_size(spec, n, max_bytes)
     check_method(method)
+    spec = room_for_open_keys(spec, n)
 
     frame = _window(
         spec,
@@ -455,6 +489,8 @@ def generate_batches(
     check_method(method)
     if n == 0:
         return
+    # The whole frame's `n`, so every batch draws from one key range.
+    spec = room_for_open_keys(spec, n)
 
     # A parent frame is the same frame for every batch, so collect it once.
     # Left as given, a `LazyFrame` reference would be collected inside each

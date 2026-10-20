@@ -478,3 +478,43 @@ def test_cartesian_with_custom_choices():
     # 3 sizes * (2 colors + null) = 9 combinations
     assert df.height == 9
     assert df.select("size", "color").unique().height == 9
+
+
+# ---------------------------------------------------------------------------
+# An unbounded unique key makes room for the frame
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("dtype", [pl.Int64, pl.UInt64])
+def test_an_unbounded_unique_key_widens_to_fit_the_frame(dtype):
+    """With no bounds, a 64-bit key draws from +-1,000,000 -- 2,000,001
+    values, or 1,000,001 unsigned. A larger frame widens the range upward
+    from its lower end, rather than refusing a key the dtype could hold."""
+    from polspec import ColSpec, TableSpec, generate, validate
+
+    spec = TableSpec("Keys", {"id": ColSpec(dtype, unique=True)})
+    frame = generate(spec, 2_100_000, seed=1)
+    assert frame["id"].n_unique() == frame.height
+    low = 0 if dtype == pl.UInt64 else -1_000_000
+    assert frame["id"].min() == low
+    assert frame["id"].max() == low + 2_100_000 - 1
+    validate(spec, frame)
+
+
+def test_a_widened_key_is_the_same_batched():
+    from polspec import ColSpec, TableSpec, generate, generate_batches
+
+    spec = TableSpec("Keys", {"id": ColSpec(pl.Int64, unique=True)})
+    whole = generate(spec, 2_100_000, seed=4)
+    batched = pl.concat(generate_batches(spec, 2_100_000, batch_size=500_000, seed=4))
+    assert batched.equals(whole)
+
+
+def test_a_key_within_the_default_range_is_unchanged_and_a_bounded_one_refuses():
+    from polspec import ColSpec, GenerationError, TableSpec, generate
+
+    spec = TableSpec("Keys", {"id": ColSpec(pl.Int64, unique=True)})
+    assert generate(spec, 1_000, seed=2)["id"].is_between(-1_000_000, 1_000_000).all()
+    bounded = TableSpec("Keys", {"id": ColSpec(pl.Int64, unique=True, bounds=(0, 9))})
+    with pytest.raises(GenerationError, match="only 10 distinct"):
+        generate(bounded, 11, seed=2)

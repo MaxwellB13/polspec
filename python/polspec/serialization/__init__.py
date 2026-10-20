@@ -14,7 +14,7 @@ import unicodedata
 import warnings
 from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, overload
 
 import polars as pl
 import yaml
@@ -94,6 +94,17 @@ _LOSS = {
     ),
     "python": ("generated Python", "Re-declare them by hand on the generated class."),
 }
+
+
+def _written(text: str, source: str | Path | None) -> str | None:
+    """`text` written to `source` -- its folders made -- or, with no source,
+    returned."""
+    if source is None:
+        return text
+    p = Path(source)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text, encoding="utf-8")
+    return None
 
 
 def _warn_unserializable(spec: TableSpec, source: str | Path, kind: str) -> None:
@@ -198,20 +209,23 @@ def from_dict(
 # ---------------------------------------------------------------------------
 
 
-def to_yaml(spec: SpecLike, source: str | Path) -> None:
-    """Writes `spec` -- a `TableSpec` or a `FrameSpec` class -- to a
-    human-readable YAML file at `source`.
+@overload
+def to_yaml(spec: SpecLike, source: None = None) -> str: ...
+@overload
+def to_yaml(spec: SpecLike, source: str | Path) -> None: ...
+def to_yaml(spec: SpecLike, source: str | Path | None = None) -> str | None:
+    """`spec` -- a `TableSpec` or a `FrameSpec` class -- as human-readable
+    YAML: written to the file `source`, or, with no `source`, returned as
+    text.
 
     Defaults are omitted so the file shows only what was declared. Checks and
     validators over raw expressions cannot be written and warn.
     """
     spec = as_table_spec(spec)
     require_columns(spec)
-    _warn_unserializable(spec, source, "yaml")
-    dumped = dump_yaml(to_dict(spec), source)
-    p = Path(source)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(dumped, encoding="utf-8")
+    label = source if source is not None else f"spec {spec.name!r}"
+    _warn_unserializable(spec, label, "yaml")
+    return _written(dump_yaml(to_dict(spec), label), source)
 
 
 def _resolve_categories(
@@ -300,9 +314,14 @@ def _require_class_name(name: str) -> None:
     )
 
 
-def to_python(spec: SpecLike, source: str | Path) -> None:
-    """Writes `spec` -- a `TableSpec` or a `FrameSpec` class -- as a Python
-    module defining a `FrameSpec` subclass.
+@overload
+def to_python(spec: SpecLike, source: None = None) -> str: ...
+@overload
+def to_python(spec: SpecLike, source: str | Path) -> None: ...
+def to_python(spec: SpecLike, source: str | Path | None = None) -> str | None:
+    """`spec` -- a `TableSpec` or a `FrameSpec` class -- as a Python module
+    defining a `FrameSpec` subclass: written to the file `source`, or, with
+    no `source`, returned as text.
 
     Columns are declared through `__columns__`, since a name straight from
     data is not always a valid identifier. Checks and validators over raw
@@ -316,7 +335,9 @@ def to_python(spec: SpecLike, source: str | Path) -> None:
     spec = as_table_spec(spec)
     require_columns(spec)
     _require_class_name(spec.name)
-    _warn_unserializable(spec, source, "python")
+    _warn_unserializable(
+        spec, source if source is not None else f"spec {spec.name!r}", "python"
+    )
 
     data = tablespec_to_data(spec)
     persistable_checks = [c for c in spec.checks if c.pred is not None]
@@ -370,10 +391,7 @@ def to_python(spec: SpecLike, source: str | Path) -> None:
         lines.append("from decimal import Decimal")
     lines.append(f"from polspec import {', '.join(imports)}")
     lines.extend(["", "", *body])
-
-    p = Path(source)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return _written("\n".join(lines) + "\n", source)
 
 
 # ---------------------------------------------------------------------------
@@ -541,15 +559,20 @@ def registry_from_dict(
     return registry
 
 
-def registry_to_yaml(registry: Registry, source: str | Path) -> None:
-    """A `Registry` written to `source` as one YAML file: its specs keyed by
-    name, and its categories."""
+@overload
+def registry_to_yaml(registry: Registry, source: None = None) -> str: ...
+@overload
+def registry_to_yaml(registry: Registry, source: str | Path) -> None: ...
+def registry_to_yaml(
+    registry: Registry, source: str | Path | None = None
+) -> str | None:
+    """A `Registry` as one YAML document -- its specs keyed by name, and its
+    categories: written to the file `source`, or, with no `source`, returned
+    as text."""
+    label = source if source is not None else "a registry"
     for spec in registry.specs:
-        _warn_unserializable(spec, source, "yaml")
-    p = Path(source)
-    dumped = dump_yaml(registry_to_dict(registry), source)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(dumped, encoding="utf-8")
+        _warn_unserializable(spec, label, "yaml")
+    return _written(dump_yaml(registry_to_dict(registry), label), source)
 
 
 def registry_from_yaml(source: str | Path, *, strict: bool = True) -> Registry:

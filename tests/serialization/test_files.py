@@ -584,3 +584,33 @@ def test_the_top_level_file_functions_take_either_kind_of_spec(tmp_path):
     assert polspec.from_yaml(tmp_path / "small.yaml") == Small.spec
     polspec.to_python(Small, tmp_path / "small.py")
     assert _exec_python_spec(tmp_path / "small.py")["Small"].spec == Small.spec
+
+
+# ---------------------------------------------------------------------------
+# A spec as text
+# ---------------------------------------------------------------------------
+
+
+def test_with_no_path_a_spec_comes_back_as_text(tmp_path):
+    """`to_yaml` and `to_python` return what they would write, for a test, a
+    notebook or a review; `catspec_to_yaml` and `to_markdown` already did."""
+    from polspec import FrameSpec, Registry
+    from polspec.serialization import registry_to_yaml
+
+    class Orders(FrameSpec):
+        __order_by__ = ["id"]
+        id = ColSpec(pl.Int64, unique=True)
+
+    text = to_yaml(Orders)
+    assert to_yaml(Orders, tmp_path / "o.yaml") is None
+    assert text == (tmp_path / "o.yaml").read_text(encoding="utf-8")
+    assert Orders.to_yaml() == text
+
+    source = to_python(Orders)
+    to_python(Orders, tmp_path / "o.py")
+    assert source == (tmp_path / "o.py").read_text(encoding="utf-8")
+    assert Orders.to_python() == source
+
+    registry = Registry(Orders)
+    assert registry_to_yaml(registry) == registry.to_yaml()
+    assert "specs:" in registry.to_yaml()
