@@ -284,6 +284,56 @@ def test_an_orphaned_key_is_not_a_passing_row():
     assert report.passing_rows().collect()["order_id"].to_list() == [1, 3]
 
 
+def _split(spec, df):
+    """`passing_rows()` and `failing_rows(once=True)`, collected."""
+    report = inspect(spec, df)
+    return report.passing_rows().collect(), report.failing_rows(once=True).collect()
+
+
+def test_passing_rows_out_of_order_are_settled_until_the_order_holds():
+    """Before 0.21 the rows an order finding left were still out of order:
+    `[3, 1, 2, 5, 4, 6]` flagged 1 and 4 and passed `[3, 2, 5, 6]`. What is
+    left is validated again until nothing more is found."""
+    spec = TableSpec("O", {"v": ColSpec(pl.Int64)}, order_by=["v"])
+    df = pl.DataFrame({"v": [3, 1, 2, 5, 4, 6]})
+    passing, failing = _split(spec, df)
+    assert passing["v"].to_list() == [3, 5, 6]
+    assert not inspect(spec, passing).findings
+    # The two still split the frame exactly, in its order.
+    assert sorted(passing["v"].to_list() + failing["v"].to_list()) == sorted(df["v"])
+    assert failing[FINDING_COLUMN].unique().to_list() == ["order"]
+
+
+def test_a_row_whose_parent_failed_does_not_pass():
+    """A key into the frame's own rows: `b` fails its bounds, and `c`, which
+    points at `b`, is an orphan once `b` is taken -- named by the key it
+    then breaks."""
+    spec = TableSpec(
+        "N",
+        {
+            "id": ColSpec(pl.String),
+            "up": ColSpec(pl.String, nullable=True),
+            "v": ColSpec(pl.Int64, bounds=(0, 10)),
+        },
+        foreign_keys=[ForeignKey("up", references="self", ref_columns="id")],
+    )
+    df = pl.DataFrame({"id": ["a", "b", "c"], "up": [None, "a", "b"], "v": [1, 99, 2]})
+    passing, failing = _split(spec, df)
+    assert passing["id"].to_list() == ["a"]
+    assert not inspect(spec, passing).findings
+    named = dict(zip(failing["id"], failing[FINDING_COLUMN], strict=True))
+    assert named["b"] == "v__bounds"
+    assert named["c"].startswith("fk:")
+
+
+def test_a_spec_whose_claims_do_not_relate_rows_validates_once():
+    """Only an order or a key into the frame's own rows can break in the
+    rows left; any other spec's first split is its answer."""
+    assert Keyed.inspect(MIXED)._recheck is None
+    ordered = TableSpec("O", {"v": ColSpec(pl.Int64)}, order_by=["v"])
+    assert inspect(ordered, pl.DataFrame({"v": [2, 1]}))._recheck is not None
+
+
 def test_a_structural_finding_has_no_passing_rows_to_give():
     wrong = MIXED.with_columns(pl.col("id").cast(pl.String))
     with pytest.raises(ValueError, match="id__dtype judge the whole frame"):

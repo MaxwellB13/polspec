@@ -614,3 +614,59 @@ def test_with_no_path_a_spec_comes_back_as_text(tmp_path):
     registry = Registry(Orders)
     assert registry_to_yaml(registry) == registry.to_yaml()
     assert "specs:" in registry.to_yaml()
+
+
+# ---------------------------------------------------------------------------
+# An error in a file says where
+# ---------------------------------------------------------------------------
+
+
+def _file(tmp_path, name: str, text: str):
+    path = tmp_path / name
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_a_declaration_error_names_the_file_and_the_column(tmp_path):
+    """Before 0.21 `bounds: [5, 1]` in a file said only `Bound min (5) must
+    be <= max (1)`. The error keeps its type -- a caller may catch it --
+    and says where."""
+    from polspec import SpecError
+
+    path = _file(
+        tmp_path,
+        "orders.yaml",
+        "version: 4\nname: Orders\ncolumns:\n  total:\n    dtype: Float64\n    bounds: [5, 1]\n",
+    )
+    with pytest.raises(
+        SpecError, match=r"orders\.yaml: columns\.total: Bound min \(5\)"
+    ):
+        from_yaml(path)
+
+
+def test_a_table_claim_error_names_the_file(tmp_path):
+    from polspec import SpecError
+
+    path = _file(
+        tmp_path,
+        "events.yaml",
+        "version: 4\nname: E\ncolumns:\n  a:\n    dtype: Int64\norder_by: [b]\n",
+    )
+    with pytest.raises(
+        SpecError, match=r"events\.yaml: order_by \['b'\] references unknown"
+    ):
+        from_yaml(path)
+
+
+def test_a_registry_error_names_the_file_and_the_spec(tmp_path):
+    from polspec import SpecError
+    from polspec.serialization import registry_from_yaml
+
+    path = _file(
+        tmp_path,
+        "specs.yaml",
+        "version: 4\nspecs:\n  orders:\n    columns:\n      total:\n"
+        "        dtype: Float64\n        bounds: [5, 1]\n",
+    )
+    with pytest.raises(SpecError, match=r"specs\.yaml: specs\.orders: columns\.total:"):
+        registry_from_yaml(path)

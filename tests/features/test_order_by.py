@@ -360,3 +360,22 @@ def test_schema_infer_declares_an_order_with_order(tmp_path):
 def test_the_markdown_names_the_order():
     text = to_markdown(Events.spec)
     assert "- **Row Order:** `user`, `ts` (descending)" in text
+
+
+def test_order_detection_reads_the_head_first_and_still_checks_the_whole():
+    """The head rules a column out cheaply; a column sorted only for its
+    head is still not an order, because the survivors are checked whole."""
+    from polspec.profiler import ORDER_PREFIX_ROWS, detect_order
+
+    n = ORDER_PREFIX_ROWS * 3
+    sorted_then_not = list(range(ORDER_PREFIX_ROWS)) + list(
+        range(n - ORDER_PREFIX_ROWS, 0, -1)
+    )
+    frame = pl.DataFrame(
+        {"head_only": sorted_then_not, "noise": [(i * 7919) % 101 for i in range(n)]}
+    )
+    assert detect_order(frame) is None
+    assert detect_order(frame.with_columns(pl.int_range(n).alias("id"))) == (
+        ("id",),
+        False,
+    )

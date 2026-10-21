@@ -47,6 +47,7 @@ from polspec import (
 from polspec.drift import drift
 from polspec.formats import FORMATS
 from polspec.serialization import from_dict, to_dict
+from polspec.validation import FINDING_COLUMN
 
 ROWS = 300
 SEED = 11
@@ -940,7 +941,14 @@ def test_a_pattern_named_column_is_judged_alone():
     report = inspect(spec, bad)
     assert {f.key for f in report.findings} >= {"c__bounds"}
     assert all(f.columns != ("*",) for f in report.findings), report.findings
-    assert report.passing_rows().collect().height == ROWS - 3
+    # The three rows fail; any row whose key pointed at one of them is an
+    # orphan once they go (a key into the frame's own rows), so what passes
+    # is what validates -- not merely the other rows.
+    passing = report.passing_rows().collect()
+    failing = report.failing_rows(once=True).collect()
+    assert failing.filter(pl.col(FINDING_COLUMN) == "c__bounds").height == 3
+    assert passing.height + failing.height == ROWS
+    assert not inspect(spec, passing).findings
     star = df.with_columns(pl.lit(5000, dtype=pl.Int16).alias("*"))
     keys = {f.key for f in inspect(spec, star).findings}
     assert "*__bounds" in keys and "c__bounds" not in keys

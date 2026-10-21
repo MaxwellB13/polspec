@@ -89,10 +89,15 @@ than losing that column to the finding keys. Every other name works: the
 helper columns polspec uses along the way take names the frame does not
 have.
 
-`passing_rows()` is the other half: every row no finding touched, in the
-frame's order, so the two split a frame into what to keep and what to send
-back. A duplicate key fails both of its rows, and an orphaned foreign key its
-row, so what passes is a frame the spec accepts:
+`passing_rows()` is the other half: the rows that pass, in the frame's
+order, so the two split a frame into what to keep and what to send back. A
+duplicate key fails both of its rows, and an orphaned foreign key its row.
+Some claims relate rows to each other -- an `order_by`, a key into the
+frame's own rows -- and taking rows away can break them in the rows left: a
+row whose parent was taken, rows no longer in order. So what is left is
+validated again, and anything that now fails goes too, until nothing more
+does; `failing_rows(once=True)` names those rows by the claim they broke.
+What passes is a frame the spec accepts:
 
 ```python
 kept = report.passing_rows().collect()

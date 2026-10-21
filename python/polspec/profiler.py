@@ -213,6 +213,9 @@ class _Options:
 # accident. The same bar a format clears.
 ORDER_MIN_DISTINCT = 20
 
+# Rows of the head order detection reads first, before ranking a column whole.
+ORDER_PREFIX_ROWS = 2048
+
 
 def detect_order(df: pl.DataFrame) -> tuple[tuple[str, ...], bool] | None:
     """The column `df`'s rows come sorted by, and whether high to low: the
@@ -233,24 +236,39 @@ def detect_order(df: pl.DataFrame) -> tuple[tuple[str, ...], bool] | None:
     ]
     if not candidates or df.height < ORDER_MIN_DISTINCT:
         return None
-    measured = df.select(
-        *(
-            frames.column(name).drop_nulls().n_unique().alias(f"{i}:distinct")
-            for i, name in enumerate(candidates)
-        ),
-        *(
-            frames.out_of_order([name], [desc]).sum().alias(f"{i}:{desc}")
-            for i, name in enumerate(candidates)
-            for desc in (False, True)
-        ),
+    # The rows' head first: a prefix of a sorted column is sorted, so this
+    # never turns one away, and nearly every column that is not sorted shows
+    # it within a few rows -- the full test, a rank of every value both ways,
+    # is left to the few that survive.
+    head = _sorted_ways(df.head(ORDER_PREFIX_ROWS), candidates)
+    survivors = [name for name in candidates if head[name]]
+    if not survivors:
+        return None
+    if df.height > ORDER_PREFIX_ROWS:
+        whole = _sorted_ways(df, survivors)
+    else:
+        whole = {name: head[name] for name in survivors}
+    distinct = df.select(
+        frames.column(name).drop_nulls().n_unique().alias(name) for name in survivors
     ).row(0, named=True)
-    for i, name in enumerate(candidates):
-        if measured[f"{i}:distinct"] < ORDER_MIN_DISTINCT:
-            continue
-        for desc in (False, True):
-            if measured[f"{i}:{desc}"] == 0:
-                return (name,), desc
+    for name in survivors:
+        if distinct[name] >= ORDER_MIN_DISTINCT and whole[name]:
+            return (name,), whole[name][0]
     return None
+
+
+def _sorted_ways(df: pl.DataFrame, names: Sequence[str]) -> dict[str, list[bool]]:
+    """For each of `names`, the directions -- `False` ascending, `True`
+    descending -- its rows come sorted in, ascending first."""
+    counts = df.select(
+        frames.out_of_order([name], [desc]).sum().alias(f"{i}:{desc}")
+        for i, name in enumerate(names)
+        for desc in (False, True)
+    ).row(0, named=True)
+    return {
+        name: [desc for desc in (False, True) if counts[f"{i}:{desc}"] == 0]
+        for i, name in enumerate(names)
+    }
 
 
 def profile_columns(

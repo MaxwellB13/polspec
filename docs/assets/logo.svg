@@ -18,8 +18,8 @@
         fill="none" stroke="#2C5C9E" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
   <!-- glasses: big round lenses, eyes peering through -->
   <g stroke="#2C5C9E" stroke-width="18">
-    <circle cx="192" cy="250" r="50" fill="#FFFFFF"/>
-    <circle cx="320" cy="250" r="50" fill="#FFFFFF"/>
+    <circle cx="192" cy="250" r="45" fill="#FFFFFF"/>
+    <circle cx="320" cy="250" r="45" fill="#FFFFFF"/>
     <path d="M244 250 H268" fill="none"/>
   </g>
   <circle cx="192" cy="254" r="16" fill="#2C5C9E"/>

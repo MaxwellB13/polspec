@@ -14,13 +14,13 @@ import unicodedata
 import warnings
 from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, overload
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 import polars as pl
 import yaml
 from yaml.representer import RepresenterError
 
-from polspec.errors import SerializationError
+from polspec.errors import SerializationError, SpecError
 from polspec.serialization.dtypes import physical_name
 from polspec.serialization.fields import (
     Ctx,
@@ -94,6 +94,27 @@ _LOSS = {
     ),
     "python": ("generated Python", "Re-declare them by hand on the generated class."),
 }
+
+
+class _Located:
+    """Prefixes `source` to a declaration or file error raised inside it, so
+    an error found reading a file names the file -- keeping the error's own
+    type, which a caller may already catch."""
+
+    def __init__(self, source: str) -> None:
+        self.source = source
+
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(
+        self, kind: type | None, exc: BaseException | None, tb: object
+    ) -> Literal[False]:
+        if not isinstance(exc, (SpecError, SerializationError)):
+            return False
+        if str(exc).startswith(self.source):
+            return False
+        raise type(exc)(f"{self.source}: {exc}") from exc
 
 
 def _written(text: str, source: str | Path | None) -> str | None:
@@ -200,8 +221,9 @@ def from_dict(
     An unknown key is an error, naming the closest known key, unless
     `strict=False`, which downgrades it to a warning.
     """
-    current = migrate(data, "spec", source)
-    return tablespec_from_data(current, Ctx(categories=categories, strict=strict))
+    with _Located(source):
+        current = migrate(data, "spec", source)
+        return tablespec_from_data(current, Ctx(categories=categories, strict=strict))
 
 
 # ---------------------------------------------------------------------------
@@ -443,13 +465,14 @@ def catspec_from_dict(
     """
     from polspec.catspec import CatSpec
 
-    current = migrate(data, "catspec", source)
-    check_unknown_keys(current, _CATSPEC_KEYS, Ctx(strict=strict), "")
-    return CatSpec(
-        enums=current.get("enums"),
-        categoricals=current.get("categoricals"),
-        choices=current.get("choices"),
-    )
+    with _Located(source):
+        current = migrate(data, "catspec", source)
+        check_unknown_keys(current, _CATSPEC_KEYS, Ctx(strict=strict), "")
+        return CatSpec(
+            enums=current.get("enums"),
+            categoricals=current.get("categoricals"),
+            choices=current.get("choices"),
+        )
 
 
 def catspec_to_yaml(catspec: CatSpec, source: str | Path | None = None) -> str | None:
@@ -551,11 +574,11 @@ def registry_from_dict(
                 f"{source}: specs.{name} carries name {body['name']!r}; the key "
                 "is the name, so drop one or make them agree"
             )
-        registry.add(
-            tablespec_from_data(
+        with _Located(f"{source}: specs.{name}"):
+            spec = tablespec_from_data(
                 {"name": str(name), **body}, Ctx(categories=categories, strict=strict)
             )
-        )
+        registry.add(spec)
     return registry
 
 
