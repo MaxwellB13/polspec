@@ -105,8 +105,11 @@ POLSPEC_DEEP_EXAMPLES=3000 uv run pytest tests/contracts/test_properties.py
 POLSPEC_DEEP_EXAMPLES=3000 uv run --with "polars==2.0.0" pytest -p no:cacheprovider tests/contracts/test_properties.py
 ```
 
-A failure prints the shrunk spec and a `@reproduce_failure` blob that
-replays it. A failure seen once in thousands of draws is still a failure:
+The *Deep* workflow (`.github/workflows/deep.yml`) runs them every Monday,
+on the Polars floor and the newest Polars, along with the render check
+below, and from the Actions tab on demand (with a different example count,
+if wanted): run it before a release. A failure prints the shrunk spec and a
+`@reproduce_failure` blob that replays it. A failure seen once in thousands of draws is still a failure:
 every defect the last few reviews found sat that far out.
 
 What polspec writes for people is checked by the parsers people read it
