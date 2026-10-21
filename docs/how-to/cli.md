@@ -76,10 +76,23 @@ new`.
 | `--shape` | Fit the distribution each numeric or temporal column follows |
 | `--keys` | Declare an all-distinct integer or text column unique |
 | `--order` | Declare `order_by` when the rows come sorted by a column |
+| `--round-bounds STEP` | Round each numeric column's bounds outward to `STEP` (`1000`, `1k`, `10k`, `1M`, `0.01`), within its dtype; `auto` (the default) keeps two significant figures of the span and whole seconds; `exact` writes them as observed |
+| `--round-rates STEP` | Round each null and NaN rate up to `STEP` (`0.01`); `auto` (the default) keeps two significant figures; `exact` writes them as observed |
 | `--replace COL...` | Columns whose values must not be carried into the spec |
 
 Treat the output as a draft. It describes the sample it saw — edit bounds,
 add rules, tighten a domain — before trusting it as a contract.
+
+The draft is written as a person would write it: bounds rounded outward and
+rates rounded up, to two significant figures — `amount: [3.17, 9871.23]`
+becomes `[0, 9900]` and a 2.37% null rate `0.024` — so the file reads as a
+choice rather than a measurement. Rounding outward and up keeps the data
+valid against it. `--round-bounds 1k --round-rates 0.01` picks the
+precision, and `exact` writes what was observed:
+
+```bash
+polspec schema infer orders.parquet -o orders.yaml --round-bounds 10k --round-rates 0.01
+```
 
 ## `schema new` — start from nothing
 

@@ -31,6 +31,16 @@ seed produces; see
   `FrameSpec.from_dataframe(detect_order=True)` and `polspec schema infer
   --order` turn it on, as `detect_unique` and `--keys` are. An order within
   each key is the user's to declare.
+- **Inferences at a person's precision.** `polspec schema infer` writes
+  each numeric column's bounds rounded outward and each null and NaN rate
+  rounded up -- `[3.17, 9871.23]` as `[0, 9900]`, `0.023651` as `0.024` --
+  so a draft spec reads like a written one. `--round-bounds` and
+  `--round-rates` take a step (`1000`, `1k`, `1M`, `0.01`), `auto` (the
+  default: two significant figures, and whole seconds for a timestamp) or
+  `exact`. Outward and up, within each dtype's range, so the data still
+  passes the spec it was inferred from; a rate of 0 stays 0. `profile()`
+  and `FrameSpec.from_dataframe()` take `round_bounds=` and `round_rates=`
+  too, and write exactly what they observed unless asked.
 - **A spec as text.** `to_yaml(spec)` and `to_python(spec)` -- and
   `registry_to_yaml`, and the `FrameSpec` and `Registry` methods -- return
   the text when given no path, as `to_markdown` and `catspec_to_yaml`
@@ -38,6 +48,9 @@ seed produces; see
 
 ### Changed
 
+- **`polspec schema infer`'s bounds and rates are rounded by default**
+  (`auto`, above). `--round-bounds exact --round-rates exact` writes what
+  0.19.0 wrote.
 - **A profiled date, time, datetime or duration column's bounds are dates
   and times**, as a person writes them -- `[2024-01-01, 2024-12-31]`, not
   `[19723, 20088]` -- in the column's time zone. A nanosecond column's

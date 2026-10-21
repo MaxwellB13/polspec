@@ -29,8 +29,8 @@ from polspec.dtypes import dtype_value_limits
 from polspec.errors import GenerationError
 from polspec.frames import sample_rows
 from polspec.generation import generate
+from polspec.profiler import Rounding, profile_columns
 from polspec.profiler import detect_order as detect_order_of
-from polspec.profiler import profile_columns
 from polspec.reading import read_file
 from polspec.tablespec import TableSpec
 
@@ -53,6 +53,8 @@ def profile(
     detect_unique: bool = True,
     calculate_bounds: bool = True,
     detect_order: bool = True,
+    round_bounds: Rounding = None,
+    round_rates: Rounding = None,
 ) -> TableSpec:
     """A spec describing `source` well enough to generate a stand-in for it.
 
@@ -102,6 +104,17 @@ def profile(
         so not by chance -- so a stand-in comes sorted too. The first such
         column, in column order. A sample keeps the source's row order, so
         a sorted file's sample shows it.
+    round_bounds : number, "auto" or None, default None
+        Write each numeric column's bounds rounded outward to this step --
+        `1000`, `0.01` -- the minimum down and the maximum up, within what
+        its dtype holds, so the data stays inside them. "auto" keeps two
+        significant figures of the column's span (`[3.17, 9871.23]` becomes
+        `[0, 9900]`) and rounds a datetime, time or duration outward to the
+        second. None writes them exactly as observed.
+    round_rates : number, "auto" or None, default None
+        Write each null, NaN and list-element null rate rounded up to this
+        step, never past 1; "auto" keeps two significant figures. A rate of
+        0 stays 0. None writes them exactly as observed.
 
     Returns
     -------
@@ -120,6 +133,8 @@ def profile(
         replace=replace,
         seed=seed,
         formats=formats,
+        round_bounds=round_bounds,
+        round_rates=round_rates,
     )
     order = detect_order_of(frame) if detect_order else None
     if order is None:

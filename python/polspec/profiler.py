@@ -26,6 +26,8 @@ import dataclasses
 import warnings
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, localcontext
+from typing import Literal
 
 import polars as pl
 
@@ -33,7 +35,7 @@ from polspec import frames
 from polspec._deprecation import deprecated
 from polspec.bound import Bound
 from polspec.constants import DEFAULT_NULL_PROBABILITY
-from polspec.dtypes import MAP, field_dtypes, map_entries, map_parts
+from polspec.dtypes import MAP, dtype_value_limits, field_dtypes, map_entries, map_parts
 from polspec.formats import lookup as _lookup_format
 from polspec.shape import fit, physical, with_fit
 from polspec.spec import ColSpec, is_categorical_dtype
@@ -74,6 +76,117 @@ FORMAT_MIN_SHARE = 0.99
 FORMAT_MAX_EXTRAS = 5
 
 
+# How finely `profile()` writes what it measured: a step to round to -- a
+# positive number, `1000` or `0.01` -- or "auto", or None for exactly as
+# observed.
+type Rounding = float | int | Decimal | Literal["auto"] | None
+
+
+def step_of(value: object) -> Rounding:
+    """A rounding as `profile()` takes it, checked: a positive finite step,
+    "auto", or None. Text reads as the command line writes it -- `1000`,
+    `1k`, `10k`, `1M`, `0.01`, `2.5e3`, `auto`, `exact`."""
+    if value is None:
+        return None
+    if value == "auto":
+        return "auto"
+    if value == "exact":
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        scale = {"k": 1_000, "K": 1_000, "m": 1_000_000, "M": 1_000_000}.get(
+            text[-1:], 1
+        )
+        if scale != 1:
+            text = text[:-1]
+        try:
+            value = Decimal(text) * scale
+        except ArithmeticError:
+            raise ValueError(
+                f"a rounding step must be a number such as 1000, 1k or 0.01, "
+                f"or 'auto' or 'exact'; got {value!r}"
+            ) from None
+    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
+        raise ValueError(f"a rounding step must be a number or 'auto'; got {value!r}")
+    step = Decimal(repr(value)) if isinstance(value, float) else Decimal(value)
+    if not step.is_finite() or step <= 0:
+        raise ValueError(f"a rounding step must be positive and finite; got {value!r}")
+    return step
+
+
+def _exact(value: object) -> Decimal:
+    """`value` -- a float, an int or a Decimal -- as a Decimal: a float by
+    its shortest repr, which converts back to the same float, so rounding
+    it cannot cross the value itself; the others exactly."""
+    return Decimal(repr(value)) if isinstance(value, float) else Decimal(str(value))
+
+
+def _auto_step(low: Decimal, high: Decimal) -> Decimal:
+    """Two significant figures of the span: `10 ** (floor(log10(span)) - 1)`.
+    A constant column's span is its own magnitude."""
+    span = high - low if high != low else abs(high)
+    if span == 0:
+        return Decimal(1)
+    return Decimal(1).scaleb(span.adjusted() - 1)
+
+
+def rounded_bounds(
+    bounds: Bound | None, dtype: pl.DataType, rounding: Rounding
+) -> Bound | None:
+    """`bounds` rounded outward to `rounding`'s step -- the minimum down, the
+    maximum up -- and clamped to what `dtype` holds, so every value they
+    were measured from stays inside. An integer's step is a whole number;
+    a Decimal's is never finer than its scale."""
+    if rounding is None or bounds is None or bounds.min is None or bounds.max is None:
+        return bounds
+    with localcontext(prec=100):
+        return _rounded_bounds(bounds, dtype, rounding)
+
+
+def _rounded_bounds(bounds: Bound, dtype: pl.DataType, rounding: Rounding) -> Bound:
+    low, high = _exact(bounds.min), _exact(bounds.max)
+    step = _auto_step(low, high) if rounding == "auto" else _exact(rounding)
+    if dtype.is_integer():
+        step = max(step.to_integral_value(rounding=ROUND_CEILING), Decimal(1))
+    if isinstance(dtype, pl.Decimal):
+        step = max(step, Decimal(1).scaleb(-(dtype.scale or 0)))
+    down = (low / step).to_integral_value(rounding=ROUND_FLOOR) * step
+    up = (high / step).to_integral_value(rounding=ROUND_CEILING) * step
+    if isinstance(dtype, pl.Decimal):
+        top = Decimal(10) ** ((dtype.precision or 38) - (dtype.scale or 0)) - Decimal(
+            1
+        ).scaleb(-(dtype.scale or 0))
+        down, up = max(down, -top), min(up, top)
+        quantum = Decimal(1).scaleb(-(dtype.scale or 0))
+        return Bound(
+            down.quantize(quantum, ROUND_FLOOR), up.quantize(quantum, ROUND_CEILING)
+        )
+    limits = dtype_value_limits(dtype)
+    if limits is not None:
+        down, up = max(down, _exact(limits[0])), min(up, _exact(limits[1]))
+    if dtype.is_integer():
+        return Bound(int(down), int(up))
+    return Bound(float(down), float(up))
+
+
+def rounded_rate(rate: float, rounding: Rounding) -> float:
+    """`rate` rounded up to `rounding`'s step -- "auto" keeps two significant
+    figures -- and never past 1. A rate of 0 stays 0: it says a thing never
+    occurs, which validation holds data to, while a rate above 0 only
+    shapes what generates."""
+    if rounding is None or rate <= 0:
+        return rate
+    exact = _exact(rate)  # 17 digits: the default context holds them
+    step = (
+        Decimal(1).scaleb(exact.adjusted() - 1)
+        if rounding == "auto"
+        else _exact(rounding)
+    )
+    return min(
+        float((exact / step).to_integral_value(rounding=ROUND_CEILING) * step), 1.0
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class _Options:
     """How much to infer, read by every column, however deeply nested."""
@@ -85,6 +198,10 @@ class _Options:
     detect_unique: bool = False
     formats: bool = True
     seed: int = 0
+    # Bounds rounded outward and rates up, to a step or "auto"; None leaves
+    # them exactly as observed (`Rounding`).
+    round_bounds: Rounding = None
+    round_rates: Rounding = None
     # Each float column holding an infinity outside the bounds its finite
     # values gave it, as (path, infinities): said once, after. A NaN needs no
     # word -- the column's `nan_probability` records it.
@@ -147,6 +264,8 @@ def profile_columns(
     replace: Sequence[str] = (),
     seed: int = 0,
     formats: bool = True,
+    round_bounds: Rounding = None,
+    round_rates: Rounding = None,
 ) -> dict[str, ColSpec]:
     """Infers ColSpec column definitions by profiling an existing DataFrame.
 
@@ -194,6 +313,17 @@ def profile_columns(
         frequencies. A column in `replace` is named a format only when
         every value has it, since its stand-ins would be values of the
         source.
+    round_bounds : number, "auto" or None, default None
+        Write each numeric column's bounds rounded outward to this step --
+        `1000`, `0.01` -- the minimum down and the maximum up, within what
+        its dtype holds, so the data stays inside them. "auto" keeps two
+        significant figures of the column's span (`[3.17, 9871.23]` becomes
+        `[0, 9900]`) and rounds a datetime, time or duration outward to the
+        second. None writes them exactly as observed.
+    round_rates : number, "auto" or None, default None
+        Write each null, NaN and list-element null rate rounded up to this
+        step, never past 1; "auto" keeps two significant figures. A rate of
+        0 stays 0. None writes them exactly as observed.
 
     Warns
     -----
@@ -227,6 +357,8 @@ def profile_columns(
         detect_unique=detect_unique,
         formats=formats,
         seed=seed,
+        round_bounds=step_of(round_bounds),
+        round_rates=step_of(round_rates),
     )
     columns = {
         name: _profile_column(
@@ -271,6 +403,8 @@ def _profile_column(
     non_null = series.drop_nulls()
     nullable, null_probability = _nullability(series, total_rows)
     with_weights = options.weights and imitate
+
+    null_probability = rounded_rate(null_probability, options.round_rates)
 
     def spec(**kwargs) -> ColSpec:
         return ColSpec(nullable=nullable, null_probability=null_probability, **kwargs)
@@ -352,7 +486,7 @@ def _profile_column(
             nullable=nullable,
             null_probability=null_probability,
             list_length=list_length,
-            element_null_probability=element_nulls,
+            element_null_probability=rounded_rate(element_nulls, options.round_rates),
         )
 
     if dtype in (pl.String, pl.Utf8) or is_categorical_dtype(dtype):
@@ -376,8 +510,9 @@ def _profile_column(
         )
 
     if dtype.is_integer():
+        extent = _extent(non_null, int, options.calculate_bounds)
         described = spec(
-            dtype=dtype, bounds=_extent(non_null, int, options.calculate_bounds)
+            dtype=dtype, bounds=rounded_bounds(extent, dtype, options.round_bounds)
         )
         keyed = _as_key(described, non_null, options, top)
         return keyed if keyed.unique else _shaped(keyed, non_null, options)
@@ -390,8 +525,14 @@ def _profile_column(
         finite = non_null.filter(non_null.is_finite())
         described = spec(
             dtype=dtype,
-            bounds=_extent(finite, float, options.calculate_bounds),
-            nan_probability=nans / len(non_null) if nans else 0.0,
+            bounds=rounded_bounds(
+                _extent(finite, float, options.calculate_bounds),
+                dtype,
+                options.round_bounds,
+            ),
+            nan_probability=rounded_rate(
+                nans / len(non_null) if nans else 0.0, options.round_rates
+            ),
         )
         infinities = len(non_null) - len(finite) - nans
         if described.bounds is not None and infinities:
@@ -401,14 +542,23 @@ def _profile_column(
     if dtype.is_decimal():
         described = spec(
             dtype=dtype,
-            bounds=_extent(non_null, lambda v: v, options.calculate_bounds),
+            bounds=rounded_bounds(
+                _extent(non_null, lambda v: v, options.calculate_bounds),
+                dtype,
+                options.round_bounds,
+            ),
         )
         return _shaped(described, non_null, options)
 
     if dtype.is_temporal():
         described = spec(
             dtype=dtype,
-            bounds=_temporal_extent(non_null, dtype, options.calculate_bounds),
+            bounds=_temporal_extent(
+                non_null,
+                dtype,
+                options.calculate_bounds,
+                whole_seconds=options.round_bounds == "auto",
+            ),
         )
         return _shaped(described, non_null, options)
 
@@ -573,7 +723,11 @@ def _nullability(series: pl.Series, total_rows: int) -> tuple[bool, float]:
 
 
 def _temporal_extent(
-    values: pl.Series, dtype: pl.DataType, calculate_bounds: bool
+    values: pl.Series,
+    dtype: pl.DataType,
+    calculate_bounds: bool,
+    *,
+    whole_seconds: bool = False,
 ) -> Bound | None:
     """The observed extremes of a date, time, datetime or duration column, as
     a person writes them: a `date`, a `time`, a `datetime` -- in the
@@ -584,6 +738,9 @@ def _temporal_extent(
     every value still inside. Where Python cannot hold the result -- a year
     outside 1 to 9999, a time that would round up to 24:00 -- the bounds
     stay the physical integers the dtype stores, which generate the same.
+
+    `whole_seconds` -- `round_bounds="auto"` -- rounds a datetime, time or
+    duration outward to the second first, where that can be held.
     """
     if not calculate_bounds or len(values) == 0:
         return None
@@ -593,16 +750,28 @@ def _temporal_extent(
     )
     observed = tuple(int(v) for v in extremes.row(0))
     lo, hi = observed
-    nanoseconds = dtype == pl.Time or getattr(dtype, "time_unit", None) == "ns"
-    if nanoseconds:
-        lo, hi = lo // 1000 * 1000, -(-hi // 1000) * 1000
-    try:
-        low, high = pl.Series([lo, hi]).cast(dtype, strict=True).to_list()
-    except (pl.exceptions.PolarsError, OverflowError, ValueError):
-        return Bound(*observed)
-    if low is None or high is None:
-        return Bound(*observed)
-    return Bound(low, high)
+    unit = "ns" if dtype == pl.Time else getattr(dtype, "time_unit", None)
+    per_unit = {"ns": 1, "us": 1_000, "ms": 1_000_000}.get(unit or "", 0)
+    candidates = []
+    if whole_seconds and per_unit:
+        second = 1_000_000_000 // per_unit
+        candidates.append((lo // second * second, -(-hi // second) * second))
+    if unit == "ns":
+        candidates.append((lo // 1000 * 1000, -(-hi // 1000) * 1000))
+    else:
+        candidates.append((lo, hi))
+    for low_physical, high_physical in candidates:
+        try:
+            low, high = (
+                pl.Series([low_physical, high_physical])
+                .cast(dtype, strict=True)
+                .to_list()
+            )
+        except (pl.exceptions.PolarsError, OverflowError, ValueError):
+            continue
+        if low is not None and high is not None:
+            return Bound(low, high)
+    return Bound(*observed)
 
 
 def _extent(values: pl.Series, cast, calculate_bounds: bool) -> Bound | None:
