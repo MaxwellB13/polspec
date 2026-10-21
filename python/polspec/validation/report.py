@@ -162,6 +162,17 @@ class ValidationReport:
     findings: tuple[Finding, ...]
     frame: pl.LazyFrame = field(repr=False, compare=False)
     options: ValidationOptions = field(repr=False, compare=False, default=FILLED_IN)
+    # Validates another frame against the same spec, options and parents:
+    # what settles `passing_rows()`. None for a report built by hand, whose
+    # split is the findings' rows alone.
+    _recheck: Callable[[pl.LazyFrame], ValidationReport] | None = field(
+        default=None, repr=False, compare=False
+    )
+    # The settled split, computed once: the original positions that pass,
+    # and those a later round found, with the finding that found them.
+    _settled: dict[str, dict[str, pl.DataFrame]] = field(
+        default_factory=dict, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "findings", tuple(self.findings))
@@ -253,6 +264,9 @@ class ValidationReport:
                 for f in row_level
             ]
         )
+        later = self._settle(index)["later"]
+        if later.height:
+            hits = pl.concat([hits, later.lazy()])
         named = hits.group_by(index, maintain_order=True).agg(
             frames.column(FINDING_COLUMN).unique(maintain_order=True).str.join(",")
         )
@@ -274,11 +288,17 @@ class ValidationReport:
             )
 
     def passing_rows(self) -> pl.LazyFrame:
-        """Every row no finding touched, lazily and in the frame's order.
+        """The rows that pass: a frame the spec accepts, lazily and in the
+        frame's order.
 
-        With the rows of any row-level finding -- each once, however many
-        claims it breaks; `failing_rows()` lists a row once per claim -- the
-        two split a frame into what passed and what to quarantine.
+        First every row no finding touched. Some claims are about rows in
+        relation to other rows -- an order, a key into the frame's own rows
+        -- and taking the found rows away can break them in the rows that
+        are left: a row whose parent was removed, rows no longer in order.
+        So what is left is validated again, and any row that now fails is
+        taken away too, until nothing more is found. With
+        `failing_rows(once=True)` -- which names those later rows by the
+        claim they broke -- the two split a frame exactly.
 
         Raises `ValueError` when a structural finding (a wrong `dtype`,
         `missing_columns`, `extra_columns`, `foreign_key_unresolved`) is in
@@ -294,15 +314,63 @@ class ValidationReport:
             )
         if not self.findings:
             return self.frame
-        # Each finding locates its rows on a frame carrying a row index, which
-        # a filter and an anti-join both keep; what is left is every row none
-        # of them found.
         index = self._row_index()
-        indexed = self.frame.with_row_index(index)
-        failed = pl.concat([f.rows(indexed).select(index) for f in self.findings])
-        return indexed.join(
-            failed.unique(), on=index, how="anti", maintain_order="left"
-        ).drop(index)
+        passing = self._settle(index)["passing"]
+        return (
+            self.frame.with_row_index(index)
+            .join(passing.lazy(), on=index, how="semi", maintain_order="left")
+            .drop(index)
+        )
+
+    def _untouched(self, frame: pl.LazyFrame, index: str) -> pl.LazyFrame:
+        """`frame`'s rows -- carrying `index` -- that none of this report's
+        findings found. Each finding locates its rows on a frame carrying
+        the index, which a filter and an anti-join both keep."""
+        failed = pl.concat([f.rows(frame).select(index) for f in self.findings])
+        return frame.join(failed.unique(), on=index, how="anti", maintain_order="left")
+
+    def _settle(self, index: str) -> dict[str, pl.DataFrame]:
+        """The split, settled: rounds of validating what is left, until a
+        round finds nothing. Returns the original positions (`index`) that
+        pass, and the rows a later round took, each with the finding key
+        that took it. Computed once per report.
+
+        Each round takes at least one row, or stops, so it ends. A report
+        built by hand, with nothing to validate again with, settles after
+        the first round, as before.
+        """
+        if index in self._settled:
+            return self._settled[index]
+        indexed = self.frame.with_row_index(index).collect()
+        kept = self._untouched(indexed.lazy(), index).collect()
+        later: list[pl.DataFrame] = []
+        while self._recheck is not None and kept.height:
+            report = self._recheck(kept.drop(index).lazy())
+            row_level = [f for f in report.findings if f.row_level]
+            if not row_level or len(row_level) < len(report.findings):
+                break  # settled -- or a verdict on the whole frame, unchanged
+            found = pl.concat(
+                [
+                    f.rows(kept.lazy()).select(
+                        index, pl.lit(f.key, dtype=pl.String).alias(FINDING_COLUMN)
+                    )
+                    for f in row_level
+                ]
+            ).collect()
+            if not found.height:
+                break
+            later.append(found)
+            kept = kept.join(found.select(index).unique(), on=index, how="anti")
+        settled = {
+            "passing": kept.select(index),
+            "later": (
+                pl.concat(later)
+                if later
+                else pl.DataFrame(schema={index: pl.UInt32, FINDING_COLUMN: pl.String})
+            ),
+        }
+        self._settled[index] = settled
+        return settled
 
     def to_dict(self) -> dict[str, Any]:
         """This report as JSON-ready data: the spec, the verdict, the findings."""

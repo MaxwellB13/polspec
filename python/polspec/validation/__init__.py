@@ -284,7 +284,24 @@ def inspect(
             )
         )
 
-    return ValidationReport(spec.name, tuple(findings), lf, opts)
+    def recheck(frame: pl.LazyFrame) -> ValidationReport:
+        return inspect(spec, frame, options=opts, references=references)
+
+    # Only a claim relating rows to other rows -- an order, a key into the
+    # frame's own rows -- can break in the rows left after the failing ones
+    # are taken; for any other spec the first split is already settled, and
+    # `passing_rows()` costs no second validation. A new claim of that kind
+    # belongs here (the passing-rows property in the contract tests says so).
+    relates_rows = bool(spec.order_by) or any(
+        fk.references == "self" for fk in spec.foreign_keys
+    )
+    return ValidationReport(
+        spec.name,
+        tuple(findings),
+        lf,
+        opts,
+        _recheck=recheck if relates_rows else None,
+    )
 
 
 @overload

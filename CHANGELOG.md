@@ -8,6 +8,29 @@ seed produces; see
 
 ## [Unreleased]
 
+### Fixed
+
+- **`passing_rows()` could keep rows the spec rejects.** Taking the failing
+  rows away could break a claim relating rows to each other in the rows
+  left: with `order_by`, `[3, 1, 2, 5, 4, 6]` passed `[3, 2, 5, 6]`, still
+  out of order; with a key into the frame's own rows, a row whose parent
+  failed passed as an orphan. What is left is now validated again until
+  nothing more fails, so the passing rows are always a frame the spec
+  accepts, and `failing_rows(once=True)` names the rows taken later by the
+  claim they broke -- the two still split the frame exactly. A spec with no
+  such claim validates once, as before.
+- **`profile()` was about 20 times slower in 0.20**, finding the order a
+  frame comes in by ranking every column whole, both ways. It now reads
+  each column's first rows first, which rules out nearly every unsorted
+  column, and checks the rest whole: on 1,000,000 rows by 20 columns,
+  order detection takes 8 ms, not 1.2 s. It finds the same order.
+- **An error in a spec file says where it is.** A declaration refused while
+  reading a file -- `bounds: [5, 1]`, an `order_by` naming a missing column
+  -- named neither the file nor the column. It now does
+  (`orders.yaml: columns.total: Bound min (5) must be <= max (1)`), and a
+  registry file's names the spec too (`specs.orders: ...`). The error keeps
+  its type.
+
 ## [0.20.0] - 2026-10-21
 
 **Rows that come in order.** A spec can declare the order its rows come in

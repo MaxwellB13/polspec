@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 from polspec.bound import Bound
 from polspec.check import Check
 from polspec.constants import DEFAULT_EXTRA_SHARE, DEFAULT_NULL_PROBABILITY
-from polspec.errors import SerializationError
+from polspec.errors import SerializationError, SpecError
 from polspec.expr import from_data as pred_from_data
 from polspec.foreign_key import ForeignKey, default_fk_name
 from polspec.hierarchy import Hierarchy
@@ -146,7 +146,14 @@ def decode(
             kwargs[f.name] = f.from_data(
                 data[f.name], ctx, f"{path}.{f.name}" if path else f.name
             )
-    return cls(**kwargs)
+    try:
+        return cls(**kwargs)
+    except SpecError as exc:
+        # The declaration is refused where it is built, which does not know
+        # where in the file it came from; this does. Same error, located.
+        if not path:
+            raise
+        raise SpecError(f"{path}: {exc}") from exc
 
 
 def to_source(obj: Any, fields: Sequence[Field], ctor: str) -> str:
