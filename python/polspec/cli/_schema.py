@@ -41,6 +41,8 @@ def _cmd_schema_infer(args: argparse.Namespace) -> int:
                 detect_unique=args.keys,
                 detect_order=args.order,
                 replace=args.replace or (),
+                round_bounds=args.round_bounds,
+                round_rates=args.round_rates,
             )
         except ValueError as exc:  # a name in --replace the file lacks
             raise CliError(str(exc)) from exc

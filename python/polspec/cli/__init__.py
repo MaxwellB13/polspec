@@ -31,6 +31,7 @@ from polspec.cli._synthesize import add_synthesize_parser
 from polspec.cli._test import _cmd_test
 from polspec.drift import DriftOptions
 from polspec.errors import PolspecError
+from polspec.profiler import step_of
 from polspec.validation import SWITCHES
 
 try:
@@ -39,6 +40,15 @@ try:
     _VERSION = _pkg_version("polspec")
 except Exception:  # noqa: BLE001 - version detection must never break the CLI
     _VERSION = "unknown"
+
+
+def _rounding(text: str) -> object:
+    """`--round-bounds` and `--round-rates`: a step (`1k`, `0.01`), `auto`
+    or `exact`, read as `profile()` reads one."""
+    try:
+        return step_of(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -108,6 +118,29 @@ def _build_parser() -> argparse.ArgumentParser:
         "--order",
         action="store_true",
         help="Declare order_by when the rows come sorted by a column",
+    )
+    infer.add_argument(
+        "--round-bounds",
+        default="auto",
+        type=_rounding,
+        metavar="STEP",
+        help=(
+            "Round each numeric column's bounds outward to STEP (1000, 1k, 10k, "
+            "1M, 0.01), within its dtype, so the data stays inside; 'auto' "
+            "keeps two significant figures of the span and whole seconds; "
+            "'exact' writes them as observed (default: auto)"
+        ),
+    )
+    infer.add_argument(
+        "--round-rates",
+        default="auto",
+        type=_rounding,
+        metavar="STEP",
+        help=(
+            "Round each null and NaN rate up to STEP (0.01); 'auto' keeps two "
+            "significant figures; 'exact' writes them as observed. A rate of "
+            "0 stays 0 (default: auto)"
+        ),
     )
     infer.add_argument(
         "--replace",

@@ -35,8 +35,8 @@ from polspec.errors import SpecError
 from polspec.foreign_key import ForeignKey
 from polspec.frames import Method, References
 from polspec.hierarchy import Hierarchy
+from polspec.profiler import Rounding, profile_columns
 from polspec.profiler import detect_order as detect_order_of
-from polspec.profiler import profile_columns
 from polspec.render import framespec_to_markdown, framespec_to_mermaid
 from polspec.spec import ColSpec
 from polspec.tablespec import TableSpec, parse_unique_together
@@ -373,6 +373,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         detect_unique: bool = False,
         replace: Sequence[str] = (),
         detect_order: bool = False,
+        round_bounds: Rounding = None,
+        round_rates: Rounding = None,
     ) -> type[FrameSpec]:
         """Infers a spec by profiling an existing DataFrame.
 
@@ -386,7 +388,10 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         `(min_len, max_len)` for strings and binary. `shape`, `detect_unique`,
         `detect_order` and `replace` describe more, for a spec that will
         generate a stand-in for the data: `polspec.profile` takes the same
-        switches, every one on by default.
+        switches, every one on by default. `round_bounds` and `round_rates`
+        write bounds and rates at a person's precision -- a step, or "auto"
+        -- as `polspec.profile` describes; `polspec schema infer` rounds
+        "auto" unless told otherwise.
         """
         columns = profile_columns(
             df,
@@ -397,6 +402,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             shape=shape,
             detect_unique=detect_unique,
             replace=replace,
+            round_bounds=round_bounds,
+            round_rates=round_rates,
         )
         order = detect_order_of(df) if detect_order else None
         if order is None:
