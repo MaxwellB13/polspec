@@ -15,6 +15,7 @@ from polspec import frames
 from polspec._ffi import column_plan
 from polspec._ffi import generate_dataframe as _generate_dataframe
 from polspec.dtypes import typed_values
+from polspec.rules import rule_condition
 
 if TYPE_CHECKING:
     from polspec.spec import ColSpec
@@ -72,7 +73,7 @@ def apply_column_rules(
     column = frames.plain(df[name])  # renamed back below
     claimed = column.is_null()
     for rule in spec.rules:
-        mask = df.select(rule._expr().fill_null(False)).to_series() & ~claimed
+        mask = df.select(rule_condition(rule).fill_null(False)).to_series() & ~claimed
         rows = mask.arg_true()
         if rows.len() == 0:
             continue

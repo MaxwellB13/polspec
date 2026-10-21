@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
-from collections.abc import Sequence
+from typing import Unpack
 
 import polars as pl
 
@@ -29,7 +29,13 @@ from polspec.dtypes import dtype_value_limits
 from polspec.errors import GenerationError
 from polspec.frames import sample_rows
 from polspec.generation import generate
-from polspec.profiler import Rounding, profile_columns
+from polspec.profiler import (
+    ProfileKeywords,
+    ProfileOptions,
+    SynthesizeKeywords,
+    profile_columns,
+    profile_options,
+)
 from polspec.profiler import detect_order as detect_order_of
 from polspec.reading import read_file
 from polspec.tablespec import TableSpec
@@ -43,18 +49,8 @@ def profile(
     source: Source,
     *,
     name: str = "Profiled",
-    replace: Sequence[str] = (),
-    sample: int | None = None,
-    seed: int = 0,
-    max_unique_enum: int = 50,
-    formats: bool = True,
-    weights: bool = True,
-    shape: bool = True,
-    detect_unique: bool = True,
-    calculate_bounds: bool = True,
-    detect_order: bool = True,
-    round_bounds: Rounding = None,
-    round_rates: Rounding = None,
+    options: ProfileOptions | None = None,
+    **keywords: Unpack[ProfileKeywords],
 ) -> TableSpec:
     """A spec describing `source` well enough to generate a stand-in for it.
 
@@ -66,55 +62,11 @@ def profile(
         Arrow IPC file.
     name : str, default "Profiled"
         The spec's name.
-    replace : sequence of str, default ()
-        Columns whose values must not be carried into the spec. A text
-        column named here is described by its lengths, never as an `Enum`
-        of the values it holds, and carries no weights.
-    sample : int, optional
-        Profile a random sample of this many rows rather than every row.
-    seed : int, default 0
-        Seeds the sample and the shape fitting, so a profile is the same
-        every run.
-    max_unique_enum : int, default 50
-        A text column with at most this many distinct values, repeating --
-        and not in `replace` -- becomes an `Enum` of them.
-    formats : bool, default True
-        Name the `format` a text column's values have -- an email, a UUID,
-        an IP, a country code -- so its fake values have it too: when at
-        least 20 distinct values have one of `email`, `uuid4`, `ipv4`,
-        `ipv6`, `mac`, `hostname`, `iso_country` or `iso_currency`, and
-        every value does -- or 99% do, and the rest are at most five
-        repeated stand-ins, which become its `extra_values`.
-    weights : bool, default True
-        Record each category's observed frequency, for categorical, enum and
-        boolean columns.
-    shape : bool, default True
-        Fit the distribution each numeric or temporal column follows, so it
-        generates that shape rather than uniformly between its extremes.
-        Needs `calculate_bounds`.
-    detect_unique : bool, default True
-        Declare an integer or text column `unique=True` when every one of at
-        least a hundred values is distinct.
-    calculate_bounds : bool, default True
-        Record the observed extremes of numeric and temporal columns, and the
-        length range of text and binary ones.
-    detect_order : bool, default True
-        Declare `order_by` when the rows come sorted by a column of single
-        values -- either way, nulls last, with at least 20 distinct values,
-        so not by chance -- so a stand-in comes sorted too. The first such
-        column, in column order. A sample keeps the source's row order, so
-        a sorted file's sample shows it.
-    round_bounds : number, "auto" or None, default None
-        Write each numeric column's bounds rounded outward to this step --
-        `1000`, `0.01` -- the minimum down and the maximum up, within what
-        its dtype holds, so the data stays inside them. "auto" keeps two
-        significant figures of the column's span (`[3.17, 9871.23]` becomes
-        `[0, 9900]`) and rounds a datetime, time or duration outward to the
-        second. None writes them exactly as observed.
-    round_rates : number, "auto" or None, default None
-        Write each null, NaN and list-element null rate rounded up to this
-        step, never past 1; "auto" keeps two significant figures. A rate of
-        0 stays 0. None writes them exactly as observed.
+    options : ProfileOptions, optional
+        What to infer and how finely to write it -- or pass its fields as
+        keywords instead: `replace`, `sample`, `seed`, `max_unique_enum`,
+        `formats`, `weights`, `shape`, `detect_unique`, `calculate_bounds`,
+        `detect_order`, `round_bounds`, `round_rates`. See `ProfileOptions`.
 
     Returns
     -------
@@ -122,21 +74,10 @@ def profile(
         Everything `FrameSpec.from_dataframe` records, plus each column's
         category frequencies, fitted distribution and uniqueness.
     """
-    frame, _ = _load(source, sample, seed)
-    columns = profile_columns(
-        frame,
-        weights=weights,
-        max_unique_enum=max_unique_enum,
-        calculate_bounds=calculate_bounds,
-        shape=shape,
-        detect_unique=detect_unique,
-        replace=replace,
-        seed=seed,
-        formats=formats,
-        round_bounds=round_bounds,
-        round_rates=round_rates,
-    )
-    order = detect_order_of(frame) if detect_order else None
+    opts = profile_options(options, keywords)
+    frame, _ = _load(source, opts.sample, opts.seed)
+    columns = profile_columns(frame, opts)
+    order = detect_order_of(frame) if opts.detect_order else None
     if order is None:
         return TableSpec(name, columns)
     order_by, descending = order
@@ -148,33 +89,27 @@ def synthesize(
     n: int | None = None,
     *,
     seed: int | None = None,
-    replace: Sequence[str] = (),
-    sample: int | None = None,
-    max_unique_enum: int = 50,
-    formats: bool = True,
+    options: ProfileOptions | None = None,
+    **keywords: Unpack[SynthesizeKeywords],
 ) -> pl.DataFrame:
     """A fake frame that looks like `source`: `generate()` over `profile()`.
 
     The result has `source`'s schema, and `n` rows -- as many as `source`
     has, by default. Each column follows the profiled column's null rate,
     extremes, category frequencies and fitted distribution; a key column
-    stays distinct. Columns are generated independently, so a relationship
-    between two columns in `source` is not kept. See `profile` for `replace`,
-    `sample`, `max_unique_enum` and `formats`.
+    stays distinct, and rows that came sorted come sorted. Columns are
+    generated independently, so a relationship between two columns in
+    `source` is not kept.
+
+    `options` -- or its fields as keywords -- is how `source` is profiled:
+    every `ProfileOptions` switch, `replace` and `sample` among them. See
+    `profile`.
 
     `seed` seeds the generation, and the sample and fitting behind it, so the
     same source and seed give the same frame. To look at, edit or keep the
     spec the frame came from, call `profile` and `generate` separately.
     """
-    fake, _ = synthesized(
-        source,
-        n,
-        seed=seed,
-        replace=replace,
-        sample=sample,
-        max_unique_enum=max_unique_enum,
-        formats=formats,
-    )
+    fake, _ = synthesized(source, n, seed=seed, options=options, **keywords)
     return fake
 
 
@@ -183,24 +118,20 @@ def synthesized(
     n: int | None = None,
     *,
     seed: int | None = None,
-    replace: Sequence[str] = (),
-    sample: int | None = None,
-    max_unique_enum: int = 50,
-    formats: bool = True,
     name: str = "Synthesized",
+    options: ProfileOptions | None = None,
+    **keywords: Unpack[SynthesizeKeywords],
 ) -> tuple[pl.DataFrame, TableSpec]:
     """`synthesize`, with the spec the frame was generated from -- one
     profile for both, where the command line writes the spec beside the
     data."""
-    frame, height = _load(source, sample, seed if seed is not None else 0)
-    spec = profile(
-        frame,
-        name=name,
-        replace=replace,
-        seed=seed if seed is not None else 0,
-        max_unique_enum=max_unique_enum,
-        formats=formats,
-    )
+    opts = profile_options(options, keywords)
+    if seed is not None:
+        # One seed for the stand-in and for the profile behind it.
+        opts = dataclasses.replace(opts, seed=seed)
+    frame, height = _load(source, opts.sample, opts.seed)
+    # Profiled as read: the sample is already taken.
+    spec = profile(frame, name=name, options=dataclasses.replace(opts, sample=None))
     rows = height if n is None else n
     if rows < 0:
         raise ValueError(f"n must be >= 0, got {rows}")

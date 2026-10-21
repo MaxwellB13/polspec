@@ -117,19 +117,30 @@ def test_the_declared_constructor_matches_the_fields(cls):
 
 
 def test_the_facade_names_exactly_the_options_the_function_accepts():
-    """One list of options, on `ValidationOptions`; the facade's explicit
-    signature is a copy, and this is what keeps the copy honest.
-    """
-    from inspect import signature
+    """One list of options, on `ValidationOptions`; `ValidationKeywords` is
+    its typed copy, which `validate`, `inspect` and the `FrameSpec` facades
+    take as `**keywords` -- and this keeps the copy honest."""
+    from inspect import Parameter, signature
 
-    from polspec.validation import _ACCEPTED_OPTIONS
+    from polspec.validation import _ACCEPTED_OPTIONS, ValidationKeywords
 
+    assert set(ValidationKeywords.__annotations__) == set(_ACCEPTED_OPTIONS)
     for verb in (FrameSpec.inspect, FrameSpec.validate):
         params = signature(verb).parameters
-        named = {name for name in params if name not in ("df", "options", "references")}
-        assert named == set(_ACCEPTED_OPTIONS), verb.__name__
-        # `None` is "not given": the defaults stay on the dataclass alone.
-        assert all(params[name].default is None for name in named), verb.__name__
+        assert [p.kind for p in params.values()][-1] is Parameter.VAR_KEYWORD
+        named = {n for n, p in params.items() if p.kind is not Parameter.VAR_KEYWORD}
+        assert named == {"df", "options", "references"}, verb.__name__
+
+
+def test_the_profiling_keywords_are_its_options():
+    """`ProfileKeywords` -- and `SynthesizeKeywords`, which leaves `seed` to
+    `synthesize` -- are `ProfileOptions`' fields, typed."""
+    from polspec import ProfileOptions
+    from polspec.profiler import ProfileKeywords, SynthesizeKeywords
+
+    fields = {f.name for f in dataclasses.fields(ProfileOptions)}
+    assert set(ProfileKeywords.__annotations__) == fields
+    assert set(SynthesizeKeywords.__annotations__) == fields - {"seed"}
 
 
 # ---------------------------------------------------------------------------

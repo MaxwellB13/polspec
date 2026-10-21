@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from polspec.bound import Bound
+from polspec.bound import Bound, coerce_bound
 from polspec.check import Check
 from polspec.constants import (
     DEFAULT_EXTRA_SHARE,
@@ -372,57 +372,6 @@ class ColSpec:
         value is checked against this."""
         return _value_dtype(self.dtype)
 
-    def _element(self) -> ColSpec:
-        """What a `List`'s elements are claimed to be: this declaration with
-        the list's own claims -- its length, whether a cell is null -- taken
-        off, and its element null rate as the element's own. Generation
-        draws an element from it and validation checks one against it, so
-        the two read one answer."""
-        return dataclasses.replace(
-            self,
-            dtype=self.value_dtype,
-            list_length=None,
-            nullable=self.element_null_probability > 0,
-            null_probability=self.element_null_probability,
-            element_null_probability=0.0,
-        )
-
-    def _as_list(self) -> ColSpec:
-        """A `Map` column as the list it is: this declaration with the dtype
-        `List(Struct({"key": K, "value": V}))`, which Polars casts to and from
-        the map. Everything a list of structs has -- its length, its entries'
-        `fields` -- is then read by the code that reads a list of structs."""
-        entries = map_entries(self.dtype)
-        assert entries is not None  # noqa: S101 - only a map is a list of entries
-        return dataclasses.replace(self, dtype=entries)
-
-    def _as_drawn_list(self) -> ColSpec:
-        """`_as_list`, with the length generation draws.
-
-        A map with no `list_length` of its own is as long as a list, unless
-        its keys run out first: a map of `Boolean` keys holds at most two
-        entries, without having to be told. Validation reads `_as_list`,
-        where an undeclared length is no claim at all."""
-        entries = self._as_list()
-        if entries.list_length is not None:
-            return entries
-        lo, hi = DEFAULT_LIST_LEN
-        keys = _distinct_values(self._field("key"))
-        length = Bound(lo, hi if keys is None else min(hi, keys))
-        return dataclasses.replace(entries, list_length=length)
-
-    def _field(self, name: str) -> ColSpec:
-        """What one field of a struct value is claimed to be: what `fields`
-        says, or its dtype alone when `fields` says nothing about it."""
-        declared = (self.fields or {}).get(name)
-        if declared is not None:
-            return declared
-        dtype = self.value_dtype
-        assert isinstance(dtype, pl.Struct)  # noqa: S101 - only a struct has fields
-        field = field_dtypes(dtype)[name]
-        # A Null field can only be declared nullable; say so for it.
-        return ColSpec(field, nullable=field == pl.Null)
-
     def _validate_nesting(self) -> None:
         """A `List` or `Array` needs an element dtype to describe."""
         if not isinstance(self.dtype, (pl.List, pl.Array)):
@@ -535,7 +484,7 @@ class ColSpec:
                     "entries are drawn key and value apart. Declare them on the "
                     'key or the value, in fields={"key": ..., "value": ...}.'
                 )
-        key = self._field("key")
+        key = field_of(self, "key")
         if key.nullable:
             raise SpecError(
                 f"ColSpec.fields['key'] is nullable, but a key of {self.dtype!r} "
@@ -624,9 +573,9 @@ class ColSpec:
         raw: Any = self.bounds
         if raw is not None and isinstance(self.value_dtype, pl.Decimal):
             raw = self._decimal_endpoints(raw, self.value_dtype)
-        object.__setattr__(self, "bounds", Bound._coerce(raw))
-        object.__setattr__(self, "string_length", Bound._coerce(self.string_length))
-        object.__setattr__(self, "list_length", Bound._coerce(self.list_length))
+        object.__setattr__(self, "bounds", coerce_bound(raw))
+        object.__setattr__(self, "string_length", coerce_bound(self.string_length))
+        object.__setattr__(self, "list_length", coerce_bound(self.list_length))
         if self.fields is not None:
             object.__setattr__(self, "fields", MappingProxyType(dict(self.fields)))
         # One internal representation for "unconstrained", so every downstream
@@ -1222,3 +1171,58 @@ class ColSpec:
             normalized.append(chk)
 
         object.__setattr__(self, "validators", tuple(normalized))
+
+
+def field_of(spec: ColSpec, name: str) -> ColSpec:
+    """What one field of a struct value is claimed to be: what `fields`
+    says, or its dtype alone when `fields` says nothing about it."""
+    declared = (spec.fields or {}).get(name)
+    if declared is not None:
+        return declared
+    dtype = spec.value_dtype
+    assert isinstance(dtype, pl.Struct)  # noqa: S101 - only a struct has fields
+    field = field_dtypes(dtype)[name]
+    # A Null field can only be declared nullable; say so for it.
+    return ColSpec(field, nullable=field == pl.Null)
+
+
+def element_of(spec: ColSpec) -> ColSpec:
+    """What a `List`'s elements are claimed to be: this declaration with
+    the list's own claims -- its length, whether a cell is null -- taken
+    off, and its element null rate as the element's own. Generation
+    draws an element from it and validation checks one against it, so
+    the two read one answer."""
+    return dataclasses.replace(
+        spec,
+        dtype=spec.value_dtype,
+        list_length=None,
+        nullable=spec.element_null_probability > 0,
+        null_probability=spec.element_null_probability,
+        element_null_probability=0.0,
+    )
+
+
+def entries_of(spec: ColSpec) -> ColSpec:
+    """A `Map` column as the list it is: this declaration with the dtype
+    `List(Struct({"key": K, "value": V}))`, which Polars casts to and from
+    the map. Everything a list of structs has -- its length, its entries'
+    `fields` -- is then read by the code that reads a list of structs."""
+    entries = map_entries(spec.dtype)
+    assert entries is not None  # noqa: S101 - only a map is a list of entries
+    return dataclasses.replace(spec, dtype=entries)
+
+
+def drawn_entries_of(spec: ColSpec) -> ColSpec:
+    """`entries_of`, with the length generation draws.
+
+    A map with no `list_length` of its own is as long as a list, unless
+    its keys run out first: a map of `Boolean` keys holds at most two
+    entries, without having to be told. Validation reads `entries_of`,
+    where an undeclared length is no claim at all."""
+    entries = entries_of(spec)
+    if entries.list_length is not None:
+        return entries
+    lo, hi = DEFAULT_LIST_LEN
+    keys = _distinct_values(field_of(spec, "key"))
+    length = Bound(lo, hi if keys is None else min(hi, keys))
+    return dataclasses.replace(entries, list_length=length)

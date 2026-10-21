@@ -13,7 +13,7 @@ Two entry points over the same machinery:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, overload
+from typing import Any, Literal, TypedDict, Unpack, overload
 
 import polars as pl
 import polars.selectors as cs
@@ -99,6 +99,28 @@ _Options = ValidationOptions
 # second spelling reachable through `inspect` alone, which is what it used to
 # be: `inspect(spec, df, unique=False)` worked and `validate(spec, df,
 # unique=False)` did not.
+class ValidationKeywords(TypedDict, total=False):
+    """`ValidationOptions` as keywords: the structural options by their own
+    names, each check switch with `validate_` in front -- what `validate`,
+    `inspect` and the `FrameSpec` facades take. See `ValidationOptions` for
+    what each means and its default."""
+
+    extra_cols: Literal["drop", "allow", "raise"]
+    missing_cols: Literal["add", "allow", "raise"]
+    strict_dtypes: bool
+    validate_rules: bool
+    validate_validators: bool
+    validate_unique: bool
+    validate_checks: bool
+    validate_foreign_keys: bool
+    validate_hierarchy: bool
+    validate_order: bool
+    validate_pattern: bool
+    validate_bounds: bool
+    cast: bool
+    streaming: bool
+
+
 SWITCHES = (
     "rules",
     "validators",
@@ -162,7 +184,7 @@ def inspect(
     *,
     options: ValidationOptions | None = None,
     references: References = None,
-    **option_kwargs: Any,
+    **option_kwargs: Unpack[ValidationKeywords],
 ) -> ValidationReport:
     """Everything `spec` has to say about `df`, as a `ValidationReport`.
 
@@ -305,11 +327,25 @@ def inspect(
 
 
 @overload
-def validate(spec: SpecLike, df: pl.DataFrame, **options: Any) -> pl.DataFrame: ...
+def validate(
+    spec: SpecLike,
+    df: pl.DataFrame,
+    *,
+    options: ValidationOptions | None = None,
+    references: References = None,
+    **option_kwargs: Unpack[ValidationKeywords],
+) -> pl.DataFrame: ...
 
 
 @overload
-def validate(spec: SpecLike, df: pl.LazyFrame, **options: Any) -> pl.LazyFrame: ...
+def validate(
+    spec: SpecLike,
+    df: pl.LazyFrame,
+    *,
+    options: ValidationOptions | None = None,
+    references: References = None,
+    **option_kwargs: Unpack[ValidationKeywords],
+) -> pl.LazyFrame: ...
 
 
 def validate(
@@ -318,7 +354,7 @@ def validate(
     *,
     options: ValidationOptions | None = None,
     references: References = None,
-    **option_kwargs: Any,
+    **option_kwargs: Unpack[ValidationKeywords],
 ) -> pl.DataFrame | pl.LazyFrame:
     """Validates a DataFrame or LazyFrame against `spec`.
 
@@ -358,10 +394,10 @@ def validate(
     spec = as_table_spec(spec)
     report = inspect(spec, df, options=options, references=references, **option_kwargs)
     report.raise_if_failed()
-    return _transformed(spec, df, report)
+    return transformed(spec, df, report)
 
 
-def _transformed(
+def transformed(
     spec: TableSpec, df: pl.DataFrame | pl.LazyFrame, report: ValidationReport
 ) -> pl.DataFrame | pl.LazyFrame:
     """The frame behind a passing report, with the report's structural

@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from polspec.check import Check
 
 from polspec import frames
+from polspec.check import failure_mask
 from polspec.validation.constraints._base import Constraint, struct_of
 from polspec.validation.report import FindingCode
 
@@ -138,7 +139,7 @@ def frame_constraints(
         constraints.append(
             _FrameCheck(
                 key=f"check:{check.name}",
-                mask=check._failure_mask(),
+                mask=failure_mask(check),
                 sample_expr=struct_of(involved),
                 check=check,
             )

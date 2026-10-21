@@ -12,6 +12,10 @@ workflow, and what carries over from the source.
 
 ::: polspec.profile
 
+## ProfileOptions
+
+::: polspec.ProfileOptions
+
 ## profile_dataframe (deprecated)
 
 Deprecated in 0.18.0, removed in 1.0: `profile` takes the same switches. The

@@ -24,6 +24,7 @@ import polars as pl
 from polspec.constants import DEFAULT_LIST_LEN, DEFAULT_STRING_LEN
 from polspec.dtypes import field_dtypes, map_entries
 from polspec.formats import lookup as _lookup_format
+from polspec.spec import drawn_entries_of, element_of, field_of
 from polspec.tablespec import SpecLike, as_table_spec
 
 if TYPE_CHECKING:
@@ -97,7 +98,7 @@ def _value_bytes(spec: ColSpec, dtype: pl.DataType) -> float:
         return _VIEW_BYTES + _bytes_past_inline(spec) * _present(spec)
     if map_entries(dtype) is not None:
         # A map is held as the list of entries it is, as long as it is drawn.
-        return _column_bytes(spec._as_drawn_list())
+        return _column_bytes(drawn_entries_of(spec))
     if isinstance(dtype, pl.List):
         # An offset per row, plus however many elements the row holds, each
         # read through the declaration generation draws it from. A null list
@@ -106,14 +107,14 @@ def _value_bytes(spec: ColSpec, dtype: pl.DataType) -> float:
         mean_len = (lengths[0] + lengths[1]) / 2
         # An element is a column of its own: a nullable one carries a
         # validity bit, and its content only where it is present.
-        element = _column_bytes(spec._element())
+        element = _column_bytes(element_of(spec))
         return 8 + mean_len * element * _present(spec)
     if isinstance(dtype, pl.Array):
-        return dtype.size * _column_bytes(spec._element())
+        return dtype.size * _column_bytes(element_of(spec))
     if isinstance(dtype, pl.Struct):
         # A struct holds no values of its own: it is its fields, each a
         # column with its own validity when it can be null.
-        return sum(_column_bytes(spec._field(name)) for name in field_dtypes(dtype))
+        return sum(_column_bytes(field_of(spec, name)) for name in field_dtypes(dtype))
     # A `Null` column allocates nothing: no values, and no validity either.
     return 0.0
 

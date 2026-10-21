@@ -41,6 +41,7 @@ from polspec.formats import lookup as _lookup_format
 from polspec.generation import generate
 from polspec.pass_order import DISTRIBUTION, NAN_RATE, NULL_RATE, VALUES, WEIGHTS
 from polspec.shape import ks_distance, physical
+from polspec.spec import field_of
 from polspec.validation.constraints import is_dtype_compatible
 
 # The sample a declared distribution is drawn as, to hold values against:
@@ -791,7 +792,7 @@ def _compare_struct_fields(pair: Pair) -> list[DriftFinding]:
         if not isinstance(new, pl.Struct):
             return []
         others: dict[str, ColSpec | Observed] = {
-            name: pair.new._field(name)
+            name: field_of(pair.new, name)
             for name in field_dtypes(new)
             if name in field_dtypes(declared)
         }
@@ -801,7 +802,7 @@ def _compare_struct_fields(pair: Pair) -> list[DriftFinding]:
     for name, other in others.items():
         field_pair = Pair(
             pair.column,
-            pair.declared._field(name),
+            field_of(pair.declared, name),
             other,
             pair.options,
             where=f"{pair.label}.{name}",
