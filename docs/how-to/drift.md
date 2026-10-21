@@ -190,7 +190,7 @@ columns, each tested once, expects a false alarm about one run in ten;
 lower `significance` for a wide frame watched often.
 
 What `drift()` does **not** measure is what validation already does:
-uniqueness, composite keys, foreign keys and checks are pass/fail claims
+uniqueness, composite keys, foreign keys, checks and row order are pass/fail claims
 about rows, not summaries that move. `validate()` is still the verdict.
 
 ### Options

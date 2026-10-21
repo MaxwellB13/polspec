@@ -172,7 +172,7 @@ def test_to_yaml_warns_when_checks_are_not_persisted(tmp_path):
         CheckedSpec.to_yaml(yaml_path)
 
     Loaded = FrameSpec.from_yaml(yaml_path)
-    assert Loaded.checks() == ()
+    assert Loaded.spec.checks == ()
 
 
 def test_yaml_roundtrip_preserves_unique_together(tmp_path):
@@ -186,7 +186,7 @@ def test_yaml_roundtrip_preserves_unique_together(tmp_path):
     CompoundSpec.to_yaml(yaml_path)
 
     LoadedCompound = FrameSpec.from_yaml(yaml_path)
-    assert LoadedCompound.unique_together() == (("tenant_id", "user_id"),)
+    assert LoadedCompound.spec.unique_together == (("tenant_id", "user_id"),)
     assert LoadedCompound.spec.columns["email"].unique is True
 
     # Test validation with loaded spec
@@ -348,7 +348,7 @@ def test_to_python_warns_when_checks_are_not_persisted(tmp_path):
         CheckedSpec.to_python(py_path)
 
     Loaded = _exec_python_spec(py_path)["CheckedSpec"]
-    assert Loaded.checks() == ()
+    assert Loaded.spec.checks == ()
 
 
 def test_to_python_persists_foreign_keys_to_other_specs_by_name(tmp_path, recwarn):
@@ -399,8 +399,8 @@ def test_to_python_preserves_unique_together_and_self_foreign_keys(tmp_path):
     HierarchySpec.to_python(py_path)
     Loaded = _exec_python_spec(py_path)["HierarchySpec"]
 
-    assert Loaded.unique_together() == (("tenant_id", "id"),)
-    assert Loaded.foreign_keys() == (
+    assert Loaded.spec.unique_together == (("tenant_id", "id"),)
+    assert Loaded.spec.foreign_keys == (
         ForeignKey("parent_id", references="self", ref_columns="id"),
     )
 
