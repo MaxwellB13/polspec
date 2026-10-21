@@ -124,6 +124,10 @@ pinned by a passing test. A NaN, by contrast, is recorded as the column's
 - **A `Hierarchy` cannot be batched or streamed.** `generate_batches` and
   every `sink_*` refuse a spec that declares one, because each batch is
   generated independently and a forest is a property of the whole frame.
+- **An ordered spec cannot be batched or streamed either.** A spec with
+  `__order_by__` is refused by `generate_batches`, `scan` and every
+  `sink_*`, for the same reason: the rows' order is a property of the whole
+  frame. Generate it with `generate()` and write that frame out.
 - **A `Hierarchy` owns both its columns.** A `null_probability`,
   `distribution` or `weights` declared on either is not what you get: the
   references have to come from one pool for the two columns to join at all.

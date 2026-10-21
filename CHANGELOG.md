@@ -28,6 +28,23 @@ seed produces; see
   'validate_unique'?)`), where the facades said only "unexpected keyword
   argument". Still a `TypeError`.
 
+### Deprecated
+
+- **`FrameSpec.checks()`, `.foreign_keys()` and `.unique_together()`**,
+  removed in 1.0. Each call warns, and still works. Use `.spec.checks`,
+  `.spec.foreign_keys` and `.spec.unique_together`: everything a
+  declaration says is on `.spec`, which no column can shadow, and an order
+  or a hierarchy needs no accessor of its own.
+
+### Documentation
+
+- *Known limitations* says that an ordered spec can't be batched or
+  streamed, as a hierarchy can't.
+- The drift how-to lists row order among the pass/fail claims that
+  `drift()` leaves to `validate()`.
+- The constraints how-to gains a recipe for a sequence, `1, 2, …, n`: a
+  unique column bounded `(1, n)` and ordered by itself.
+
 ### Fixed
 
 - **`passing_rows()` could keep rows the spec rejects.** Taking the failing

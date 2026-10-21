@@ -192,7 +192,7 @@ def test_check_anonymous_naming_defaults_to_expr_repr():
 
         __checks__ = [Check(pl.col("val") > 0)]
 
-    check_obj = AnonSpec.checks()[0]
+    check_obj = AnonSpec.spec.checks[0]
     assert "val" in check_obj.name
 
 
@@ -220,7 +220,7 @@ def test_unique_together_declaration_variations_and_validation():
         account_id = ColSpec(pl.Int32)
         __unique_together__ = ("tenant_id", "account_id")
 
-    assert SingleTupleSpec.unique_together() == (("tenant_id", "account_id"),)
+    assert SingleTupleSpec.spec.unique_together == (("tenant_id", "account_id"),)
 
     # Reference to non-existent column raises ValueError
     with pytest.raises(ValueError, match="references unknown column 'missing_col'"):
@@ -350,3 +350,25 @@ def test_tags_given_as_a_set_are_ordered_the_same_in_every_process():
         for _ in range(4)
     }
     assert len(runs) == 1, f"tag order differs between processes: {runs}"
+
+
+# ---------------------------------------------------------------------------
+# The declaration is on `.spec`: the three older accessors are deprecated
+# ---------------------------------------------------------------------------
+
+
+class _Declared(FrameSpec):
+    __unique_together__ = [("a", "b")]
+    __checks__ = [Check(pl.col("a") <= pl.col("b"), name="ordered")]
+    a = ColSpec(pl.Int64)
+    b = ColSpec(pl.Int64)
+
+
+@pytest.mark.parametrize("name", ["checks", "foreign_keys", "unique_together"])
+def test_the_older_accessors_are_deprecated_for_spec_and_still_work(name):
+    with pytest.warns(
+        DeprecationWarning,
+        match=rf"FrameSpec\.{name}\(\) is deprecated.*use FrameSpec\.spec\.{name}",
+    ):
+        old = getattr(_Declared, name)()
+    assert old == getattr(_Declared.spec, name)

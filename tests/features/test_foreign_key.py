@@ -32,7 +32,7 @@ def test_foreign_key_declaration_variations():
         id = ColSpec(pl.Int64)
         __foreign_keys__ = [ForeignKey("id", references=CustomerFkSpec)]
 
-    fk = SameNameFk.foreign_keys()[0]
+    fk = SameNameFk.spec.foreign_keys[0]
     assert fk.columns == ("id",)
     assert fk.ref_columns == ("id",)
     assert fk.references == "CustomerFkSpec"
@@ -51,7 +51,7 @@ def test_foreign_key_declaration_variations():
             )
         ]
 
-    fk2 = RenamedFk.foreign_keys()[0]
+    fk2 = RenamedFk.spec.foreign_keys[0]
     assert fk2.columns == ("customer_id",)
     assert fk2.ref_columns == ("id",)
     assert fk2.name == "customer_fk"
@@ -66,7 +66,7 @@ def test_foreign_key_declaration_variations():
             )
         ]
 
-    fk3 = CompositeFk.foreign_keys()[0]
+    fk3 = CompositeFk.spec.foreign_keys[0]
     assert fk3.columns == ("a", "b")
     assert fk3.ref_columns == ("id", "code")
 
@@ -78,7 +78,7 @@ def test_foreign_key_declaration_variations():
             ForeignKey("parent_id", references="self", ref_columns="id")
         ]
 
-    fk4 = SelfFk.foreign_keys()[0]
+    fk4 = SelfFk.spec.foreign_keys[0]
     assert fk4.references == "self"
     assert fk4.name == "fk_parent_id__self"
 
@@ -131,7 +131,7 @@ def test_foreign_key_declaration_allows_string_enum_categorical_bucket():
             ForeignKey("code", references=CustomerFkSpec, ref_columns="code")
         ]
 
-    assert EnumChild.foreign_keys()[0].columns == ("code",)
+    assert EnumChild.spec.foreign_keys[0].columns == ("code",)
 
 
 def test_foreign_key_declaration_rejects_duplicate_names():
@@ -163,8 +163,8 @@ def test_foreign_key_inheritance_deduplicates_and_accumulates():
             ForeignKey("b", references=CustomerFkSpec, ref_columns="code")
         ]
 
-    assert len(ExtendedFkSpec.foreign_keys()) == 2
-    fk_names = [fk.name for fk in ExtendedFkSpec.foreign_keys()]
+    assert len(ExtendedFkSpec.spec.foreign_keys) == 2
+    fk_names = [fk.name for fk in ExtendedFkSpec.spec.foreign_keys]
     assert fk_names == ["fk_a__CustomerFkSpec", "fk_b__CustomerFkSpec"]
 
 
@@ -186,7 +186,7 @@ def test_foreign_key_yaml_roundtrip_self_reference(tmp_path):
     assert "foreign_keys" in yaml_path.read_text()
 
     Loaded = FrameSpec.from_yaml(yaml_path)
-    assert Loaded.foreign_keys() == (
+    assert Loaded.spec.foreign_keys == (
         ForeignKey("parent_id", references="self", ref_columns="id"),
     )
 

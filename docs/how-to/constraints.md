@@ -257,6 +257,26 @@ Events.scan(10_000)
 with at least 20 distinct, whose rows come sorted one way or the other. An
 order within each key is yours to declare.
 
+### A sequence: `1, 2, …, n`
+
+An auto-increment ID needs nothing new. A unique column holds each value of
+its bounds once, so a unique column bounded `(1, n)` in a frame of `n` rows
+holds every value from 1 to `n`. Ordered by it, that's the sequence:
+
+```python
+class Orders(FrameSpec):
+    __order_by__ = ["order_id"]
+    order_id = ColSpec(pl.Int64, unique=True, bounds=(1, 1_000))
+    total    = ColSpec(pl.Float64, bounds=(0, 500))
+
+orders = Orders.generate(1_000, seed=7)
+assert orders["order_id"].to_list() == list(range(1, 1_001))
+```
+
+Fewer rows than the bounds hold give distinct IDs in order, with gaps. More
+rows are refused, since the bounds don't hold enough values. Leave out
+`__order_by__` for the same IDs in a shuffled order.
+
 ## Referential integrity — `ForeignKey`
 
 ```python

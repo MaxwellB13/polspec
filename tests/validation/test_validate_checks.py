@@ -133,8 +133,8 @@ def test_validation_check_inheritance_and_bypass():
         c = ColSpec(pl.Int64)
         __checks__ = [Check(pl.col("c") > pl.col("b"), name="c_gt_b")]
 
-    assert len(ExtendedOrderSpec.checks()) == 2
-    check_names = [c.name for c in ExtendedOrderSpec.checks()]
+    assert len(ExtendedOrderSpec.spec.checks) == 2
+    check_names = [c.name for c in ExtendedOrderSpec.spec.checks]
     assert check_names == ["a_positive", "c_gt_b"]
 
     df_bad = pl.DataFrame({"a": [-1, 2], "b": [5, 5], "c": [3, 10]})

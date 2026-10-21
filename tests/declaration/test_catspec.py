@@ -447,8 +447,8 @@ def test_framespec_with_catspec_preserves_checks_and_diagrams():
         __checks__ = [Check(pl.col("score") >= 0, name="score_positive")]
 
     EnhancedSpec = BaseSpec.with_catspec(cats, name="EnhancedSpec")
-    assert EnhancedSpec.checks() == BaseSpec.checks()
-    assert EnhancedSpec.unique_together() == BaseSpec.unique_together()
+    assert EnhancedSpec.spec.checks == BaseSpec.spec.checks
+    assert EnhancedSpec.spec.unique_together == BaseSpec.spec.unique_together
     assert isinstance(EnhancedSpec.spec.columns["tier"].dtype, pl.Enum)
 
     md = EnhancedSpec.to_markdown()
@@ -477,7 +477,7 @@ def test_framespec_with_catspec_preserves_foreign_keys():
         ]
 
     EnhancedOrderSpec = BaseOrderSpec.with_catspec(cats, name="EnhancedOrderSpec")
-    assert EnhancedOrderSpec.foreign_keys() == BaseOrderSpec.foreign_keys()
+    assert EnhancedOrderSpec.spec.foreign_keys == BaseOrderSpec.spec.foreign_keys
     assert isinstance(EnhancedOrderSpec.spec.columns["tier"].dtype, pl.Enum)
 
     customers_df = pl.DataFrame({"id": [1, 2]})

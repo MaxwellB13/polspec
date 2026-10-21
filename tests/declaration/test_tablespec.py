@@ -353,8 +353,8 @@ def test_declarations_under_bare_names_do_not_shadow_accessors():
         checks = [Check(pl.col("a") > 0, name="pos")]
         unique_together = ["a"]
 
-    assert [c.name for c in Spec.checks()] == ["pos"]
-    assert Spec.unique_together() == (("a",),)
+    assert [c.name for c in Spec.spec.checks] == ["pos"]
+    assert Spec.spec.unique_together == (("a",),)
 
 
 def test_a_spec_is_hashable_so_it_can_key_a_references_mapping():
