@@ -2,7 +2,7 @@
 name = "polspec"
 # The one place the version is set. Bump with `uv version --bump patch|minor|major`.
 # maturin gives this field precedence over Cargo.toml's, which stays a placeholder.
-version = "0.19.0"
+version = "0.20.0"
 description = "Declare a Polars schema once, then generate data from it and validate data against it."
 readme = "README.md"
 authors = [
@@ -19,6 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Programming Language :: Rust",
     "Topic :: Software Development :: Testing",
     "Typing :: Typed",
@@ -30,7 +31,12 @@ dependencies = [
     # extension links pyo3-polars, which talks to Python Polars through its
     # Arrow-based series interface; raise the upper bound deliberately, once
     # a Polars 3 passes the suite.
-    "polars>=1.39,<3",
+    "polars>=1.39,<3 ; python_version < '3.15'",
+    # Polars 1 does not run on Python 3.15: its Series methods that defer to
+    # an expression find them by their compiled bytecode, which 3.15
+    # changed, and return None -- `Series.fill_null`, `Series.abs` -- with
+    # crashes to follow. Polars 2 runs; so on 3.15 it is the floor.
+    "polars>=2,<3 ; python_version >= '3.15'",
     "pyyaml>=6.0.3",
     # Windows ships no IANA database, and a zoned Datetime becoming a Python
     # value -- a finding's samples -- needs one; without it Polars panics.

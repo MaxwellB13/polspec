@@ -142,7 +142,7 @@ uv add polspec           # or: pip install polspec
 ```
 
 polspec works with Polars 1.39 and later, Polars 2 included, on Python 3.12
-to 3.14. Wheels are published for Linux (x86_64, aarch64), macOS (Intel
+to 3.15 (on 3.15, Polars 2: Polars 1 does not run on it). Wheels are published for Linux (x86_64, aarch64), macOS (Intel
 and Apple silicon) and Windows (x86_64), so you don't need a Rust toolchain.
 
 > **Pre-1.0.** The API is settling toward a 1.0 with written stability
