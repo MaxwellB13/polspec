@@ -30,7 +30,7 @@ from polspec.generation import (
     sink_parquet,
 )
 from polspec.hierarchy import Hierarchy
-from polspec.profiler import profile_dataframe
+from polspec.profiler import ProfileOptions, profile_dataframe
 from polspec.reading import read
 from polspec.registry import Registry
 from polspec.render import to_markdown, to_mermaid
@@ -74,6 +74,7 @@ __all__ = [
     "MultiValidationError",
     "PolspecError",
     "Pred",
+    "ProfileOptions",
     "Registry",
     "RegistryError",
     "SerializationError",

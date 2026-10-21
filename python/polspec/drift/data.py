@@ -30,6 +30,7 @@ from polspec.domain import Domain, is_textual
 from polspec.dtypes import field_dtypes, map_entries
 from polspec.formats import lookup as _lookup_format
 from polspec.shape import physical
+from polspec.spec import entries_of, field_of
 from polspec.validation.constraints import is_dtype_compatible
 
 if TYPE_CHECKING:
@@ -155,7 +156,7 @@ class Observed:
             # and its key and value as the fields of a struct.
             values = values.cast(entries)
             if map_entries(declared.dtype) is not None:
-                declared = declared._as_list()
+                declared = entries_of(declared)
 
         if isinstance(values.dtype, (pl.List, pl.Array)):
             # A List column is measured as its elements; only the length is
@@ -181,7 +182,9 @@ class Observed:
                 else {}
             )
             measured["fields"] = {
-                name: cls.of(values.struct.field(name), declared._field(name), options)
+                name: cls.of(
+                    values.struct.field(name), field_of(declared, name), options
+                )
                 for name in field_dtypes(values.dtype)
                 if name in shared
             }

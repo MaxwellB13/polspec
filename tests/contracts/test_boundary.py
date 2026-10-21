@@ -159,9 +159,7 @@ _STDLIB_PRIVATE = {"argparse._SubParsersAction"}
 
 
 def test_the_cli_reaches_into_nothing_private():
-    """The command line uses polspec as a user would: no `report._…`.
-    (Inside the library, the declarations share private helpers between
-    their own modules; that is not held here.)"""
+    """The command line uses polspec as a user would: no `report._…`."""
     reaches = []
     for module, path in _sources():
         if not module.startswith("polspec.cli"):
@@ -173,4 +171,47 @@ def test_the_cli_reaches_into_nothing_private():
                 continue
             if ast.unparse(node) not in _STDLIB_PRIVATE:
                 reaches.append(f"{module}:{node.lineno} {ast.unparse(node)}")
+    assert not reaches
+
+
+def _private_names_defined(tree: ast.AST) -> set[str]:
+    """The private names a module defines: its methods and functions, its
+    fields and attributes, and what it sets by name."""
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+        elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store):
+            names.add(node.attr)
+        elif isinstance(node, ast.Assign):
+            names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        elif isinstance(node, ast.Call) and getattr(node.func, "id", "") == "setattr":
+            if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant):
+                names.add(str(node.args[1].value))
+    return {name for name in names if _private(name)}
+
+
+def test_no_module_reaches_into_another_modules_private_attributes():
+    """A private attribute is its module's alone: one module calling
+    another's `spec._field(...)` was 24 places before 0.21, and each became a
+    plain function in the module that owns it (`field_of`, `element_of`,
+    ...). A private name a module uses, it defines."""
+    sources = {
+        module: ast.parse(path.read_text(encoding="utf-8"))
+        for module, path in _sources()
+    }
+    reaches = []
+    for module, tree in sources.items():
+        own = _private_names_defined(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Attribute) or not _private(node.attr):
+                continue
+            if isinstance(node.value, ast.Name) and node.value.id in {"self", "cls"}:
+                continue
+            text = ast.unparse(node)
+            if node.attr in own or text in _STDLIB_PRIVATE or text.startswith("pl."):
+                continue
+            reaches.append(f"{module}:{node.lineno} {text}")
     assert not reaches

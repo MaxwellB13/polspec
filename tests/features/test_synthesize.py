@@ -345,3 +345,36 @@ def test_a_skewed_country_column_keeps_its_mix_through_synthesize():
     fake = synthesize(source, 5_000, seed=1)
     assert (fake["c"] == "GB").mean() == pytest.approx(900 / source.height, abs=0.02)
     assert set(fake["c"]) <= set(source["c"])
+
+
+# ---------------------------------------------------------------------------
+# One set of profiling options (0.21)
+# ---------------------------------------------------------------------------
+
+
+def test_profile_takes_its_options_as_an_object_or_as_keywords(real):
+    from polspec import ProfileOptions
+
+    as_keywords = profile(real, weights=False, shape=False, round_bounds="auto")
+    as_object = profile(
+        real, options=ProfileOptions(weights=False, shape=False, round_bounds="auto")
+    )
+    assert as_keywords == as_object
+    with pytest.raises(TypeError, match="not both"):
+        profile(real, options=ProfileOptions(), weights=False)
+
+
+def test_synthesize_takes_every_profiling_option(real):
+    """Before 0.21 `synthesize` took four of `profile`'s options; it takes
+    them all now, the order and the rounding among them."""
+    ordered = real.sort("id")
+    assert synthesize(ordered, 200, seed=3)["id"].is_sorted()
+    unordered = synthesize(ordered, 200, seed=3, detect_order=False)
+    assert not unordered["id"].is_sorted()
+
+
+def test_a_rounding_that_is_not_one_is_refused_when_the_options_are_made():
+    from polspec import ProfileOptions
+
+    with pytest.raises(ValueError, match="rounding step"):
+        ProfileOptions(round_bounds="banana")

@@ -62,6 +62,19 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"polspec {_VERSION}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    # One builder per verb, in the order `--help` lists them.
+    _add_schema_parser(subparsers)
+    _add_test_parser(subparsers)
+    _add_validate_parser(subparsers)
+    _add_generate_parser(subparsers)
+    add_synthesize_parser(subparsers)
+    _add_diff_parser(subparsers)
+    _add_drift_parser(subparsers)
+    return parser
+
+
+def _add_schema_parser(subparsers: argparse._SubParsersAction) -> None:
+    """`polspec schema infer` and `polspec schema new`."""
     schema = subparsers.add_parser("schema", help="Create or infer a FrameSpec")
     schema_sub = schema.add_subparsers(dest="schema_command", required=True)
 
@@ -156,6 +169,9 @@ def _build_parser() -> argparse.ArgumentParser:
     new.add_argument("-o", "--output", required=True, help="Python file to write")
     new.set_defaults(func=_cmd_schema_new)
 
+
+def _add_test_parser(subparsers: argparse._SubParsersAction) -> None:
+    """`polspec test`: a pytest round-trip test from a spec."""
     test = subparsers.add_parser(
         "test", help="Generate a pytest round-trip test from a schema"
     )
@@ -184,6 +200,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     test.set_defaults(func=_cmd_test)
 
+
+def _add_validate_parser(subparsers: argparse._SubParsersAction) -> None:
+    """`polspec validate`: data against a spec."""
     validate = subparsers.add_parser(
         "validate", help="Check a data file against a schema"
     )
@@ -266,6 +285,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     validate.set_defaults(func=_cmd_validate)
 
+
+def _add_generate_parser(subparsers: argparse._SubParsersAction) -> None:
+    """`polspec generate`: a data file from a spec."""
     generate = subparsers.add_parser(
         "generate", help="Generate rows from a schema into a data file"
     )
@@ -317,39 +339,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     generate.set_defaults(func=_cmd_generate)
 
-    add_synthesize_parser(subparsers)
 
-    def add_report_options(sub: argparse.ArgumentParser) -> None:
-        output = sub.add_mutually_exclusive_group()
-        output.add_argument(
-            "--json", action="store_true", help="Print the report as JSON"
-        )
-        output.add_argument(
-            "--markdown",
-            action="store_true",
-            help="Print the report as Markdown, for a pull-request comment",
-        )
-        sub.add_argument(
-            "--fail-on",
-            choices=_FAIL_ON,
-            default="breaking",
-            help=(
-                "Which findings make the exit status 1: breaking (default), "
-                "any, or none"
-            ),
-        )
-        sub.add_argument(
-            "--strict-dtypes",
-            action="store_true",
-            help="A dtype change is breaking unless the dtypes are identical",
-        )
-        sub.add_argument(
-            "--class",
-            dest="cls",
-            metavar="NAME",
-            help="Use only this class (a .py source may define several)",
-        )
-
+def _add_diff_parser(subparsers: argparse._SubParsersAction) -> None:
+    """`polspec diff`: two declarations compared."""
     diff_parser = subparsers.add_parser(
         "diff", help="What changed between two schemas, and whether it breaks"
     )
@@ -361,9 +353,12 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="OLD=NEW",
         help="A column renamed between the two; repeat for several",
     )
-    add_report_options(diff_parser)
+    _add_report_options(diff_parser)
     diff_parser.set_defaults(func=_cmd_diff)
 
+
+def _add_drift_parser(subparsers: argparse._SubParsersAction) -> None:
+    """`polspec drift`: data against its declaration."""
     drift_parser = subparsers.add_parser(
         "drift", help="How a data file has moved relative to its schema"
     )
@@ -441,10 +436,38 @@ def _build_parser() -> argparse.ArgumentParser:
             f"(default: {_drift_default('max_samples')})"
         ),
     )
-    add_report_options(drift_parser)
+    _add_report_options(drift_parser)
     drift_parser.set_defaults(func=_cmd_drift)
 
-    return parser
+
+def _add_report_options(sub: argparse.ArgumentParser) -> None:
+    """What `diff` and `drift` both take: the report's form and what fails."""
+    output = sub.add_mutually_exclusive_group()
+    output.add_argument("--json", action="store_true", help="Print the report as JSON")
+    output.add_argument(
+        "--markdown",
+        action="store_true",
+        help="Print the report as Markdown, for a pull-request comment",
+    )
+    sub.add_argument(
+        "--fail-on",
+        choices=_FAIL_ON,
+        default="breaking",
+        help=(
+            "Which findings make the exit status 1: breaking (default), any, or none"
+        ),
+    )
+    sub.add_argument(
+        "--strict-dtypes",
+        action="store_true",
+        help="A dtype change is breaking unless the dtypes are identical",
+    )
+    sub.add_argument(
+        "--class",
+        dest="cls",
+        metavar="NAME",
+        help="Use only this class (a .py source may define several)",
+    )
 
 
 def _drift_default(name: str) -> object:

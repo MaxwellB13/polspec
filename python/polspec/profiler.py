@@ -24,15 +24,17 @@ from __future__ import annotations
 
 import dataclasses
 import warnings
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, localcontext
-from typing import Literal
+from types import MappingProxyType
+from typing import Any, Literal, TypedDict
 
 import polars as pl
 
 from polspec import frames
 from polspec._deprecation import deprecated
+from polspec._options import options_from
 from polspec.bound import Bound
 from polspec.constants import DEFAULT_NULL_PROBABILITY
 from polspec.dtypes import MAP, dtype_value_limits, field_dtypes, map_entries, map_parts
@@ -188,6 +190,137 @@ def rounded_rate(rate: float, rounding: Rounding) -> float:
 
 
 @dataclass(frozen=True, slots=True)
+class ProfileOptions:
+    """What `profile()` infers from data, and how finely it writes it.
+
+    `profile`, `FrameSpec.from_dataframe` and `synthesize` take these as an
+    `options=` object or as the keywords themselves -- one or the other, as
+    `validate` takes `ValidationOptions`. `FrameSpec.from_dataframe`
+    records less by default: `weights`, `shape`, `detect_unique` and
+    `detect_order` off.
+
+    Parameters
+    ----------
+    replace : sequence of str, default ()
+        Columns whose values must not be carried into the spec. A text
+        column named here is described by its lengths, never as an `Enum`
+        of the values it holds, and carries no weights.
+    sample : int, optional
+        Profile a random sample of this many rows rather than every row.
+    seed : int, default 0
+        Seeds the sample and the shape fitting, so a profile is the same
+        every run.
+    max_unique_enum : int, default 50
+        A text column with at most this many distinct values, repeating --
+        and not in `replace` -- becomes an `Enum` of them.
+    formats : bool, default True
+        Name the `format` a text column's values have -- an email, a UUID,
+        an IP, a country code -- so its fake values have it too: when at
+        least 20 distinct values have one of `email`, `uuid4`, `ipv4`,
+        `ipv6`, `mac`, `hostname`, `iso_country` or `iso_currency`, and
+        every value does -- or 99% do, and the rest are at most five
+        repeated stand-ins, which become its `extra_values`.
+    weights : bool, default True
+        Record each category's observed frequency, for categorical, enum and
+        boolean columns.
+    shape : bool, default True
+        Fit the distribution each numeric or temporal column follows, so it
+        generates that shape rather than uniformly between its extremes.
+        Needs `calculate_bounds`.
+    detect_unique : bool, default True
+        Declare an integer or text column `unique=True` when every one of at
+        least a hundred values is distinct.
+    calculate_bounds : bool, default True
+        Record the observed extremes of numeric and temporal columns, and the
+        length range of text and binary ones.
+    detect_order : bool, default True
+        Declare `order_by` when the rows come sorted by a column of single
+        values -- either way, nulls last, with at least 20 distinct values,
+        so not by chance -- so a stand-in comes sorted too. The first such
+        column, in column order. A sample keeps the source's row order, so
+        a sorted file's sample shows it.
+    round_bounds : number, "auto" or None, default None
+        Write each numeric column's bounds rounded outward to this step --
+        `1000`, `0.01` -- the minimum down and the maximum up, within what
+        its dtype holds, so the data stays inside them. "auto" keeps two
+        significant figures of the column's span (`[3.17, 9871.23]` becomes
+        `[0, 9900]`) and rounds a datetime, time or duration outward to the
+        second. None writes them exactly as observed.
+    round_rates : number, "auto" or None, default None
+        Write each null, NaN and list-element null rate rounded up to this
+        step, never past 1; "auto" keeps two significant figures. A rate of
+        0 stays 0. None writes them exactly as observed.
+
+    """
+
+    replace: Sequence[str] = ()
+    sample: int | None = None
+    seed: int = 0
+    max_unique_enum: int = 50
+    formats: bool = True
+    weights: bool = True
+    shape: bool = True
+    detect_unique: bool = True
+    calculate_bounds: bool = True
+    detect_order: bool = True
+    round_bounds: Rounding = None
+    round_rates: Rounding = None
+
+    def __post_init__(self) -> None:
+        replace: object = self.replace
+        if isinstance(replace, str):
+            raise TypeError(
+                f"replace takes a sequence of column names, got the string {replace!r}"
+            )
+        object.__setattr__(self, "replace", tuple(self.replace))
+        object.__setattr__(self, "round_bounds", step_of(self.round_bounds))
+        object.__setattr__(self, "round_rates", step_of(self.round_rates))
+
+
+class SynthesizeKeywords(TypedDict, total=False):
+    """`ProfileOptions`' fields as `synthesize()` takes them: all but
+    `seed`, which there seeds the stand-in as well as its profile."""
+
+    replace: Sequence[str]
+    sample: int | None
+    max_unique_enum: int
+    formats: bool
+    weights: bool
+    shape: bool
+    detect_unique: bool
+    calculate_bounds: bool
+    detect_order: bool
+    round_bounds: Rounding
+    round_rates: Rounding
+
+
+class ProfileKeywords(SynthesizeKeywords, total=False):
+    """`ProfileOptions`' fields, as the keywords `profile()` takes them."""
+
+    seed: int
+
+
+def profile_options(
+    options: ProfileOptions | None,
+    keywords: Mapping[str, Any],
+    *,
+    defaults: Mapping[str, Any] | None = None,
+) -> ProfileOptions:
+    """The options for one call: the object, or the keywords over
+    `defaults` -- a caller whose defaults differ from `ProfileOptions`'."""
+    if options is None and defaults:
+        keywords = {**defaults, **keywords}
+    return options_from(ProfileOptions, options, keywords, what="profiling")
+
+
+# What `profile_columns` -- and so `FrameSpec.from_dataframe` -- records
+# unless asked: the shape of the data, not a stand-in for it.
+DESCRIBE_DEFAULTS: Mapping[str, Any] = MappingProxyType(
+    {"weights": False, "shape": False, "detect_unique": False, "detect_order": False}
+)
+
+
+@dataclass(frozen=True, slots=True)
 class _Options:
     """How much to infer, read by every column, however deeply nested."""
 
@@ -273,17 +406,9 @@ def _sorted_ways(df: pl.DataFrame, names: Sequence[str]) -> dict[str, list[bool]
 
 def profile_columns(
     df: pl.DataFrame,
-    *,
-    weights: bool = False,
-    max_unique_enum: int = 50,
-    calculate_bounds: bool = True,
-    shape: bool = False,
-    detect_unique: bool = False,
-    replace: Sequence[str] = (),
-    seed: int = 0,
-    formats: bool = True,
-    round_bounds: Rounding = None,
-    round_rates: Rounding = None,
+    given: ProfileOptions | None = None,
+    /,
+    **keywords: Any,
 ) -> dict[str, ColSpec]:
     """Infers ColSpec column definitions by profiling an existing DataFrame.
 
@@ -291,57 +416,8 @@ def profile_columns(
     columns as a `TableSpec`. Its defaults record weights, shapes and
     uniqueness, which these leave off.
 
-    Parameters
-    ----------
-    df : pl.DataFrame
-        The data to describe.
-    weights : bool, default False
-        Record each category's observed frequency, for categorical, enum and
-        boolean columns.
-    max_unique_enum : int, default 50
-        A string or categorical column with at most this many distinct values
-        becomes an `Enum` of them -- when they repeat, each at least twice
-        on average (`ENUM_MIN_REPEATS`); a column of distinct values stays
-        text however few there are.
-    calculate_bounds : bool, default True
-        Record the observed extremes of numeric and temporal columns, and the
-        length range of text and binary ones.
-    shape : bool, default False
-        Fit the distribution each numeric or temporal column follows, so it
-        generates that shape rather than uniformly between its extremes.
-        Needs `calculate_bounds`.
-    detect_unique : bool, default False
-        Declare an integer or text column `unique=True` when every one of at
-        least a hundred values is distinct.
-    replace : sequence of str, default ()
-        Columns whose values must not be carried into the spec: a text
-        column named here is described by its lengths alone -- never as an
-        `Enum` of the values it holds -- and carries no weights.
-    seed : int, default 0
-        Seeds what fitting a shape samples, so a profile is the same every run.
-    formats : bool, default True
-        Name the `format` a text column's values have -- `email`, `uuid4`,
-        `ipv4`, `ipv6`, `mac`, `hostname`, `iso_country`, `iso_currency` --
-        when at least `FORMAT_MIN_DISTINCT` (20) distinct values have it and
-        every value does; or 99% of them do and the rest are at most five
-        repeated stand-ins, which become the format's `extra_values`. A
-        hostname has to hold a dot: a single word is too weak a sign. A
-        finite format -- `iso_country`, `iso_currency` -- only where the
-        column would not narrow to an Enum, which keeps its codes'
-        frequencies. A column in `replace` is named a format only when
-        every value has it, since its stand-ins would be values of the
-        source.
-    round_bounds : number, "auto" or None, default None
-        Write each numeric column's bounds rounded outward to this step --
-        `1000`, `0.01` -- the minimum down and the maximum up, within what
-        its dtype holds, so the data stays inside them. "auto" keeps two
-        significant figures of the column's span (`[3.17, 9871.23]` becomes
-        `[0, 9900]`) and rounds a datetime, time or duration outward to the
-        second. None writes them exactly as observed.
-    round_rates : number, "auto" or None, default None
-        Write each null, NaN and list-element null rate rounded up to this
-        step, never past 1; "auto" keeps two significant figures. A rate of
-        0 stays 0. None writes them exactly as observed.
+    `given` is a `ProfileOptions`, or pass its fields as keywords, over
+    `DESCRIBE_DEFAULTS`: what a column is, not a stand-in for it.
 
     Warns
     -----
@@ -352,6 +428,8 @@ def profile_columns(
     """
     if not isinstance(df, pl.DataFrame):
         raise TypeError(f"Expected pl.DataFrame, got {type(df).__name__}")
+    opts = profile_options(given, keywords, defaults=DESCRIBE_DEFAULTS)
+    replace = opts.replace
     replaced = set(replace)
     unknown = sorted(replaced - set(df.columns))
     if unknown:
@@ -368,15 +446,15 @@ def profile_columns(
             )
 
     options = _Options(
-        weights=weights,
-        max_unique_enum=max_unique_enum,
-        calculate_bounds=calculate_bounds,
-        shape=shape and calculate_bounds,
-        detect_unique=detect_unique,
-        formats=formats,
-        seed=seed,
-        round_bounds=step_of(round_bounds),
-        round_rates=step_of(round_rates),
+        weights=opts.weights,
+        max_unique_enum=opts.max_unique_enum,
+        calculate_bounds=opts.calculate_bounds,
+        shape=opts.shape and opts.calculate_bounds,
+        detect_unique=opts.detect_unique,
+        formats=opts.formats,
+        seed=opts.seed,
+        round_bounds=opts.round_bounds,
+        round_rates=opts.round_rates,
     )
     columns = {
         name: _profile_column(
@@ -401,6 +479,50 @@ def profile_columns(
     return columns
 
 
+@dataclass(frozen=True, slots=True)
+class _Column:
+    """One column being profiled, and what every dtype family reads of it.
+
+    `imitate` is False for a column in `replace=`, whose values are not to be
+    carried over; `top` is False for a struct's field or a list's element,
+    which cannot be declared unique.
+    """
+
+    series: pl.Series
+    name: str
+    total_rows: int
+    options: _Options
+    imitate: bool
+    top: bool
+    non_null: pl.Series
+    nullable: bool
+    null_probability: float
+
+    @property
+    def dtype(self) -> pl.DataType:
+        return self.series.dtype
+
+    @property
+    def with_weights(self) -> bool:
+        return self.options.weights and self.imitate
+
+    def spec(self, **kwargs: Any) -> ColSpec:
+        """A declaration carrying this column's nullability."""
+        return ColSpec(
+            nullable=self.nullable, null_probability=self.null_probability, **kwargs
+        )
+
+    def nested(self, values: pl.Series, label: str, rows: int) -> ColSpec:
+        """`values` -- a field's, an element's -- profiled as a column."""
+        return _profile_column(
+            values,
+            label,
+            total_rows=rows,
+            options=self.options,
+            imitate=self.imitate,
+        )
+
+
 def _profile_column(
     series: pl.Series,
     name: str,
@@ -410,189 +532,237 @@ def _profile_column(
     imitate: bool = True,
     top: bool = False,
 ) -> ColSpec:
-    """Describes one column: its nullability, its domain, and its extent.
-
-    `imitate` is False for a column in `replace=`, whose values are not to be
-    carried over; `top` is False for a struct's field or a list's element,
-    which cannot be declared unique.
-    """
+    """Describes one column: its nullability, its domain, and its extent --
+    by the first of `_FAMILIES` its dtype belongs to."""
     series = frames.plain(series)  # `name` carries the real name
-    dtype = series.dtype
-    non_null = series.drop_nulls()
-    nullable, null_probability = _nullability(series, total_rows)
-    with_weights = options.weights and imitate
-
-    null_probability = rounded_rate(null_probability, options.round_rates)
-
-    def spec(**kwargs) -> ColSpec:
-        return ColSpec(nullable=nullable, null_probability=null_probability, **kwargs)
-
-    def nested(values: pl.Series, label: str, rows: int) -> ColSpec:
-        return _profile_column(
-            values, label, total_rows=rows, options=options, imitate=imitate
-        )
-
-    if dtype == pl.Null:
+    if series.dtype == pl.Null:
         # Every value null, however many rows -- an empty frame included.
         return ColSpec(dtype=pl.Null, nullable=True)
+    nullable, null_probability = _nullability(series, total_rows)
+    column = _Column(
+        series=series,
+        name=name,
+        total_rows=total_rows,
+        options=options,
+        imitate=imitate,
+        top=top,
+        non_null=series.drop_nulls(),
+        nullable=nullable,
+        null_probability=rounded_rate(null_probability, options.round_rates),
+    )
+    for belongs, describe in _FAMILIES:
+        if belongs(column.dtype):
+            return describe(column)
+    # A dtype with nothing to measure (an `Object`): recorded faithfully so
+    # validation still reads it.
+    return column.spec(dtype=column.dtype)
 
-    if isinstance(dtype, pl.Enum):
-        categories = dtype.categories.to_list()
-        return spec(
-            dtype=dtype,
-            weights=_empirical_weights(non_null, categories) if with_weights else None,
+
+def _enum(c: _Column) -> ColSpec:
+    dtype = c.dtype
+    assert isinstance(dtype, pl.Enum)  # noqa: S101 - the family says so
+    categories = dtype.categories.to_list()
+    return c.spec(
+        dtype=c.dtype,
+        weights=_empirical_weights(c.non_null, categories) if c.with_weights else None,
+    )
+
+
+def _map(c: _Column) -> ColSpec:
+    # Described as the list of entries it is -- its length, its key and
+    # value as the fields of a struct -- then made a map again from the
+    # key and value dtypes profiling settled on, which may narrow a String
+    # key to an Enum as it would a column.
+    entries = map_entries(c.dtype)
+    assert entries is not None  # noqa: S101 - the family says so
+    as_list = c.nested(c.series.cast(entries), c.name, c.total_rows)
+    parts = as_list.fields or {}
+    if set(parts) != {"key", "value"}:
+        return c.spec(dtype=c.dtype)
+    return dataclasses.replace(
+        as_list,
+        dtype=MAP(parts["key"].dtype, parts["value"].dtype),
+        element_null_probability=0.0,
+    )
+
+
+def _struct(c: _Column) -> ColSpec:
+    # Described as its fields: each profiled as a column of its own over the
+    # structs that are present, so a field's null rate is how often it is
+    # null inside one. The dtype is rebuilt from the fields', since
+    # profiling may narrow a String field to an Enum as it would a column.
+    fields = {
+        field: c.nested(
+            c.non_null.struct.field(field), f"{c.name}.{field}", len(c.non_null)
         )
+        for field in field_dtypes(_as_struct(c.dtype))
+    }
+    return c.spec(
+        dtype=pl.Struct({field: fs.dtype for field, fs in fields.items()}),
+        fields=fields or None,
+    )
 
-    if (entries := map_entries(dtype)) is not None:
-        # Described as the list of entries it is -- its length, its key and
-        # value as the fields of a struct -- then made a map again from the
-        # key and value dtypes profiling settled on, which may narrow a
-        # String key to an Enum as it would a column.
-        as_list = nested(series.cast(entries), name, total_rows)
-        parts = as_list.fields or {}
-        if set(parts) != {"key", "value"}:
-            return spec(dtype=dtype)
-        return dataclasses.replace(
-            as_list,
-            dtype=MAP(parts["key"].dtype, parts["value"].dtype),
-            element_null_probability=0.0,
-        )
 
-    if isinstance(dtype, pl.Struct):
-        # Described as its fields: each profiled as a column of its own over
-        # the structs that are present, so a field's null rate is how often
-        # it is null inside one. The dtype is rebuilt from the fields', since
-        # profiling may narrow a String field to an Enum as it would a column.
-        fields = {
-            field: nested(
-                non_null.struct.field(field), f"{name}.{field}", len(non_null)
-            )
-            for field in field_dtypes(dtype)
-        }
-        return spec(
-            dtype=pl.Struct({field: fs.dtype for field, fs in fields.items()}),
-            fields=fields or None,
-        )
+def _list_of_lists(c: _Column) -> ColSpec:
+    # Nothing a declaration can say describes the inner values, so only
+    # the outer list's length is recorded.
+    return c.spec(
+        dtype=c.dtype,
+        list_length=_extent(c.non_null.list.len(), int, c.options.calculate_bounds)
+        if isinstance(c.dtype, pl.List)
+        else None,
+    )
 
-    if isinstance(dtype, (pl.List, pl.Array)) and isinstance(
+
+def _list(c: _Column) -> ColSpec:
+    # Described as its elements: profile the exploded values as a column of
+    # the inner dtype, then put the list's own nullability and length back
+    # on top. An element that is a struct brings its fields along.
+    dtype = c.dtype
+    exploded = c.non_null.explode(empty_as_null=False)
+    element_nulls = exploded.null_count() / len(exploded) if len(exploded) else 0.0
+    elements = c.nested(exploded.drop_nulls(), c.name, 0)
+    list_length = None
+    if isinstance(dtype, pl.List):
+        list_length = _extent(c.non_null.list.len(), int, c.options.calculate_bounds)
+    return dataclasses.replace(
+        elements,
+        dtype=pl.List(elements.dtype)
+        if isinstance(dtype, pl.List)
+        else pl.Array(elements.dtype, _as_array(dtype).size),
+        nullable=c.nullable,
+        null_probability=c.null_probability,
+        list_length=list_length,
+        element_null_probability=rounded_rate(element_nulls, c.options.round_rates),
+    )
+
+
+def _text(c: _Column) -> ColSpec:
+    described = _profile_textual(
+        c.non_null,
+        c.name,
+        c.dtype,
+        c.spec,
+        with_weights=c.with_weights,
+        max_unique_enum=c.options.max_unique_enum if c.imitate else 0,
+        calculate_bounds=c.options.calculate_bounds,
+        formats=c.options.formats,
+        keep_values=c.imitate,
+    )
+    return _as_key(described, c.non_null, c.options, c.top)
+
+
+def _boolean(c: _Column) -> ColSpec:
+    return c.spec(
+        dtype=pl.Boolean,
+        weights=_boolean_weights(c.non_null) if c.with_weights else None,
+    )
+
+
+def _integer(c: _Column) -> ColSpec:
+    extent = _extent(c.non_null, int, c.options.calculate_bounds)
+    described = c.spec(
+        dtype=c.dtype, bounds=rounded_bounds(extent, c.dtype, c.options.round_bounds)
+    )
+    keyed = _as_key(described, c.non_null, c.options, c.top)
+    return keyed if keyed.unique else _shaped(keyed, c.non_null, c.options)
+
+
+def _float(c: _Column) -> ColSpec:
+    # A NaN is recorded as the share of present values it is; an infinity is
+    # no bound -- a spec refuses a non-finite one -- so the extent and the
+    # shape are the finite values'.
+    non_null = c.non_null
+    nans = int(non_null.is_nan().sum())
+    finite = non_null.filter(non_null.is_finite())
+    described = c.spec(
+        dtype=c.dtype,
+        bounds=rounded_bounds(
+            _extent(finite, float, c.options.calculate_bounds),
+            c.dtype,
+            c.options.round_bounds,
+        ),
+        nan_probability=rounded_rate(
+            nans / len(non_null) if nans else 0.0, c.options.round_rates
+        ),
+    )
+    infinities = len(non_null) - len(finite) - nans
+    if described.bounds is not None and infinities:
+        c.options.infinite.append((c.name, infinities))
+    return _shaped(described, finite, c.options)
+
+
+def _decimal(c: _Column) -> ColSpec:
+    described = c.spec(
+        dtype=c.dtype,
+        bounds=rounded_bounds(
+            _extent(c.non_null, lambda v: v, c.options.calculate_bounds),
+            c.dtype,
+            c.options.round_bounds,
+        ),
+    )
+    return _shaped(described, c.non_null, c.options)
+
+
+def _temporal(c: _Column) -> ColSpec:
+    described = c.spec(
+        dtype=c.dtype,
+        bounds=_temporal_extent(
+            c.non_null,
+            c.dtype,
+            c.options.calculate_bounds,
+            whole_seconds=c.options.round_bounds == "auto",
+        ),
+    )
+    return _shaped(described, c.non_null, c.options)
+
+
+def _binary(c: _Column) -> ColSpec:
+    non_null = c.non_null
+    return c.spec(
+        dtype=pl.Binary,
+        string_length=_extent(
+            non_null.bin.size() if len(non_null) else non_null,
+            int,
+            c.options.calculate_bounds,
+        ),
+    )
+
+
+def _as_struct(dtype: pl.DataType) -> pl.Struct:
+    assert isinstance(dtype, pl.Struct)  # noqa: S101 - the family says so
+    return dtype
+
+
+def _as_array(dtype: pl.DataType) -> pl.Array:
+    assert isinstance(dtype, pl.Array)  # noqa: S101 - the family says so
+    return dtype
+
+
+def _nested_list(dtype: pl.DataType) -> bool:
+    return isinstance(dtype, (pl.List, pl.Array)) and isinstance(
         dtype.inner, (pl.List, pl.Array)
-    ):
-        # A list of lists: nothing a declaration can say describes the inner
-        # values, so only the outer list's length is recorded.
-        return spec(
-            dtype=dtype,
-            list_length=_extent(non_null.list.len(), int, options.calculate_bounds)
-            if isinstance(dtype, pl.List)
-            else None,
-        )
+    )
 
-    if isinstance(dtype, (pl.List, pl.Array)):
-        # Described as its elements: profile the exploded values as a column
-        # of the inner dtype, then put the list's own nullability and length
-        # back on top. An element that is a struct brings its fields along.
-        exploded = non_null.explode(empty_as_null=False)
-        element_nulls = exploded.null_count() / len(exploded) if len(exploded) else 0.0
-        elements = nested(exploded.drop_nulls(), name, 0)
-        list_length = None
-        if isinstance(dtype, pl.List):
-            list_length = _extent(non_null.list.len(), int, options.calculate_bounds)
-        return dataclasses.replace(
-            elements,
-            dtype=pl.List(elements.dtype)
-            if isinstance(dtype, pl.List)
-            else pl.Array(elements.dtype, dtype.size),
-            nullable=nullable,
-            null_probability=null_probability,
-            list_length=list_length,
-            element_null_probability=rounded_rate(element_nulls, options.round_rates),
-        )
 
-    if dtype in (pl.String, pl.Utf8) or is_categorical_dtype(dtype):
-        described = _profile_textual(
-            non_null,
-            name,
-            dtype,
-            spec,
-            with_weights=with_weights,
-            max_unique_enum=options.max_unique_enum if imitate else 0,
-            calculate_bounds=options.calculate_bounds,
-            formats=options.formats,
-            keep_values=imitate,
-        )
-        return _as_key(described, non_null, options, top)
-
-    if dtype == pl.Boolean:
-        return spec(
-            dtype=pl.Boolean,
-            weights=_boolean_weights(non_null) if with_weights else None,
-        )
-
-    if dtype.is_integer():
-        extent = _extent(non_null, int, options.calculate_bounds)
-        described = spec(
-            dtype=dtype, bounds=rounded_bounds(extent, dtype, options.round_bounds)
-        )
-        keyed = _as_key(described, non_null, options, top)
-        return keyed if keyed.unique else _shaped(keyed, non_null, options)
-
-    if dtype.is_float():
-        # A NaN is recorded as the share of present values it is; an infinity
-        # is no bound -- a spec refuses a non-finite one -- so the extent and
-        # the shape are the finite values'.
-        nans = int(non_null.is_nan().sum())
-        finite = non_null.filter(non_null.is_finite())
-        described = spec(
-            dtype=dtype,
-            bounds=rounded_bounds(
-                _extent(finite, float, options.calculate_bounds),
-                dtype,
-                options.round_bounds,
-            ),
-            nan_probability=rounded_rate(
-                nans / len(non_null) if nans else 0.0, options.round_rates
-            ),
-        )
-        infinities = len(non_null) - len(finite) - nans
-        if described.bounds is not None and infinities:
-            options.infinite.append((name, infinities))
-        return _shaped(described, finite, options)
-
-    if dtype.is_decimal():
-        described = spec(
-            dtype=dtype,
-            bounds=rounded_bounds(
-                _extent(non_null, lambda v: v, options.calculate_bounds),
-                dtype,
-                options.round_bounds,
-            ),
-        )
-        return _shaped(described, non_null, options)
-
-    if dtype.is_temporal():
-        described = spec(
-            dtype=dtype,
-            bounds=_temporal_extent(
-                non_null,
-                dtype,
-                options.calculate_bounds,
-                whole_seconds=options.round_bounds == "auto",
-            ),
-        )
-        return _shaped(described, non_null, options)
-
-    if dtype == pl.Binary:
-        return spec(
-            dtype=pl.Binary,
-            string_length=_extent(
-                non_null.bin.size() if len(non_null) else non_null,
-                int,
-                options.calculate_bounds,
-            ),
-        )
-
-    # A dtype with nothing to measure (a `Null` column, an `Object`): recorded
-    # faithfully so validation still reads it.
-    return spec(dtype=dtype)
+# Each dtype family and how it is described, in the order a dtype is tested:
+# a map before a list (it is one underneath), a list of lists before a list.
+_FAMILIES: tuple[
+    tuple[Callable[[pl.DataType], bool], Callable[[_Column], ColSpec]], ...
+] = (
+    (lambda d: isinstance(d, pl.Enum), _enum),
+    (lambda d: map_entries(d) is not None, _map),
+    (lambda d: isinstance(d, pl.Struct), _struct),
+    (_nested_list, _list_of_lists),
+    (lambda d: isinstance(d, (pl.List, pl.Array)), _list),
+    (lambda d: d in (pl.String, pl.Utf8) or is_categorical_dtype(d), _text),
+    (lambda d: d == pl.Boolean, _boolean),
+    (lambda d: d.is_integer(), _integer),
+    (lambda d: d.is_float(), _float),
+    (lambda d: d.is_decimal(), _decimal),
+    (lambda d: d.is_temporal(), _temporal),
+    (lambda d: d == pl.Binary, _binary),
+)
 
 
 def _as_key(

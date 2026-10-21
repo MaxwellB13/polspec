@@ -39,7 +39,7 @@ from polspec.dtypes import (
 from polspec.errors import GenerationError
 from polspec.formats import lookup as _lookup_format
 from polspec.generation.seeds import pass_seed, stable_seed
-from polspec.spec import ColSpec, column_kind
+from polspec.spec import ColSpec, column_kind, drawn_entries_of, element_of, field_of
 
 if TYPE_CHECKING:
     from polspec._polspec import ColumnPlan
@@ -664,7 +664,7 @@ def _field_spec(spec: ColSpec, name: str, seed_key: str) -> ColSpec:
     that renaming the column moves every field with it and adding a field
     beside one moves nothing.
     """
-    return dataclasses.replace(spec._field(name), seed_name=f"{seed_key}.{name}")
+    return dataclasses.replace(field_of(spec, name), seed_name=f"{seed_key}.{name}")
 
 
 def _generate_struct_column(
@@ -759,7 +759,7 @@ def _list_parts(
 
     # A column named "" seeds its elements by that name, as `None` does: a
     # `seed_name` cannot be empty.
-    element_spec = dataclasses.replace(spec._element(), seed_name=seed_key or None)
+    element_spec = dataclasses.replace(element_of(spec), seed_name=seed_key or None)
     # The elements are drawn per window, not as a window: which element a
     # row starts at depends on every earlier row's length. Each window after
     # the first draws them from a seed of its own, so two batches never
@@ -833,7 +833,7 @@ def _generate_map_column(
     into one -- so a map drawn with one would come out shorter than its
     `list_length`. The repeats are separated first, and only they move.
     """
-    entries = spec._as_drawn_list()
+    entries = drawn_entries_of(spec)
     lengths, elements = _list_parts(name, entries, n, seed, row_offset)
     elements = _separate_repeated_keys(
         name, entries, lengths, elements, seed, row_offset
@@ -871,7 +871,7 @@ def _separate_repeated_keys(
         return elements
     seed_key = entries.seed_name or name
     key_spec = dataclasses.replace(
-        entries._field("key"), seed_name=f"{seed_key}\x00key"
+        field_of(entries, "key"), seed_name=f"{seed_key}\x00key"
     )
     rng = random.Random(None if seed is None else f"{seed}:{row_offset}:{seed_key}")
     for _ in range(_MAX_KEY_ROUNDS):

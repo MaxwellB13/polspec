@@ -34,6 +34,8 @@ if TYPE_CHECKING:
     from polspec.spec import ColSpec
     from polspec.validation import ValidationOptions
 
+from polspec.check import failure_mask
+from polspec.spec import element_of, entries_of, field_of
 from polspec.validation.constraints._base import (
     Constraint,
     as_strings,
@@ -337,7 +339,7 @@ def column_constraints(
         constraints.extend(
             _ColumnValidator(
                 key=f"{name}__validator_{index}",
-                mask=validator._failure_mask(),
+                mask=failure_mask(validator),
                 sample_expr=sample_source(column, actual_dtype),
                 column=name,
                 validator=validator,
@@ -546,7 +548,7 @@ def _struct_constraints(
     for field in field_dtypes(declared_dtype):
         if field not in actual_fields:
             continue  # a dtype finding already says so
-        declared = spec._field(field)
+        declared = field_of(spec, field)
         value = column.struct.field(field)
         path = f"{where}.{field}"
         if not declared.nullable:
@@ -632,7 +634,7 @@ def _list_constraints(
     nested = isinstance(inner, (pl.List, pl.Array)) or map_entries(inner) is not None
     inner_where = f"{where}[]" if nested else where
     for constraint in _value_tree(
-        name, inner_where, spec._element(), inner, pl.element(), options
+        name, inner_where, element_of(spec), inner, pl.element(), options
     ):
         lifted: dict[str, Any] = {
             "mask": present & any_element(constraint.mask),
@@ -663,7 +665,7 @@ def _map_constraints(
     """
     as_list = column.cast(entries)
     constraints = _list_constraints(
-        name, where, spec._as_list(), entries, as_list, options
+        name, where, entries_of(spec), entries, as_list, options
     )
     keys = as_list.list.eval(pl.element().struct.field("key"))
     constraints.append(

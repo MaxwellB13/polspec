@@ -135,5 +135,6 @@ class ColRule:
     def __hash__(self) -> int:
         return hash((self.when, self.choices, self.weights))
 
-    def _expr(self) -> pl.Expr:
-        return self.when.to_expr()
+
+def rule_condition(rule: ColRule) -> pl.Expr:
+    return rule.when.to_expr()

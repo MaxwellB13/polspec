@@ -18,6 +18,7 @@ import polars as pl
 
 from polspec.dtypes import map_entries
 from polspec.serialization.dtypes import DTYPE_NAMES
+from polspec.spec import field_of
 from polspec.tablespec import TableSpec, as_table_spec
 
 if TYPE_CHECKING:
@@ -190,7 +191,7 @@ def _column_rows(name: str, cs) -> list[str]:
     value_dtype = cs.value_dtype
     if isinstance(value_dtype, pl.Struct):
         for field in value_dtype.fields:
-            rows.extend(_column_rows(f"{name}.{field.name}", cs._field(field.name)))
+            rows.extend(_column_rows(f"{name}.{field.name}", field_of(cs, field.name)))
     return rows
 
 

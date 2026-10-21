@@ -315,9 +315,10 @@ def test_an_unknown_validation_option_names_the_one_you_meant():
     assert "ValidationOptions" not in message
 
 
-def test_the_facade_refuses_a_typo_from_its_own_signature():
-    """`FrameSpec.validate` spells every option out, so a typo never reaches
-    the function it forwards to -- and an editor sees it before Python does.
+def test_the_facade_refuses_a_typo_naming_the_option_meant():
+    """`FrameSpec.validate` takes its options typed (`ValidationKeywords`),
+    so an editor sees a typo before Python does; at run time it is refused
+    as the function refuses it, naming the option meant.
     """
 
     class Rows(FrameSpec):
@@ -326,7 +327,7 @@ def test_the_facade_refuses_a_typo_from_its_own_signature():
     df = Rows.generate(5, seed=1)
     for verb in (Rows.inspect, Rows.validate):
         with pytest.raises(
-            TypeError, match="unexpected keyword argument 'validate_uniqe'"
+            TypeError, match=r"'validate_uniqe' \(did you mean 'validate_unique'\?\)"
         ):
             verb(df, validate_uniqe=True)
 
@@ -344,7 +345,7 @@ def test_the_option_switches_have_one_spelling():
         with pytest.raises(TypeError, match="Unknown validation option"):
             verb(Rows.spec, dupes, unique=False)
     for verb in (Rows.inspect, Rows.validate):
-        with pytest.raises(TypeError, match="unexpected keyword argument 'unique'"):
+        with pytest.raises(TypeError, match="Unknown validation option"):
             verb(dupes, unique=False)
 
 

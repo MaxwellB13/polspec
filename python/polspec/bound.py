@@ -55,9 +55,9 @@ class Bound[T]:
             return f"<= {self.max}"
         return f"[{self.min}, {self.max}]"
 
-    @classmethod
-    def _coerce(cls, value: Bound | tuple[Any, Any] | list[Any] | None) -> Bound | None:
-        if value is None or isinstance(value, Bound):
-            return value
-        lo, hi = value
-        return cls(lo, hi)
+
+def coerce_bound(value: Bound | tuple[Any, Any] | list[Any] | None) -> Bound | None:
+    if value is None or isinstance(value, Bound):
+        return value
+    lo, hi = value
+    return Bound(lo, hi)

@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from polspec.spec import ColSpec
 
 
+from polspec.rules import rule_condition
 from polspec.validation.constraints._base import Constraint, as_strings, in_values
 
 
@@ -77,7 +78,7 @@ def rule_constraints(
             # rule rewrote as a failure of the next. No finding beats a
             # false one.
             break
-        matches = rule._expr().fill_null(False)
+        matches = rule_condition(rule).fill_null(False)
         applies = matches & ~claimed
         claimed = claimed | matches
 

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Unpack, cast, overload
 
 import polars as pl
 
@@ -33,14 +33,20 @@ from polspec.check import Check
 from polspec.drift import DriftOptions, DriftReport
 from polspec.errors import SpecError
 from polspec.foreign_key import ForeignKey
-from polspec.frames import Method, References
+from polspec.frames import Method, References, sample_rows
 from polspec.hierarchy import Hierarchy
-from polspec.profiler import Rounding, profile_columns
-from polspec.profiler import detect_order as detect_order_of
+from polspec.profiler import (
+    DESCRIBE_DEFAULTS,
+    ProfileKeywords,
+    ProfileOptions,
+    detect_order,
+    profile_columns,
+    profile_options,
+)
 from polspec.render import framespec_to_markdown, framespec_to_mermaid
 from polspec.spec import ColSpec
 from polspec.tablespec import TableSpec, parse_unique_together
-from polspec.validation import ValidationOptions
+from polspec.validation import ValidationKeywords, ValidationOptions
 
 if TYPE_CHECKING:
     import os
@@ -365,50 +371,33 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         df: pl.DataFrame,
         *,
         name: str = "ProfiledFrameSpec",
-        weights: bool = False,
-        max_unique_enum: int = 50,
-        formats: bool = True,
-        calculate_bounds: bool = True,
-        shape: bool = False,
-        detect_unique: bool = False,
-        replace: Sequence[str] = (),
-        detect_order: bool = False,
-        round_bounds: Rounding = None,
-        round_rates: Rounding = None,
+        options: ProfileOptions | None = None,
+        **keywords: Unpack[ProfileKeywords],
     ) -> type[FrameSpec]:
         """Infers a spec by profiling an existing DataFrame.
 
-        `weights=True` records empirical frequencies for categorical, enum and
-        boolean columns. A string or categorical column with at most
-        `max_unique_enum` distinct values, repeating, becomes an `Enum`;
-        one whose values have a `format` -- an email, a UUID, a country
-        code -- names it, unless `formats=False`.
-        `calculate_bounds`
-        records observed `(min, max)` for numeric and temporal columns and
-        `(min_len, max_len)` for strings and binary. `shape`, `detect_unique`,
-        `detect_order` and `replace` describe more, for a spec that will
-        generate a stand-in for the data: `polspec.profile` takes the same
-        switches, every one on by default. `round_bounds` and `round_rates`
-        write bounds and rates at a person's precision -- a step, or "auto"
-        -- as `polspec.profile` describes; `polspec schema infer` rounds
-        "auto" unless told otherwise.
+        `polspec.profile` with less recorded by default -- `weights`,
+        `shape`, `detect_unique` and `detect_order` off -- so it describes
+        what each column is rather than a stand-in for the data. A string or
+        categorical column with at most `max_unique_enum` distinct values,
+        repeating, becomes an `Enum`; one whose values have a `format` -- an
+        email, a UUID, a country code -- names it, unless `formats=False`.
+        `calculate_bounds` records observed `(min, max)` for numeric and
+        temporal columns and `(min_len, max_len)` for strings and binary.
+
+        `options` is a `ProfileOptions`, or pass its fields as keywords:
+        `round_bounds` and `round_rates` write bounds and rates at a
+        person's precision, as `polspec schema infer` does by default.
         """
-        columns = profile_columns(
-            df,
-            weights=weights,
-            max_unique_enum=max_unique_enum,
-            formats=formats,
-            calculate_bounds=calculate_bounds,
-            shape=shape,
-            detect_unique=detect_unique,
-            replace=replace,
-            round_bounds=round_bounds,
-            round_rates=round_rates,
-        )
-        order = detect_order_of(df) if detect_order else None
-        if order is None:
-            return cls.from_spec(TableSpec(name, columns))
-        order_by, descending = order
+        if not isinstance(df, pl.DataFrame):
+            raise TypeError(f"Expected pl.DataFrame, got {type(df).__name__}")
+        opts = profile_options(options, keywords, defaults=DESCRIBE_DEFAULTS)
+        # The columns directly, not through `profile`: a frame with no rows
+        # still describes its columns' dtypes, which `profile` refuses.
+        frame = sample_rows(df, opts.sample, opts.seed)
+        columns = profile_columns(frame, opts)
+        order = detect_order(frame) if opts.detect_order else None
+        order_by, descending = order if order is not None else ((), False)
         return cls.from_spec(
             TableSpec(name, columns, order_by=order_by, descending=descending)
         )
@@ -807,20 +796,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         *,
         options: ValidationOptions | None = None,
         references: References = None,
-        extra_cols: Literal["drop", "allow", "raise"] | None = None,
-        missing_cols: Literal["add", "allow", "raise"] | None = None,
-        strict_dtypes: bool | None = None,
-        validate_rules: bool | None = None,
-        validate_validators: bool | None = None,
-        validate_unique: bool | None = None,
-        validate_checks: bool | None = None,
-        validate_foreign_keys: bool | None = None,
-        validate_hierarchy: bool | None = None,
-        validate_order: bool | None = None,
-        validate_pattern: bool | None = None,
-        validate_bounds: bool | None = None,
-        cast: bool | None = None,
-        streaming: bool | None = None,
+        **keywords: Unpack[ValidationKeywords],
     ) -> validation.ValidationReport:
         """Everything this spec has to say about `df`, as a `ValidationReport`.
 
@@ -834,22 +810,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             df,
             options=options,
             references=references,
-            **_given(
-                extra_cols=extra_cols,
-                missing_cols=missing_cols,
-                strict_dtypes=strict_dtypes,
-                validate_rules=validate_rules,
-                validate_validators=validate_validators,
-                validate_unique=validate_unique,
-                validate_checks=validate_checks,
-                validate_foreign_keys=validate_foreign_keys,
-                validate_hierarchy=validate_hierarchy,
-                validate_order=validate_order,
-                validate_pattern=validate_pattern,
-                validate_bounds=validate_bounds,
-                cast=cast,
-                streaming=streaming,
-            ),
+            **_given(keywords),
         )
 
     @overload
@@ -860,20 +821,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         *,
         options: ValidationOptions | None = None,
         references: References = None,
-        extra_cols: Literal["drop", "allow", "raise"] | None = None,
-        missing_cols: Literal["add", "allow", "raise"] | None = None,
-        strict_dtypes: bool | None = None,
-        validate_rules: bool | None = None,
-        validate_validators: bool | None = None,
-        validate_unique: bool | None = None,
-        validate_checks: bool | None = None,
-        validate_foreign_keys: bool | None = None,
-        validate_hierarchy: bool | None = None,
-        validate_order: bool | None = None,
-        validate_pattern: bool | None = None,
-        validate_bounds: bool | None = None,
-        cast: bool | None = None,
-        streaming: bool | None = None,
+        **keywords: Unpack[ValidationKeywords],
     ) -> pl.DataFrame: ...
 
     @overload
@@ -884,20 +832,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         *,
         options: ValidationOptions | None = None,
         references: References = None,
-        extra_cols: Literal["drop", "allow", "raise"] | None = None,
-        missing_cols: Literal["add", "allow", "raise"] | None = None,
-        strict_dtypes: bool | None = None,
-        validate_rules: bool | None = None,
-        validate_validators: bool | None = None,
-        validate_unique: bool | None = None,
-        validate_checks: bool | None = None,
-        validate_foreign_keys: bool | None = None,
-        validate_hierarchy: bool | None = None,
-        validate_order: bool | None = None,
-        validate_pattern: bool | None = None,
-        validate_bounds: bool | None = None,
-        cast: bool | None = None,
-        streaming: bool | None = None,
+        **keywords: Unpack[ValidationKeywords],
     ) -> pl.LazyFrame: ...
 
     @classmethod
@@ -907,20 +842,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         *,
         options: ValidationOptions | None = None,
         references: References = None,
-        extra_cols: Literal["drop", "allow", "raise"] | None = None,
-        missing_cols: Literal["add", "allow", "raise"] | None = None,
-        strict_dtypes: bool | None = None,
-        validate_rules: bool | None = None,
-        validate_validators: bool | None = None,
-        validate_unique: bool | None = None,
-        validate_checks: bool | None = None,
-        validate_foreign_keys: bool | None = None,
-        validate_hierarchy: bool | None = None,
-        validate_order: bool | None = None,
-        validate_pattern: bool | None = None,
-        validate_bounds: bool | None = None,
-        cast: bool | None = None,
-        streaming: bool | None = None,
+        **keywords: Unpack[ValidationKeywords],
     ) -> pl.DataFrame | pl.LazyFrame:
         """Validates a DataFrame or LazyFrame against this spec.
 
@@ -939,45 +861,34 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         references : mapping, optional
             Parent frames for foreign keys into other specs, keyed by that
             spec, its FrameSpec class, or its name.
-        extra_cols, missing_cols, strict_dtypes, cast, streaming
-            The structural options, named as on `ValidationOptions`.
-        validate_rules, validate_validators, validate_unique, validate_checks, validate_foreign_keys, validate_hierarchy, validate_order, validate_pattern, validate_bounds
-            The check switches: `validate_` in front of the field they set.
+        **keywords
+            The options one at a time, as `ValidationKeywords` lists them:
+            `extra_cols`, `missing_cols`, `strict_dtypes`, `cast` and
+            `streaming`, and each check switch with `validate_` in front of
+            the `ValidationOptions` field it sets (`validate_unique`,
+            `validate_order`, ...).
 
         Notes
         -----
-        A keyword left as `None` takes the `ValidationOptions` default; see
-        that class for what every option means.
+        A keyword left out, or given as `None`, takes the
+        `ValidationOptions` default; see that class for what every option
+        means.
         """
         return validation.validate(
             cls.spec,
             df,
             options=options,
             references=references,
-            **_given(
-                extra_cols=extra_cols,
-                missing_cols=missing_cols,
-                strict_dtypes=strict_dtypes,
-                validate_rules=validate_rules,
-                validate_validators=validate_validators,
-                validate_unique=validate_unique,
-                validate_checks=validate_checks,
-                validate_foreign_keys=validate_foreign_keys,
-                validate_hierarchy=validate_hierarchy,
-                validate_order=validate_order,
-                validate_pattern=validate_pattern,
-                validate_bounds=validate_bounds,
-                cast=cast,
-                streaming=streaming,
-            ),
+            **_given(keywords),
         )
 
 
-def _given(**options: Any) -> dict[str, Any]:
+def _given(options: Mapping[str, Any] | None = None, /, **more: Any) -> dict[str, Any]:
     """The validation keywords the caller actually passed.
 
     `None` is the facade's "not given", so the defaults live on
     `ValidationOptions` alone and `options=` conflicts with a keyword only
     when the caller wrote both.
     """
-    return {name: value for name, value in options.items() if value is not None}
+    given = {**(options or {}), **more}
+    return {name: value for name, value in given.items() if value is not None}

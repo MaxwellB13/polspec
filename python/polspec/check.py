@@ -87,8 +87,9 @@ class Check:
     def __hash__(self) -> int:
         return hash((self.name, str(self.expr), self.description, self.ignore_nulls))
 
-    def _failure_mask(self) -> pl.Expr:
-        """Returns the Polars boolean mask for rows that violate this check."""
-        if self.ignore_nulls:
-            return ~self.expr.fill_null(True)
-        return ~self.expr.fill_null(False)
+
+def failure_mask(check: Check) -> pl.Expr:
+    """Returns the Polars boolean mask for rows that violate this check."""
+    if check.ignore_nulls:
+        return ~check.expr.fill_null(True)
+    return ~check.expr.fill_null(False)

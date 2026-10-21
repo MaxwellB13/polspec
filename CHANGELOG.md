@@ -8,6 +8,26 @@ seed produces; see
 
 ## [Unreleased]
 
+### Added
+
+- **`ProfileOptions`: one definition of what profiling takes.** `profile`,
+  `FrameSpec.from_dataframe` and `synthesize` take the options as an
+  `options=` object or as the keywords themselves -- as `validate` takes
+  `ValidationOptions` -- and the keywords are typed (`ProfileKeywords`), so
+  an editor completes and checks them. `synthesize` takes every one now,
+  not four of them: it can be told not to keep the source's order, not to
+  fit shapes, or to round. `FrameSpec.from_dataframe` takes `sample` too.
+
+### Changed
+
+- **The validation keywords are one typed list, `ValidationKeywords`.**
+  `validate`, `inspect` and the `FrameSpec` facades take `**keywords` typed
+  by it rather than spelling every option out four times, so an editor
+  still sees each one. A misspelt option is refused as `validate` refuses
+  it, naming the option meant (`'validate_uniqe' (did you mean
+  'validate_unique'?)`), where the facades said only "unexpected keyword
+  argument". Still a `TypeError`.
+
 ### Fixed
 
 - **`passing_rows()` could keep rows the spec rejects.** Taking the failing

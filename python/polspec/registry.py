@@ -587,7 +587,7 @@ class Registry:
         # transforming with the unbound copy would apply one spec's report to
         # a different spec's columns the moment binding ever changes them.
         return {
-            name: validation._transformed(specs[name], named[name], report)
+            name: validation.transformed(specs[name], named[name], report)
             for name, report in reports.items()
         }
 
