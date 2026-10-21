@@ -1,0 +1,102 @@
+name: Deep
+
+# The checks too slow for every pull request, run on a schedule: the
+# property tests at 3,000 examples each, and the render check -- every drawn
+# ER diagram parsed by Mermaid, every data dictionary by a Markdown parser.
+# A one-in-thousands bug surfaces here between releases rather than in a
+# user's hands. Run by hand from the Actions tab before a release.
+on:
+  schedule:
+    - cron: "17 4 * * 1" # Mondays, 04:17 UTC
+  workflow_dispatch:
+    inputs:
+      examples:
+        description: "Examples per property"
+        default: "3000"
+
+jobs:
+  properties:
+    name: Deep properties (py${{ matrix.python-version }}, ${{ matrix.polars }} polars)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The floor, as `lowest-direct` resolves it, and the newest the
+          # bound allows, as `polars-latest` does.
+          - python-version: "3.12"
+            polars: floor
+          - python-version: "3.13"
+            polars: newest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Resolve the floor
+        if: ${{ matrix.polars == 'floor' }}
+        run: uv lock --resolution lowest-direct
+
+      - name: Upgrade polars within the declared bound
+        if: ${{ matrix.polars == 'newest' }}
+        run: uv lock --upgrade-package polars
+
+      - name: Sync dependencies
+        run: uv sync --all-extras
+
+      - name: Report versions
+        run: uv run python -c "import polars, hypothesis; print(polars.__version__, hypothesis.__version__)"
+
+      - name: Build extension (maturin develop)
+        run: uv run maturin develop --release
+
+      - name: Deep properties
+        env:
+          POLSPEC_DEEP_EXAMPLES: ${{ inputs.examples || '3000' }}
+        run: uv run pytest tests/contracts/test_properties.py -p no:cacheprovider
+
+  render:
+    name: Render check (Mermaid, Markdown)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Install the render check's parsers
+        working-directory: scripts/deep/render
+        run: npm install
+
+      - name: Sync dependencies
+        run: uv sync --all-extras
+
+      - name: Build extension (maturin develop)
+        run: uv run maturin develop --release
+
+      - name: Render check
+        run: uv run python scripts/deep/render/run.py 400

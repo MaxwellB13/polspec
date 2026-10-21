@@ -29,6 +29,7 @@ import re
 import string
 import sys
 import tempfile
+import warnings
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,7 @@ from polspec import (
     Check,
     ColRule,
     ColSpec,
+    ForeignKey,
     GenerationError,
     SerializationError,
     SpecError,
@@ -51,9 +53,11 @@ from polspec import (
     generate,
     generate_batches,
     inspect,
+    profile,
     validate,
 )
 from polspec.drift import drift
+from polspec.dtypes import map_parts
 from polspec.formats import FORMATS
 from polspec.render import framespec_to_markdown, framespec_to_mermaid
 from polspec.serialization import from_dict, to_dict, to_python
@@ -389,9 +393,12 @@ def specs(
     draw: st.DrawFn,
     names: st.SearchStrategy[str] | None = None,
     spec_name: st.SearchStrategy[str] | None = None,
+    ordered: bool = True,
 ) -> TableSpec:
     """A drawn spec, its columns named `c0`, `c1`... unless `names` draws
-    them, and itself named `Drawn` unless `spec_name` does."""
+    them, and itself named `Drawn` unless `spec_name` does. With `ordered`,
+    it may declare an `order_by` over one or two of its columns, either way
+    -- off for what streams, which an ordered spec refuses."""
     drawn = draw(st.lists(columns(), min_size=1, max_size=4))
     keys = (
         draw(st.lists(names, min_size=len(drawn), max_size=len(drawn), unique=True))
@@ -429,7 +436,31 @@ def specs(
         and (check := _check_that_holds(name, column)) is not None
     ]
     name = draw(spec_name) if spec_name is not None else "Drawn"
-    return TableSpec(name, cols, checks=checks)
+    order_by, descending = _order(draw, cols) if ordered else ((), False)
+    return TableSpec(
+        name, cols, checks=checks, order_by=order_by, descending=descending
+    )
+
+
+def _sortable(column: ColSpec) -> bool:
+    """A column `order_by` may name: one of single values."""
+    return not column.dtype.is_nested() and map_parts(column.dtype) is None
+
+
+def _order(
+    draw: st.DrawFn, cols: dict[str, ColSpec]
+) -> tuple[tuple[str, ...], tuple[bool, ...]]:
+    """No order, half the time; otherwise one or two sortable columns, each
+    either way -- the second an order within the first, as a per-key order
+    is."""
+    sortable = [name for name, column in cols.items() if _sortable(column)]
+    if not sortable or draw(st.booleans()):
+        return (), ()
+    names = draw(
+        st.lists(st.sampled_from(sortable), min_size=1, max_size=2, unique=True)
+    )
+    flags = draw(st.lists(st.booleans(), min_size=len(names), max_size=len(names)))
+    return tuple(names), tuple(flags)
 
 
 _ROWS = st.integers(0, MAX_ROWS)
@@ -452,7 +483,7 @@ def test_what_a_drawn_spec_generates_it_validates(spec, n, seed):
 
 
 @SETTINGS
-@given(spec=specs(), n=_ROWS, seed=_SEEDS, batch_size=st.integers(1, 50))
+@given(spec=specs(ordered=False), n=_ROWS, seed=_SEEDS, batch_size=st.integers(1, 50))
 def test_what_a_drawn_spec_streams_it_validates(spec, n, seed, batch_size):
     parts = list(generate_batches(spec, n, batch_size=batch_size, seed=seed))
     streamed = pl.concat(parts) if parts else generate(spec, 0, seed=seed)
@@ -722,15 +753,90 @@ def test_the_spec_strategy_reaches_rules_and_checks():
     def record(spec: TableSpec) -> None:
         if any(c.rules for c in spec.columns.values()):
             seen.add("rules")
+        if spec.order_by:
+            seen.add("order_by" if len(spec.order_by) == 1 else "order_by_two")
+            if any(spec.descending):
+                seen.add("descending")
         for check in spec.checks:
             seen.add("checks")
             literals = check.pred.literals() if check.pred is not None else []
             seen.update(type(v).__name__ for v in literals)
 
     record()
-    assert {"rules", "checks", "date", "datetime", "time", "timedelta"} <= seen, sorted(
-        seen
+    reached = {"rules", "checks", "date", "datetime", "time", "timedelta"}
+    reached |= {"order_by", "order_by_two", "descending"}
+    assert reached <= seen, sorted(reached - seen)
+
+
+# ---------------------------------------------------------------------------
+# The split, and the profile, hold whatever the spec
+# ---------------------------------------------------------------------------
+
+
+def _with_self_key(spec: TableSpec) -> TableSpec:
+    """`spec` with a key into its own rows: what can leave a row orphaned
+    when the failing rows are taken."""
+    columns = {
+        **spec.columns,
+        "node": ColSpec(pl.String, unique=True, string_length=(8, 8)),
+        "up": ColSpec(pl.String, nullable=True, null_probability=0.4),
+    }
+    return dataclasses.replace(
+        spec,
+        columns=columns,
+        foreign_keys=(ForeignKey("up", references="self", ref_columns="node"),),
     )
+
+
+@SETTINGS
+@given(
+    spec=specs(),
+    self_key=st.booleans(),
+    n=st.integers(1, MAX_ROWS),
+    seed=_SEEDS,
+    picks=st.lists(st.integers(0, 10**6), min_size=1, max_size=MAX_ROWS),
+)
+def test_the_passing_rows_are_a_frame_the_spec_accepts(spec, self_key, n, seed, picks):
+    """Whatever the spec and however its rows go wrong -- a row copied over
+    another, so values repeat, move out of order, or point at a parent that
+    is not there -- `passing_rows()` is a frame the spec accepts, and with
+    `failing_rows(once=True)` splits the frame exactly. 0.21's B1."""
+    if self_key:
+        spec = _with_self_key(spec)
+    df = generate(spec, n, seed=seed)
+    rows = list(range(n))
+    for i, pick in enumerate(picks[: max(1, n // 3)]):
+        rows[(i * 7919) % n] = pick % n
+    bad = df[rows]
+    report = inspect(spec, bad)
+    assume(all(f.row_level for f in report.findings))
+    passing = report.passing_rows().collect()
+    failing = report.failing_rows(once=True).collect()
+    assert not inspect(spec, passing).findings
+    assert passing.height + failing.height == n
+
+
+_STEPS = st.one_of(
+    st.just("auto"),
+    st.none(),
+    st.sampled_from([1, 7, 1000, 0.01, 0.3, 2.5]),
+)
+
+
+@SETTINGS
+@given(
+    spec=specs(), n=st.integers(1, MAX_ROWS), seed=_SEEDS, bounds=_STEPS, rates=_STEPS
+)
+def test_a_frame_passes_the_spec_profiled_from_it_at_any_precision(
+    spec, n, seed, bounds, rates
+):
+    """`profile()` rounds bounds outward and rates up, so whatever the
+    precision, the frame it read passes what it wrote."""
+    df = generate(spec, n, seed=seed)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # an infinity outside the bounds says so
+        profiled = profile(df, round_bounds=bounds, round_rates=rates)
+    validate(profiled, df)
 
 
 # ---------------------------------------------------------------------------
