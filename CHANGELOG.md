@@ -8,8 +8,41 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-21
+
+**Rows that come in order.** A spec can declare the order its rows come in
+-- `__order_by__ = ["user_id", "ts"]` for each user's events in time
+order -- which event logs, time series, window functions and `join_asof`
+all depend on. `generate()` sorts whole rows, so every other claim still
+holds; `validate()` reports rows out of order; `profile()` finds an order
+a frame already has, so `synthesize()` keeps it.
+
+**Inferred specs that read like written ones.** `polspec schema infer`
+now writes bounds rounded outward and rates rounded up -- `[0, 9900]`, not
+`[3.17, 9871.23]` -- at a precision you can choose, always keeping the
+data valid; dates as dates rather than day counts; and an unbounded unique
+ID column no longer stops at two million rows. A spec also comes back as
+text from `to_yaml()` and `to_python()` without a path.
+
+**Python 3.15** is supported, with Polars 2, and tested in CI on every OS.
+
+**No seeded output changes**: every catalogue case generates what 0.19.0
+does, checked against the published 0.19.0 across 463 cases. No spec file
+needs migrating: `order_by` and `descending` are new optional keys.
+`schema infer`'s files change by default (`--round-bounds exact
+--round-rates exact` writes what 0.19.0 wrote), and so do `profile()`'s
+temporal bounds and the order of a sampled frame's rows.
+
 ### Added
 
+- **Python 3.15.** The wheels are built against Python's stable ABI, so the
+  same wheel runs on 3.12 to 3.15; CI now tests 3.15 on Linux, macOS and
+  Windows. **On 3.15, polspec requires Polars 2**: Polars 1 does not run on
+  Python 3.15 -- some of its `Series` methods return `None` there, and the
+  process can crash after -- so pip installs Polars 2 on 3.15, and Polars
+  1.39 or later on 3.12 to 3.14 as before. PyYAML publishes no 3.15 wheels
+  yet, so on 3.15 pip installs it from source -- its pure-Python version,
+  with no compiler needed.
 - **`order_by`: rows that come sorted.** A spec declares the columns its
   rows are sorted by, as `DataFrame.sort` takes them --
   `__order_by__ = ["user_id", "ts"]`, with `__descending__` for the
@@ -2440,7 +2473,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/MaxwellB13/polspec/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/MaxwellB13/polspec/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/MaxwellB13/polspec/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/MaxwellB13/polspec/compare/v0.16.0...v0.17.0
