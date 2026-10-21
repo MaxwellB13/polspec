@@ -187,9 +187,13 @@ def _private_names_defined(tree: ast.AST) -> set[str]:
             names.add(node.attr)
         elif isinstance(node, ast.Assign):
             names.update(t.id for t in node.targets if isinstance(t, ast.Name))
-        elif isinstance(node, ast.Call) and getattr(node.func, "id", "") == "setattr":
-            if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant):
-                names.add(str(node.args[1].value))
+        elif (
+            isinstance(node, ast.Call)
+            and getattr(node.func, "id", "") == "setattr"
+            and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Constant)
+        ):
+            names.add(str(node.args[1].value))
     return {name for name in names if _private(name)}
 
 
