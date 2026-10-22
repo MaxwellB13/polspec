@@ -48,14 +48,11 @@ def options_from[T](
         # dataclass raise about a private class they cannot look up.
         hints = []
         for name in unknown:
-            close = difflib.get_close_matches(name, accepted, n=1) or [
-                # A prefixed spelling of a real option, such as 0.22's
-                # `validate_unique` for `unique`, is not close enough for
-                # difflib, and is the one a caller upgrading writes.
-                a
-                for a in accepted
-                if name.endswith(f"_{a}")
-            ]
+            # A prefixed spelling of a real option -- 0.22's `validate_order`
+            # for `order` -- is the one a caller upgrading writes, so it comes
+            # first: difflib would offer `validators` for it.
+            close = [a for a in accepted if name.endswith(f"_{a}")]
+            close = close or difflib.get_close_matches(name, accepted, n=1)
             hints.append(f"{name!r}{f' (did you mean {close[0]!r}?)' if close else ''}")
         raise TypeError(
             f"Unknown {what} option(s): {', '.join(hints)}. "
