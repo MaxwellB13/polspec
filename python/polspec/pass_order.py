@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from polspec.errors import SpecError
+from polspec.expr import root_names
 
 if TYPE_CHECKING:
     from polspec.tablespec import TableSpec
@@ -76,7 +77,7 @@ def passes_of(spec: TableSpec) -> list[Pass]:
     for name, col in spec.columns.items():
         if not col.rules:
             continue
-        reads = {n for rule in col.rules for n in rule.when.root_names()}
+        reads = {n for rule in col.rules for n in root_names(rule.when)}
         passes.append(
             Pass(
                 key=f"rules:{name}",

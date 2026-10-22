@@ -65,10 +65,10 @@ class Employees(FrameSpec):
 class Orders(FrameSpec):
     order_id = ColSpec(pl.Int64, bounds=(1, 100_000_000), unique=True)
     customer_id = ColSpec(pl.Int64, bounds=(1, 10_000_000))
-    status = ColSpec(categories.enum.STATUS)
+    status = ColSpec(categories.STATUS)
     currency = ColSpec(
-        categories.categorical.CURRENCY,
-        choices=categories.get_choices("CURRENCY"),
+        categories.CURRENCY,
+        choices=categories.choices.get("CURRENCY"),
     )
     region = ColSpec(pl.Enum(["UK", "US", "EU"]))
     carrier = ColSpec(
@@ -161,7 +161,7 @@ if __name__ == "__main__":
     # validators and __checks__ wrap arbitrary predicates that generation
     # never attempts to satisfy (see docs/how-to/constraints.md), so they're
     # skipped here and proven separately below against real, compliant data.
-    registry.validate_all(frames, validate_validators=False, validate_checks=False)
+    registry.validate_all(frames, validators=False, checks=False)
     print("Relationships drawn:", registry.to_mermaid().count("||--o{"))
 
     print("PII columns on Customers:", Customers.tag("pii"))
@@ -184,7 +184,7 @@ if __name__ == "__main__":
     LoadedOrders.validate(
         LoadedOrders.generate(100, seed=7, references={Customers: customers}),
         references={"Customers": customers},
-        validate_checks=False,
+        checks=False,
     )
 
     # Proof that the validator and check skipped above do work -- against

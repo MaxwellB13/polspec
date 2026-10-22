@@ -8,8 +8,9 @@ Internal: not part of the public API.
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Sequence
-from dataclasses import KW_ONLY, dataclass
+from dataclasses import KW_ONLY, dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from polspec.constants import FILLED_IN
@@ -82,7 +83,9 @@ class ForeignKey:
     references: str
     ref_columns: tuple[str, ...] = FILLED_IN
     name: str = FILLED_IN
-    target: TableSpec | None = None
+    # The spec the key points at, when it was declared against one or a
+    # registry has resolved its name. Filled in, never passed.
+    target: TableSpec | None = field(default=None, init=False)
 
     if TYPE_CHECKING:
 
@@ -93,7 +96,6 @@ class ForeignKey:
             references: type[FrameSpec] | TableSpec | str,
             ref_columns: str | Sequence[str] | None = None,
             name: str | None = None,
-            target: TableSpec | None = None,
         ) -> None: ...
 
     def __post_init__(self) -> None:
@@ -153,3 +155,11 @@ class ForeignKey:
 
     def __hash__(self) -> int:
         return hash((self.name, self.columns, self.ref_columns, self.references))
+
+
+def bound_to(fk: ForeignKey, target: TableSpec) -> ForeignKey:
+    """`fk` with its target resolved: what a registry does for a key that
+    names its parent."""
+    bound = dataclasses.replace(fk)
+    object.__setattr__(bound, "target", target)
+    return bound

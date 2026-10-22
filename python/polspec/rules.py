@@ -14,7 +14,7 @@ import polars as pl
 
 from polspec.dtypes import typed_values
 from polspec.errors import SpecError
-from polspec.expr import Pred
+from polspec.expr import Pred, root_names
 
 
 def reject_duplicate_choices(
@@ -90,7 +90,7 @@ class ColRule:
                 "ColRule.when must be a predicate built with col(), got "
                 f"{type(self.when).__name__}.{hint}"
             )
-        if not self.when.root_names():
+        if not root_names(self.when):
             raise SpecError(
                 f"ColRule.when must reference at least one column, got {self.when!r}"
             )

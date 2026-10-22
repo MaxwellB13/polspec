@@ -26,6 +26,7 @@ from polspec.check import Check
 from polspec.domain import Domain
 from polspec.dtypes import map_parts
 from polspec.errors import SpecError
+from polspec.expr import root_names
 from polspec.foreign_key import ForeignKey, default_fk_name
 from polspec.hierarchy import Hierarchy
 from polspec.pass_order import ordered_passes
@@ -284,7 +285,7 @@ class TableSpec:
     def _validate_rules(self) -> None:
         for col_name, spec in self.columns.items():
             for rule in spec.rules:
-                for ref_col in sorted(rule.when.root_names()):
+                for ref_col in sorted(root_names(rule.when)):
                     if ref_col not in self.columns:
                         raise SpecError(
                             f"ColRule on column {col_name!r} references unknown "
@@ -399,7 +400,7 @@ class TableSpec:
                         f"unknown local column {col!r}"
                     )
 
-            target = self.resolve_target(fk)
+            target = self._resolve_target(fk)
             if target is None:
                 # A name with no spec behind it yet (a key read from a file).
                 # The registry resolves and checks it later.
@@ -510,7 +511,7 @@ class TableSpec:
         """
         ordered_passes(self)
 
-    def resolve_target(self, fk: ForeignKey) -> TableSpec | None:
+    def _resolve_target(self, fk: ForeignKey) -> TableSpec | None:
         """The spec a foreign key points at.
 
         This spec for `"self"`, the bound target when the key was declared
@@ -746,7 +747,7 @@ class TableSpec:
             )
             if validators != spec.validators:
                 updates["validators"] = validators
-            if any(r.when.root_names() & set(mapping) for r in spec.rules):
+            if any(root_names(r.when) & set(mapping) for r in spec.rules):
                 updates["rules"] = tuple(
                     dataclasses.replace(r, when=r.when.rename(mapping))
                     for r in spec.rules
