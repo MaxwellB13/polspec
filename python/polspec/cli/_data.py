@@ -23,6 +23,7 @@ from polspec.cli._io import (
 from polspec.constants import LARGE_FRAME_BYTES
 from polspec.errors import CliError
 from polspec.generation.pipeline import describe_bytes
+from polspec.sizing import estimated_size
 from polspec.tablespec import TableSpec
 from polspec.validation import FINDING_COLUMN, validate
 from polspec.validation.report import SCHEMA_VERSION as REPORT_SCHEMA_VERSION
@@ -173,7 +174,7 @@ def _say_if_large(spec: TableSpec, rows: int) -> None:
     """Says how big the frame will be before it is built, when that is worth
     saying. `generate` builds the whole frame, so a shell caller who did not
     expect gigabytes should hear it before the machine starts swapping."""
-    estimate = spec.estimated_size(rows)
+    estimate = estimated_size(spec, rows)
     if estimate > LARGE_FRAME_BYTES:
         print(
             f"note: {spec.name} at {rows:,} rows is an estimated "

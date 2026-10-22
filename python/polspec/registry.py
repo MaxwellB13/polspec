@@ -29,7 +29,14 @@ from typing import TYPE_CHECKING, Any, Literal
 import polars as pl
 
 from polspec import generation, serialization, validation
-from polspec.catspec import CatSpec, as_catspec, declared_categories_from
+from polspec.catspec import (
+    CatSpec,
+    as_catspec,
+    categories_of,
+    declared_categories_from,
+    enum_categories,
+    resolve_key,
+)
 from polspec.errors import (
     MultiValidationError,
     PolspecError,
@@ -313,14 +320,14 @@ class Registry:
             return
         for spec in self._specs.values():
             for col_name, cs in spec.columns.items():
-                bound = cats.resolve_key(col_name)
+                bound = resolve_key(cats, col_name)
                 if bound is None:
                     continue
                 kind, key = bound
                 dtype = cs.dtype
                 if kind == "enum" and isinstance(dtype, pl.Enum):
                     declared = dtype.categories.to_list()
-                    expected = cats.get_enum(key)
+                    expected = enum_categories(cats, key)
                     if declared != expected:
                         raise RegistryError(
                             f"{spec.name}.{col_name} declares Enum {declared}, but "
@@ -328,7 +335,7 @@ class Registry:
                         )
                 elif kind == "categorical" and isinstance(dtype, pl.Categorical):
                     declared_cats = declared_categories_from(dtype)
-                    expected_cats = cats.get_categorical(key)
+                    expected_cats = categories_of(cats, key)
                     if declared_cats is not None and (
                         declared_cats.name() != expected_cats.name()
                         or declared_cats.physical() != expected_cats.physical()

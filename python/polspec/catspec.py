@@ -45,7 +45,6 @@ import polars as pl
 from polspec import frames
 from polspec.dtypes import DtypeLike
 from polspec.errors import SpecError
-from polspec.serialization.dtypes import categories_from_data, physical_from_name
 from polspec.spec import is_categorical_dtype
 from polspec.tablespec import TableSpec, as_table_spec
 
@@ -113,8 +112,6 @@ def _categories_identity(cats: pl.Categories) -> tuple[str, str, str]:
     return (cats.name(), cats.namespace(), str(cats.physical()))
 
 
-# ---------------------------------------------------------------------------
-# Typed accessors
 # ---------------------------------------------------------------------------
 
 
@@ -275,17 +272,13 @@ class CatSpec(metaclass=_CatSpecMeta):
     >>> cats = CatSpec(enums={"STATUS": ["PENDING", "COMPLETED"]})
     >>> cats.STATUS
     Enum(categories=['PENDING', 'COMPLETED'])
-    >>> cats.get_enum("status")
+    >>> cats["status"]
+    Enum(categories=['PENDING', 'COMPLETED'])
+    >>> cats.enums["STATUS"]
     ['PENDING', 'COMPLETED']
     """
 
-    __slots__ = (
-        "_cat_accessor",
-        "_categoricals",
-        "_choices",
-        "_enum_accessor",
-        "_enums",
-    )
+    __slots__ = ("_categoricals", "_choices", "_enums")
 
     # Filled in by the metaclass from a subclass's class body; empty on CatSpec
     # itself and on any subclass that declares nothing.
@@ -318,12 +311,16 @@ class CatSpec(metaclass=_CatSpecMeta):
         for key, value in (choices or {}).items():
             self._choices[str(key)] = list(value)
 
-        self._enum_accessor = _Accessor(self, "enum")
-        self._cat_accessor = _Accessor(self, "categorical")
-
     @staticmethod
     def _as_categories(name: str, value: Any) -> pl.Categories:
         """One `categoricals=` value in every form the constructor accepts."""
+        # Here, not at the top: serialization reads a `CatSpec` with this
+        # module's lookups, so it imports this module.
+        from polspec.serialization.dtypes import (
+            categories_from_data,
+            physical_from_name,
+        )
+
         if isinstance(value, pl.Categories):
             return value
         if isinstance(value, str):
@@ -360,98 +357,31 @@ class CatSpec(metaclass=_CatSpecMeta):
         """Every recorded domain pool, keyed by entry name."""
         return MappingProxyType(self._choices)
 
-    @property
-    def enum(self) -> _Accessor:
-        """Entries as `pl.Enum` dtypes: `cats.enum.STATUS`."""
-        return self._enum_accessor
-
-    @property
-    def categorical(self) -> _Accessor:
-        """Entries as `pl.Categorical` dtypes: `cats.categorical.CURRENCY`."""
-        return self._cat_accessor
-
     # ------------------------------------------------------------------
-    # Lookup -- one resolution rule, and everything else built on it
+    # Lookup: by name, matching case as `resolve_key` below does
     # ------------------------------------------------------------------
-
-    def resolve_key(self, name: str) -> tuple[Kind, str] | None:
-        """Which entry a name binds to, if any.
-
-        Exact match first, then the upper- and lower-case forms, so a column
-        named `status` finds `STATUS`. An `Enum` wins over a `Categorical` of
-        the same name.
-        """
-        for kind, entries in (
-            ("enum", self._enums),
-            ("categorical", self._categoricals),
-        ):
-            for candidate in (name, name.upper(), name.lower()):
-                if candidate in entries:
-                    return (kind, candidate)  # type: ignore[return-value]
-        return None
-
-    def dtype_of(self, name: str) -> pl.DataType | None:
-        """The dtype registered under `name`, or None if nothing is."""
-        resolved = self.resolve_key(name)
-        if resolved is None:
-            return None
-        kind, key = resolved
-        if kind == "enum":
-            return pl.Enum(self._enums[key])
-        return pl.Categorical(self._categoricals[key])
-
-    def get_enum(self, name: str) -> list[str]:
-        """The category list of an `Enum` entry."""
-        resolved = self.resolve_key(name)
-        if resolved is None or resolved[0] != "enum":
-            raise KeyError(f"CatSpec has no Enum named {name!r}")
-        return list(self._enums[resolved[1]])
-
-    def get_categorical(self, name: str) -> pl.Categories:
-        """The shared `pl.Categories` of a `Categorical` entry."""
-        for candidate in (name, name.upper(), name.lower()):
-            if candidate in self._categoricals:
-                return self._categoricals[candidate]
-        raise KeyError(f"CatSpec has no Categorical named {name!r}")
-
-    def get_choices(self, name: str) -> list[Any] | None:
-        """The pool of values an entry draws from, if it has one.
-
-        An `Enum`'s categories are its pool. A `Categorical`'s comes from the
-        `choices` it was registered with, since a `pl.Categories` names a shared
-        domain without listing what is in it.
-        """
-        if name in self._choices:
-            return list(self._choices[name])
-        resolved = self.resolve_key(name)
-        if resolved is None:
-            return None
-        kind, key = resolved
-        if kind == "enum":
-            return list(self._enums[key])
-        return list(self._choices[key]) if key in self._choices else None
 
     def get(self, name: str, default: Any = None) -> Any:
         """The dtype registered under `name`, or `default` if nothing is."""
-        dtype = self.dtype_of(name)
+        dtype = dtype_of(self, name)
         return default if dtype is None else dtype
 
     def __getattr__(self, name: str) -> Any:
         if name.startswith("_"):
             raise AttributeError(name)
-        dtype = self.dtype_of(name)
+        dtype = dtype_of(self, name)
         if dtype is None:
             raise AttributeError(f"CatSpec has no Enum or Categorical named {name!r}")
         return dtype
 
     def __getitem__(self, name: str) -> pl.DataType:
-        dtype = self.dtype_of(name)
+        dtype = dtype_of(self, name)
         if dtype is None:
             raise KeyError(f"CatSpec has no Enum or Categorical named {name!r}")
         return dtype
 
     def __contains__(self, name: object) -> bool:
-        return isinstance(name, str) and self.resolve_key(name) is not None
+        return isinstance(name, str) and resolve_key(self, name) is not None
 
     def __iter__(self) -> Iterator[str]:
         """Entry names, `Enum`s first, in declaration order within each kind."""
@@ -809,3 +739,72 @@ def _infer_from_spec(
             choices[col_name] = declared
 
     return CatSpec(enums=enums, categoricals=categoricals, choices=choices)
+
+
+# ---------------------------------------------------------------------------
+# Lookup -- one resolution rule, and everything else built on it. Module
+# functions rather than methods: the library needs them, users have `cats[...]`
+# and the `enums`, `categoricals` and `choices` mappings.
+# ---------------------------------------------------------------------------
+
+
+def resolve_key(cats: CatSpec, name: str) -> tuple[Kind, str] | None:
+    """Which entry a name binds to, if any.
+
+    Exact match first, then the upper- and lower-case forms, so a column
+    named `status` finds `STATUS`. An `Enum` wins over a `Categorical` of
+    the same name.
+    """
+    for kind, entries in (
+        ("enum", cats._enums),
+        ("categorical", cats._categoricals),
+    ):
+        for candidate in (name, name.upper(), name.lower()):
+            if candidate in entries:
+                return (kind, candidate)  # type: ignore[return-value]
+    return None
+
+
+def dtype_of(cats: CatSpec, name: str) -> pl.DataType | None:
+    """The dtype registered under `name`, or None if nothing is."""
+    resolved = resolve_key(cats, name)
+    if resolved is None:
+        return None
+    kind, key = resolved
+    if kind == "enum":
+        return pl.Enum(cats._enums[key])
+    return pl.Categorical(cats._categoricals[key])
+
+
+def enum_categories(cats: CatSpec, name: str) -> list[str]:
+    """The category list of an `Enum` entry."""
+    resolved = resolve_key(cats, name)
+    if resolved is None or resolved[0] != "enum":
+        raise KeyError(f"CatSpec has no Enum named {name!r}")
+    return list(cats._enums[resolved[1]])
+
+
+def categories_of(cats: CatSpec, name: str) -> pl.Categories:
+    """The shared `pl.Categories` of a `Categorical` entry."""
+    for candidate in (name, name.upper(), name.lower()):
+        if candidate in cats._categoricals:
+            return cats._categoricals[candidate]
+    raise KeyError(f"CatSpec has no Categorical named {name!r}")
+
+
+def pool_of(cats: CatSpec, name: str) -> list[Any] | None:
+    """The pool of values an entry draws from, if it has one.
+
+    An `Enum`'s categories are its pool. A `Categorical`'s comes from the
+    `choices` it was registered with, since a `pl.Categories` names a shared
+    domain without listing what is in it.
+    """
+    if name in cats._choices:
+        return list(cats._choices[name])
+    resolved = resolve_key(cats, name)
+    if resolved is None:
+        return None
+    kind, key = resolved
+    if kind == "enum":
+        return list(cats._enums[key])
+    return list(cats._choices[key]) if key in cats._choices else None

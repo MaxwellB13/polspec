@@ -11,7 +11,6 @@ import polars as pl
 import pytest
 import yaml
 from polspec import (
-    CliError,
     ColRule,
     ColSpec,
     ForeignKey,
@@ -37,17 +36,14 @@ def test_every_error_is_a_polspec_error():
         GenerationError,
         SerializationError,
         RegistryError,
-        CliError,
     ):
         assert issubclass(cls, PolspecError)
 
 
 def test_every_error_is_reachable_from_the_package():
-    """One import for the hierarchy, including the one the CLI raises.
-
-    `CliError` used to live only in `polspec.errors`, so `except
-    polspec.CliError` failed while its five siblings worked.
-    """
+    """One import for the hierarchy. The command line's own error is not in
+    it: `main()` turns every `PolspecError` into an exit status, so none
+    reaches a caller."""
     import polspec
 
     for cls in (
@@ -57,7 +53,6 @@ def test_every_error_is_reachable_from_the_package():
         GenerationError,
         SerializationError,
         RegistryError,
-        CliError,
     ):
         assert getattr(polspec, cls.__name__) is cls
         assert cls.__name__ in polspec.__all__

@@ -31,10 +31,10 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import polars as pl
 
+from polspec.compare import stats
+from polspec.compare.data import Observed
+from polspec.compare.report import DriftFinding, Severity
 from polspec.domain import Domain, describe_values
-from polspec.drift import stats
-from polspec.drift.data import Observed
-from polspec.drift.report import DriftFinding, Severity
 from polspec.dtypes import bound_endpoint_to_physical, field_dtypes
 from polspec.errors import PolspecError
 from polspec.formats import lookup as _lookup_format
@@ -52,7 +52,7 @@ REFERENCE_SEED = 20_260_929
 
 if TYPE_CHECKING:
     from polspec.bound import Bound
-    from polspec.drift import DriftOptions
+    from polspec.compare import DriftOptions
     from polspec.spec import ColSpec
     from polspec.tablespec import TableSpec
 

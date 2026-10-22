@@ -68,8 +68,8 @@ argument at construction time can still add to or override them per key.
 
 ```python
 extended = Categories(enums={"REASON": ["FRAUD", "DUPLICATE"]})
-extended.get_enum("STATUS")   # ["NEW", "PAID", "SHIPPED"] -- inherited
-extended.get_enum("REASON")   # ["FRAUD", "DUPLICATE"]     -- added
+extended.enums["STATUS"]   # ["NEW", "PAID", "SHIPPED"] -- inherited
+extended.enums["REASON"]   # ["FRAUD", "DUPLICATE"]     -- added
 ```
 
 They also compare equal when they say the same thing, so a registry loaded from
@@ -82,8 +82,8 @@ Categories.spec == CatSpec.from_yaml("categories.yaml")
 
 ## Using a registry
 
-Whichever form built it, the accessors are the same, and naming an entry always
-means the same thing: the dtype.
+Whichever form built it, naming an entry always means the same thing: its
+dtype.
 
 ```python
 categories.STATUS                   # -> pl.Enum([...])
@@ -92,27 +92,19 @@ categories["STATUS"]                # -> the same dtype
 categories.get("STATUS")            # -> the same dtype, or None
 ```
 
-Ask for the pieces underneath when you want them rather than the dtype:
+What is underneath is in three mappings, one per kind, keyed by each entry's
+name as declared:
 
 ```python
-categories.get_enum("STATUS")           # -> list[str]
-categories.get_categorical("CURRENCY")  # -> pl.Categories
-categories.get_choices("CURRENCY")      # -> the domain pool, or None
+categories.enums["STATUS"]            # -> ["NEW", "PAID", "SHIPPED"]
+categories.categoricals["CURRENCY"]   # -> pl.Categories
+categories.choices.get("CURRENCY")    # -> the domain pool, or None
 ```
 
-And name the kind when you want the lookup to insist on it — these refuse an
-entry of the other kind instead of quietly returning it:
-
-```python
-categories.enum.STATUS              # -> pl.Enum
-categories.enum["STATUS"]           # item access
-categories.enum("STATUS")           # callable
-categories.categorical.CURRENCY     # -> pl.Categorical
-```
-
-Lookup falls back to case variants, so a column named `status` finds a registry
-entry named `STATUS`. Convenient, but worth knowing about if you have entries
-differing only in case.
+Naming an entry falls back to case variants, so `categories["status"]` -- and a
+column named `status` -- finds an entry named `STATUS`. Convenient, but worth
+knowing about if you have entries differing only in case. The mappings match
+exactly.
 
 ## Why a shared `Categories` matters
 

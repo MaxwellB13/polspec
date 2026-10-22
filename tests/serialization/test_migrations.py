@@ -17,6 +17,7 @@ import polars as pl
 import pytest
 import yaml
 from polspec import (
+    FORMAT_VERSION,
     CatSpec,
     Check,
     ColRule,
@@ -26,16 +27,9 @@ from polspec import (
     SerializationError,
     TableSpec,
     col,
-    inspect,
-)
-from polspec.serialization import (
-    FORMAT_VERSION,
-    catspec_from_dict,
-    catspec_from_yaml,
     from_dict,
     from_yaml,
-    registry_from_dict,
-    registry_from_yaml,
+    inspect,
     to_dict,
 )
 
@@ -145,17 +139,17 @@ def test_an_old_spec_file_writes_back_as_the_current_version(fixture, tmp_path):
 
 @pytest.mark.parametrize("fixture", ["catspec_v1.yaml", "catspec_v2.yaml"])
 def test_an_old_category_registry_reads_as_it_declared(fixture):
-    cats = catspec_from_yaml(FIXTURES / fixture)
+    cats = CatSpec.from_yaml(FIXTURES / fixture)
     assert cats.status == pl.Enum(["A", "B"])
-    assert cats.get_categorical("currency").physical() == pl.UInt8
+    assert cats["currency"].categories.physical() == pl.UInt8
     if fixture == "catspec_v2.yaml":
-        assert cats.get_choices("CURRENCY") == ["GBP", "USD"]
-        assert cats.get_choices("plain") == ["x", "y"]
+        assert cats.choices.get("CURRENCY") == ["GBP", "USD"]
+        assert cats.choices.get("plain") == ["x", "y"]
     assert CatSpec.from_dict(cats.to_dict()) == cats
 
 
 def test_an_old_registry_file_reads_as_it_declared():
-    registry = registry_from_yaml(FIXTURES / "registry_v2.yaml")
+    registry = Registry.from_yaml(FIXTURES / "registry_v2.yaml")
     assert isinstance(registry, Registry)
     assert registry.names == ("Customers", "Orders")
     orders = registry["Orders"]
@@ -174,8 +168,8 @@ def test_an_old_registry_file_reads_as_it_declared():
     ("read", "data"),
     [
         (from_dict, {"name": "T", "columns": {"c": {"dtype": "Int64"}}}),
-        (catspec_from_dict, {"enums": {"S": ["a"]}}),
-        (registry_from_dict, {"specs": {"T": {"columns": {"c": {"dtype": "Int64"}}}}}),
+        (CatSpec.from_dict, {"enums": {"S": ["a"]}}),
+        (Registry.from_dict, {"specs": {"T": {"columns": {"c": {"dtype": "Int64"}}}}}),
     ],
     ids=["spec", "catspec", "registry"],
 )

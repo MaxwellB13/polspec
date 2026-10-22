@@ -30,7 +30,7 @@ from polspec.validation.report import json_value
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from polspec.drift import DriftOptions
+    from polspec.compare import DriftOptions
 
 # The shape of `DriftReport.to_dict()`, and so of `polspec diff --json` and
 # `polspec drift --json`: raised when a key is renamed, removed or changes
@@ -58,8 +58,12 @@ DriftCode = Literal[
     "constraint_removed",
     "field_changed",
 ]
+"""The code of a `DriftFinding`: what moved. The full list is on the *Errors
+and findings* page."""
 
 Severity = Literal["breaking", "compatible"]
+"""A `DriftFinding`'s severity: `breaking` when data that satisfied the old
+side could fail the new one, `compatible` otherwise."""
 Kind = Literal["diff", "drift"]
 
 

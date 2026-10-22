@@ -32,7 +32,3 @@ existing `except ValueError` handlers keep working. The
 ## RegistryError
 
 ::: polspec.RegistryError
-
-## CliError
-
-::: polspec.CliError

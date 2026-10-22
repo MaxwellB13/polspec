@@ -576,21 +576,6 @@ class TableSpec:
         """The Polars schema this spec declares: column name to dtype."""
         return pl.Schema({name: spec.dtype for name, spec in self.columns.items()})
 
-    def estimated_size(self, n: int) -> int:
-        """Bytes a frame of `n` generated rows is expected to hold.
-
-        Read off the declaration -- the width of each dtype, the lengths the
-        spec declares -- so it costs nothing and needs no data. It measures
-        the *frame*: generation holds working buffers on top, most visibly
-        for `Decimal` and `List`, so a process peak is higher.
-
-        >>> Orders.spec.estimated_size(1_000_000) / 1024**2   # doctest: +SKIP
-        27.5
-        """
-        from polspec.sizing import estimated_size
-
-        return estimated_size(self, n)
-
     def tag(
         self,
         *tags: str | Sequence[str],
@@ -814,26 +799,33 @@ class TableSpec:
 
         Takes the registry as a value or as the class body that declares it.
         """
-        from polspec.catspec import as_catspec
+        # Here, not at the top: `catspec` imports this module.
+        from polspec.catspec import (
+            as_catspec,
+            categories_of,
+            enum_categories,
+            pool_of,
+            resolve_key,
+        )
 
         catspec = as_catspec(catspec)
         new_columns: dict[str, ColSpec] = {}
         for col_name, spec in self.columns.items():
-            resolved = catspec.resolve_key(col_name)
+            resolved = resolve_key(catspec, col_name)
             if resolved is None:
                 new_columns[col_name] = spec
                 continue
             kind, key = resolved
             if kind == "enum":
                 new_columns[col_name] = _retype_column(
-                    col_name, spec, pl.Enum(catspec.get_enum(key))
+                    col_name, spec, pl.Enum(enum_categories(catspec, key))
                 )
             else:
                 new_columns[col_name] = _retype_column(
                     col_name,
                     spec,
-                    pl.Categorical(catspec.get_categorical(key)),
-                    choices=catspec.get_choices(key) or spec.choices,
+                    pl.Categorical(categories_of(catspec, key)),
+                    choices=pool_of(catspec, key) or spec.choices,
                 )
         return dataclasses.replace(self, columns=new_columns)
 

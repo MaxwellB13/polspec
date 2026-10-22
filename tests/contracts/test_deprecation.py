@@ -111,7 +111,7 @@ def test_the_field_tables_left_serialization_and_still_work(name):
 STABILITY = (
     Path(__file__).resolve().parents[2] / "docs" / "explanation" / "stability.md"
 )
-PUBLIC = ("polspec", "polspec.drift", "polspec.validation", "polspec.serialization")
+PUBLIC = ("polspec",)
 
 
 def _inventory() -> list[str]:

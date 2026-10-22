@@ -26,12 +26,12 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, Unpack, cast, overload
 
 import polars as pl
 
-from polspec import drift as drift_module
-from polspec import generation, reading, serialization, validation
+from polspec import compare as drift_module
+from polspec import generation, reading, serialization, sizing, validation
 from polspec._deprecation import deprecated
 from polspec.catspec import CatSpec
 from polspec.check import Check
-from polspec.drift import DriftOptions, DriftReport
+from polspec.compare import DriftOptions, DriftReport
 from polspec.errors import SpecError
 from polspec.foreign_key import ForeignKey
 from polspec.frames import Method, References, sample_rows
@@ -526,7 +526,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         See `TableSpec.estimated_size`. `generate()` warns when the estimate
         passes four gibibytes, and takes `max_bytes=` to refuse instead.
         """
-        return cls.spec.estimated_size(n)
+        return sizing.estimated_size(cls.spec, n)
 
     @classmethod
     def scan(
@@ -726,7 +726,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     ) -> DriftReport:
         """What changed from this spec to `other`, as a `DriftReport`.
 
-        This spec is the *old* side. See `polspec.drift.diff`.
+        This spec is the *old* side. See `polspec.compare.diff`.
         """
         return drift_module.diff(cls.spec, other, renames=renames, options=options)
 
@@ -744,7 +744,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         """How `df` has moved relative to this spec, as a `DriftReport`.
 
         Each keyword left as `None` takes the `DriftOptions` default. See
-        `polspec.drift.drift`.
+        `polspec.compare.drift`.
         """
         return drift_module.drift(
             cls.spec,

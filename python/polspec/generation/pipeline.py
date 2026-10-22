@@ -34,6 +34,7 @@ from polspec.generation.passes.rules import apply_column_rules
 from polspec.generation.passes.unique_together import apply_unique_together
 from polspec.generation.seeds import pass_seed
 from polspec.pass_order import ordered_passes, rewritable_members
+from polspec.sizing import estimated_size
 from polspec.spec import ColSpec
 from polspec.tablespec import (
     SpecLike,
@@ -294,7 +295,7 @@ def _check_size(spec: TableSpec, n: int, max_bytes: int | None) -> None:
     """
     if max_bytes == 0:
         return
-    estimate = spec.estimated_size(n)
+    estimate = estimated_size(spec, n)
     limit = LARGE_FRAME_BYTES if max_bytes is None else max_bytes
     if estimate <= limit:
         return

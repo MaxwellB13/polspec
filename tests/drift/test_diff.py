@@ -26,8 +26,8 @@ from polspec import (
     SpecError,
     TableSpec,
     col,
+    diff,
 )
-from polspec.drift import diff
 
 
 def _spec(**columns: ColSpec) -> TableSpec:

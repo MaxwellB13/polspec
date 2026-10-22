@@ -13,8 +13,15 @@ import datetime as dt
 
 import polars as pl
 import pytest
-from polspec import ColSpec, DriftOptions, FrameSpec, TableSpec, generate, inspect
-from polspec.drift import drift
+from polspec import (
+    ColSpec,
+    DriftOptions,
+    FrameSpec,
+    TableSpec,
+    drift,
+    generate,
+    inspect,
+)
 
 ROWS = 2_000
 SEED = 3

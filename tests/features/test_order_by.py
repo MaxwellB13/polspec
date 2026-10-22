@@ -23,6 +23,7 @@ from polspec import (
     SpecError,
     TableSpec,
     col,
+    diff,
     from_yaml,
     generate,
     generate_batches,
@@ -35,7 +36,6 @@ from polspec import (
     to_yaml,
     validate,
 )
-from polspec.drift import diff
 
 
 class Events(FrameSpec):

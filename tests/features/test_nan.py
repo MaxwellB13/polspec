@@ -20,12 +20,14 @@ from polspec import (
     RegistryError,
     SpecError,
     TableSpec,
+    diff,
+    drift,
+    from_dict,
     generate,
     generate_batches,
     inspect,
+    to_dict,
 )
-from polspec.drift import diff, drift
-from polspec.serialization import from_dict, to_dict
 
 NAN = float("nan")
 

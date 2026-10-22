@@ -15,6 +15,10 @@ What drift does not measure is what validation already does: uniqueness,
 composite keys, foreign keys and checks are pass/fail claims about rows,
 not summaries that move. `drift()` reports on columns; `validate()` is
 still the verdict.
+
+What is public here is exported from `polspec` itself.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations
@@ -26,9 +30,9 @@ from typing import Any
 import polars as pl
 
 from polspec._options import options_from
-from polspec.drift.data import Observed
-from polspec.drift.fields import Pair, compare_column, compare_table
-from polspec.drift.report import DriftCode, DriftFinding, DriftReport, Severity
+from polspec.compare.data import Observed
+from polspec.compare.fields import Pair, compare_column, compare_table
+from polspec.compare.report import DriftCode, DriftFinding, DriftReport, Severity
 from polspec.frames import Frame, to_eager
 from polspec.pass_order import passes_of
 from polspec.tablespec import TableSpec, as_table_spec, require_columns

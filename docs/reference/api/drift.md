@@ -1,17 +1,17 @@
 # Drift
 
-`polspec.drift.diff()` compares two declarations; `polspec.drift.drift()`
+`polspec.diff()` compares two declarations; `polspec.drift()`
 compares a declaration to a frame. Both return a `DriftReport`, and both are
 reachable from a spec as `Orders.diff(...)` and `Orders.drift(df)` -- see
 [Schema and data drift](../../how-to/drift.md).
 
 ## diff
 
-::: polspec.drift.diff
+::: polspec.diff
 
 ## drift
 
-::: polspec.drift.drift
+::: polspec.drift
 
 ## DriftOptions
 
@@ -24,3 +24,11 @@ reachable from a spec as `Orders.diff(...)` and `Orders.drift(df)` -- see
 ## DriftFinding
 
 ::: polspec.DriftFinding
+
+## DriftCode
+
+::: polspec.DriftCode
+
+## Severity
+
+::: polspec.Severity

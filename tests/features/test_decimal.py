@@ -15,8 +15,7 @@ from decimal import Decimal
 import polars as pl
 import pytest
 from helpers import spec_for
-from polspec import ColSpec, FrameSpec, SpecError, ValidationError
-from polspec.drift import drift
+from polspec import ColSpec, FrameSpec, SpecError, ValidationError, drift
 
 # ---------------------------------------------------------------------------
 # Declaration

@@ -9,6 +9,7 @@ keeps a half's rounding from carrying a value over a bound.
 from __future__ import annotations
 
 import polars as pl
+import polspec
 import pytest
 from helpers import spec_for
 from polspec import ColSpec, FrameSpec, GenerationError, SpecError, TableSpec
@@ -131,7 +132,7 @@ def test_each_round_trips_through_yaml_and_python(dtype, tmp_path):
 )
 def test_each_is_sized_at_its_own_width(dtype, width):
     spec = TableSpec("S", {"c": ColSpec(dtype)})
-    assert spec.estimated_size(1_000) == width * 1_000
+    assert polspec.estimated_size(spec, 1_000) == width * 1_000
     df = spec_for(ColSpec(dtype)).generate(1_000, seed=1)
     assert df.estimated_size() == width * 1_000
 

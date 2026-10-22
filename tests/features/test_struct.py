@@ -14,6 +14,7 @@ field (`point.lat`) and locates the column's rows.
 from __future__ import annotations
 
 import polars as pl
+import polspec
 import pytest
 from helpers import spec_for
 from polspec import (
@@ -23,10 +24,11 @@ from polspec import (
     SpecError,
     TableSpec,
     col,
+    diff,
+    drift,
     generate,
     inspect,
 )
-from polspec.drift import diff, drift
 
 POINT = pl.Struct({"lat": pl.Float64, "lon": pl.Float64, "label": pl.String})
 
@@ -166,8 +168,7 @@ def test_a_struct_column_round_trips_through_yaml_and_python(tmp_path):
 
 
 def test_a_struct_dtype_is_read_back_from_a_mapping_of_its_fields():
-    from polspec import SerializationError
-    from polspec.serialization import from_dict, to_dict
+    from polspec import SerializationError, from_dict, to_dict
 
     data = to_dict(TableSpec("T", {"p": ColSpec(POINT)}))
     assert data["columns"]["p"]["dtype"] == {
@@ -661,12 +662,12 @@ def test_estimated_size_of_a_struct_is_its_fields():
         )
     )
     n = 10_000
-    assert struct.estimated_size(n) == fields_alone.estimated_size(n)
+    assert polspec.estimated_size(struct, n) == polspec.estimated_size(fields_alone, n)
 
     # Polars' own accounting leaves out the 16-byte view per text value.
     df = struct.generate(n, seed=1)
     polars_says = df.estimated_size() + 16 * n
-    assert struct.estimated_size(n) == pytest.approx(polars_says, rel=0.02)
+    assert polspec.estimated_size(struct, n) == pytest.approx(polars_says, rel=0.02)
 
 
 def test_every_breaking_field_finding_is_a_validation_failure_on_that_field():

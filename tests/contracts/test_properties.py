@@ -49,17 +49,19 @@ from polspec import (
     SpecError,
     TableSpec,
     col,
+    drift,
+    from_dict,
     generate,
     generate_batches,
     inspect,
     profile,
+    to_dict,
     to_markdown,
     to_mermaid,
+    to_python,
     validate,
 )
-from polspec.drift import drift
 from polspec.formats import FORMATS
-from polspec.serialization import from_dict, to_dict, to_python
 
 # Polars 2's `Map`; on Polars 1, no dtype is one.
 MAP = getattr(pl, "Map", ())

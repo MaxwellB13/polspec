@@ -24,6 +24,7 @@ import polars as pl
 import polspec
 import pytest
 from polspec import (
+    FORMAT_VERSION,
     Check,
     ColRule,
     ColSpec,
@@ -39,12 +40,11 @@ from polspec import (
     to_yaml,
 )
 from polspec.cli import main
-from polspec.serialization import FORMAT_VERSION
 
 GOLDEN = Path(__file__).with_name("golden")
 WRITE = os.environ.get("POLSPEC_WRITE_GOLDEN") == "1"
 DOCS = Path(__file__).resolve().parents[2] / "docs"
-PUBLIC = ("polspec", "polspec.drift", "polspec.validation", "polspec.serialization")
+PUBLIC = ("polspec",)
 
 
 def _golden(name: str, actual: str) -> None:

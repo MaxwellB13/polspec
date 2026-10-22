@@ -35,7 +35,7 @@ outside polspec should use only [the public API](../reference/api/index.md).
 | `scalars` | The plain forms a spec file writes for the values YAML cannot hold -- a time, a duration -- shared by bounds, choices and predicate literals |
 | `formats` | Named string formats -- what each looks like, said once for generation and validation |
 | `hierarchy` | `Hierarchy` -- a self-referencing link table, declared |
-| `drift` | `diff` and `drift`: what changed between two specs, or between a spec and data. `fields.py` holds one comparator per `ColSpec` field, `data.py` measures a frame in the declaration's terms |
+| `compare` | `diff` and `drift`: what changed between two specs, or between a spec and data. `fields.py` holds one comparator per `ColSpec` field, `data.py` measures a frame in the declaration's terms |
 | `sizing` | `estimated_size`: a frame's memory, read off the declaration |
 | `reading` | `read`: a data file in a spec's terms -- the reader chosen by extension, a declared type the file could not hold (a date, decimal or duration as text; an array as a list) read as declared. The CLI reads through the same table |
 | `catspec` | `CatSpec` — a shared registry of enums and categoricals, as a value, plus the metaclass that builds one from a class body (the same split as `tablespec`/`framespec`) |

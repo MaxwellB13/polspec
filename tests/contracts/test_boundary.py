@@ -28,7 +28,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "python" / "polspec"
-PUBLIC = ("polspec", "polspec.drift", "polspec.validation", "polspec.serialization")
+PUBLIC = ("polspec",)
 INTERNAL = "Internal: not part of the public API."
 
 # `from polspec.x import a, b` or `from polspec.x import (\n a,\n b,\n)`,
@@ -92,7 +92,8 @@ def test_every_public_name_is_real_and_has_a_docstring(module: str):
     """Each class and function, that is: a constant or a `Literal` alias
     cannot carry one, and its API page describes it."""
     loaded = importlib.import_module(module)
-    assert loaded.__all__ == sorted(loaded.__all__)
+    # In ruff's order (RUF022): constants first, then everything else sorted.
+    assert loaded.__all__ == sorted(loaded.__all__, key=lambda n: (not n.isupper(), n))
     undocumented = []
     for name in loaded.__all__:
         value = getattr(loaded, name)  # an AttributeError is a stale __all__

@@ -493,7 +493,7 @@ def test_extra_values_survive_a_spec_file(tmp_path):
 
 
 def test_removing_an_extra_is_breaking_and_adding_one_is_not():
-    from polspec.drift import diff
+    from polspec import diff
 
     wide = TableSpec("T", {"c": COUNTRY})
     narrow = TableSpec(

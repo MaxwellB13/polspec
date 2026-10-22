@@ -179,9 +179,8 @@ POLSPEC_WRITE_GOLDEN=1 uv run pytest tests/contracts/test_contract.py
 
 ## The public API
 
-The public API is `polspec.__all__` and the `__all__` of `polspec.drift`,
-`polspec.validation` and `polspec.serialization`. Every other module's
-docstring ends `Internal: not part of the public API.`, and a new module
+The public API is `polspec.__all__`, and nothing else: one namespace.
+Every module's docstring ends `Internal: not part of the public API.`, and a new module
 needs that line. `tests/contracts/test_boundary.py` holds the line:
 
 - the docs and README import only public names;

@@ -4,6 +4,10 @@ Everything here is driven by the field registry in `fields.py`, so the YAML
 a spec writes, the YAML it reads, and the Python it emits cannot disagree
 about which fields exist. Files carry a `version:`; `migrations.py` brings an
 older file forward before it is read.
+
+What is public here is exported from `polspec` itself.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ import polars as pl
 import yaml
 from yaml.representer import RepresenterError
 
+from polspec.catspec import pool_of
 from polspec.errors import SerializationError, SpecError
 from polspec.serialization.dtypes import physical_name
 from polspec.serialization.fields import (
@@ -439,7 +444,7 @@ def catspec_to_dict(catspec: CatSpec) -> dict[str, Any]:
                 info["namespace"] = cat.namespace()
             if cat.physical() != pl.UInt32:
                 info["physical"] = physical_name(cat.physical())
-            choices = catspec.get_choices(key)
+            choices = pool_of(catspec, key)
             if choices:
                 info["categories"] = list(choices)
             cats[key] = info

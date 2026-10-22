@@ -28,3 +28,11 @@ data -- see [Validating data](../../how-to/validating.md). Each takes a
 ## Finding
 
 ::: polspec.Finding
+
+## FindingCode
+
+::: polspec.FindingCode
+
+## FINDING_COLUMN
+
+::: polspec.FINDING_COLUMN

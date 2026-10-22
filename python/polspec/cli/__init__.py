@@ -29,7 +29,7 @@ from polspec.cli._drift import _FAIL_ON, _cmd_diff, _cmd_drift
 from polspec.cli._schema import _cmd_schema_infer, _cmd_schema_new
 from polspec.cli._synthesize import add_synthesize_parser
 from polspec.cli._test import _cmd_test
-from polspec.drift import DriftOptions
+from polspec.compare import DriftOptions
 from polspec.errors import PolspecError
 from polspec.profiler import step_of
 from polspec.validation import SWITCHES
