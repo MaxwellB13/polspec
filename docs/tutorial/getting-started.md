@@ -26,7 +26,7 @@ thousands of rows later:
 <!-- docs: raises -->
 ```python
 ColSpec(pl.Int8, bounds=(0, 1_000))
-# ValueError: ColSpec.bounds max (1000) is outside the range Int8 can represent [-128, 127]
+# SpecError: ColSpec.bounds max (1000) is outside the range Int8 can represent [-128, 127]
 ```
 
 ## Generate data
@@ -131,10 +131,13 @@ occurred, so regenerated data keeps the observed mix rather than a uniform one.
 
 Treat the result as a first draft to edit, not a finished contract: it
 describes the sample it saw, which may be narrower than the rule you actually
-mean.
+mean. [Infer a spec from data](../how-to/profiling.md) covers the rest:
+`polspec.profile`, which also records a stand-in's shapes and keys, the
+options, and rounding.
 
 ## Next
 
 - [Declaring columns](../how-to/columns.md) — everything a `ColSpec` accepts
 - [Constraints](../how-to/constraints.md) — rules, checks, uniqueness, foreign keys
 - [Generating data](../how-to/generating.md) — coverage, batching, writing to files
+- [Testing pipelines](../how-to/testing.md) — fixtures, and checking what each stage produces

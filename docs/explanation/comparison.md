@@ -18,20 +18,20 @@ hand back a usable frame," not raw loop speed in isolation.
 | n_rows     | polspec (Rust) |     NumPy |    Python |
 |-----------:|---------------:|----------:|----------:|
 |      1,000 |        0.0001s |   0.0006s |   0.0014s |
-|     10,000 |        0.0003s |   0.0049s |   skipped |
-|    100,000 |        0.0020s |   0.0472s |   0.1454s |
-|  1,000,000 |        0.0069s |   0.4797s |   1.4837s |
-|  5,000,000 |        0.0286s |   2.4156s |   skipped |
-| 20,000,000 |        0.1127s |   9.7757s |   skipped |
+|     10,000 |        0.0004s |   0.0048s |   0.0143s |
+|    100,000 |        0.0020s |   0.0464s |   0.1461s |
+|  1,000,000 |        0.0064s |   0.4775s |   2.0281s |
+|  5,000,000 |        0.0282s |   2.4287s |   skipped |
+| 20,000,000 |        0.1116s |  15.0528s |   skipped |
 
-Measured 2026-09-08 on an Intel 13900K with 64GB DDR5; yours will differ, and
+Measured 2026-10-22 with polspec 0.21.0 on an Intel 13900K with 64GB DDR5; yours will differ, and
 the shape matters more than the absolute numbers. Three things worth reading
 off it:
 
 - **The gap widens with size, not just the ratio.** At 1,000 rows all three
   are fast enough that the difference doesn't matter to a test suite. At
   20,000,000, pure Python is impractical (skipped past a 5-second cutoff at
-  a much smaller size) and NumPy's ~2 million rows/second becomes a real wait
+  a much smaller size) and NumPy's 1–2 million rows/second becomes a real wait
   in a CI loop, while polspec is still around a tenth of a second.
 - **NumPy's implementation is the hard-won version.** Its string column uses
   a fixed-width byte-array trick because NumPy has no efficient way to
@@ -49,7 +49,7 @@ off it:
   extension as a single codegen unit moves the `unique` path by a factor of two
   on its own.
 
-Reproduce it yourself:
+Reproduce it yourself, from a checkout of the repository:
 
 ```bash
 uv run --group bench python benchmarks/bench.py compare

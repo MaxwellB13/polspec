@@ -136,6 +136,7 @@ two specs sharing it draw from the same domain.
 ## Building a registry from what you have
 
 ```python
+df = Orders.generate(100, seed=1)
 CatSpec.from_dataframe(df)      # existing Enum/Categorical columns
 CatSpec.from_framespec(Orders)  # a spec's declared columns
 ```

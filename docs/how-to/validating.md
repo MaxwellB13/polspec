@@ -1,5 +1,42 @@
 # Validating data
 
+The examples on this page check data against these specs:
+
+```python
+from pathlib import Path
+
+from datetime import date
+
+import polars as pl
+from polspec import ColSpec, ForeignKey, FrameSpec
+
+
+class Customers(FrameSpec):
+    id        = ColSpec(pl.Int64, bounds=(1, 10_000), unique=True)
+    name      = ColSpec(pl.String, string_length=(3, 20), tags="pii")
+    country   = ColSpec(pl.Enum(["UK", "US", "DE"]))
+    signed_up = ColSpec(pl.Date, bounds=(date(2020, 1, 1), date(2026, 1, 1)))
+
+
+class Orders(FrameSpec):
+    order_id      = ColSpec(pl.Int64, bounds=(1, 1_000_000), unique=True)
+    customer_id   = ColSpec(pl.Int64, bounds=(1, 10_000))
+    status        = ColSpec(pl.Enum(["NEW", "PAID", "SHIPPED"]))
+    total         = ColSpec(pl.Float64, bounds=(0.0, 5_000.0))
+    internal_note = ColSpec(pl.String, string_length=(0, 40), nullable=True)
+
+
+class OrderLines(FrameSpec):
+    order_id = ColSpec(pl.Int64, bounds=(1, 1_000_000))
+    line_no  = ColSpec(pl.Int32, bounds=(1, 50))
+    quantity = ColSpec(pl.UInt16, bounds=(1, 500))
+    __unique_together__ = [["order_id", "line_no"]]
+    __foreign_keys__ = [ForeignKey("order_id", references=Orders)]
+
+
+df = Orders.generate(500, seed=2)
+```
+
 ```python
 clean = Orders.validate(df)
 ```
@@ -172,7 +209,7 @@ error replaces the whole report.
 <!-- docs: raises -->
 ```python
 pl.read_csv("customers.csv", schema_overrides=Customers.schema())
-# ComputeError: could not parse `FR` as dtype `enum` at column 'country'
+# ComputeError: could not parse `FR` as dtype `enum` at column 'country' ...
 ```
 
 **2. Ask what is wrong -- all of it.**
@@ -401,7 +438,10 @@ the dtype error under noise.
 A key referencing another spec needs that spec's data:
 
 ```python
-Orders.validate(orders, references={Customers: customers})
+orders = Orders.generate(500, seed=2)
+order_lines = OrderLines.generate(800, seed=3, references={Orders: orders})
+
+OrderLines.validate(order_lines, references={Orders: orders})
 ```
 
 Without it, the key is reported as a `foreign_key_unresolved` finding naming

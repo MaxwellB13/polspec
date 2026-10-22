@@ -11,6 +11,9 @@ same row shape — which is why one table holds both.
 ## Declaring one
 
 ```python
+import polars as pl
+from polspec import ColSpec, FrameSpec, Hierarchy
+
 class Links(FrameSpec):
     PARENT_REF = ColSpec(pl.String)
     CHILD_REF = ColSpec(pl.String)

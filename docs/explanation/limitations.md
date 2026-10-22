@@ -2,11 +2,11 @@
 
 polspec generates data and validates it from one declaration. Where both
 sides read the same definition they cannot drift: what values a column may
-hold, and the order the passes that rewrite a generated frame run in, live
-in `polspec.domain` and `polspec.pass_order`. What is left below is what generation does not
-attempt at all, plus a few edges worth knowing about.
+hold, and the order in which rules, keys and hierarchies rewrite a generated
+frame, are each defined once and read by both. What is left below is what
+generation does not attempt at all, plus a few edges worth knowing about.
 
-Each is pinned by a test in `tests/contracts/test_roundtrip.py`. A gap meant to close
+Each is pinned by a test in polspec's suite. A gap meant to close
 one day carries `xfail(strict=True)`: the suite stays green while it exists,
 and the moment it is fixed pytest turns the XPASS into a failure. A boundary
 that is deliberate is pinned by an ordinary passing test instead. Either way
@@ -37,6 +37,9 @@ functional graph — so a row can be its own parent, and two rows can be each
 other's. This is not rare:
 
 ```python
+import polars as pl
+from polspec import ColSpec, ForeignKey, FrameSpec, Hierarchy
+
 class Node(FrameSpec):
     Reference = ColSpec(pl.String, unique=True)
     Parent    = ColSpec(pl.String, nullable=True, null_probability=0.2)

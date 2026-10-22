@@ -21,7 +21,8 @@ Rules, validators and checks all take a condition. Write it with `col()`,
 which builds a small predicate tree rather than a Polars expression:
 
 ```python
-from polspec import col
+import polars as pl
+from polspec import ColSpec, FrameSpec, col
 
 col("total") >= col("subtotal")
 col("email").str.contains("@")
@@ -188,6 +189,7 @@ class TooTight(FrameSpec):
 TooTight.generate(300, seed=1)
 # GenerationError: Composite unique key ['a', 'b'] cannot be satisfied: the
 # columns take 4 distinct combination(s) between them and 300 row(s) need one.
+# Widen one of the columns, or generate fewer rows.
 ```
 
 A member column may not also carry `rules`: a rule assigns from a fixed set,
@@ -250,7 +252,8 @@ instead:
 Events.scan(10_000)
 # SpecError: Events declares order_by ['user_id', 'ts'], which scan cannot
 # produce: the rows' order is a property of the whole frame, and each batch
-# is generated on its own.
+# is generated on its own. Use generate() for an ordered frame, and write it out
+# yourself.
 ```
 
 `profile()` declares an order it finds: the first column of single values,
