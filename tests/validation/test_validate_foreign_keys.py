@@ -68,7 +68,7 @@ def test_validation_foreign_key_missing_references_raises_value_error():
 def test_validation_foreign_key_validate_foreign_keys_false_bypasses_check():
     df = pl.DataFrame({"order_id": [1, 2], "customer_id": [1, 99]})
     # No references supplied, but the check is disabled so it never looks for one.
-    result = OrderSpec2.validate(df, validate_foreign_keys=False)
+    result = OrderSpec2.validate(df, foreign_keys=False)
     assert result.height == 2
 
 

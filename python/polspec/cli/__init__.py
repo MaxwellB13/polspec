@@ -262,8 +262,8 @@ def _add_validate_parser(subparsers: argparse._SubParsersAction) -> None:
         choices=SWITCHES,
         metavar="CHECK",
         help=(
-            "Turn off one kind of check, as validate_CHECK=False does; repeat "
-            f"for several. One of: {', '.join(SWITCHES)}"
+            "Turn off one kind of check, as CHECK=False does in Python; "
+            "repeat for several."
         ),
     )
     validate.add_argument(

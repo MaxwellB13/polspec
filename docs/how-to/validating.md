@@ -245,7 +245,7 @@ Customers.diff(Widened).breaking      # () -- widening a domain breaks nothing
 ```
 
 While you are still finding out what the ranges really are,
-`validate_bounds=False` checks everything but the bounds, and
+`bounds=False` checks everything but the bounds, and
 [`from_dataframe`](../tutorial/getting-started.md#infer-a-spec-instead-of-writing-one)
 describes what the file actually holds, to compare against what the spec
 says it should.
@@ -286,15 +286,15 @@ Orders.validate(
     cast=False,
     streaming=False,
     references=None,
-    validate_rules=True,
-    validate_validators=True,
-    validate_unique=True,
-    validate_checks=True,
-    validate_foreign_keys=True,
-    validate_hierarchy=True,
-    validate_order=True,
-    validate_pattern=True,
-    validate_bounds=True,
+    rules=True,
+    validators=True,
+    unique=True,
+    checks=True,
+    foreign_keys=True,
+    hierarchy=True,
+    order=True,
+    pattern=True,
+    bounds=True,
 )
 ```
 
@@ -303,14 +303,14 @@ carries as `report.options` — so a report says what it was asked to check, not
 only what it found:
 
 ```python
-report = Orders.inspect(df, validate_checks=False)
+report = Orders.inspect(df, checks=False)
 report.options.checks        # False
 report.options.extra_cols    # "raise"
 ```
 
-The `validate_*` switches are named for what they switch, so
-`validate_checks` is `options.checks`. An option name polspec does not accept
-is a `TypeError` naming the closest one it does.
+A keyword is the field it sets: `checks=False` is `options.checks`, as
+`--skip checks` is on the command line. An option name polspec does not
+accept is a `TypeError` naming the closest one it does.
 
 You can also pass the whole set as one value, which is the shape to reach for
 when the same settings go through several calls:
@@ -361,7 +361,7 @@ can. An `Int64` column where an `Int8` is declared passes with values from
 samples; so is a float or integer too large for a declared `Decimal`'s
 integer digits, after rounding to its scale. A declared bound has to fit its
 dtype, so on a side a bound closes such a value is out of bounds as well,
-and reported only as that -- unless `validate_bounds=False`. That is what makes a frame
+and reported only as that -- unless `bounds=False`. That is what makes a frame
 with no findings safe to hand to `cast=True`. Floats are left alone: a
 `Float64` too large for a declared `Float32` casts to an infinity rather
 than failing.
@@ -378,22 +378,22 @@ than memory.
 
 ### Turning checks off
 
-Each `validate_*` switch disables a whole category of check. Most exist for
+Each switch disables a whole category of check. Most exist for
 what generation cannot satisfy yet -- `__checks__`, validators and `pattern`
 are validated but not generated:
 
 ```python
-Orders.validate(Orders.generate(1_000, seed=1), validate_checks=False)
+Orders.validate(Orders.generate(1_000, seed=1), checks=False)
 ```
 
-`validate_bounds=False` is the other way round: generation always stays in
+`bounds=False` is the other way round: generation always stays in
 bounds, so it is for real data -- a file whose ranges you want to look at
 before holding it to them, while every other claim is still checked. It
 covers every `bounds`, including a `List`'s elements and a struct's fields;
 `string_length` and `list_length` have codes of their own and stay on.
 
 ```python
-Orders.validate(df, validate_bounds=False)
+Orders.validate(df, bounds=False)
 ```
 
 To loosen one column rather than all of them, validate against a spec with

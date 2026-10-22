@@ -268,7 +268,7 @@ def test_temporal_and_binary_dtypes_and_yaml(tmp_path):
 
     # Test YAML serialization
     yaml_path = tmp_path / "temporal.yaml"
-    TemporalAndBinary.to_yaml(source=yaml_path)
+    TemporalAndBinary.to_yaml(path=yaml_path)
     Loaded = FrameSpec.from_yaml(source=yaml_path)
     assert Loaded.schema() == TemporalAndBinary.schema()
     df_loaded = Loaded.generate(500, seed=42)

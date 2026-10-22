@@ -212,7 +212,7 @@ def test_validation_multibyte_string_length():
 
 
 # ---------------------------------------------------------------------------
-# validate_bounds
+# bounds
 # ---------------------------------------------------------------------------
 
 
@@ -247,7 +247,7 @@ def test_validate_bounds_false_turns_off_every_bounds_check_and_nothing_else():
         "ids__list_len",
         "point.lat__bounds",
     }
-    report = Ranged.inspect(OUT_OF_RANGE, validate_bounds=False)
+    report = Ranged.inspect(OUT_OF_RANGE, bounds=False)
     assert {f.key for f in report.findings} == {"code__len", "ids__list_len"}
     assert report.options.bounds is False
 
@@ -260,8 +260,8 @@ def test_validate_bounds_is_an_option_like_the_others():
     )
     with pytest.raises(ValidationError, match="out of bounds"):
         Ranged.validate(in_range)
-    assert Ranged.validate(in_range, validate_bounds=False).height == 1
-    assert inspect(Ranged.spec, in_range, validate_bounds=False).passed
+    assert Ranged.validate(in_range, bounds=False).height == 1
+    assert inspect(Ranged.spec, in_range, bounds=False).passed
     assert Ranged.inspect(in_range, options=ValidationOptions(bounds=False)).passed
 
 
@@ -489,7 +489,7 @@ def test_a_checked_bound_reports_what_lies_past_the_dtype_on_its_side():
     spec = TableSpec("T", {"n": ColSpec(pl.Int8, bounds=(0, 10))})
     frame = pl.DataFrame({"n": [1000, -1000]})
     assert [f.key for f in inspect(spec, frame).findings] == ["n__bounds"]
-    assert [f.key for f in inspect(spec, frame, validate_bounds=False).findings] == [
+    assert [f.key for f in inspect(spec, frame, bounds=False).findings] == [
         "n__dtype_range"
     ]
     at_least = TableSpec("T", {"n": ColSpec(pl.Int8, bounds=(0, None))})

@@ -14,17 +14,9 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 
-def accepted_options(
-    cls: type, *, renames: Mapping[str, str] | None = None
-) -> list[str]:
-    """The keyword names a caller may pass for `cls`: its fields, with any
-    renamed ones spelled the public way instead of the field's."""
-    renamed = dict(renames or {})
-    hidden = set(renamed.values())
-    return sorted(
-        {f.name for f in dataclasses.fields(cast("Any", cls)) if f.name not in hidden}
-        | set(renamed)
-    )
+def accepted_options(cls: type) -> list[str]:
+    """The keyword names a caller may pass for `cls`: its fields."""
+    return sorted(f.name for f in dataclasses.fields(cast("Any", cls)))
 
 
 def options_from[T](
@@ -33,13 +25,10 @@ def options_from[T](
     options: Mapping[str, Any],
     *,
     what: str,
-    renames: Mapping[str, str] | None = None,
 ) -> T:
     """The options for one call, from an object, keywords, or neither.
 
-    `what` names the kind in messages ("validation", "drift"); `renames`
-    maps a public keyword to the field it sets (`validate_unique` ->
-    `unique`).
+    `what` names the kind in messages ("validation", "drift").
     """
     if options_obj is not None:
         if options:
@@ -52,18 +41,24 @@ def options_from[T](
                 f"options= must be a {cls.__name__}, got {type(options_obj).__name__}"
             )
         return options_obj
-    accepted = accepted_options(cls, renames=renames)
+    accepted = accepted_options(cls)
     unknown = [k for k in options if k not in accepted]
     if unknown:
         # Naming the option the caller meant, rather than letting the
         # dataclass raise about a private class they cannot look up.
         hints = []
         for name in unknown:
-            close = difflib.get_close_matches(name, accepted, n=1)
+            close = difflib.get_close_matches(name, accepted, n=1) or [
+                # A prefixed spelling of a real option, such as 0.22's
+                # `validate_unique` for `unique`, is not close enough for
+                # difflib, and is the one a caller upgrading writes.
+                a
+                for a in accepted
+                if name.endswith(f"_{a}")
+            ]
             hints.append(f"{name!r}{f' (did you mean {close[0]!r}?)' if close else ''}")
         raise TypeError(
             f"Unknown {what} option(s): {', '.join(hints)}. "
             f"Accepted: {', '.join(accepted)}."
         )
-    renamed = dict(renames or {})
-    return cls(**{renamed.get(k, k): v for k, v in options.items()})
+    return cls(**options)

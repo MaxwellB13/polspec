@@ -16,7 +16,7 @@ from __future__ import annotations
 import dataclasses
 import warnings
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import KW_ONLY, dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -178,6 +178,9 @@ class TableSpec:
 
     name: str
     columns: Mapping[str, ColSpec] = field(default_factory=dict)
+    # Everything after this is keyword-only: a positional call would freeze
+    # the order of the fields, and say nothing about what each argument is.
+    _: KW_ONLY
     checks: Sequence[Check] = ()
     unique_together: Sequence[Sequence[str]] = ()
     foreign_keys: Sequence[ForeignKey] = ()
@@ -194,6 +197,7 @@ class TableSpec:
             self,
             name: str,
             columns: Mapping[str, ColSpec] = MappingProxyType({}),
+            *,
             checks: Sequence[Check] = (),
             unique_together: Sequence[Sequence[str]] = (),
             foreign_keys: Sequence[ForeignKey] = (),

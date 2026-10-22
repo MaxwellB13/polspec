@@ -38,21 +38,21 @@ def _skip_reasons(spec_cls: type[FrameSpec]) -> tuple[dict[str, bool], list[str]
     reasons: list[str] = []
 
     if spec_cls.spec.checks:
-        flags["validate_checks"] = False
+        flags["checks"] = False
         reasons.append(
             "__checks__ wraps arbitrary expressions that generation cannot "
             "be made to satisfy"
         )
 
     if any(c.validators for c in spec_cls.spec.columns.values()):
-        flags["validate_validators"] = False
+        flags["validators"] = False
         reasons.append(
             "ColSpec.validators wraps arbitrary expressions that generation "
             "cannot be made to satisfy"
         )
 
     if any(c.pattern is not None for c in spec_cls.spec.columns.values()):
-        flags["validate_pattern"] = False
+        flags["pattern"] = False
         reasons.append(
             "ColSpec.pattern is checked by validation only; generation fills "
             "the column with ordinary random text (use format= for a shape "

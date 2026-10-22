@@ -5,7 +5,7 @@ Internal: not part of the public API.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
@@ -43,6 +43,9 @@ class Check:
     # name -- while the constructor also accepts a predicate and no name; see
     # the `__init__` below, which exists only for type checkers.
     expr: pl.Expr
+    # Everything after this is keyword-only: a positional call would freeze
+    # the order of the fields, and say nothing about what each argument is.
+    _: KW_ONLY
     name: str = FILLED_IN
     description: str | None = None
     ignore_nulls: bool = True
@@ -53,6 +56,7 @@ class Check:
         def __init__(
             self,
             expr: pl.Expr | Pred,
+            *,
             name: str | None = None,
             description: str | None = None,
             ignore_nulls: bool = True,

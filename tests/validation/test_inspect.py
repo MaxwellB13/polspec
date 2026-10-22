@@ -189,9 +189,9 @@ def test_a_passing_report_is_empty_and_so_falsy():
     report = Orders.inspect(
         good,
         references={Customers: CUSTOMERS},
-        validate_unique=False,
-        validate_validators=False,
-        validate_checks=False,
+        unique=False,
+        validators=False,
+        checks=False,
     )
     assert report.passed and not report and len(report) == 0
     assert report.failing_rows().collect().height == 0

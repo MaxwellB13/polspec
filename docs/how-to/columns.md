@@ -406,7 +406,7 @@ countries plus `UK (ISO)`, IPv4 or `NOT AVAILABLE` -- with
 `pattern=` is a regular expression every value must match -- **checked by
 validation only**. Generation does not read it: a column with a pattern is
 filled with ordinary random text, so the round trip holds only with
-`validate_pattern=False`, exactly as for `validators`. That is the honest
+`pattern=False`, exactly as for `validators`. That is the honest
 half of the split `format=` makes: polspec can check any regex, and can
 generate a curated set.
 

@@ -48,7 +48,7 @@ def reject_duplicate_choices(
     )
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True, eq=False, kw_only=True)
 class ColRule:
     """Restricts a column's generated values on rows where `when` matches.
 

@@ -21,8 +21,8 @@ This one is by design, not a defect: checks and validators wrap arbitrary
 Polars expressions, and a pattern is an arbitrary regex; nothing can generate
 data satisfying an arbitrary predicate, and generating from an arbitrary
 regex has no answer for `.*`. Validate generated data with
-`validate_checks=False` / `validate_validators=False` /
-`validate_pattern=False`, or construct the rows those invariants describe
+`checks=False` / `validators=False` /
+`pattern=False`, or construct the rows those invariants describe
 yourself. For a shape polspec *can* generate, declare a
 [`format`](../how-to/formats.md) instead of a pattern.
 

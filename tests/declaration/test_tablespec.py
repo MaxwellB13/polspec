@@ -254,8 +254,8 @@ def test_rename_rewrites_validators_and_checks_written_with_col():
     derived = FrameSpec.from_spec(renamed)
     derived.validate(
         derived.generate(50, seed=1),
-        validate_checks=False,  # `big` compares two independent columns
-        validate_foreign_keys=False,
+        checks=False,  # `big` compares two independent columns
+        foreign_keys=False,
     )
 
 
@@ -313,7 +313,7 @@ def test_structural_ops_round_trip_through_generate_and_validate():
     df = Derived.generate(50, seed=3)
     assert df.columns == ["order_id", "region", "carrier", "amount"]
     # The check renamed with its column: it is validated, not switched off.
-    Derived.validate(df, validate_unique=False)
+    Derived.validate(df, unique=False)
 
 
 # ---------------------------------------------------------------------------

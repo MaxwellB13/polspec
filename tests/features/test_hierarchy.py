@@ -273,7 +273,7 @@ def test_a_shallow_frame_produces_no_findings():
 
 def test_the_check_can_be_switched_off():
     cyclic = pl.DataFrame({"PARENT": ["b", "c", "a"], "CHILD": ["a", "b", "c"]})
-    assert Chain.inspect(cyclic, validate_hierarchy=False).passed
+    assert Chain.inspect(cyclic, hierarchy=False).passed
 
 
 # ---------------------------------------------------------------------------

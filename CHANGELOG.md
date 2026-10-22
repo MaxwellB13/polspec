@@ -45,6 +45,50 @@ guide.
   | `cats.get_categorical("X")` | `cats.categoricals["X"]`, or `cats["x"].categories` for any case |
   | `cats.get_choices("X")` | `cats.choices.get("X")` |
 
+- **Constructors take everything past what identifies the thing by
+  keyword.** `ColSpec(dtype, *, ...)`, `TableSpec(name, columns, *, ...)`,
+  `Check(expr, *, ...)` and `ForeignKey(columns, *, references=..., ...)`;
+  `ColRule`, `Hierarchy`, `ValidationOptions`, `DriftOptions`,
+  `ProfileOptions`, `Finding` and `DriftFinding` by keyword throughout.
+  `ColSpec(pl.Int64, "x")` used to set `col_name` without saying so.
+  `Bound(min, max)` stays positional.
+
+  | Before | Now |
+  |:--|:--|
+  | `ColSpec(pl.Int64, None, None, True)` | `ColSpec(pl.Int64, nullable=True)` |
+  | `ForeignKey("customer_id", Customers)` | `ForeignKey("customer_id", references=Customers)` |
+  | `Hierarchy("node", "parent")` | `Hierarchy(child="node", parent="parent")` |
+  | `ValidationOptions("drop")` | `ValidationOptions(extra_cols="drop")` |
+
+- **One spelling for each validation switch: the field's name.**
+  `validate(df, checks=False)`, as `ValidationOptions(checks=False)` and
+  `--skip checks` already said it. The old spelling is refused, naming the
+  new one (`'validate_checks' (did you mean 'checks'?)`).
+
+  | Before | Now |
+  |:--|:--|
+  | `validate_rules=`, `validate_validators=`, `validate_unique=`, `validate_checks=`, `validate_foreign_keys=`, `validate_hierarchy=`, `validate_order=`, `validate_pattern=`, `validate_bounds=` | `rules=`, `validators=`, `unique=`, `checks=`, `foreign_keys=`, `hierarchy=`, `order=`, `pattern=`, `bounds=` |
+
+- **Writers take `path`; a reader's `source` stays.** `to_yaml`,
+  `to_python`, `FrameSpec.to_yaml`/`to_python`, `CatSpec.to_yaml` and
+  `Registry.to_yaml` call their destination `path`, as `to_markdown`,
+  `to_mermaid` and every `sink_*` already did. `from_dict`'s label for its
+  errors is `where`.
+
+  | Before | Now |
+  |:--|:--|
+  | `to_yaml(spec, source="orders.yaml")` (and the other writers) | `to_yaml(spec, path="orders.yaml")`, or positionally as before |
+  | `from_dict(data, source="orders.yaml")` | `from_dict(data, where="orders.yaml")` |
+
+- **Every drift and validation entry point takes `options=` or typed
+  keywords.** `FrameSpec.drift(df, ...)` takes all seven `DriftOptions`
+  fields -- it named four, so `significance=` was a `TypeError` there and
+  worked in `polspec.drift()` -- and `drift()`, `diff()` and
+  `FrameSpec.diff()` type them (`DriftKeywords`). `Registry.inspect_all`
+  and `validate_all` take `options=` or the validation keywords, typed,
+  where they took untyped `**options`.
+- **`FrameSpec.from_dataframe()` names its spec `"Profiled"`**, as
+  `profile()` does, not `"ProfiledFrameSpec"`.
 - **`TableSpec.estimated_size(n)`** is `polspec.estimated_size(spec, n)`;
   `FrameSpec.estimated_size(n)` stays.
 - **`Finding.rows(frame)`** is internal; `report.rows(finding)` is how a

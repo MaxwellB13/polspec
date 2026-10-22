@@ -24,7 +24,7 @@ import importlib.util
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Unpack
 
 import polars as pl
 
@@ -49,7 +49,11 @@ from polspec.render import registry_to_mermaid
 from polspec.tablespec import TableSpec, as_spec_name, as_table_spec, resolve_references
 
 if TYPE_CHECKING:
-    from polspec.validation import ValidationReport
+    from polspec.validation import (
+        ValidationKeywords,
+        ValidationOptions,
+        ValidationReport,
+    )
 
 __all__ = ["Registry"]
 
@@ -559,24 +563,39 @@ class Registry:
         return named
 
     def inspect_all(
-        self, frames: Frames, *, references: Frames | None = None, **options: Any
+        self,
+        frames: Frames,
+        *,
+        options: ValidationOptions | None = None,
+        references: Frames | None = None,
+        **keywords: Unpack[ValidationKeywords],
     ) -> dict[str, ValidationReport]:
         """A `ValidationReport` per frame, each spec seeing every other frame
-        as a possible parent. Takes the options `validate()` does.
+        as a possible parent. Takes the options `validate()` does: an
+        `options=` object, or its fields as keywords.
         """
         named = self._named(frames)
         specs = self._bind(require_known=False)
         parents = {**resolve_references(references, lambda f: f), **named}
         return {
             name: validation.inspect(
-                specs[name], named[name], references=parents, **options
+                specs[name],
+                named[name],
+                options=options,
+                references=parents,
+                **keywords,
             )
             for name in self.order()
             if name in named
         }
 
     def validate_all(
-        self, frames: Frames, *, references: Frames | None = None, **options: Any
+        self,
+        frames: Frames,
+        *,
+        options: ValidationOptions | None = None,
+        references: Frames | None = None,
+        **keywords: Unpack[ValidationKeywords],
     ) -> dict[str, pl.DataFrame | pl.LazyFrame]:
         """Validates every frame, or returns them with the structural
         transformations `validate()` applies.
@@ -587,7 +606,9 @@ class Registry:
         """
         named = self._named(frames)
         specs = self._bind(require_known=False)
-        reports = self.inspect_all(named, references=references, **options)
+        reports = self.inspect_all(
+            named, options=options, references=references, **keywords
+        )
         if any(not report.passed for report in reports.values()):
             raise MultiValidationError(reports)
         # The bound spec, matching the one each report was produced against:
@@ -659,11 +680,11 @@ class Registry:
 
         return serialization.registry_from_dict(data, strict=strict)
 
-    def to_yaml(self, source: str | Path | None = None) -> str | None:
+    def to_yaml(self, path: str | Path | None = None) -> str | None:
         """Every spec, and the declared categories, as one YAML document:
-        written to the file `source`, or, with no `source`, returned as
+        written to the file `path`, or, with no `path`, returned as
         text."""
-        return serialization.registry_to_yaml(self, source)
+        return serialization.registry_to_yaml(self, path)
 
     @classmethod
     def from_yaml(cls, source: str | Path, *, strict: bool = True) -> Registry:

@@ -9,7 +9,7 @@ Internal: not part of the public API.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
 from typing import TYPE_CHECKING, Any
 
 from polspec.constants import FILLED_IN
@@ -76,6 +76,9 @@ class ForeignKey:
     # accepted forms are spelled out in the `__init__` below, which exists
     # only for type checkers.
     columns: tuple[str, ...]
+    # Everything after this is keyword-only: a positional call would freeze
+    # the order of the fields, and say nothing about what each argument is.
+    _: KW_ONLY
     references: str
     ref_columns: tuple[str, ...] = FILLED_IN
     name: str = FILLED_IN
@@ -86,6 +89,7 @@ class ForeignKey:
         def __init__(
             self,
             columns: str | Sequence[str],
+            *,
             references: type[FrameSpec] | TableSpec | str,
             ref_columns: str | Sequence[str] | None = None,
             name: str | None = None,

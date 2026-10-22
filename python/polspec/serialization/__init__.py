@@ -102,12 +102,12 @@ _LOSS = {
 
 
 class _Located:
-    """Prefixes `source` to a declaration or file error raised inside it, so
+    """Prefixes `where` to a declaration or file error raised inside it, so
     an error found reading a file names the file -- keeping the error's own
     type, which a caller may already catch."""
 
-    def __init__(self, source: str) -> None:
-        self.source = source
+    def __init__(self, where: str) -> None:
+        self.where = where
 
     def __enter__(self) -> None:
         return None
@@ -117,23 +117,23 @@ class _Located:
     ) -> Literal[False]:
         if not isinstance(exc, (SpecError, SerializationError)):
             return False
-        if str(exc).startswith(self.source):
+        if str(exc).startswith(self.where):
             return False
-        raise type(exc)(f"{self.source}: {exc}") from exc
+        raise type(exc)(f"{self.where}: {exc}") from exc
 
 
-def _written(text: str, source: str | Path | None) -> str | None:
-    """`text` written to `source` -- its folders made -- or, with no source,
+def _written(text: str, path: str | Path | None) -> str | None:
+    """`text` written to `path` -- its folders made -- or, with no path,
     returned."""
-    if source is None:
+    if path is None:
         return text
-    p = Path(source)
+    p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(text, encoding="utf-8")
     return None
 
 
-def _warn_unserializable(spec: TableSpec, source: str | Path, kind: str) -> None:
+def _warn_unserializable(spec: TableSpec, where: str | Path, kind: str) -> None:
     """Warns, naming exactly what a file cannot hold and will therefore lose.
 
     A `Check` or validator over a raw `polars.Expr` has no representation in
@@ -147,7 +147,7 @@ def _warn_unserializable(spec: TableSpec, source: str | Path, kind: str) -> None
             f"{spec.name} declares {len(raw_checks)} __checks__ ({names}) that "
             f"cannot be represented in {medium} (a Check over a raw polars.Expr; "
             f"write it with polspec.col() to persist it) and will NOT be written "
-            f"to {source!s}. {tail}",
+            f"to {where!s}. {tail}",
             stacklevel=3,
         )
     validators = [
@@ -162,12 +162,12 @@ def _warn_unserializable(spec: TableSpec, source: str | Path, kind: str) -> None
             f"{spec.name} declares {len(validators)} column-level validator(s) "
             f"({names}) that cannot be represented in {medium} (a validator over "
             f"a raw polars.Expr; write it with polspec.col() to persist it) and "
-            f"will NOT be written to {source!s}. {tail}",
+            f"will NOT be written to {where!s}. {tail}",
             stacklevel=3,
         )
 
 
-def dump_yaml(data: Mapping[str, Any], source: str | Path) -> str:
+def dump_yaml(data: Mapping[str, Any], where: str | Path) -> str:
     """`data` as YAML text, or a `SerializationError` naming what YAML
     cannot hold and where it sits.
 
@@ -180,9 +180,9 @@ def dump_yaml(data: Mapping[str, Any], source: str | Path) -> str:
         return yaml.safe_dump(dict(data), sort_keys=False)
     except RepresenterError as exc:
         value = exc.args[1] if len(exc.args) > 1 else None
-        where = _path_to(data, value) or "a value"
+        inside = _path_to(data, value) or "a value"
         raise SerializationError(
-            f"{source}: {where} holds {value!r} (of type {type(value).__name__}), "
+            f"{where}: {inside} holds {value!r} (of type {type(value).__name__}), "
             "which a YAML spec file cannot hold."
         ) from exc
 
@@ -219,15 +219,17 @@ def from_dict(
     *,
     categories: CatSpec | None = None,
     strict: bool = True,
-    source: str = "spec data",
+    where: str = "spec data",
 ) -> TableSpec:
     """A `TableSpec` from data in any format version this polspec can read.
 
     An unknown key is an error, naming the closest known key, unless
-    `strict=False`, which downgrades it to a warning.
+    `strict=False`, which downgrades it to a warning. `where` names the data
+    at the front of any error -- a file's path, say -- as `from_yaml` names
+    the file it read.
     """
-    with _Located(source):
-        current = migrate(data, "spec", source)
+    with _Located(where):
+        current = migrate(data, "spec", where)
         return tablespec_from_data(current, Ctx(categories=categories, strict=strict))
 
 
@@ -237,12 +239,12 @@ def from_dict(
 
 
 @overload
-def to_yaml(spec: SpecLike, source: None = None) -> str: ...
+def to_yaml(spec: SpecLike, path: None = None) -> str: ...
 @overload
-def to_yaml(spec: SpecLike, source: str | Path) -> None: ...
-def to_yaml(spec: SpecLike, source: str | Path | None = None) -> str | None:
+def to_yaml(spec: SpecLike, path: str | Path) -> None: ...
+def to_yaml(spec: SpecLike, path: str | Path | None = None) -> str | None:
     """`spec` -- a `TableSpec` or a `FrameSpec` class -- as human-readable
-    YAML: written to the file `source`, or, with no `source`, returned as
+    YAML: written to the file `path`, or, with no `path`, returned as
     text.
 
     Defaults are omitted so the file shows only what was declared. Checks and
@@ -250,9 +252,9 @@ def to_yaml(spec: SpecLike, source: str | Path | None = None) -> str | None:
     """
     spec = as_table_spec(spec)
     require_columns(spec)
-    label = source if source is not None else f"spec {spec.name!r}"
+    label = path if path is not None else f"spec {spec.name!r}"
     _warn_unserializable(spec, label, "yaml")
-    return _written(dump_yaml(to_dict(spec), label), source)
+    return _written(dump_yaml(to_dict(spec), label), path)
 
 
 def _resolve_categories(
@@ -301,7 +303,7 @@ def from_yaml(
             f"{source}: expected a mapping at the top level, got {type(raw).__name__}"
         )
     registry = _resolve_categories(categories, raw or {}, path.parent)
-    return from_dict(raw, categories=registry, strict=strict, source=str(source))
+    return from_dict(raw, categories=registry, strict=strict, where=str(source))
 
 
 # ---------------------------------------------------------------------------
@@ -342,13 +344,13 @@ def _require_class_name(name: str) -> None:
 
 
 @overload
-def to_python(spec: SpecLike, source: None = None) -> str: ...
+def to_python(spec: SpecLike, path: None = None) -> str: ...
 @overload
-def to_python(spec: SpecLike, source: str | Path) -> None: ...
-def to_python(spec: SpecLike, source: str | Path | None = None) -> str | None:
+def to_python(spec: SpecLike, path: str | Path) -> None: ...
+def to_python(spec: SpecLike, path: str | Path | None = None) -> str | None:
     """`spec` -- a `TableSpec` or a `FrameSpec` class -- as a Python module
-    defining a `FrameSpec` subclass: written to the file `source`, or, with
-    no `source`, returned as text.
+    defining a `FrameSpec` subclass: written to the file `path`, or, with
+    no `path`, returned as text.
 
     Columns are declared through `__columns__`, since a name straight from
     data is not always a valid identifier. Checks and validators over raw
@@ -363,7 +365,7 @@ def to_python(spec: SpecLike, source: str | Path | None = None) -> str | None:
     require_columns(spec)
     _require_class_name(spec.name)
     _warn_unserializable(
-        spec, source if source is not None else f"spec {spec.name!r}", "python"
+        spec, path if path is not None else f"spec {spec.name!r}", "python"
     )
 
     data = tablespec_to_data(spec)
@@ -418,7 +420,7 @@ def to_python(spec: SpecLike, source: str | Path | None = None) -> str | None:
         lines.append("from decimal import Decimal")
     lines.append(f"from polspec import {', '.join(imports)}")
     lines.extend(["", "", *body])
-    return _written("\n".join(lines) + "\n", source)
+    return _written("\n".join(lines) + "\n", path)
 
 
 # ---------------------------------------------------------------------------
@@ -461,17 +463,17 @@ def catspec_from_dict(
     data: Mapping[str, Any] | None,
     *,
     strict: bool = True,
-    source: str = "registry data",
+    where: str = "registry data",
 ) -> CatSpec:
     """A `CatSpec` from its data form, the inverse of `catspec_to_dict`.
 
     An older format version is migrated first. `strict=False` warns about
-    an unknown key rather than raising; `source` names the data in errors.
+    an unknown key rather than raising; `where` names the data in errors.
     """
     from polspec.catspec import CatSpec
 
-    with _Located(source):
-        current = migrate(data, "catspec", source)
+    with _Located(where):
+        current = migrate(data, "catspec", where)
         check_unknown_keys(current, _CATSPEC_KEYS, Ctx(strict=strict), "")
         return CatSpec(
             enums=current.get("enums"),
@@ -480,16 +482,16 @@ def catspec_from_dict(
         )
 
 
-def catspec_to_yaml(catspec: CatSpec, source: str | Path | None = None) -> str | None:
-    """A `CatSpec` as YAML: written to `source` when one is given, else
+def catspec_to_yaml(catspec: CatSpec, path: str | Path | None = None) -> str | None:
+    """A `CatSpec` as YAML: written to `path` when one is given, else
     returned as text."""
     dumped = dump_yaml(
         {"version": FORMAT_VERSION, **catspec_to_dict(catspec)},
-        source if source is not None else "a category registry",
+        path if path is not None else "a category registry",
     )
-    if source is None:
+    if path is None:
         return dumped
-    p = Path(source)
+    p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(dumped, encoding="utf-8")
     return None
@@ -501,7 +503,7 @@ def catspec_from_yaml(source: str | Path, *, strict: bool = True) -> CatSpec:
     if not path.exists():
         raise FileNotFoundError(f"CatSpec file not found: {source}")
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    return catspec_from_dict(raw, strict=strict, source=str(source))
+    return catspec_from_dict(raw, strict=strict, where=str(source))
 
 
 # ---------------------------------------------------------------------------
@@ -529,57 +531,57 @@ def registry_from_dict(
     data: Mapping[str, Any] | None,
     *,
     strict: bool = True,
-    source: str = "registry data",
+    where: str = "registry data",
     base: Path | None = None,
 ) -> Registry:
     """A `Registry` from its data form, the inverse of `registry_to_dict`.
 
     `categories` may be the categories themselves or the path of a
     category file, resolved against `base` -- which `registry_from_yaml`
-    sets to the registry file's directory. `strict` and `source` are as
+    sets to the registry file's directory. `strict` and `where` are as
     for `catspec_from_dict`.
     """
     from polspec.registry import Registry
 
-    current = migrate(data, "registry", source)
+    current = migrate(data, "registry", where)
     ctx = Ctx(strict=strict)
     check_unknown_keys(current, _REGISTRY_KEYS, ctx, "")
 
     declared = current.get("categories")
     categories: CatSpec | None = None
     if isinstance(declared, Mapping):
-        categories = catspec_from_dict(declared, strict=strict, source=source)
+        categories = catspec_from_dict(declared, strict=strict, where=where)
     elif isinstance(declared, (str, Path)):
         if base is None:
             raise SerializationError(
-                f"{source}: 'categories' names a file ({declared!r}); read the "
+                f"{where}: 'categories' names a file ({declared!r}); read the "
                 "registry with registry_from_yaml so the path can be resolved"
             )
         path = Path(declared)
         categories = catspec_from_yaml(path if path.is_absolute() else base / path)
     elif declared is not None:
         raise SerializationError(
-            f"{source}: 'categories' must be a mapping or a path, got {declared!r}"
+            f"{where}: 'categories' must be a mapping or a path, got {declared!r}"
         )
 
     specs = current.get("specs")
     if not isinstance(specs, Mapping) or not specs:
         raise SerializationError(
-            f"{source}: a registry file needs a non-empty 'specs' mapping, keyed "
+            f"{where}: a registry file needs a non-empty 'specs' mapping, keyed "
             "by spec name"
         )
     registry = Registry(categories=categories)
     for name, body in specs.items():
         if not isinstance(body, Mapping):
             raise SerializationError(
-                f"{source}: specs.{name} must be a mapping, got {type(body).__name__}"
+                f"{where}: specs.{name} must be a mapping, got {type(body).__name__}"
             )
         if "name" in body and body["name"] != name:
             raise SerializationError(
-                f"{source}: specs.{name} carries name {body['name']!r}; the key "
+                f"{where}: specs.{name} carries name {body['name']!r}; the key "
                 "is the name, so drop one or make them agree"
             )
-        with _Located(f"{source}: specs.{name}"):
+        with _Located(f"{where}: specs.{name}"):
             spec = tablespec_from_data(
                 {"name": str(name), **body}, Ctx(categories=categories, strict=strict)
             )
@@ -588,19 +590,17 @@ def registry_from_dict(
 
 
 @overload
-def registry_to_yaml(registry: Registry, source: None = None) -> str: ...
+def registry_to_yaml(registry: Registry, path: None = None) -> str: ...
 @overload
-def registry_to_yaml(registry: Registry, source: str | Path) -> None: ...
-def registry_to_yaml(
-    registry: Registry, source: str | Path | None = None
-) -> str | None:
+def registry_to_yaml(registry: Registry, path: str | Path) -> None: ...
+def registry_to_yaml(registry: Registry, path: str | Path | None = None) -> str | None:
     """A `Registry` as one YAML document -- its specs keyed by name, and its
-    categories: written to the file `source`, or, with no `source`, returned
+    categories: written to the file `path`, or, with no `path`, returned
     as text."""
-    label = source if source is not None else "a registry"
+    label = path if path is not None else "a registry"
     for spec in registry.specs:
         _warn_unserializable(spec, label, "yaml")
-    return _written(dump_yaml(registry_to_dict(registry), label), source)
+    return _written(dump_yaml(registry_to_dict(registry), label), path)
 
 
 def registry_from_yaml(source: str | Path, *, strict: bool = True) -> Registry:
@@ -608,4 +608,4 @@ def registry_from_yaml(source: str | Path, *, strict: bool = True) -> Registry:
     `categories:` path is read relative to the file."""
     path = Path(source)
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    return registry_from_dict(raw, strict=strict, source=str(source), base=path.parent)
+    return registry_from_dict(raw, strict=strict, where=str(source), base=path.parent)
