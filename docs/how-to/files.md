@@ -44,7 +44,9 @@ Loaded.generate(1_000, seed=1)
 ```
 
 With no path, `to_yaml()` and `to_python()` return the text instead of
-writing it -- for a test, a notebook or a review.
+writing it -- for a test, a notebook or a review. `polspec.to_dict(spec)`
+and `polspec.from_dict(data)` are the same file as plain Python data, for
+storing a spec somewhere other than a file.
 
 The output is plain, readable YAML — defaults are omitted so the file shows
 only what you actually declared:

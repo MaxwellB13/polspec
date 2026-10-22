@@ -70,20 +70,12 @@ identifiers](columns.md#column-names-that-are-not-identifiers). The `.py`
 output is passed through `ruff format` when it's on `PATH`, same as `schema
 new`.
 
-| Option | Effect |
-|:--|:--|
-| `--name NAME` | Class name (default: derived from the file name) |
-| `--weights` | Record each category's observed frequency |
-| `--max-unique-enum N` | Max distinct values for a string column to become an `Enum`, when they repeat (default 50) |
-| `--no-formats` | Do not name the `format` a text column's values have (email, uuid4, ...) |
-| `--no-bounds` | Skip computing numeric/temporal bounds and string lengths |
-| `--sample N` | Profile a random sample of N rows (seeded, so the same every run) |
-| `--shape` | Fit the distribution each numeric or temporal column follows |
-| `--keys` | Declare an all-distinct integer or text column unique |
-| `--order` | Declare `order_by` when the rows come sorted by a column |
-| `--round-bounds STEP` | Round each numeric column's bounds outward to `STEP` (`1000`, `1k`, `10k`, `1M`, `0.01`), within its dtype; `auto` (the default) keeps two significant figures of the span and whole seconds; `exact` writes them as observed |
-| `--round-rates STEP` | Round each null and NaN rate up to `STEP` (`0.01`), and each `--weights` frequency to its nearest `STEP`; `auto` (the default) keeps two significant figures; `exact` writes them as observed |
-| `--replace COL...` | Columns whose values must not be carried into the spec |
+Every option, with its default, is in the
+[command-line reference](../reference/cli.md#polspec-schema-infer): what to
+record (`--weights`, `--shape`, `--keys`, `--order`), what to leave out
+(`--no-bounds`, `--no-formats`, `--replace`), and how finely to write it
+(`--round-bounds`, `--round-rates`). [Infer a spec from data](profiling.md)
+explains each from Python.
 
 Treat the output as a draft. It describes the sample it saw — edit bounds,
 add rules, tighten a domain — before trusting it as a contract.
@@ -131,12 +123,8 @@ def test_orders_cartesian_coverage():
     Orders.validate(df)
 ```
 
-| Option | Effect |
-|:--|:--|
-| `--rows N` | Rows to generate (default 500) |
-| `--seed N` | Generation seed (default 42) |
-| `--no-cartesian` | Skip the coverage-guaranteeing test |
-| `--class NAME` | Generate a test for only this class, when the source defines several |
+Its options -- `--rows`, `--seed`, `--no-cartesian`, `--class` -- are in
+the [command-line reference](../reference/cli.md#polspec-test).
 
 ### It will not hand you a test that fails on the spot
 

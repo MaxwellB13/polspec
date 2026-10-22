@@ -5,7 +5,8 @@ key by key. [Specs as files](../how-to/files.md) shows the workflow; this is
 the format. A test holds every table here to the reader's own field
 registry, so a key the reader accepts cannot be missing from this page.
 
-Every file starts with `version: 4`, the format version that wrote it. A
+Every file starts with `version: 4` -- `polspec.FORMAT_VERSION`, the format
+version that wrote it. A
 file from an older version is migrated as it is read; one from a newer
 polspec is refused, naming the version it needs. A key the reader does not
 know is an error naming the closest known key; `strict=False` downgrades it

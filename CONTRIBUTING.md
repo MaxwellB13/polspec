@@ -3,7 +3,7 @@
 polspec is a Python package over a Rust extension. The Python side owns the
 vocabulary (what a column can declare and what it means); the Rust side owns
 the inner loop that fills arrays with values. See
-[Architecture](https://maxwellb13.github.io/polspec/explanation/architecture/)
+[ARCHITECTURE.md](ARCHITECTURE.md)
 for the module map.
 
 ## Set up

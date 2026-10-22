@@ -33,8 +33,7 @@ take their options by keyword; one spelling for each option and parameter;
 typed options on every entry point, `FrameSpec.drift` among them, which
 took four of its seven; and the internals out of the API reference. **They
 are breaking**, made outright with no deprecation period, and listed below
-with the replacement for each -- the list the 1.0 migration guide is built
-from. **No seeded output changes.**
+with the replacement for each. **No seeded output changes.**
 
 ### Breaking
 

@@ -175,8 +175,7 @@ replace a data-quality platform watching a production warehouse.
 ## What polspec doesn't try to be
 
 Worth being direct about, in the same spirit as the
-[known limitations](limitations.md) and
-[roadmap](roadmap.md) pages:
+[known limitations](limitations.md) and [stability](stability.md) pages:
 
 - **Not a realistic-fake-data library.** No locales, no plausible names or
   addresses out of the box — pair it with Faker for that.

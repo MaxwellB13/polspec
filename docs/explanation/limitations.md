@@ -1,10 +1,20 @@
 # Known limitations
 
-polspec generates data and validates it from one declaration. Where both
-sides read the same definition they cannot drift: what values a column may
-hold, and the order in which rules, keys and hierarchies rewrite a generated
-frame, are each defined once and read by both. What is left below is what
-generation does not attempt at all, plus a few edges worth knowing about.
+polspec generates data and validates it from one declaration, and the two
+directions are not symmetric. A validator only has to *recognise* a
+violation, which a Polars expression can do for almost any claim; a
+generator has to *avoid* one, which is easy only for a claim with a shape a
+sampler can use. `bounds=(1, 100)` has that shape;
+`pl.col("email").str.contains("@")` does not -- though `format="email"`,
+which says the same thing in a sampler's terms, does.
+
+Where both sides read the same definition they cannot drift: what values a
+column may hold, and the order in which rules, keys and hierarchies rewrite
+a generated frame, are each defined once and read by both. A declaration
+whose claims contradict each other -- a foreign key whose parent cannot fit
+its column, two rules that each read the other -- is refused when it is
+written, not when it runs. What is left below is what generation does not
+attempt at all, plus a few edges worth knowing about.
 
 Each is pinned by a test in polspec's suite. A gap meant to close
 one day carries `xfail(strict=True)`: the suite stays green while it exists,
@@ -111,6 +121,15 @@ pinned by a passing test. A NaN, by contrast, is recorded as the column's
 
 ## Smaller sharp edges
 
+- **Specs know about each other only through a `Registry`.** A
+  `ForeignKey` names the spec it points at, and nothing above one spec
+  knows which specs exist unless they are put in a
+  [`Registry`](../how-to/registry.md) -- two test modules may each define
+  an `Orders`. `Registry.discover("specs/")` imports every `.py` file it
+  finds, so a declared `Registry(...)` is the safer shape; shared
+  categories are checked against a `CatSpec` only when one is given; and a
+  single spec's `to_mermaid()` draws one entity, where
+  `registry.to_mermaid()` draws them all.
 - **A `Decimal`, `Int128` or `UInt128` is drawn through 64 bits.**
   Generation fills a Decimal as its physical integer and a 128-bit integer
   as a 64-bit one, so bounds past what 64 bits hold -- eighteen significant
