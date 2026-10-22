@@ -219,3 +219,92 @@ def test_no_module_reaches_into_another_modules_private_attributes():
                 continue
             reaches.append(f"{module}:{node.lineno} {text}")
     assert not reaches
+
+
+# ---------------------------------------------------------------------------
+# The tests: public behaviour, through the public API
+# ---------------------------------------------------------------------------
+
+TESTS = ROOT / "tests"
+
+# A test file whose subject is internal, and why. Everything else a test
+# imports from polspec is public.
+INTERNAL_SUBJECTS = {
+    "contracts/test_boundary.py": "this file: the line itself",
+    "contracts/test_deprecation.py": "the deprecation helper, and what warns",
+    "contracts/test_parity.py": "internal tables against the signatures they mirror",
+    "docs/test_docs.py": "the docs against the codec's own tables",
+    "drift/test_significance.py": "drift's statistics, held to SciPy",
+    "generation/test_engine.py": "the Python / Rust boundary, which has no public face",
+    "generation/test_seeds.py": "the Python port of the engine's seeds, against it",
+}
+
+# Internal names any test may use, and why.
+TEST_PARAMETERS = {
+    "polspec.cli.main": "the command line's entry point, as `polspec` runs it",
+    "polspec.formats.FORMATS": "every format, so each is tested",
+    "polspec.generation.pipeline": "its 5 GiB warning lowered, not allocated past",
+    "polspec.profiler.FORMAT_MIN_DISTINCT": "a threshold, tested either side",
+    "polspec.profiler.ORDER_PREFIX_ROWS": "a threshold, tested either side",
+}
+
+
+def _test_files() -> list[Path]:
+    return sorted(p for p in TESTS.rglob("*.py") if "__pycache__" not in p.parts)
+
+
+def _internal_imports(path: Path) -> list[str]:
+    """What `path` imports from polspec outside the public API."""
+    found = []
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            found += [
+                a.name
+                for a in node.names
+                if a.name.startswith("polspec.") and a.name not in PUBLIC
+            ]
+        elif (
+            isinstance(node, ast.ImportFrom)
+            and node.module
+            and node.module.split(".")[0] == "polspec"
+        ):
+            public = (
+                set(importlib.import_module(node.module).__all__)
+                if node.module in PUBLIC
+                else set()
+            )
+            found += [
+                f"{node.module}.{a.name}" for a in node.names if a.name not in public
+            ]
+    return found
+
+
+def test_the_tests_use_only_the_public_api():
+    """A test of public behaviour survives any refactor that keeps it; a test
+    of an internal function pins the code it calls."""
+    wrong = [
+        f"{path.relative_to(TESTS).as_posix()}: {name}"
+        for path in _test_files()
+        if path.relative_to(TESTS).as_posix() not in INTERNAL_SUBJECTS
+        for name in _internal_imports(path)
+        if name not in TEST_PARAMETERS
+    ]
+    assert not wrong
+
+
+def test_every_exception_to_the_public_api_is_still_needed():
+    used = {
+        path.relative_to(TESTS).as_posix(): set(_internal_imports(path))
+        for path in _test_files()
+    }
+    stale = [
+        f
+        for f in INTERNAL_SUBJECTS
+        if f != "contracts/test_boundary.py" and not used[f]
+    ]
+    stale += [
+        name
+        for name in TEST_PARAMETERS
+        if not any(name in names for names in used.values())
+    ]
+    assert not stale

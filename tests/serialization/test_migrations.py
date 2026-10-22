@@ -30,13 +30,14 @@ from polspec import (
 )
 from polspec.serialization import (
     FORMAT_VERSION,
+    catspec_from_dict,
     catspec_from_yaml,
     from_dict,
     from_yaml,
+    registry_from_dict,
     registry_from_yaml,
     to_dict,
 )
-from polspec.serialization.migrations import MIGRATIONS, migrate
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -168,31 +169,32 @@ def test_an_old_registry_file_reads_as_it_declared():
 # ---------------------------------------------------------------------------
 
 
-def test_every_kind_has_a_step_from_every_old_version():
+@pytest.mark.parametrize("version", range(1, FORMAT_VERSION))
+@pytest.mark.parametrize(
+    ("read", "data"),
+    [
+        (from_dict, {"name": "T", "columns": {"c": {"dtype": "Int64"}}}),
+        (catspec_from_dict, {"enums": {"S": ["a"]}}),
+        (registry_from_dict, {"specs": {"T": {"columns": {"c": {"dtype": "Int64"}}}}}),
+    ],
+    ids=["spec", "catspec", "registry"],
+)
+def test_every_kind_of_file_reads_at_every_old_version(read, data, version):
     """A version bump that forgets a kind would leave its files unreadable."""
-    for kind, steps in MIGRATIONS.items():
-        assert sorted(steps) == list(range(1, FORMAT_VERSION)), kind
+    read({"version": version, **data})
 
 
 def test_a_legacy_tag_spelling_gives_way_to_tags():
     """`tags` wins where a version 1 file spelt it both ways."""
-    migrated = migrate(
-        {"columns": {"c": {"dtype": "Int64", "category": "old", "tags": "new"}}},
-        "spec",
-        "legacy.yaml",
+    spec = from_dict(
+        {"columns": {"c": {"dtype": "Int64", "category": "old", "tags": "new"}}}
     )
-    assert migrated["columns"]["c"] == {"dtype": "Int64", "tags": "new"}
+    assert spec["c"].tags == ("new",)
 
 
-def test_an_unknown_version_1_distribution_is_left_for_the_decoder():
-    migrated = migrate(
-        {"columns": {"c": {"dtype": "Float64", "distribution": "cauchy"}}},
-        "spec",
-        "legacy.yaml",
-    )
-    assert migrated["columns"]["c"]["distribution"] == "cauchy"
+def test_an_unknown_version_1_distribution_is_refused_by_name():
     with pytest.raises(ValueError, match="cauchy"):
-        from_dict(migrated)
+        from_dict({"columns": {"c": {"dtype": "Float64", "distribution": "cauchy"}}})
 
 
 @pytest.mark.parametrize(
@@ -229,12 +231,12 @@ def test_a_flat_version_1_registry_refuses_what_it_cannot_read():
 @pytest.mark.parametrize("version", [0, -1, True, 1.5])
 def test_a_version_that_is_not_a_positive_integer_is_refused(version):
     with pytest.raises(SerializationError, match="positive integer"):
-        migrate({"version": version}, "spec", "odd.yaml")
+        from_dict({"version": version, "columns": {"c": {"dtype": "Int64"}}})
 
 
 def test_a_file_that_is_not_a_mapping_is_refused():
     with pytest.raises(SerializationError, match="expected a mapping"):
-        migrate(["not", "a", "mapping"], "spec", "odd.yaml")
+        from_dict(["not", "a", "mapping"])  # ty: ignore[invalid-argument-type]
 
 
 def test_a_version_3_float_reads_as_holding_no_nan():

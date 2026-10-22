@@ -12,13 +12,14 @@ import polars as pl
 import pytest
 import yaml
 from cases import EVERY_DTYPE
-from polspec import CatSpec, SerializationError
-from polspec.serialization.dtypes import (
-    dtype_from_data,
-    dtype_to_data,
-    dtype_to_source,
-    physical_from_name,
-    physical_name,
+from polspec import CatSpec, ColSpec, SerializationError, TableSpec, profile
+from polspec.serialization import (
+    catspec_from_dict,
+    catspec_to_dict,
+    from_dict,
+    to_dict,
+    to_python,
+    to_yaml,
 )
 
 NAMED = [
@@ -38,40 +39,50 @@ def _normalised(dtype):
     return dtype() if isinstance(dtype, type) else dtype
 
 
+def _column(dtype: pl.DataType) -> TableSpec:
+    return TableSpec("T", {"c": ColSpec(dtype, nullable=True)})
+
+
+def _read(dtype_data, categories: CatSpec | None = None) -> pl.DataType:
+    """The dtype a spec file holding `dtype_data` declares."""
+    data = {"name": "T", "columns": {"c": {"dtype": dtype_data}}}
+    return from_dict(data, categories=categories)["c"].dtype
+
+
 @pytest.mark.parametrize("dtype", EVERY_DTYPE + NAMED, ids=str)
 def test_every_dtype_survives_data_and_source(dtype):
     dtype = _normalised(dtype)
-    data = yaml.safe_load(yaml.safe_dump(dtype_to_data(dtype)))
-    assert dtype_from_data(data) == dtype
-    assert eval(dtype_to_source(dtype), {"pl": pl}) == dtype  # noqa: S307
+    spec = _column(dtype)
+    data = yaml.safe_load(to_yaml(spec))
+    assert from_dict(data)["c"].dtype == dtype
+    namespace: dict = {}
+    exec(to_python(spec), namespace)
+    assert namespace["T"].spec["c"].dtype == dtype
 
 
-def test_a_physical_dtype_is_named_and_read_back():
-    assert physical_name(pl.UInt8) == "UInt8"
-    assert physical_from_name("UInt16") == pl.UInt16
-    assert physical_from_name(pl.UInt8) == pl.UInt8
-    with pytest.raises(SerializationError, match="is not a dtype a Categorical"):
-        physical_name(pl.Object)
+def test_a_categoricals_physical_dtype_is_named_and_read_back():
+    cats = CatSpec(categoricals={"C": {"physical": "UInt16"}})
+    written = catspec_to_dict(cats)
+    assert written["categoricals"]["C"]["physical"] == "UInt16"
+    assert catspec_from_dict(written).dtype_of("C") == cats.dtype_of("C")
     with pytest.raises(SerializationError, match="Unknown physical dtype"):
-        physical_from_name("Float64")
+        CatSpec(categoricals={"C": {"physical": "Float64"}})
 
 
 def test_a_registry_reference_resolves_against_the_registry():
     cats = CatSpec(
         enums={"STATUS": ["A", "B"]}, categoricals={"COLOUR": {"physical": "UInt8"}}
     )
-    assert dtype_from_data("$categories.STATUS", cats) == pl.Enum(["A", "B"])
-    assert dtype_from_data("categories.STATUS", cats) == pl.Enum(["A", "B"])
-    assert dtype_from_data("STATUS", cats) == pl.Enum(["A", "B"])
-    assert dtype_from_data({"Enum": "STATUS"}, cats) == pl.Enum(["A", "B"])
-    colour = dtype_from_data({"Categorical": "COLOUR"}, cats)
+    assert _read("$categories.STATUS", cats) == pl.Enum(["A", "B"])
+    assert _read("categories.STATUS", cats) == pl.Enum(["A", "B"])
+    assert _read("STATUS", cats) == pl.Enum(["A", "B"])
+    assert _read({"Enum": "STATUS"}, cats) == pl.Enum(["A", "B"])
+    colour = _read({"Categorical": "COLOUR"}, cats)
     assert colour == cats.dtype_of("COLOUR")
-    assert dtype_from_data({"Categorical": {"name": "COLOUR"}}, cats) == colour
+    assert _read({"Categorical": {"name": "COLOUR"}}, cats) == colour
     # A name the registry does not hold is a fresh, named Categories.
-    assert dtype_from_data({"Categorical": "fresh"}) == pl.Categorical(
-        pl.Categories("fresh")
-    )
-    assert dtype_from_data({"Categorical": "Categorical"}) == pl.Categorical()
+    assert _read({"Categorical": "fresh"}) == pl.Categorical(pl.Categories("fresh"))
+    assert _read({"Categorical": "Categorical"}) == pl.Categorical()
 
 
 @pytest.mark.parametrize(
@@ -92,12 +103,13 @@ def test_a_registry_reference_resolves_against_the_registry():
 )
 def test_a_malformed_dtype_is_refused_naming_its_form(data, complaint):
     with pytest.raises(SerializationError, match=complaint):
-        dtype_from_data(data)
+        _read(data)
 
 
-@pytest.mark.parametrize("dtype", [pl.Object()], ids=str)
-def test_a_dtype_with_no_file_form_is_refused(dtype):
+def test_a_dtype_with_no_file_form_is_refused():
+    """An `Object` column is profiled faithfully, but has no file form."""
+    spec = profile(pl.DataFrame({"c": pl.Series([object()], dtype=pl.Object)}))
     with pytest.raises(SerializationError, match="cannot write dtype"):
-        dtype_to_data(dtype)
+        to_dict(spec)
     with pytest.raises(SerializationError, match="cannot write dtype"):
-        dtype_to_source(dtype)
+        to_python(spec)

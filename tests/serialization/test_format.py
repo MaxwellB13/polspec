@@ -23,7 +23,6 @@ from polspec.serialization import (
     from_dict,
     to_dict,
 )
-from polspec.serialization.migrations import migrate
 
 # ---------------------------------------------------------------------------
 # One registry entry per dataclass field
@@ -96,7 +95,8 @@ V1_FILE = {
 
 
 def test_version_1_files_migrate_to_the_current_form():
-    migrated = migrate(V1_FILE, "spec", "legacy.yaml")
+    spec = from_dict(V1_FILE)
+    migrated = to_dict(spec)
     assert migrated["version"] == FORMAT_VERSION
     region = migrated["columns"]["region"]
     assert region["tags"] == "geo" and "category" not in region
@@ -107,7 +107,6 @@ def test_version_1_files_migrate_to_the_current_form():
         "eq": [{"col": "region"}, "UK"]
     }
 
-    spec = from_dict(V1_FILE)
     assert spec["region"].tags == ("geo",)
     assert spec["amount"].distribution_params == {"mean": 5.0, "std": 2.0}
     assert spec["carrier"].rules[0].when.equals(col("region") == "UK")

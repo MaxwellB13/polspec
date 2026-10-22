@@ -1,8 +1,9 @@
 """The definitions generation and validation share.
 
-`Domain` is what a column may hold, read from one declaration by both sides.
-`Pass` and `order` decide which rewrite of a generated frame runs first, so
-the data a spec produces satisfies the same claims validation checks it
+What a column may hold is read from one declaration by both sides, so a
+foreign key whose parent holds values its column refuses is refused as it
+is declared. The rewrites of a generated frame run writers before readers,
+so the data a spec produces satisfies the same claims validation checks it
 against. These tests pin both, and the round-trips they make possible.
 """
 
@@ -15,34 +16,27 @@ from polspec import (
     FrameSpec,
     GenerationError,
     SpecError,
+    TableSpec,
     col,
 )
-from polspec.domain import Domain
-from polspec.pass_order import Pass, order, ordered_passes, passes_of
 
 # ---------------------------------------------------------------------------
-# Domain: what a column is declared to hold
+# What a column is declared to hold, and whether a parent's values fit it
 # ---------------------------------------------------------------------------
 
 
-def test_domain_reads_choices_bounds_and_categories():
-    assert Domain.of(ColSpec(pl.Int64)).is_open
-    assert Domain.of(ColSpec(pl.Int64, bounds=(None, None))).is_open
-
-    numeric = Domain.of(ColSpec(pl.Int64, bounds=(1, 10)))
-    assert numeric.values is None
-    assert (numeric.bounds.min, numeric.bounds.max) == (1, 10)
-
-    assert Domain.of(ColSpec(pl.String, choices=["a", "b"])).values == ("a", "b")
-    assert Domain.of(ColSpec(pl.Enum(["A", "B"]))).values == ("A", "B")
-    # choices narrow an Enum rather than replacing it
-    assert Domain.of(ColSpec(pl.Enum(["A", "B"]), choices=["B"])).values == ("B",)
-
-
-def test_domain_describes_itself_for_an_error_message():
-    assert str(Domain.of(ColSpec(pl.Int64, bounds=(1, 10)))) == "bounds [1, 10]"
-    assert str(Domain.of(ColSpec(pl.String, choices=["a"]))) == "one of ['a']"
-    assert str(Domain.of(ColSpec(pl.Int64))) == "any Int64"
+def _keyed(child: ColSpec, parent: ColSpec) -> SpecError | None:
+    """The refusal of a key filling `child` from `parent`, if it is refused."""
+    parent_spec = TableSpec("Parent", {"k": parent})
+    try:
+        TableSpec(
+            "Child",
+            {"k": child},
+            foreign_keys=[ForeignKey("k", references=parent_spec, ref_columns="k")],
+        )
+    except SpecError as refused:
+        return refused
+    return None
 
 
 @pytest.mark.parametrize(
@@ -87,67 +81,65 @@ def test_domain_describes_itself_for_an_error_message():
         (ColSpec(pl.Int64, bounds=(1, 10)), ColSpec(pl.Int64, choices=[2, 40]), False),
     ],
 )
-def test_domain_knows_whether_a_parents_values_fit(child, parent, fits):
-    assert (Domain.of(child).rejects(Domain.of(parent)) is None) is fits
+def test_a_key_is_declared_only_where_the_parents_values_fit(child, parent, fits):
+    assert (_keyed(child, parent) is None) is fits
 
 
-def test_textual_domains_compare_by_the_string_they_hold():
-    enum_side = Domain.of(ColSpec(pl.Enum(["A", "B"])))
-    string_side = Domain.of(ColSpec(pl.String, choices=["A", "B"]))
-    assert enum_side.rejects(string_side) is None
-    assert string_side.rejects(enum_side) is None
+@pytest.mark.parametrize(
+    ("child", "parent", "says"),
+    [
+        (ColSpec(pl.Int64, bounds=(1, 10)), ColSpec(pl.Int64), "an unbounded Int64"),
+        (ColSpec(pl.Int64, bounds=(1, 10)), ColSpec(pl.Int64), "bounds [1, 10]"),
+        (
+            ColSpec(pl.String, choices=["a"]),
+            ColSpec(pl.String, choices=["a", "z"]),
+            "one of ['a']",
+        ),
+    ],
+)
+def test_a_refused_key_names_both_sides(child, parent, says):
+    refused = _keyed(child, parent)
+    assert refused is not None and says in str(refused)
 
-    narrower = Domain.of(ColSpec(pl.String, choices=["A", "C"]))
-    assert enum_side.rejects(narrower) is not None
 
-
-def test_declarations_that_cannot_be_compared_prove_nothing():
-    # Nothing is guessed from values the two sides cannot be ranked by.
-    child = Domain.of(ColSpec(pl.Int64, bounds=(1, 10)))
-    assert child.rejects(Domain(dtype=pl.Int64, values=("x",))) is None
+def test_an_enum_key_and_a_string_column_compare_by_the_text_they_hold():
+    enum_side = ColSpec(pl.Enum(["A", "B"]))
+    string_side = ColSpec(pl.String, choices=["A", "B"])
+    assert _keyed(enum_side, string_side) is None
+    assert _keyed(string_side, enum_side) is None
+    # choices narrow an Enum rather than replacing it
+    assert _keyed(ColSpec(pl.Enum(["A", "B"]), choices=["B"]), enum_side) is not None
+    assert _keyed(enum_side, ColSpec(pl.String, choices=["A", "C"])) is not None
 
 
 # ---------------------------------------------------------------------------
-# Passes: what each rewrite reads and writes
+# The rewrites run writers before readers
 # ---------------------------------------------------------------------------
 
 
-class Ordered(FrameSpec):
-    region = ColSpec(pl.Enum(["UK", "US"]))
-    carrier = ColSpec(
-        pl.Enum(["RM", "UPS"]),
-        rules=[ColRule(when=col("region") == "UK", choices=["RM"])],
-    )
-    plain = ColSpec(pl.Int64, bounds=(0, 10))
+def test_rules_that_read_each_other_cannot_be_ordered():
+    with pytest.raises(SpecError, match="Cannot order the generation passes on S"):
+        TableSpec(
+            "S",
+            {
+                "a": ColSpec(
+                    pl.Enum(["x", "y"]),
+                    rules=[ColRule(when=col("b") == "x", choices=["y"])],
+                ),
+                "b": ColSpec(
+                    pl.Enum(["x", "y"]),
+                    rules=[ColRule(when=col("a") == "x", choices=["y"])],
+                ),
+            },
+        )
 
 
-def test_a_pass_reading_what_it_writes_does_not_depend_on_itself():
-    # A rule keyed on its own column reads the values it is about to replace.
-    # That is not a dependency on any other pass -- but if something *else*
-    # writes that column, this pass has to run after it.
-    self_reading = Pass(
-        key="rules:n", label="the rules on 'n'", writes={"n"}, reads={"n", "g"}
-    )
-    assert self_reading.reads == frozenset({"n", "g"})
-    assert order([self_reading], "S") == [self_reading]
+def test_a_self_key_draws_from_the_column_another_key_fills():
+    """`b` takes its values from `a`, which a key fills from the parent; so
+    `b` is drawn after `a` is filled, and holds only the parent's keys."""
 
-    earlier = Pass(key="fk:n", label="the foreign key on 'n'", writes={"n"})
-    assert [p.key for p in order([self_reading, earlier], "S")] == [
-        "fk:n",
-        "rules:n",
-    ]
-
-
-def test_passes_come_from_rules_and_foreign_keys():
-    passes = {p.key: p for p in passes_of(Ordered.spec)}
-    assert set(passes) == {"rules:carrier"}
-    assert passes["rules:carrier"].writes == frozenset({"carrier"})
-    assert passes["rules:carrier"].reads == frozenset({"region"})
-
-
-def test_a_cross_spec_key_reads_nothing_local_and_a_self_key_does():
     class Parent(FrameSpec):
-        k = ColSpec(pl.Int64, bounds=(1, 50))
+        k = ColSpec(pl.Int64, bounds=(40, 50))
 
     class Child(FrameSpec):
         a = ColSpec(pl.Int64, bounds=(1, 50))
@@ -157,37 +149,10 @@ def test_a_cross_spec_key_reads_nothing_local_and_a_self_key_does():
             ForeignKey("b", references="self", ref_columns="a", name="fk_b"),
         ]
 
-    passes = {p.key: p for p in passes_of(Child.spec)}
-    assert passes["fk:fk_a"].reads == frozenset()
-    assert passes["fk:fk_b"].reads == frozenset({"a"})
-    # so the key drawing from `a` runs after the one that fills it
-    assert [p.key for p in ordered_passes(Child.spec)] == ["fk:fk_a", "fk:fk_b"]
-
-
-def test_order_puts_writers_before_readers_and_keeps_declaration_order():
-    declared = [
-        Pass(key="third", label="third", writes={"c"}, reads={"b"}),
-        Pass(key="first", label="first", writes={"a"}),
-        Pass(key="second", label="second", writes={"b"}, reads={"a"}),
-        Pass(key="independent", label="independent", writes={"z"}),
-    ]
-    # Among the passes ready to run, the earliest declared goes first, so
-    # the sequence is the declaration order a dependency does not disturb.
-    assert [p.key for p in order(declared, "S")] == [
-        "first",
-        "second",
-        "third",
-        "independent",
-    ]
-
-
-def test_order_refuses_a_cycle():
-    cycle = [
-        Pass(key="a", label="the rules on 'a'", writes={"a"}, reads={"b"}),
-        Pass(key="b", label="the rules on 'b'", writes={"b"}, reads={"a"}),
-    ]
-    with pytest.raises(SpecError, match="Cannot order the generation passes on S"):
-        order(cycle, "S")
+    parent = Parent.generate(11, seed=1)
+    df = Child.generate(300, seed=2, references={Parent: parent})
+    assert set(df["b"].drop_nulls().to_list()) <= set(parent["k"].to_list())
+    Child.validate(df, references={Parent: parent})
 
 
 # ---------------------------------------------------------------------------
@@ -216,10 +181,6 @@ def test_a_rule_keyed_on_a_foreign_keyed_column_sees_the_parents_values():
         )
         __foreign_keys__ = [ForeignKey("amount", references=FkParent, ref_columns="k")]
 
-    assert [p.key for p in ordered_passes(Child.spec)] == [
-        "fk:fk_amount__FkParent",
-        "rules:tier",
-    ]
     parent = FkParent.generate(50, seed=1)
     df = Child.generate(500, seed=3, references={FkParent: parent})
     # every amount now comes from the parent, so every tier is "high"
@@ -317,16 +278,8 @@ def test_a_composite_key_orders_after_what_writes_its_columns():
         __foreign_keys__ = [ForeignKey("a", references=Parent, ref_columns="k")]
         __unique_together__ = [["a", "b"]]
 
-    passes = {p.key: p for p in passes_of(Child.spec)}
-    repair = passes["unique_together:0"]
-    # It reads both members -- so it runs after the key that fills `a` -- but
-    # writes only `b`, since rewriting `a` would break that key.
-    assert repair.reads == frozenset({"a", "b"})
-    assert repair.writes == frozenset({"b"})
-    assert [p.key for p in ordered_passes(Child.spec)] == [
-        "fk:fk_a__Parent",
-        "unique_together:0",
-    ]
+    # The repair reads both members -- so it runs after the key that fills
+    # `a` -- but rewrites only `b`, since rewriting `a` would break that key.
 
     parent = Parent.generate(200, seed=1)
     df = Child.generate(300, seed=2, references={Parent: parent})
@@ -348,7 +301,6 @@ def test_a_composite_key_of_only_foreign_keyed_columns_says_so():
         ]
         __unique_together__ = [["a", "b"]]
 
-    assert passes_of(Child.spec)[-1].writes == frozenset()
     with pytest.raises(GenerationError, match="every column in it is foreign-keyed"):
         Child.generate(300, seed=1, references={Parent: Parent.generate(50, seed=1)})
 
@@ -373,46 +325,3 @@ def test_a_key_filling_a_unique_column_needs_a_parent_that_can():
     assert df["fk"].n_unique() == 100
     assert set(df["fk"].to_list()) <= set(parent["k"].to_list())
     Child.validate(df, references={Parent: parent})
-
-
-def test_each_pass_names_the_claims_it_overrides():
-    """Measured, not assumed: a rule's choices replace the NaN drawn beneath
-    them, a hierarchy owns its nulls, a composite key's repair leaves more
-    nulls than were drawn -- and a foreign key keeps its column's null rate,
-    which is why the set is per pass, not one for every rewritten column."""
-    from polspec import ForeignKey, Hierarchy, TableSpec
-    from polspec.pass_order import (
-        DISTRIBUTION,
-        NAN_RATE,
-        NULL_RATE,
-        VALUES,
-        WEIGHTS,
-    )
-
-    spec = TableSpec(
-        "T",
-        {
-            "k": ColSpec(pl.Enum(["a", "b"])),
-            "v": ColSpec(
-                pl.Float64,
-                choices=[0.5, 1.5],
-                rules=[ColRule(when=col("k") == "a", choices=[0.5])],
-            ),
-            "id": ColSpec(pl.Int64, unique=True, bounds=(0, 10**6)),
-            "ref": ColSpec(pl.Int64, nullable=True),
-            "child": ColSpec(pl.String),
-            "parent": ColSpec(pl.String, nullable=True),
-            "x": ColSpec(pl.Int64, bounds=(0, 10**6)),
-            "y": ColSpec(pl.Enum(["p", "q"])),
-        },
-        foreign_keys=[ForeignKey("ref", references="self", ref_columns="id")],
-        hierarchy=Hierarchy(child="child", parent="parent"),
-        unique_together=[("x", "y")],
-    )
-    overrides = {p.key.split(":")[0]: p.overrides for p in passes_of(spec)}
-    assert overrides == {
-        "rules": {WEIGHTS, DISTRIBUTION, VALUES, NAN_RATE},
-        "fk": {WEIGHTS, DISTRIBUTION, VALUES},
-        "hierarchy": {WEIGHTS, DISTRIBUTION, VALUES, NULL_RATE},
-        "unique_together": {WEIGHTS, DISTRIBUTION, NULL_RATE},
-    }

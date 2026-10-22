@@ -205,7 +205,6 @@ _READERS = {
 
 def _call(verb: str, spec, tmp_path) -> object:
     import polspec
-    from polspec.sizing import estimated_size
 
     if verb == "generate":
         return polspec.generate(spec, 20, seed=1)
@@ -214,7 +213,7 @@ def _call(verb: str, spec, tmp_path) -> object:
     if verb == "scan":
         return polspec.scan(spec, 20, seed=1).collect()
     if verb == "estimated_size":
-        return estimated_size(spec, 1_000)
+        return polspec.estimated_size(spec, 1_000)
     if verb == "inspect":
         return polspec.inspect(spec, _FRAME).findings
     if verb == "validate":

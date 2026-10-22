@@ -4,7 +4,7 @@ The round trip itself -- every format generates data its own validator
 accepts -- lives in `test_roundtrip.py` beside the other column cases. This
 module covers everything around it: what a declaration refuses and how it
 says so, what the `format` finding reports, how a format takes part in a
-foreign key's domain check, and the paths through the engine.
+foreign key's domain check, and how its values are drawn.
 """
 
 from __future__ import annotations
@@ -23,46 +23,48 @@ from polspec import (
     Hierarchy,
     SpecError,
     TableSpec,
+    generate,
     generate_batches,
+    inspect,
 )
-from polspec.domain import Domain
-from polspec.formats import FORMATS, Format, lookup, names
-from polspec.generation.engine import plan_column
 
 # ---------------------------------------------------------------------------
 # The registry
 # ---------------------------------------------------------------------------
 
 
+def _formatted(name: str) -> TableSpec:
+    return TableSpec("T", {"v": ColSpec(pl.String, format=name, nullable=True)})
+
+
+def _accepted(name: str, values: list[str | None]) -> list[str | None]:
+    """The values a column of format `name` accepts, in order."""
+    frame = pl.DataFrame({"v": values}, schema={"v": pl.String})
+    return inspect(_formatted(name), frame).passing_rows().collect()["v"].to_list()
+
+
 def test_the_documented_set_is_the_shipped_set():
-    assert names() == [
-        "uuid4",
-        "email",
-        "ipv4",
-        "ipv6",
-        "mac",
-        "hostname",
-        "iso_country",
-        "iso_currency",
-    ]
+    with pytest.raises(SpecError) as exc:
+        ColSpec(pl.String, format="zzzz")
+    assert (
+        "Known formats: uuid4, email, ipv4, ipv6, mac, hostname, iso_country, "
+        "iso_currency"
+    ) in str(exc.value)
 
 
-def test_iso_lists_are_well_formed():
-    countries = FORMATS["iso_country"].values
-    currencies = FORMATS["iso_currency"].values
-    assert len(countries) == 249 and len(set(countries)) == 249
-    assert all(len(c) == 2 and c.isupper() for c in countries)
-    assert len(set(currencies)) == len(currencies)
-    assert all(len(c) == 3 and c.isupper() for c in currencies)
-    assert {"US", "GB", "DE", "JP"} <= set(countries)
-    assert {"USD", "EUR", "GBP", "JPY"} <= set(currencies)
-
-
-def test_a_format_is_a_template_or_a_list_never_both():
-    with pytest.raises(ValueError, match="needs a template or values"):
-        Format("x", "nothing")
-    with pytest.raises(ValueError, match="no pattern"):
-        Format("x", "shape", template=(("lit", ["a"], 0, 0),))
+@pytest.mark.parametrize(
+    ("name", "width", "count", "some"),
+    [
+        ("iso_country", 2, 249, {"US", "GB", "DE", "JP"}),
+        ("iso_currency", 3, None, {"USD", "EUR", "GBP", "JPY"}),
+    ],
+)
+def test_iso_lists_are_well_formed(name, width, count, some):
+    values = set(generate(_formatted(name), 50_000, seed=1)["v"].drop_nulls())
+    if count is not None:
+        assert len(values) == count
+    assert all(len(c) == width and c.isupper() for c in values)
+    assert some <= values
 
 
 @pytest.mark.parametrize(
@@ -115,15 +117,11 @@ def test_each_validator_accepts_its_shape_and_nothing_else(name, good, bad):
     lowercase UUID, an uncompressed IPv6 -- so the round trip cannot see
     whether the validator is too *narrow* for real data. This can.
     """
-    fmt = lookup(name)
-    result = pl.DataFrame({"v": good + bad}).select(fmt.check(pl.col("v")))["v"]
-    assert result.to_list() == [True] * len(good) + [False] * len(bad)
+    assert _accepted(name, good + bad) == good
 
 
 def test_null_is_neither_valid_nor_invalid():
-    fmt = lookup("email")
-    result = pl.DataFrame({"v": [None, "a@b.c"]}).select(fmt.check(pl.col("v")))["v"]
-    assert result.to_list() == [None, True]
+    assert _accepted("email", [None, "a@b.c"]) == [None, "a@b.c"]
 
 
 # ---------------------------------------------------------------------------
@@ -217,8 +215,22 @@ def test_a_format_is_not_checked_on_a_column_of_the_wrong_dtype():
 
 
 # ---------------------------------------------------------------------------
-# Domain: a format in a foreign key
+# A format in a foreign key
 # ---------------------------------------------------------------------------
+
+
+def _keyed(child: ColSpec, parent: ColSpec) -> SpecError | None:
+    """The refusal of a key filling `child` from `parent`, if it is refused."""
+    parent_spec = TableSpec("Parent", {"k": parent})
+    try:
+        TableSpec(
+            "Child",
+            {"k": child},
+            foreign_keys=[ForeignKey("k", references=parent_spec, ref_columns="k")],
+        )
+    except SpecError as refused:
+        return refused
+    return None
 
 
 @pytest.mark.parametrize(
@@ -269,14 +281,10 @@ def test_a_format_is_not_checked_on_a_column_of_the_wrong_dtype():
         ),
     ],
 )
-def test_domain_knows_whether_a_formatted_parent_fits(child, parent, fits):
-    assert (Domain.of(child).rejects(Domain.of(parent)) is None) is fits
-
-
-def test_domain_describes_a_format_by_name():
-    assert str(Domain.of(ColSpec(pl.String, format="uuid4"))) == "format 'uuid4'"
-    finite = Domain.of(ColSpec(pl.String, format="iso_country"))
-    assert finite.format is None and len(finite.values) == 249
+def test_a_key_into_a_formatted_parent_is_declared_only_where_it_fits(
+    child, parent, fits
+):
+    assert (_keyed(child, parent) is None) is fits
 
 
 def test_a_foreign_key_into_a_formatted_parent_is_checked_at_declaration():
@@ -300,19 +308,8 @@ def test_a_foreign_key_into_a_formatted_parent_is_checked_at_declaration():
 
 
 # ---------------------------------------------------------------------------
-# The engine
+# Drawing
 # ---------------------------------------------------------------------------
-
-
-def test_a_template_format_reaches_the_engine_as_a_template():
-    plan, domain = plan_column("c", ColSpec(pl.String, format="email"))
-    assert plan.kind == "template" and domain is None
-
-
-def test_a_finite_format_reaches_the_engine_as_an_index():
-    plan, domain = plan_column("c", ColSpec(pl.String, format="iso_currency"))
-    assert plan.kind == "index"
-    assert domain.dtype == pl.String and domain.len() == plan.n_categories
 
 
 def test_a_unique_finite_format_refuses_when_the_list_runs_out():
@@ -418,19 +415,14 @@ def test_each_extra_is_drawn_on_its_share_of_the_present_rows(column, shares):
         assert (present == extra).mean() == pytest.approx(share, abs=0.003), extra
     # The format's own values fill the rest.
     own = present.filter(~present.is_in(list(shares)))
-    assert (
-        own.to_frame("v")
-        .select(lookup(column.format).check(pl.col("v")))
-        .to_series()
-        .all()
-    )
+    assert not inspect(_formatted(column.format), own.to_frame("v"))
     if column.nullable:
         assert values.null_count() / len(values) == pytest.approx(0.2, abs=0.005)
 
 
 def test_a_finite_format_draws_every_value_and_every_extra():
     values = spec_for(COUNTRY).generate(100_000, seed=1)["c"]
-    assert values.n_unique() == len(FORMATS["iso_country"].values) + 2
+    assert values.n_unique() == 249 + 2  # every country, and both extras
 
 
 def test_an_extended_template_column_is_batch_stable():
@@ -530,7 +522,6 @@ def test_a_foreign_key_holds_the_parents_extras_to_the_child():
         {"ip": ColSpec(pl.String, format="ipv4", extra_values=["NOT AVAILABLE", "X"])},
         foreign_keys=[ForeignKey("ip", references=parent)],
     )
-    assert Domain.of(COUNTRY).values[-2:] == ("UK (ISO)", "UK (ISLANDS)")
 
 
 def test_retyping_away_from_string_drops_the_extras_with_the_format():

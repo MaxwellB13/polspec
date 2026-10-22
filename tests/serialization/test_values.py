@@ -16,6 +16,7 @@ import importlib.util
 from decimal import Decimal
 from pathlib import Path
 
+import numpy as np
 import polars as pl
 import pytest
 import yaml
@@ -29,8 +30,7 @@ from polspec import (
     TableSpec,
     col,
 )
-from polspec.scalars import from_plain, is_tagged, to_plain
-from polspec.serialization import dump_yaml, from_dict, from_yaml, to_dict, to_python
+from polspec.serialization import from_dict, from_yaml, to_dict, to_python, to_yaml
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -73,8 +73,14 @@ def _through_python(spec: TableSpec, tmp_path: Path) -> TableSpec:
 
 
 # ---------------------------------------------------------------------------
-# The codec
+# The plain form of a time and a duration
 # ---------------------------------------------------------------------------
+
+
+def _choice_written(value: dt.time | dt.timedelta):
+    dtype = pl.Time if isinstance(value, dt.time) else pl.Duration("us")
+    spec = TableSpec("T", {"c": ColSpec(dtype, choices=[value])})
+    return yaml.safe_load(yaml.safe_dump(to_dict(spec)))
 
 
 @pytest.mark.parametrize(
@@ -95,33 +101,15 @@ def _through_python(spec: TableSpec, tmp_path: Path) -> TableSpec:
     ids=["time", "time_micros", "duration", "zero", "negative"],
 )
 def test_a_time_or_duration_has_one_plain_form(value, plain):
-    assert to_plain(value) == plain
-    assert is_tagged(plain)
-    assert from_plain(yaml.safe_load(yaml.safe_dump(plain))) == value
-
-
-@pytest.mark.parametrize(
-    "value",
-    [1, 1.5, "12:30", dt.date(2024, 1, 1), dt.datetime(2024, 1, 1, 9), b"\x00", None],
-    ids=str,
-)
-def test_everything_else_passes_through(value):
-    assert to_plain(value) is value
-    assert from_plain(value) is value
+    data = _choice_written(value)
+    assert data["columns"]["c"]["choices"] == [plain]
+    assert from_dict(data)["c"].choices == (value,)
 
 
 def test_a_duration_field_left_out_is_zero():
-    assert from_plain({"duration": {"seconds": 60}}) == dt.timedelta(minutes=1)
-
-
-@pytest.mark.parametrize(
-    "plain",
-    [{"time": 5}, {"duration": {"hours": 1}}, {"time": "x", "duration": {}}],
-    ids=["time_not_text", "unknown_field", "two_keys"],
-)
-def test_what_is_not_a_tagged_form_is_left_alone(plain):
-    assert not is_tagged(plain)
-    assert from_plain(plain) is plain
+    data = _choice_written(dt.timedelta(0))
+    data["columns"]["c"]["choices"] = [{"duration": {"seconds": 60}}]
+    assert from_dict(data)["c"].choices == (dt.timedelta(minutes=1),)
 
 
 # ---------------------------------------------------------------------------
@@ -185,24 +173,21 @@ def test_generated_python_imports_what_it_writes(spec, tmp_path):
 # ---------------------------------------------------------------------------
 
 
+# A numpy scalar is not a Python value: a YAML file has no form for it.
+UNWRITABLE = TableSpec(
+    "T", {"c": ColSpec(pl.Int64, choices=[np.int64(1), np.int64(2)])}
+)
+
+
 def test_a_value_yaml_cannot_hold_is_a_serialization_error_naming_where():
-    class Unwritable:
-        pass
-
     with pytest.raises(SerializationError, match=r"columns\.c\.choices\[0\]"):
-        dump_yaml({"columns": {"c": {"choices": [Unwritable()]}}}, "odd.yaml")
+        to_yaml(UNWRITABLE)
 
 
-def test_nothing_is_written_when_the_dump_fails(tmp_path, monkeypatch):
-    import polspec.serialization as serialization
-
-    def refuse(data, source):
-        raise SerializationError("refused")
-
-    monkeypatch.setattr(serialization, "dump_yaml", refuse)
+def test_nothing_is_written_when_the_dump_fails(tmp_path):
     target = tmp_path / "never.yaml"
     with pytest.raises(SerializationError):
-        serialization.to_yaml(SHIFTS, target)
+        to_yaml(UNWRITABLE, target)
     assert not target.exists()
 
 

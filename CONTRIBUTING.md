@@ -211,6 +211,15 @@ naming what to use instead and the release it goes in.
   feature across every verb), `cli/`, `docs/`. Every module opens with a
   docstring saying what it covers; `tests/helpers.py` holds what several
   share, and `tests/cases.py` the case catalogue the contracts share.
+- **Tests test public behaviour, through the public API.** A test imports
+  only public names, so a refactor that keeps what polspec does keeps its
+  tests passing. An internal function is tested by what it makes a public
+  call do. `tests/contracts/test_boundary.py` holds this line too. Its
+  exceptions are listed there, each with its reason: test files whose
+  subject is internal (the Rust boundary, the parity tables, the
+  deprecation helper), and a few names any test may use (the CLI's `main`,
+  a threshold tested either side). An exception that is no longer used
+  fails the test.
 - **What the constructor accepts is not what the instance holds.** `ColSpec`,
   `Check` and `ForeignKey` annotate their fields with the normalised form
   (`pl.DataType`, `Bound`, tuples) and declare the accepted forms in an

@@ -16,8 +16,8 @@ from polspec import (
     SpecError,
     TableSpec,
     col,
+    generate,
 )
-from polspec.tablespec import as_spec_name, as_table_spec
 
 
 class Customers(FrameSpec):
@@ -96,14 +96,14 @@ def test_from_spec_wraps_a_table_spec_in_a_class():
     assert Renamed.spec.columns == spec.columns
 
 
-def test_as_table_spec_and_as_spec_name():
-    assert as_table_spec(Orders) is Orders.spec
-    assert as_table_spec(Orders.spec) is Orders.spec
-    assert as_spec_name(Orders) == "Orders"
-    assert as_spec_name(Orders.spec) == "Orders"
-    assert as_spec_name("Orders") == "Orders"
+def test_a_framespec_class_and_its_tablespec_are_interchangeable():
+    assert generate(Orders, 50, seed=1).equals(generate(Orders.spec, 50, seed=1))
+    by_class = ForeignKey("customer_id", references=Orders)
+    by_spec = ForeignKey("customer_id", references=Orders.spec)
+    by_name = ForeignKey("customer_id", references="Orders")
+    assert by_class.references == by_spec.references == by_name.references == "Orders"
     with pytest.raises(TypeError, match="Expected a TableSpec"):
-        as_table_spec(object())
+        generate(object(), 1)  # ty: ignore[invalid-argument-type]
 
 
 # ---------------------------------------------------------------------------

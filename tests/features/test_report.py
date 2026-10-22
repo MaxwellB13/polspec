@@ -11,9 +11,10 @@ from polspec import (
     ForeignKey,
     FrameSpec,
     TableSpec,
+    to_markdown,
+    to_mermaid,
 )
 from polspec.drift import diff
-from polspec.render import framespec_to_markdown, framespec_to_mermaid
 
 
 def test_framespec_to_markdown_and_to_mermaid(tmp_path):
@@ -211,7 +212,7 @@ AWKWARD = TableSpec(
 
 
 def test_markdown_escapes_what_would_split_a_cell():
-    md = framespec_to_markdown(AWKWARD)
+    md = to_markdown(AWKWARD)
     assert _cells_per_row(md) == {10}
     assert r"| `a\|b` | `Enum(['x\|y', 'new\nline'])` |" in md
     assert "| `new line` |" in md  # a newline would have ended the row
@@ -237,7 +238,7 @@ def test_drift_and_catspec_markdown_escape_their_cells():
 
 
 def test_mermaid_attribute_names_are_words_mermaid_reads():
-    mermaid = framespec_to_mermaid(AWKWARD)
+    mermaid = to_mermaid(AWKWARD)
     names = _attributes(mermaid)
     assert len(names) == len(AWKWARD.columns) == len(set(names))
     for name in names:
@@ -254,7 +255,7 @@ def test_mermaid_attribute_names_are_words_mermaid_reads():
 def test_mermaid_notes_hold_no_tilde():
     """A `~` in a note, before a long enough tail, hung Mermaid 10's parser."""
     spec = TableSpec("T", {"x": ColSpec(pl.String, choices=["~a", "b~"])})
-    mermaid = framespec_to_mermaid(spec)
+    mermaid = to_mermaid(spec)
     assert "~" not in mermaid
     assert "choices: [\N{TILDE OPERATOR}a, b\N{TILDE OPERATOR}]" in mermaid
 
@@ -262,16 +263,16 @@ def test_mermaid_notes_hold_no_tilde():
 def test_mermaid_entity_names_start_as_mermaid_reads_them():
     one = TableSpec("2023 Sales", {"x": ColSpec(pl.Int8)})
     two = TableSpec("Café", {"x": ColSpec(pl.Int8)})
-    assert framespec_to_mermaid(one).startswith("erDiagram\n    _2023_Sales {")
-    assert framespec_to_mermaid(two).startswith("erDiagram\n    Caf_ {")
+    assert to_mermaid(one).startswith("erDiagram\n    _2023_Sales {")
+    assert to_mermaid(two).startswith("erDiagram\n    Caf_ {")
     # A word Mermaid reserves outside a block -- `class` styles an entity.
     three = TableSpec("class", {"x": ColSpec(pl.Int8)})
-    assert framespec_to_mermaid(three).startswith("erDiagram\n    class_ {")
+    assert to_mermaid(three).startswith("erDiagram\n    class_ {")
 
 
 def test_markdown_fences_a_name_holding_backticks():
     spec = TableSpec("T", {"back`tick": ColSpec(pl.Int8), "": ColSpec(pl.Int8)})
-    md = framespec_to_markdown(spec)
+    md = to_markdown(spec)
     assert "| ``back`tick`` |" in md
     assert "| ` ` |" in md  # an empty name is still a code span, not "``"
 

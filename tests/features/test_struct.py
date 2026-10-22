@@ -166,16 +166,17 @@ def test_a_struct_column_round_trips_through_yaml_and_python(tmp_path):
 
 
 def test_a_struct_dtype_is_read_back_from_a_mapping_of_its_fields():
-    from polspec.serialization.dtypes import dtype_from_data, dtype_to_data
+    from polspec import SerializationError
+    from polspec.serialization import from_dict, to_dict
 
-    assert dtype_to_data(POINT) == {
+    data = to_dict(TableSpec("T", {"p": ColSpec(POINT)}))
+    assert data["columns"]["p"]["dtype"] == {
         "Struct": {"lat": "Float64", "lon": "Float64", "label": "String"}
     }
-    assert dtype_from_data(dtype_to_data(POINT)) == POINT
-    from polspec.errors import SerializationError
-
+    assert from_dict(data)["p"].dtype == POINT
+    data["columns"]["p"]["dtype"] = {"Struct": "nope"}
     with pytest.raises(SerializationError, match=r"written as {Struct"):
-        dtype_from_data({"Struct": "nope"})
+        from_dict(data)
 
 
 # ---------------------------------------------------------------------------

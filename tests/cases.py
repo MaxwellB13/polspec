@@ -17,7 +17,9 @@ from decimal import Decimal
 
 import polars as pl
 from polspec import ColSpec, col
-from polspec.dtypes import MAP
+
+# Polars 2's `Map`, or None on Polars 1.
+MAP = getattr(pl, "Map", None)
 
 # ---------------------------------------------------------------------------
 # Column matrix -- one declared column per case, round-tripped in isolation.

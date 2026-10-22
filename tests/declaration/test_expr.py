@@ -9,8 +9,32 @@ import datetime as dt
 
 import polars as pl
 import pytest
-from polspec import Check, ColRule, ColSpec, FrameSpec, SpecError, col
-from polspec.expr import Pred, from_data, lit
+from polspec import Check, ColRule, ColSpec, FrameSpec, Pred, SpecError, col, lit
+from polspec.serialization import from_dict
+
+# Every column a predicate below names, so a spec file can hold it.
+NAMED = {
+    "a": "Int64",
+    "b": "Int64",
+    "s": "String",
+    "d": "Date",
+    "total": "Int64",
+    "subtotal": "Int64",
+    "status": "String",
+}
+
+
+def from_data(data) -> Pred:
+    """The predicate a spec file's check holding `data` declares."""
+    file = {
+        "name": "T",
+        "columns": {name: {"dtype": dtype} for name, dtype in NAMED.items()},
+        "checks": [{"name": "c", "expr": data}],
+    }
+    pred = from_dict(file).checks[0].pred
+    assert pred is not None
+    return pred
+
 
 FRAME = pl.DataFrame(
     {

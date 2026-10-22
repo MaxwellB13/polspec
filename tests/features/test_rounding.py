@@ -16,6 +16,7 @@ import polars as pl
 import pytest
 from cases import COLUMN_CASES
 from polspec import (
+    Bound,
     ColSpec,
     FrameSpec,
     TableSpec,
@@ -24,15 +25,23 @@ from polspec import (
     profile,
     validate,
 )
-from polspec.bound import Bound
-from polspec.profiler import rounded_bounds, rounded_rate, step_of
 
 STEPS = ["auto", 1000, 0.01, 7, 0.3, "1M"]
 
 
 # ---------------------------------------------------------------------------
-# The arithmetic
+# The arithmetic, as `from_dataframe` writes it
 # ---------------------------------------------------------------------------
+
+
+def _bounds(values: list, dtype: pl.DataType, step) -> Bound | None:
+    frame = pl.DataFrame({"c": pl.Series(values, dtype=dtype)})
+    return FrameSpec.from_dataframe(frame, round_bounds=step).spec["c"].bounds
+
+
+def _rate(nulls: int, rows: int, step) -> float:
+    frame = pl.DataFrame({"c": [None] * nulls + [1] * (rows - nulls)})
+    return FrameSpec.from_dataframe(frame, round_rates=step).spec["c"].null_probability
 
 
 @pytest.mark.parametrize(
@@ -44,17 +53,17 @@ STEPS = ["auto", 1000, 0.01, 7, 0.3, "1M"]
         ((0.99, 4.99), pl.Float64, "auto", (0.9, 5.0)),
         ((1203, 8_712_334), pl.Int64, "auto", (0, 8_800_000)),
         # A step: outward to its multiples.
-        ((1203, 8_712_334), pl.Int64, Decimal(1000), (1000, 8_713_000)),
-        ((-5.5, 5.5), pl.Float32, Decimal(2), (-6.0, 6.0)),
+        ((1203, 8_712_334), pl.Int64, 1000, (1000, 8_713_000)),
+        ((-5.5, 5.5), pl.Float32, 2, (-6.0, 6.0)),
         # Within what the dtype holds.
         ((3, 251), pl.UInt8, "auto", (0, 255)),
-        ((-100, 100), pl.Int8, Decimal(1000), (-128, 127)),
+        ((-100, 100), pl.Int8, 1000, (-128, 127)),
         # An integer's step is whole; a Decimal's no finer than its scale.
-        ((3, 9), pl.Int32, Decimal("0.01"), (3, 9)),
+        ((3, 9), pl.Int32, 0.01, (3, 9)),
         (
             (Decimal("1.23"), Decimal("98.76")),
             pl.Decimal(10, 2),
-            Decimal("0.001"),
+            "0.001",
             (Decimal("1.23"), Decimal("98.76")),
         ),
         (
@@ -68,58 +77,54 @@ STEPS = ["auto", 1000, 0.01, 7, 0.3, "1M"]
     ],
 )
 def test_bounds_round_outward_within_the_dtype(observed, dtype, step, written):
-    result = rounded_bounds(Bound(*observed), dtype, step)
+    result = _bounds(list(observed), dtype, step)
+    assert result is not None
     assert (result.min, result.max) == written
     assert result.min <= observed[0] and result.max >= observed[1]
 
 
 def test_a_float_rounds_without_artifacts():
     """0.1 * 9 is 0.9000000000000001 in floats; the rounding is decimal."""
-    assert rounded_bounds(Bound(0.95, 1.0), pl.Float64, Decimal("0.1")) == Bound(
-        0.9, 1.0
-    )
+    assert _bounds([0.95, 1.0], pl.Float64, 0.1) == Bound(0.9, 1.0)
 
 
 @pytest.mark.parametrize(
-    ("rate", "step", "written"),
+    ("nulls", "rows", "step", "written"),
     [
-        (0.023651, "auto", 0.024),
-        (0.00031, "auto", 0.00031),
-        (0.1234, "auto", 0.13),
-        (0.023651, Decimal("0.01"), 0.03),
-        (0.999, Decimal("0.01"), 1.0),
-        (0.5, Decimal(3), 1.0),  # never past 1
-        (0.0, "auto", 0.0),  # none stays none
-        (0.0, Decimal("0.01"), 0.0),
+        (2_365, 100_000, "auto", 0.024),
+        (31, 100_000, "auto", 0.00031),
+        (1_234, 10_000, "auto", 0.13),
+        (2_365, 100_000, 0.01, 0.03),
+        (999, 1_000, 0.01, 1.0),
+        (1, 2, 3, 1.0),  # never past 1
+        (0, 100, "auto", 0.0),  # none stays none
+        (0, 100, 0.01, 0.0),
     ],
 )
-def test_rates_round_up_and_zero_stays_zero(rate, step, written):
-    assert rounded_rate(rate, step) == written
+def test_rates_round_up_and_zero_stays_zero(nulls, rows, step, written):
+    assert _rate(nulls, rows, step) == written
 
 
 @pytest.mark.parametrize(
     ("text", "step"),
     [
-        ("1k", Decimal(1000)),
-        ("10k", Decimal(10_000)),
-        ("1M", Decimal(1_000_000)),
-        ("0.01", Decimal("0.01")),
-        ("2.5e3", Decimal(2500)),
-        (1000, Decimal(1000)),
-        (0.01, Decimal("0.01")),
-        ("auto", "auto"),
+        ("1k", 1000),
+        ("10k", 10_000),
+        ("1M", 1_000_000),
+        ("2.5e3", 2500),
+        ("0.01", 0.01),
         ("exact", None),
-        (None, None),
     ],
 )
 def test_a_step_reads_as_written(text, step):
-    assert step_of(text) == step
+    values = [1203.0, 8_712_334.5]
+    assert _bounds(values, pl.Float64, text) == _bounds(values, pl.Float64, step)
 
 
 @pytest.mark.parametrize("bad", ["banana", "-1", "0", 0, -0.5, "inf", True])
 def test_a_step_that_is_not_one_is_refused(bad):
     with pytest.raises(ValueError, match="rounding step"):
-        step_of(bad)
+        _bounds([1, 2], pl.Int64, bad)
 
 
 # ---------------------------------------------------------------------------

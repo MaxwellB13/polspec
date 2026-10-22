@@ -105,26 +105,6 @@ def test_generation_failure_is_a_generation_error():
         NoCoverage.generate(10, method="cartesian")
 
 
-def test_rust_engine_complaints_surface_as_generation_error():
-    class Spec(FrameSpec):
-        a = ColSpec(
-            pl.Float64,
-            distribution="normal",
-            distribution_params={"mean": 0.0, "std": 1.0},
-        )
-
-    # A valid spec; then reach the engine with a parameter it rejects by
-    # bypassing ColSpec's own check, which is what a future bug would do.
-    from polspec._ffi import column_plan
-
-    with pytest.raises(GenerationError) as info:
-        column_plan(
-            "a", "float64", distribution="normal", params={"mean": 0.0, "std": -1.0}
-        )
-    assert isinstance(info.value.__cause__, ValueError)
-    assert "'a'" in str(info.value) and "must be positive" in str(info.value)
-
-
 def test_unreadable_file_is_a_serialization_error(tmp_path):
     path = tmp_path / "spec.yaml"
     path.write_text(

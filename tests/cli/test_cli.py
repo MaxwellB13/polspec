@@ -400,10 +400,21 @@ def _write_yaml_spec(tmp_path, name="Orders"):
     return path
 
 
-@pytest.mark.parametrize(
-    "suffix",
-    [".csv", ".tsv", ".parquet", ".pq", ".ndjson", ".jsonl", ".json", ".arrow"],
-)
+WRITTEN_SUFFIXES = [
+    ".csv",
+    ".tsv",
+    ".parquet",
+    ".pq",
+    ".ndjson",
+    ".jsonl",
+    ".json",
+    ".arrow",
+    ".feather",
+    ".ipc",
+]
+
+
+@pytest.mark.parametrize("suffix", WRITTEN_SUFFIXES)
 def test_generate_writes_a_file_the_readers_read_back(tmp_path, suffix, capsys):
     spec = _write_yaml_spec(tmp_path)
     out = tmp_path / "out" / f"rows{suffix}"
@@ -411,9 +422,9 @@ def test_generate_writes_a_file_the_readers_read_back(tmp_path, suffix, capsys):
     assert f"Wrote 40 row(s) of Orders to {out}" in capsys.readouterr().out
     # What generate wrote, the readers read -- through the same suffix map --
     # and the spec accepts: a text format's dates are read back as declared.
-    from polspec.cli._io import _read_data_file
+    from polspec import from_yaml, read
 
-    back = _read_data_file(out, None)
+    back = read(from_yaml(spec), out)
     assert back.height == 40
     assert back.columns == ["order_id", "status", "total", "placed"]
     assert run_cli("validate", spec, out) == 0
@@ -446,11 +457,14 @@ def test_generate_to_json_writes_categories_as_text_and_refuses_bytes(
     assert "JSON has no bytes" in capsys.readouterr().err
 
 
-def test_every_reader_has_a_writer():
-    from polspec.cli._io import _DATA_WRITERS
-    from polspec.reading import SUFFIXES
+def test_every_reader_has_a_writer(tmp_path):
+    """Every suffix `read` takes is one `generate` writes, tested above."""
+    from polspec import TableSpec, read
 
-    assert set(SUFFIXES) == set(_DATA_WRITERS)
+    with pytest.raises(ValueError, match="Supported: ") as exc:
+        read(TableSpec("T", {"a": ColSpec(pl.Int64)}), tmp_path / "rows.nope")
+    supported = str(exc.value).split("Supported: ")[1].split(", ")
+    assert sorted(supported) == sorted(WRITTEN_SUFFIXES)
 
 
 def test_generate_is_reproducible_by_seed(tmp_path):
@@ -1013,8 +1027,8 @@ def test_validate_skip_turns_off_a_kind_of_check(tmp_path, capsys):
 
 
 def test_validate_skip_takes_every_switch_and_nothing_else(tmp_path, capsys):
-    from polspec.validation import SWITCHES
-
+    switches = ["rules", "validators", "unique", "checks", "foreign_keys"]
+    switches += ["hierarchy", "order", "pattern", "bounds"]  # as documented
     source = _temporal_spec(tmp_path)
     data = tmp_path / "events.csv"
     data.write_text(
@@ -1022,7 +1036,7 @@ def test_validate_skip_takes_every_switch_and_nothing_else(tmp_path, capsys):
         "2024-06-01,2024-01-01T00:00:00,2024-01-01T00:00:00+0000,12:00:00,x\n",
         encoding="utf-8",
     )
-    every = [arg for name in SWITCHES for arg in ("--skip", name)]
+    every = [arg for name in switches for arg in ("--skip", name)]
     assert run_cli("validate", source, data, *every) == 0
     with pytest.raises(SystemExit):
         run_cli("validate", source, data, "--skip", "nope")
