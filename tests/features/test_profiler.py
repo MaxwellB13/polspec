@@ -565,7 +565,7 @@ def test_currency_codes_follow_the_same_rule():
 
 
 # ---------------------------------------------------------------------------
-# One profiler: `profile`, with `profile_dataframe` deprecated onto it
+# One profiler: `profile`, its switches on by default
 # ---------------------------------------------------------------------------
 
 
@@ -577,20 +577,6 @@ def _frame() -> pl.DataFrame:
             "amount": [float(i % 37) * 1.5 for i in range(200)],
         }
     )
-
-
-def test_profile_dataframe_is_deprecated_for_profile_and_still_works():
-    frame = _frame()
-    with pytest.warns(
-        DeprecationWarning,
-        match=r"profile_dataframe is deprecated.*polspec\.profile\(df, weights=False",
-    ):
-        columns = polspec.profile_dataframe(frame, max_unique_enum=10)
-    # The replacement the warning names gives the same columns.
-    profiled = polspec.profile(
-        frame, weights=False, shape=False, detect_unique=False, max_unique_enum=10
-    )
-    assert columns == dict(profiled.columns)
 
 
 def test_profile_switches_default_on_and_turn_off():

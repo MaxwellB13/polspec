@@ -15,11 +15,3 @@ workflow, and what carries over from the source.
 ## ProfileOptions
 
 ::: polspec.ProfileOptions
-
-## profile_dataframe (deprecated)
-
-Deprecated in 0.18.0, removed in 1.0: `profile` takes the same switches. The
-call that gives the same columns is
-`profile(df, weights=False, shape=False, detect_unique=False).columns`.
-
-::: polspec.profile_dataframe

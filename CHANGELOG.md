@@ -8,6 +8,22 @@ seed produces; see
 
 ## [Unreleased]
 
+### Removed
+
+What 0.x deprecated, each of which warned for at least one minor release:
+
+| Removed | Deprecated in | Use instead |
+|:--|:--|:--|
+| `polspec.profile_dataframe(df, ...)` | 0.18.0 | `polspec.profile(df, weights=False, shape=False, detect_unique=False, detect_order=False).columns` |
+| `polspec.serialization.COLSPEC_FIELDS`, `TABLESPEC_FIELDS`, `COLRULE_FIELDS`, `CHECK_FIELDS`, `FK_FIELDS` | 0.18.0 | the keys the *Spec files* reference lists |
+| `FrameSpec.checks()` | 0.21.0 | `FrameSpec.spec.checks` |
+| `FrameSpec.foreign_keys()` | 0.21.0 | `FrameSpec.spec.foreign_keys` |
+| `FrameSpec.unique_together()` | 0.21.0 | `FrameSpec.spec.unique_together` |
+
+A column may now be called `checks`, `foreign_keys` or `unique_together`
+without shadowing anything. From 1.0, a deprecated name is removed only at
+the next major release.
+
 ## [0.23.0] - 2026-10-22
 
 **The surface 1.0 freezes, released first.** A review before 1.0 read every

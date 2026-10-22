@@ -200,11 +200,12 @@ naming what to use instead and the release it goes in.
 - Mark a function with `polspec._deprecation.deprecated(old, use=...)`, or
   call `warn_deprecated` where a decorator does not fit (an argument, an
   attribute).
-- A name deprecated in 0.x is removed in 1.0, and after at least one minor
-  release of warning. In 1.x a removal waits for the next major, after at
+- A name deprecated in 1.x is removed at the next major release, after at
   least two minor releases of warning.
-- Say so in the changelog under *Deprecated*, with the replacement; mark it
-  "(deprecated)" in the API reference; and test that it warns and still
+- Say so in the changelog under *Deprecated*, with the replacement; list it
+  in the Stability page's *Deprecated* table, which
+  `tests/contracts/test_deprecation.py` holds to what actually warns; mark
+  it "(deprecated)" in the API reference; and test that it warns and still
   works.
 
 ## Supported versions

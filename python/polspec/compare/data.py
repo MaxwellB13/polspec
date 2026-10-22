@@ -7,7 +7,7 @@ just the summary statistics the comparators read -- never the rows, except a
 bounded sample of the values of a column that declares a distribution,
 which is what a distribution is compared by.
 
-This measures directly rather than going through `profile_dataframe`. The
+This measures directly rather than going through `profile`. The
 profiler describes a frame well enough to generate one like it, which is a
 different question: it narrows a small String column to an Enum and records
 temporal extremes as physical integers, both of which a comparison would

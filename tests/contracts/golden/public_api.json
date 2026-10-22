@@ -41,7 +41,6 @@
   "inspect",
   "lit",
   "profile",
-  "profile_dataframe",
   "read",
   "scan",
   "sink_csv",

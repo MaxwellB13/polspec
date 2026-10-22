@@ -37,7 +37,7 @@ from polspec.generation import (
     sink_parquet,
 )
 from polspec.hierarchy import Hierarchy
-from polspec.profiler import ProfileOptions, profile_dataframe
+from polspec.profiler import ProfileOptions
 from polspec.reading import read
 from polspec.registry import Registry
 from polspec.render import to_markdown, to_mermaid
@@ -114,7 +114,6 @@ __all__ = [
     "inspect",
     "lit",
     "profile",
-    "profile_dataframe",
     "read",
     "scan",
     "sink_csv",
