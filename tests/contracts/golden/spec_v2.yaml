@@ -1,0 +1,36 @@
+# Version 2: the same spec, in the predicate data form; written as version 4
+# writes it, since nothing in it changed meaning in versions 3 and 4.
+version: 2
+name: Orders
+columns:
+  region:
+    dtype:
+      Enum:
+      - UK
+      - US
+    tags: geo
+  carrier:
+    dtype:
+      Enum:
+      - RM
+      - UPS
+    rules:
+    - when:
+        eq:
+        - col: region
+        - UK
+      choices:
+      - RM
+  amount:
+    dtype: Float64
+    bounds:
+    - 0.0
+    - 100.0
+    distribution: normal
+    distribution_params:
+      mean: 50.0
+      std: 10.0
+  note:
+    dtype: String
+    nullable: true
+    null_probability: 0.25

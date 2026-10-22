@@ -1,0 +1,37 @@
+version: 4
+name: Orders
+columns:
+  order_id:
+    dtype: Int64
+    bounds:
+    - 0
+    - 1000
+    unique: true
+  status:
+    dtype:
+      Enum:
+      - NEW
+      - PAID
+      - SHIPPED
+    weights:
+    - 0.25
+    - 0.5
+    - 0.25
+  total:
+    dtype: Float64
+    bounds:
+    - 0.0
+    - 9900.0
+  email:
+    dtype: String
+    format: email
+  note:
+    dtype: String
+    nullable: true
+    unique: true
+    null_probability: 0.89
+    string_length:
+    - 6
+    - 8
+order_by:
+- order_id

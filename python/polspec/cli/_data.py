@@ -25,6 +25,7 @@ from polspec.errors import CliError
 from polspec.generation.pipeline import describe_bytes
 from polspec.tablespec import TableSpec
 from polspec.validation import FINDING_COLUMN, validate
+from polspec.validation.report import SCHEMA_VERSION as REPORT_SCHEMA_VERSION
 
 if TYPE_CHECKING:
     import polars as pl
@@ -231,7 +232,13 @@ def _validate_all(args: argparse.Namespace) -> int:
         frames, references=references, **_validation_options(args)
     )
     if args.json:
-        print(json.dumps({name: r.to_dict() for name, r in reports.items()}, indent=2))
+        # Keyed under `reports`: a spec may be called anything, `schema_version`
+        # included.
+        document = {
+            "schema_version": REPORT_SCHEMA_VERSION,
+            "reports": {name: r.to_dict() for name, r in reports.items()},
+        }
+        print(json.dumps(document, indent=2))
     else:
         for name, report in reports.items():
             print(f"== {name}")

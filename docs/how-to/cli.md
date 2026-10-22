@@ -264,6 +264,26 @@ structured report with `--json`. The exit status is 0 when the data passes
 and 1 when it does not, so a spec can gate a pipeline step in CI with no
 Python at all.
 
+The JSON is `ValidationReport.to_dict()`, led by a `schema_version`:
+
+```json
+{
+  "schema_version": 1,
+  "spec": "Orders",
+  "passed": false,
+  "findings": [
+    {"code": "bounds", "key": "total__bounds", "message": "Column 'total': ...",
+     "columns": ["total"], "count": 1, "samples": [-1.0],
+     "details": {"bounds": [0, 10], "min_found": -1.0, "max_found": 1.0}}
+  ]
+}
+```
+
+The keys, and the types of their values, are what
+[Stability](../explanation/stability.md#the-command-line) promises; a key
+may be added, and `schema_version` rises if one is ever renamed, removed or
+changes type.
+
 `--output PATH` writes the rows that passed, typed as the spec declares --
 they are validated again with `cast=True`, so the file is one the spec
 accepts -- and `--failing PATH` writes the rows that did not, each once, in
@@ -310,7 +330,9 @@ files named after them (`Orders.parquet` for `Orders`, in any format the
 CLI reads). Every spec with a file is checked, **each seeing the others'
 files as its parents**, as [`Registry.inspect_all`](registry.md#validating-a-related-set)
 does; specs with no file are listed and skipped. The exit status is 1 when
-any report fails; `--json` prints one report per spec, keyed by name.
+any report fails; `--json` prints one document with every report keyed by
+spec name under `reports` -- `{"schema_version": 1, "reports": {"Orders":
+{...}}}` -- since a spec may be called anything.
 
 ## `diff` and `drift` — what moved
 
@@ -354,7 +376,8 @@ polspec drift --all specs/ nightly/ --json > drift.json
 As for `validate --all`: `SPEC` is a directory of specs and `DATA` a
 directory of files named after them. Every spec with a file is measured,
 specs without one are listed and skipped, and `--fail-on` decides the exit
-status across all of them. `diff` compares two declarations rather than a
+status across all of them; `--json` prints the reports under `reports`, as
+`validate --all` does. `diff` compares two declarations rather than a
 declaration and data, so it has no `--all`.
 
 ## Exit codes and errors

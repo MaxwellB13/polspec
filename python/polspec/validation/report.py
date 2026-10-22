@@ -29,6 +29,11 @@ from polspec.errors import ValidationError
 if TYPE_CHECKING:
     from polspec.validation import ValidationOptions
 
+# The shape of `ValidationReport.to_dict()`, and so of `polspec validate
+# --json`: raised when a key is renamed, removed or changes type, not when
+# one is added.
+SCHEMA_VERSION = 1
+
 FindingCode = Literal[
     "extra_columns",
     "missing_columns",
@@ -373,8 +378,10 @@ class ValidationReport:
         return settled
 
     def to_dict(self) -> dict[str, Any]:
-        """This report as JSON-ready data: the spec, the verdict, the findings."""
+        """This report as JSON-ready data: its `schema_version`, the spec, the
+        verdict, the findings."""
         return {
+            "schema_version": SCHEMA_VERSION,
             "spec": self.spec_name,
             "passed": self.passed,
             "findings": [f.to_dict() for f in self.findings],

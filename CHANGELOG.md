@@ -10,6 +10,15 @@ seed produces; see
 
 ### Changed
 
+- **Every `--json` document carries a `schema_version`**, and so does
+  `ValidationReport.to_dict()` and `DriftReport.to_dict()`. Its keys and
+  their types are the promise, and the version rises if one is ever renamed,
+  removed or changes type.
+- **`validate --all --json` and `drift --all --json` key their reports
+  under `reports`**: `{"schema_version": 1, "reports": {"Orders": {...}}}`.
+  They were keyed by spec name at the top level, where a spec called
+  `schema_version` would have collided. A script reading `doc["Orders"]`
+  reads `doc["reports"]["Orders"]` now.
 - **`schema infer` writes what a person would.** A column with no nulls
   carries no null rate -- it is not nullable, so the rate meant nothing,
   and every such column used to say `null_probability: 0.0`. Under
@@ -21,6 +30,11 @@ seed produces; see
 
 ### Documentation
 
+- The finding codes table gains the three hierarchy codes it lacked:
+  `hierarchy_multi_parent`, `hierarchy_cycle` and `hierarchy_depth`.
+- *Errors* said an exception other than a `PolspecError` keeps its traceback
+  on the command line; it is printed as one line, with its class, and exits
+  1.
 - **Stability**, a new page: what polspec promises now, in the beta, and
   what 1.0 promises -- the public API, spec files, seeded output, the
   command line and its exit codes, finding and drift codes -- with the test

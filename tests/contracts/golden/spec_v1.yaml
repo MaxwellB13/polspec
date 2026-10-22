@@ -1,0 +1,35 @@
+# Version 1, as polspec wrote a spec before its files carried a `version:`:
+# tags spelt `category`, a rule's condition one column and one operator, and
+# distribution parameters by whichever alias the author typed.
+name: Orders
+columns:
+  region:
+    dtype:
+      Enum:
+      - UK
+      - US
+    category: geo
+  carrier:
+    dtype:
+      Enum:
+      - RM
+      - UPS
+    rules:
+    - when:
+        column: region
+        equals: UK
+      choices:
+      - RM
+  amount:
+    dtype: Float64
+    bounds:
+    - 0.0
+    - 100.0
+    distribution: Normal
+    distribution_params:
+      mu: 50
+      sigma: 10
+  note:
+    dtype: String
+    nullable: true
+    null_probability: 0.25

@@ -32,6 +32,11 @@ if TYPE_CHECKING:
 
     from polspec.drift import DriftOptions
 
+# The shape of `DriftReport.to_dict()`, and so of `polspec diff --json` and
+# `polspec drift --json`: raised when a key is renamed, removed or changes
+# type, not when one is added.
+SCHEMA_VERSION = 1
+
 DriftCode = Literal[
     "column_added",
     "column_removed",
@@ -161,8 +166,9 @@ class DriftReport:
         return tuple(f for f in self.findings if f.code == code)
 
     def to_dict(self) -> dict[str, Any]:
-        """This report as JSON-ready data."""
+        """This report as JSON-ready data, led by its `schema_version`."""
         return {
+            "schema_version": SCHEMA_VERSION,
             "kind": self.kind,
             "old": self.old,
             "new": self.new,

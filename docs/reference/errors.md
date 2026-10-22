@@ -51,7 +51,9 @@ DataFrame was expected raise the plain `ValueError` or `TypeError` any Python
 API would.
 
 The command line prints a `PolspecError` as a one-line `error: ...` and exits
-with status 1; anything else is a bug and keeps its traceback.
+with status 1. Any other exception is printed the same way, with its class
+name (`error: KeyError: ...`), and also exits 1; it is a bug worth
+reporting. A command line that is itself wrong exits 2.
 
 ## Finding codes
 
@@ -81,6 +83,9 @@ through `report.rows(finding)`; structural ones describe the frame's shape.
 | `check` | row-level | a `__checks__` predicate is false |
 | `order` | row-level | a row belongs before the row above it, by the spec's `order_by`; `details` name the order |
 | `foreign_key` | row-level | a key value has no matching parent row (also structural when the parent lacks the referenced columns) |
+| `hierarchy_multi_parent` | row-level | a reference appears as a child in more than one row, so it has no single ultimate parent; see [Hierarchies](../how-to/hierarchies.md) |
+| `hierarchy_cycle` | row-level | a row's chain of parents never reaches an ultimate parent |
+| `hierarchy_depth` | row-level | a chain is longer than the declared `max_depth`, without being a loop |
 
 ## Drift codes
 
