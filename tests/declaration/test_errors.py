@@ -21,6 +21,7 @@ from polspec import (
     RegistryError,
     SerializationError,
     SpecError,
+    TableSpec,
     ValidationError,
     ValidationOptions,
     col,
@@ -336,3 +337,26 @@ def test_options_can_be_passed_as_one_value():
         Rows.validate(dupes, options=opts, unique=False)
     with pytest.raises(TypeError, match="must be a ValidationOptions"):
         Rows.validate(dupes, options={"unique": False})
+
+
+@pytest.mark.parametrize(
+    "switch",
+    [
+        "rules",
+        "validators",
+        "unique",
+        "checks",
+        "foreign_keys",
+        "hierarchy",
+        "order",
+        "pattern",
+        "bounds",
+    ],
+)
+def test_each_switchs_old_spelling_names_the_new_one(switch):
+    """`validate_order` once offered `validators`, the closer string."""
+    spec = TableSpec("T", {"a": ColSpec(pl.Int64)})
+    with pytest.raises(
+        TypeError, match=rf"'validate_{switch}' \(did you mean '{switch}'\?\)"
+    ):
+        inspect(spec, pl.DataFrame({"a": [1]}), **{f"validate_{switch}": False})

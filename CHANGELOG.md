@@ -8,6 +8,18 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-22
+
+**The surface 1.0 freezes, released first.** A review before 1.0 read every
+public name and signature, since 1.0 makes them permanent, and this release
+makes every change it found: one namespace, `polspec`; constructors that
+take their options by keyword; one spelling for each option and parameter;
+typed options on every entry point, `FrameSpec.drift` among them, which
+took four of its seven; and the internals out of the API reference. **They
+are breaking**, made outright with no deprecation period, and listed below
+with the replacement for each -- the list the 1.0 migration guide is built
+from. **No seeded output changes.**
+
 ### Breaking
 
 0.23 makes every change to the public surface before 1.0 freezes it, so 1.0
@@ -2733,7 +2745,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/MaxwellB13/polspec/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/MaxwellB13/polspec/compare/v0.21.1...v0.22.0
 [0.21.1]: https://github.com/MaxwellB13/polspec/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/MaxwellB13/polspec/compare/v0.20.0...v0.21.0
