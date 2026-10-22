@@ -8,6 +8,19 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-22
+
+**Beta: the contract, written down and tested.** The
+[Stability](https://maxwellb13.github.io/polspec/explanation/stability/)
+page states what polspec promises now and what 1.0 will -- the public API,
+spec files, seeded output, the command line, the finding and drift codes --
+and a test holds each promise to a golden copy, so a release cannot break
+one without a test failing first. What 1.0 removes is listed there and
+warns today. Two small changes come with it: every `--json` document leads
+with a `schema_version`, and the `--all` documents key their reports under
+`reports`; and `schema infer` no longer writes a null rate on a column with
+no nulls, and rounds category frequencies. **No seeded output changes.**
+
 ### Changed
 
 - **Beta.** The `Development Status` classifier says so, and the API is
@@ -2619,7 +2632,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.21.1...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/MaxwellB13/polspec/compare/v0.21.1...v0.22.0
 [0.21.1]: https://github.com/MaxwellB13/polspec/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/MaxwellB13/polspec/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/MaxwellB13/polspec/compare/v0.19.0...v0.20.0
