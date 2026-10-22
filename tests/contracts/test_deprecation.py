@@ -8,8 +8,11 @@ hold the mechanism, and the public surface, to the policy.
 
 from __future__ import annotations
 
+import re
 import warnings
+from pathlib import Path
 
+import polars as pl
 import polspec
 import pytest
 from polspec._deprecation import REMOVAL, deprecated, is_deprecated
@@ -99,3 +102,77 @@ def test_the_field_tables_left_serialization_and_still_work(name):
         table = getattr(serialization, name)
     assert table is getattr(fields, name)
     assert caught[0].filename == __file__, "the warning points at the caller"
+
+
+# ---------------------------------------------------------------------------
+# The inventory: what 1.0 removes, on the Stability page
+# ---------------------------------------------------------------------------
+
+STABILITY = (
+    Path(__file__).resolve().parents[2] / "docs" / "explanation" / "stability.md"
+)
+PUBLIC = ("polspec", "polspec.drift", "polspec.validation", "polspec.serialization")
+
+
+def _inventory() -> list[str]:
+    """The names in the Stability page's *Removed at 1.0* table, as written."""
+    page = STABILITY.read_text(encoding="utf-8")
+    section = page.split("### Removed at 1.0\n", 1)[1].split("\n## ", 1)[0]
+    return re.findall(r"^\| `([^`]+)` \|", section, re.M)
+
+
+def _name(entry: str) -> str:
+    """`polspec.profile_dataframe(df)` -> `polspec.profile_dataframe`."""
+    return entry.split("(", 1)[0]
+
+
+def _deprecated_now() -> set[str]:
+    """Everything that warns: marked public functions and methods, and the
+    names a module's `__getattr__` keeps for the old path."""
+    import importlib
+
+    from polspec.serialization import _MOVED_FIELDS
+
+    found = {f"polspec.serialization.{name}" for name in _MOVED_FIELDS}
+    for module_name in PUBLIC:
+        module = importlib.import_module(module_name)
+        for name in module.__all__:
+            obj = getattr(module, name)
+            if is_deprecated(obj):
+                found.add(f"{module_name}.{name}")
+            if isinstance(obj, type):
+                found |= {
+                    f"{name}.{attr}"
+                    for attr in dir(obj)
+                    if not attr.startswith("_") and is_deprecated(getattr(obj, attr))
+                }
+    return found
+
+
+def test_the_inventory_is_everything_that_warns():
+    """The Stability page lists what 1.0 removes; a deprecation it leaves
+    out, or one it lists that no longer warns, fails here."""
+    assert {_name(entry) for entry in _inventory()} == _deprecated_now()
+
+
+class _Declared(polspec.FrameSpec):
+    a = polspec.ColSpec(pl.Int64)
+
+
+def _use(name: str) -> object:
+    """The deprecated use `name` stands for."""
+    if name == "polspec.profile_dataframe":
+        return polspec.profile_dataframe(pl.DataFrame({"a": [1, 2, 3]}))
+    if name.startswith("polspec.serialization."):
+        from polspec import serialization
+
+        return getattr(serialization, name.rsplit(".", 1)[1])
+    if name.startswith("FrameSpec."):
+        return getattr(_Declared, name.split(".", 1)[1])()
+    raise AssertionError(f"say how to use {name} here")
+
+
+@pytest.mark.parametrize("entry", _inventory())
+def test_every_name_in_the_inventory_warns_and_still_works(entry):
+    with pytest.warns(DeprecationWarning, match=f"removed in polspec {REMOVAL}"):
+        _use(_name(entry))
