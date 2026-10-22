@@ -5,6 +5,38 @@ rather than asking you to keep a second copy in step.
 
 ## Markdown data dictionary
 
+The examples on this page document these specs:
+
+```python
+from datetime import date
+
+import polars as pl
+from polspec import ColSpec, ForeignKey, FrameSpec, Registry
+
+
+class Customers(FrameSpec):
+    id        = ColSpec(pl.Int64, bounds=(1, 10_000), unique=True)
+    name      = ColSpec(pl.String, string_length=(3, 20), tags="pii")
+    country   = ColSpec(pl.Enum(["UK", "US", "DE"]))
+    signed_up = ColSpec(pl.Date, bounds=(date(2020, 1, 1), date(2026, 1, 1)))
+
+
+class Orders(FrameSpec):
+    order_id      = ColSpec(pl.Int64, bounds=(1, 1_000_000), unique=True)
+    customer_id   = ColSpec(pl.Int64, bounds=(1, 10_000))
+    status        = ColSpec(pl.Enum(["NEW", "PAID", "SHIPPED"]))
+    total         = ColSpec(pl.Float64, bounds=(0.0, 5_000.0))
+    internal_note = ColSpec(pl.String, string_length=(0, 40), nullable=True)
+
+
+class OrderLines(FrameSpec):
+    order_id = ColSpec(pl.Int64, bounds=(1, 1_000_000))
+    line_no  = ColSpec(pl.Int32, bounds=(1, 50))
+    quantity = ColSpec(pl.UInt16, bounds=(1, 500))
+    __unique_together__ = [["order_id", "line_no"]]
+    __foreign_keys__ = [ForeignKey("order_id", references=Orders)]
+```
+
 ```python
 Orders.to_markdown("docs/orders.md")   # writes and returns
 markdown = Orders.to_markdown()        # just returns
@@ -87,6 +119,13 @@ Registry(Customers, Orders, OrderLines).to_mermaid("docs/schema.mmd")
 `CatSpec` renders the same two ways:
 
 ```python
+from polspec import CatSpec
+
+categories = CatSpec(
+    enums={"STATUS": ["NEW", "PAID", "SHIPPED"]},
+    categoricals={"CURRENCY": pl.Categories("CURRENCY", physical=pl.UInt8)},
+)
+
 categories.to_markdown("docs/categories.md")
 categories.to_mermaid("docs/categories.mmd")
 ```

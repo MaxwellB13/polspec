@@ -62,6 +62,11 @@ hold a half at declaration; see
 `nullable=True`, `null_probability` sets how often generation emits one.
 
 ```python
+from datetime import date
+
+import polars as pl
+from polspec import ColSpec, FrameSpec
+
 ColSpec(pl.Int64, nullable=True, null_probability=0.25)   # about a quarter null
 ```
 
@@ -182,7 +187,7 @@ Bounds outside what the dtype can hold are rejected when you declare them:
 <!-- docs: raises -->
 ```python
 ColSpec(pl.Float32, bounds=(-1e40, 1e40))
-# ValueError: ColSpec.bounds min (-1e+40) is outside the range Float32 can represent
+# SpecError: ColSpec.bounds min (-1e+40) is outside the range Float32 can represent ...
 ```
 
 ## Value domains
@@ -217,7 +222,7 @@ column are one value:
 <!-- docs: raises -->
 ```python
 ColSpec(pl.String, choices=[1, "1"])
-# ValueError: ColSpec.choices contains values that are the same once cast to
+# SpecError: ColSpec.choices contains values that are the same once cast to
 # String: ['1']
 ```
 

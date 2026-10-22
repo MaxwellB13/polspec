@@ -1,5 +1,30 @@
 # Generating data
 
+The examples on this page generate data from these specs:
+
+```python
+from datetime import date
+
+import polars as pl
+from polspec import ColSpec, ForeignKey, FrameSpec
+
+
+class Orders(FrameSpec):
+    order_id      = ColSpec(pl.Int64, bounds=(1, 1_000_000), unique=True)
+    customer_id   = ColSpec(pl.Int64, bounds=(1, 10_000))
+    status        = ColSpec(pl.Enum(["NEW", "PAID", "SHIPPED"]))
+    total         = ColSpec(pl.Float64, bounds=(0.0, 5_000.0))
+    internal_note = ColSpec(pl.String, string_length=(0, 40), nullable=True)
+
+
+class OrderLines(FrameSpec):
+    order_id = ColSpec(pl.Int64, bounds=(1, 1_000_000))
+    line_no  = ColSpec(pl.Int32, bounds=(1, 50))
+    quantity = ColSpec(pl.UInt16, bounds=(1, 500))
+    __unique_together__ = [["order_id", "line_no"]]
+    __foreign_keys__ = [ForeignKey("order_id", references=Orders)]
+```
+
 ```python
 df = Orders.generate(1_000_000, seed=42)
 ```
@@ -263,7 +288,8 @@ the question entirely: both hold a batch at a time rather than the frame.
 referentially consistent. See [Constraints](constraints.md#referential-integrity-foreignkey).
 
 ```python
-orders = Orders.generate(10_000, seed=2, references={Customers: customers})
+orders = Orders.generate(10_000, seed=2)
+order_lines = OrderLines.generate(30_000, seed=3, references={Orders: orders})
 ```
 
 ## What generation does not enforce

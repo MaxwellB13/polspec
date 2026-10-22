@@ -1,12 +1,11 @@
 # Roadmap and stability
 
-!!! warning "Early alpha"
+!!! warning "Pre-1.0"
 
-    polspec is early. The sections below are the honest version of "what's
-    next" — not a promise of when, just where the rough edges are and which
-    direction they're likely to move. Treat everything here, and everything
-    the library produces, as breakable between versions until it says
-    otherwise.
+    polspec is settling toward a 1.0 with written stability promises. Until
+    then, this page is the honest version of what may change: where the
+    rough edges are, and which way they are likely to move. 0.22 writes the
+    1.0 promises down, each with a test that holds it.
 
 ## Dtype coverage is complete
 
@@ -113,39 +112,22 @@ Two things this project has made no compatibility promise about yet:
   distribution parameters could all still happen as the underlying Python API
   settles.
 - **The exact values `generate()` produces for a given seed.** Determinism
-  *within* a version is a hard guarantee — the same seed on the same version
-  always produces the same frame, and that's load-bearing for the round-trip
-  tests this project is built around. Determinism *across* versions is not
-  guaranteed yet: a bug fix to a distribution, a change to how a chunk's seed
-  is derived, or a fix to one of the [known limitations](limitations.md) can
-  all legitimately change what a given seed produces. 0.7.0 was such a
-  release: every spec with rules, a foreign key, a hierarchy or a composite
-  key produces different values for the same seed than 0.6 did, once, so
-  that inserting a column never changes its neighbours again. 0.8.0 was
-  another, for batched output only: `generate_batches` and the sinks now
-  produce windows onto the frame `generate` would, whatever the batch size,
-  so every seeded batched or sunk output changed, once. 0.10.0 was the
-  third, for unique columns only: a unique column is now a permutation of
-  its value space, unique across a whole frame however it is batched, so
-  every seeded unique column changed, once. 0.11.0 finished the job for a
-  unique column a foreign key fills -- a permutation of its parent's keys
-  -- so that column's seeded values changed, once. 0.12.0 fixed a nested
-  column repeating its first batch's elements in every batch after it, so
-  the elements of a `List`, `Array` or `Map` column past the first batch
-  changed, once; `generate()` did not. 0.13.0 changed nothing that
-  constructed under 0.12.0, 0.13.1 nothing that constructed under 0.13.0,
-  0.14.0 nothing that constructed under 0.13.1 -- a column declaring
-  `nan_probability` draws its NaN from a draw of its own -- 0.15.0
-  nothing that constructed under 0.14.0, 0.15.1 nothing that constructed
-  under 0.15.0, 0.16.0 nothing that constructed under 0.15.1, 0.17.0
-  nothing that constructed under 0.16.0, and 0.18.0 nothing that
-  constructed under 0.17.0 -- on any Polars it supports, from 1.39 to 2.x,
-  whose seeded output is the same. 0.19.0 made it the same on every
-  operating system too: the samplers' `exp`, `ln` and `pow` are polspec's
-  own, the same everywhere, rather than each platform's math library, so
-  `lognormal` and `beta` columns changed, once, wherever the two
-  disagreed; `normal`, `exponential`, `gamma` and `poisson` columns drew
-  what they did on Windows.
+  *within* a version is a hard guarantee: the same seed and spec on the same
+  version always give the same frame, on every supported operating system
+  and Polars. Across versions it is not promised yet. A fix can change what
+  a seed produces, and when one does, the changelog says so. So far:
+
+  | Release | What a seed produces differently, once |
+  |:--|:--|
+  | 0.7.0 | Specs with rules, a foreign key, a hierarchy or a composite key, so that inserting a column never changes its neighbours again |
+  | 0.8.0 | Batched and sunk output, now windows onto the frame `generate()` makes, whatever the batch size |
+  | 0.10.0 | Unique columns, now a permutation of their value space, unique across a whole frame however it is batched |
+  | 0.11.0 | A unique column a foreign key fills, now a permutation of its parent's keys |
+  | 0.12.0 | A `List`, `Array` or `Map` column's elements past the first batch (`generate()` did not change) |
+  | 0.19.0 | `lognormal` and `beta` columns, where operating systems' maths libraries disagreed: the samplers' `exp`, `ln` and `pow` are polspec's own now, so a seed gives the same values on every OS |
+
+  Every other release since 0.7.0 -- 0.21.0 included -- produces exactly
+  what the one before it did, on every Polars it supports.
 
 The first of those is easier to live with than it sounds, because a spec file
 now says which format wrote it. Every file `to_yaml()` writes carries
@@ -190,18 +172,3 @@ already exists, not because any of them is started.
 strategy built from a spec, are the natural adjacent surfaces for a library
 whose whole pitch is that fixtures and contracts stay in step. Adjacent,
 though — not core.
-
-## Deferred on purpose
-
-**`ColSpec` holding a `Domain` instead of `bounds`/`choices`/`format`.**
-The internal `Domain`, what a column may hold, is already the one
-definition generation, validation, foreign keys and drift read; `ColSpec`
-still stores the three fields it is derived from, and every module
-re-derives it. Folding the fields
-into the domain would remove that repetition and nothing a user can see, at
-the cost of touching every attribute read in the library. It has been
-considered and set aside at each of the last three releases. The condition
-it waited on — nested dtypes forcing a richer domain model — was tested by
-0.9.0 and did not hold: a struct's fields are described by `ColSpec`s of
-their own, so each field has an ordinary domain and `Domain` needed no
-struct case. It stays deferred until something else asks for it.

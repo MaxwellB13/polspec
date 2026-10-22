@@ -11,6 +11,15 @@ import math
 
 import polars as pl
 import polspec
+from polspec import ColSpec, FrameSpec
+
+
+class Orders(FrameSpec):
+    order_id = ColSpec(pl.Int64, bounds=(1, 1_000_000), unique=True)
+    status   = ColSpec(pl.Enum(["NEW", "PAID", "SHIPPED"]))
+    total    = ColSpec(pl.Float64, bounds=(0.0, 5_000.0))
+
+orders = Orders.generate(500, seed=2)
 
 # Stand-in for a real table: a key, a skewed amount, a weighted status,
 # and a column of names nobody should see outside production.
@@ -43,7 +52,8 @@ fake = polspec.synthesize(pl.scan_parquet("s3://bucket/customers/*.parquet"), se
 `synthesize` is two steps: `polspec.profile` describes the source as a
 `TableSpec`, and `generate` makes data from it. Take them one at a time when
 the description is worth looking at, editing or keeping -- a reviewed spec
-is a safer thing to share than a function call over real data:
+is a safer thing to share than a function call over real data.
+[Infer a spec from data](profiling.md) covers `profile` on its own:
 
 ```python
 spec = polspec.profile(real, replace=["name"])

@@ -6,6 +6,9 @@ fills the column from the format's own sampler, and validation checks every
 value against the format's own test.
 
 ```python
+import polars as pl
+from polspec import ColSpec, ForeignKey, FrameSpec
+
 class Users(FrameSpec):
     user_id = ColSpec(pl.String, format="uuid4", unique=True)
     email   = ColSpec(pl.String, format="email")

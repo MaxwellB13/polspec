@@ -5,6 +5,9 @@ builds is a `TableSpec`: an immutable value holding the columns, checks,
 composite keys and foreign keys, reachable as `.spec` on the class.
 
 ```python
+import polars as pl
+from polspec import ColSpec, ForeignKey, FrameSpec, Registry
+
 class Orders(FrameSpec):
     order_id      = ColSpec(pl.Int64, unique=True)
     total         = ColSpec(pl.Float64, bounds=(0.0, None))
@@ -124,6 +127,9 @@ stores `"Customers"`; a key can also be declared against a bare name, which
 nothing checks until a spec of that name is supplied:
 
 ```python
+class Customers(FrameSpec):
+    id = ColSpec(pl.Int64, bounds=(1, 10_000), unique=True)
+
 ForeignKey("customer_id", references=Customers, ref_columns="id")   # checked now
 ForeignKey("customer_id", references="Customers", ref_columns="id") # checked later
 ```

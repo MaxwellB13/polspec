@@ -41,6 +41,9 @@ and the CLI's `--fail-on` is how a team decides what to gate on.
 ## Two declarations
 
 ```python
+import polars as pl
+from polspec import ColSpec, FrameSpec
+
 import datetime as dt
 
 class OrdersV1(FrameSpec):

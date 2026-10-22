@@ -8,6 +8,39 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-10-22
+
+**The documentation, current and usable.** No code changes.
+
+### Documentation
+
+- **Infer a spec from data**, a new how-to: `profile` and
+  `FrameSpec.from_dataframe` side by side -- one imitates the data, one
+  describes it -- with every option, `ProfileOptions`, rounding, and the
+  `schema infer` equivalent. Until now this was split across three pages,
+  and rounding from Python was only in the API reference.
+- **Every page declares what its examples use.** Nine pages used specs only
+  the docs tests declared, and eleven used names they never imported, so
+  copying an example could fail with a `NameError`. Two foreign-key examples
+  passed `references=` to a spec with no foreign key; they now use one that
+  has.
+- **Testing pipelines** gains a fixture per spec, a stage that must reject
+  bad rows (asserted against `inspect()` and `passing_rows()`), and fixtures
+  that look like production.
+- **Corrected:** `schema infer`'s example output, which predated rounding;
+  the cartesian example's row count (twelve, not sixteen); three error
+  comments naming `ValueError` for `SpecError`; four error messages shown
+  shorter than they are; "early alpha" on two pages, against the README's
+  "pre-1.0".
+- **Roadmap and stability:** which releases changed seeded output is a
+  table, current to 0.21. The benchmark table is re-measured on 0.21.0.
+- The home page lists row order among what a spec can declare, and links to
+  inferring a spec. Known limitations no longer opens on internal module
+  names; the architecture page says it is for contributors.
+- The docs tests now check what a page shows, not only that its code runs:
+  each error comment against the error raised, and each output block
+  against what the block prints.
+
 ## [0.21.0] - 2026-10-22
 
 **A consolidation release: what 0.20 added, made sound.** `passing_rows()`
@@ -2544,7 +2577,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.21.1...HEAD
+[0.21.1]: https://github.com/MaxwellB13/polspec/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/MaxwellB13/polspec/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/MaxwellB13/polspec/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/MaxwellB13/polspec/compare/v0.18.0...v0.19.0

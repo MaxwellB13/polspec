@@ -4,6 +4,38 @@ A spec can live in a file instead of a class body, so tooling outside Python
 can read it and so it can be reviewed as a document. [Spec files](../reference/spec-files.md)
 is the format, key by key.
 
+The examples on this page write and read these specs:
+
+```python
+from datetime import date
+
+import polars as pl
+from polspec import Check, ColSpec, ForeignKey, FrameSpec
+
+
+class Customers(FrameSpec):
+    id        = ColSpec(pl.Int64, bounds=(1, 10_000), unique=True)
+    name      = ColSpec(pl.String, string_length=(3, 20), tags="pii")
+    country   = ColSpec(pl.Enum(["UK", "US", "DE"]))
+    signed_up = ColSpec(pl.Date, bounds=(date(2020, 1, 1), date(2026, 1, 1)))
+
+
+class Orders(FrameSpec):
+    order_id      = ColSpec(pl.Int64, bounds=(1, 1_000_000), unique=True)
+    customer_id   = ColSpec(pl.Int64, bounds=(1, 10_000))
+    status        = ColSpec(pl.Enum(["NEW", "PAID", "SHIPPED"]))
+    total         = ColSpec(pl.Float64, bounds=(0.0, 5_000.0))
+    internal_note = ColSpec(pl.String, string_length=(0, 40), nullable=True)
+
+
+class OrderLines(FrameSpec):
+    order_id = ColSpec(pl.Int64, bounds=(1, 1_000_000))
+    line_no  = ColSpec(pl.Int32, bounds=(1, 50))
+    quantity = ColSpec(pl.UInt16, bounds=(1, 500))
+    __unique_together__ = [["order_id", "line_no"]]
+    __foreign_keys__ = [ForeignKey("order_id", references=Orders)]
+```
+
 ```python
 Orders.to_yaml("orders.yaml")
 Loaded = FrameSpec.from_yaml("orders.yaml")
@@ -198,6 +230,13 @@ was declared with, to one file keyed by spec name, and reads it back with the
 same version and strictness rules:
 
 ```python
+from polspec import CatSpec, Registry
+
+categories = CatSpec(
+    enums={"STATUS": ["NEW", "PAID", "SHIPPED"]},
+    categoricals={"CURRENCY": pl.Categories("CURRENCY", physical=pl.UInt8)},
+)
+
 Registry(Customers, Orders, OrderLines, categories=categories).to_yaml("specs.yaml")
 registry = Registry.from_yaml("specs.yaml").resolve()
 ```

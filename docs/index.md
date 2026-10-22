@@ -13,7 +13,7 @@ class Orders(FrameSpec):
     total    = ColSpec(pl.Float64, bounds=(0.0, None))
     placed   = ColSpec(pl.Date, nullable=True)
 
-df = Orders.generate(1_000_000, seed=42)   # a million rows in well under a second
+df = Orders.generate(1_000_000, seed=42)   # a million rows in milliseconds
 Orders.validate(df)                        # raises ValidationError on any breach
 ```
 
@@ -52,8 +52,8 @@ production will reject.
 - **Rules and invariants**
 
     Conditional values, single-column validators, multi-column checks,
-    composite uniqueness, foreign keys between specs, and parent/child
-    hierarchies with a bounded depth.
+    composite uniqueness, the order rows come in, foreign keys between
+    specs, and parent/child hierarchies with a bounded depth.
 
     [Constraints](how-to/constraints.md) ·
     [Hierarchies](how-to/hierarchies.md)
@@ -77,11 +77,12 @@ production will reject.
 
 - **Specs from elsewhere**
 
-    Infer a spec by profiling an existing DataFrame, load one from YAML so
+    Infer a spec by profiling existing data, load one from YAML so
     non-Python tooling can read it too, and keep a set of related specs in
     one `Registry` that generates and validates them together.
 
-    [Specs as files](how-to/files.md) · [Multiple specs](how-to/registry.md)
+    [Infer a spec](how-to/profiling.md) · [Specs as files](how-to/files.md) ·
+    [Multiple specs](how-to/registry.md)
 
 - **Fake data from real data**
 

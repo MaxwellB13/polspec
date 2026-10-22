@@ -4,6 +4,26 @@ Everything polspec raises on its own behalf derives from one base class, so
 a caller can separate "polspec objected" from "something else went wrong"
 with a single clause:
 
+The examples on this page use this spec:
+
+```python
+from datetime import date
+
+import polars as pl
+from polspec import ColSpec, ForeignKey, FrameSpec
+
+
+class Orders(FrameSpec):
+    order_id      = ColSpec(pl.Int64, bounds=(1, 1_000_000), unique=True)
+    customer_id   = ColSpec(pl.Int64, bounds=(1, 10_000))
+    status        = ColSpec(pl.Enum(["NEW", "PAID", "SHIPPED"]))
+    total         = ColSpec(pl.Float64, bounds=(0.0, 5_000.0))
+    internal_note = ColSpec(pl.String, string_length=(0, 40), nullable=True)
+
+
+df = Orders.generate(500, seed=2)
+```
+
 ```python
 from polspec import PolspecError
 

@@ -25,6 +25,7 @@ nav = [
       { "Validate data" = "how-to/validating.md" },
       { "Schema and data drift" = "how-to/drift.md" },
       { "Test pipelines" = "how-to/testing.md" },
+      { "Infer a spec from data" = "how-to/profiling.md" },
       { "Fake data from real data" = "how-to/synthesizing.md" },
     ] },
     { "Specs as values and files" = [

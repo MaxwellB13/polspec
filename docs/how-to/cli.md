@@ -28,8 +28,8 @@ polspec schema infer SOURCE -o OUTPUT.py [options]
 
 `SOURCE` is a `.csv`, `.tsv`, `.parquet`, `.ndjson`/`.jsonl`, `.json`, or Arrow
 IPC (`.arrow`/`.ipc`/`.feather`) file. It is read with the matching Polars
-reader and profiled with `FrameSpec.from_dataframe`, the same function behind
-[Getting started](../tutorial/getting-started.md#infer-a-spec-instead-of-writing-one).
+reader and profiled with `FrameSpec.from_dataframe`, rounding what it writes;
+[Infer a spec from data](profiling.md) covers the options from Python.
 
 `OUTPUT`'s extension picks the format: `.yaml`/`.yml` writes a YAML spec via
 `FrameSpec.to_yaml`; `.py` writes a `FrameSpec` subclass via
@@ -37,10 +37,10 @@ reader and profiled with `FrameSpec.from_dataframe`, the same function behind
 source file, rather than a data file `from_yaml` re-parses.
 
 ```console
-$ polspec schema infer orders.parquet -o orders.yaml --weights
+$ polspec schema infer orders.parquet -o orders.yaml
 Inferred 3 column(s) from 12,483 row(s) of orders.parquet -> orders.yaml
 
-$ polspec schema infer orders.parquet -o orders.py --weights
+$ polspec schema infer orders.parquet -o orders.py
 Inferred 3 column(s) from 12,483 row(s) of orders.parquet -> orders.py
 ```
 
@@ -53,11 +53,15 @@ from polspec import ColSpec, FrameSpec
 
 class Orders(FrameSpec):
     __columns__ = {
-        "order_id": ColSpec(pl.Int64, bounds=(1, 12483)),
-        "status": ColSpec(pl.Enum(["NEW", "PAID", "SHIPPED"]), weights=[0.4, 0.3, 0.3]),
-        "total": ColSpec(pl.Float64, bounds=(10.0, 500.0)),
+        "order_id": ColSpec(pl.Int64, bounds=(0, 13000), null_probability=0.0),
+        "status": ColSpec(pl.Enum(["NEW", "PAID", "SHIPPED"]), null_probability=0.0),
+        "total": ColSpec(pl.Float64, bounds=(10.0, 500.0), null_probability=0.0),
     }
 ```
+
+`order_id` ran from 1 to 12,483, and its bounds are written rounded outward,
+as the options below describe. `--weights` adds each category's observed
+frequency to `status`.
 
 Columns are declared through `__columns__` rather than as class attributes,
 same as `from_yaml` — see [Column names that are not
