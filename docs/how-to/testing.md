@@ -274,7 +274,7 @@ that page describes.
 
 ## A caveat, not a footnote
 
-polspec is pre-1.0 — see [Roadmap and stability](../explanation/roadmap.md).
+polspec is pre-1.0 — see [Stability](../explanation/stability.md).
 A seed gives the same frame on every machine for a given version, but a
 release may change what a seed produces; when one does, the changelog says
 so, and the roadmap lists every release that has. Assert the properties a

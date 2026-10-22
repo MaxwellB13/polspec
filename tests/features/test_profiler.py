@@ -183,7 +183,8 @@ def test_from_dataframe_nullability_and_edge_cases():
     assert cols["with_nulls"].bounds == Bound(1, 5)
 
     assert cols["no_nulls"].nullable is False
-    assert cols["no_nulls"].null_probability == 0.0
+    # No rate: what a column written by hand without nulls would say.
+    assert cols["no_nulls"].null_probability == ColSpec(pl.Int64).null_probability
     assert cols["no_nulls"].bounds == Bound(10, 50)
 
     assert cols["all_nulls"].nullable is True

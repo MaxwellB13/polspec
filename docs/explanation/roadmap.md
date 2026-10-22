@@ -1,11 +1,10 @@
-# Roadmap and stability
+# Roadmap
 
-!!! warning "Pre-1.0"
+!!! note "Pre-1.0"
 
-    polspec is settling toward a 1.0 with written stability promises. Until
-    then, this page is the honest version of what may change: where the
-    rough edges are, and which way they are likely to move. 0.22 writes the
-    1.0 promises down, each with a test that holds it.
+    polspec is in beta, frozen pending 1.0. What it promises, now and from
+    1.0, is on [Stability](stability.md). This page is where it is going:
+    the rough edges, and which way they are likely to move.
 
 ## Dtype coverage is complete
 
@@ -89,62 +88,27 @@ each define an `Orders` — but it leaves edges:
 - **A single spec's `to_mermaid()` still draws one entity.** The whole
   picture is `registry.to_mermaid()`.
 
-## The public API is what `polspec` exports
+## Generated values may change until 1.0
 
-What you can import from `polspec` -- the names in its `__all__`, which
-the [API reference](../reference/api/index.md) documents -- is the public
-API, along with three submodules: `polspec.drift` (`drift`, `diff` and
-their reports), `polspec.validation` (`FINDING_COLUMN` and the report
-types) and `polspec.serialization` (the `CatSpec`, `Registry` and dict
-forms of a spec file). Each has an `__all__`, and only those names are
-public. Every other module is internal and says so in its docstring:
-it can change in any release, without a deprecation. A public name is
-never renamed or removed in place: it warns first, for at least one minor
-release, and a name deprecated in 0.x goes at 1.0.
+Until 1.0 any release may change what a seed produces, and when one does,
+its changelog says so. From 1.0 that takes a major release, except to fix
+output that broke its own spec: see [Stability](stability.md#seeded-output).
+Within one version, the same call always gives the same frame, on every
+supported operating system and Polars.
 
-## YAML format and generated values may change
+The releases that have changed it, each once:
 
-Two things this project has made no compatibility promise about yet:
+| Release | What a seed produces differently, once |
+|:--|:--|
+| 0.7.0 | Specs with rules, a foreign key, a hierarchy or a composite key, so that inserting a column never changes its neighbours again |
+| 0.8.0 | Batched and sunk output, now windows onto the frame `generate()` makes, whatever the batch size |
+| 0.10.0 | Unique columns, now a permutation of their value space, unique across a whole frame however it is batched |
+| 0.11.0 | A unique column a foreign key fills, now a permutation of its parent's keys |
+| 0.12.0 | A `List`, `Array` or `Map` column's elements past the first batch (`generate()` did not change) |
+| 0.19.0 | `lognormal` and `beta` columns, where operating systems' maths libraries disagreed: the samplers' `exp`, `ln` and `pow` are polspec's own now, so a seed gives the same values on every OS |
 
-- **The YAML spec format.** The keys `to_yaml()` writes and `from_yaml()`
-  reads are what today's `ColSpec`/`FrameSpec`/`CatSpec` happen to need. A
-  new field, a renamed key, or a different nesting for something like
-  distribution parameters could all still happen as the underlying Python API
-  settles.
-- **The exact values `generate()` produces for a given seed.** Determinism
-  *within* a version is a hard guarantee: the same seed and spec on the same
-  version always give the same frame, on every supported operating system
-  and Polars. Across versions it is not promised yet. A fix can change what
-  a seed produces, and when one does, the changelog says so. So far:
-
-  | Release | What a seed produces differently, once |
-  |:--|:--|
-  | 0.7.0 | Specs with rules, a foreign key, a hierarchy or a composite key, so that inserting a column never changes its neighbours again |
-  | 0.8.0 | Batched and sunk output, now windows onto the frame `generate()` makes, whatever the batch size |
-  | 0.10.0 | Unique columns, now a permutation of their value space, unique across a whole frame however it is batched |
-  | 0.11.0 | A unique column a foreign key fills, now a permutation of its parent's keys |
-  | 0.12.0 | A `List`, `Array` or `Map` column's elements past the first batch (`generate()` did not change) |
-  | 0.19.0 | `lognormal` and `beta` columns, where operating systems' maths libraries disagreed: the samplers' `exp`, `ln` and `pow` are polspec's own now, so a seed gives the same values on every OS |
-
-  Every other release since 0.7.0 -- 0.21.0 included -- produces exactly
-  what the one before it did, on every Polars it supports.
-
-The first of those is easier to live with than it sounds, because a spec file
-now says which format wrote it. Every file `to_yaml()` writes carries
-`version: 4`; a file with no `version:` key is read as version 1 and migrated
-on load, and one written by a newer polspec than the reader is refused by name
-rather than misread. So a format change is a migration to write, not a class of
-file that silently stops loading — which is what makes the rest of this section
-a smaller promise than it looks.
-
-What is still not promised is that a *given key* survives a minor release. A
-renamed key needs a migration, and migrations are written when the rename
-happens, not before.
-
-Neither of these is likely to move for the sake of moving — but until this
-page says otherwise, don't build something that depends on today's YAML
-surviving a version bump byte-for-byte, or on a specific seed producing the
-same values after an upgrade.
+Every other release since 0.7.0 produces exactly
+what the one before it did, on every Polars it supports.
 
 ## Fake data from real data exists, one column at a time
 

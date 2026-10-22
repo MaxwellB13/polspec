@@ -8,6 +8,28 @@ seed produces; see
 
 ## [Unreleased]
 
+### Changed
+
+- **`schema infer` writes what a person would.** A column with no nulls
+  carries no null rate -- it is not nullable, so the rate meant nothing,
+  and every such column used to say `null_probability: 0.0`. Under
+  `--round-rates` (on by default) category frequencies are written at the
+  rates' precision too, each to its nearest step and never to 0:
+  `weights=[0.4, 0.3, 0.3]`, not `[0.4023872466554514, ...]`. The same holds
+  for `profile()` and `FrameSpec.from_dataframe()` given `round_rates`. What
+  a spec generates and accepts is unchanged.
+
+### Documentation
+
+- **Stability**, a new page: what polspec promises now, in the beta, and
+  what 1.0 promises -- the public API, spec files, seeded output, the
+  command line and its exit codes, finding and drift codes -- with the test
+  that holds each, what is not promised, and the supported Python, Polars
+  and operating systems. The roadmap keeps where polspec is going, and the
+  list of releases that changed seeded output.
+- The command-line guide says a command line that is itself wrong exits
+  `2`.
+
 ## [0.21.1] - 2026-10-22
 
 **The documentation, current and usable.** No code changes.
