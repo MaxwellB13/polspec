@@ -152,6 +152,31 @@ never uses a fused multiply-add (Rust never contracts `a * b + c` into one
 itself; don't call `mul_add`): one rounds differently from the two
 operations it replaces, and only some hardware has it.
 
+## The contract
+
+`tests/contracts/test_contract.py` holds each promise on the
+[Stability](https://maxwellb13.github.io/polspec/explanation/stability/)
+page to a golden copy in `tests/contracts/golden/`: the public names, a spec
+file of every format version, today's spec, registry and `schema infer`
+files byte for byte, each `--json` document's keys and types, the exit
+codes, and the finding and drift codes against their tables in
+`docs/reference/errors.md`.
+
+A golden copy changes only on purpose, and its diff is reviewed as a change
+to the contract:
+
+```bash
+POLSPEC_WRITE_GOLDEN=1 uv run pytest tests/contracts/test_contract.py
+```
+
+- An added public name, key or code is a deliberate addition: say so in the
+  changelog.
+- A removed one has been through a deprecation first (see *Deprecations*).
+- A `--json` key renamed, removed or changing type raises that report's
+  `SCHEMA_VERSION`; one added does not.
+- A new spec-file format version adds `spec_v<N>.yaml` and a migration; the
+  older files are never rewritten.
+
 ## The public API
 
 The public API is `polspec.__all__` and the `__all__` of `polspec.drift`,

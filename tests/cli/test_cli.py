@@ -707,7 +707,7 @@ def test_validate_all_reads_the_files_named_after_the_specs(tmp_path, capsys):
     assert run_cli("validate", "--all", source, out) == 1
     assert "customer_id" in capsys.readouterr().out
     run_cli("validate", "--all", source, out, "--json")
-    reports = json.loads(capsys.readouterr().out)
+    reports = json.loads(capsys.readouterr().out)["reports"]
     assert set(reports) == {"Customers", "Orders"}
     assert reports["Customers"]["passed"] and not reports["Orders"]["passed"]
 
@@ -745,7 +745,7 @@ def test_drift_all_measures_every_spec_against_the_file_named_after_it(
     assert run_cli("drift", "--all", source, out, "--fail-on", "none") == 0
     capsys.readouterr()
     run_cli("drift", "--all", source, out, "--json")
-    reports = json.loads(capsys.readouterr().out)
+    reports = json.loads(capsys.readouterr().out)["reports"]
     assert set(reports) == {"Customers", "Orders"}
     assert reports["Customers"]["unchanged"] and not reports["Orders"]["unchanged"]
 

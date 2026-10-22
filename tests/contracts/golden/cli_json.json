@@ -1,0 +1,123 @@
+{
+ "diff": {
+  "breaking": "integer",
+  "findings": [
+   {
+    "code": "string",
+    "columns": [
+     "string"
+    ],
+    "details": "object",
+    "key": "string",
+    "message": "string",
+    "severity": "string"
+   }
+  ],
+  "kind": "string",
+  "new": "string",
+  "old": "string",
+  "schema_version": "integer",
+  "unchanged": "boolean"
+ },
+ "drift": {
+  "breaking": "integer",
+  "findings": [
+   {
+    "code": "string",
+    "columns": [
+     "string"
+    ],
+    "details": "object",
+    "key": "string",
+    "message": "string",
+    "severity": "string"
+   }
+  ],
+  "kind": "string",
+  "new": "string",
+  "old": "string",
+  "schema_version": "integer",
+  "unchanged": "boolean"
+ },
+ "drift --all": {
+  "reports": {
+   "Customers": {
+    "breaking": "integer",
+    "findings": [],
+    "kind": "string",
+    "new": "string",
+    "old": "string",
+    "schema_version": "integer",
+    "unchanged": "boolean"
+   },
+   "Orders": {
+    "breaking": "integer",
+    "findings": [
+     {
+      "code": "string",
+      "columns": [
+       "string"
+      ],
+      "details": "object",
+      "key": "string",
+      "message": "string",
+      "severity": "string"
+     }
+    ],
+    "kind": "string",
+    "new": "string",
+    "old": "string",
+    "schema_version": "integer",
+    "unchanged": "boolean"
+   }
+  },
+  "schema_version": "integer"
+ },
+ "validate": {
+  "findings": [
+   {
+    "code": "string",
+    "columns": [
+     "string"
+    ],
+    "count": "integer",
+    "details": "object",
+    "key": "string",
+    "message": "string",
+    "samples": "array"
+   }
+  ],
+  "passed": "boolean",
+  "schema_version": "integer",
+  "spec": "string"
+ },
+ "validate --all": {
+  "reports": {
+   "Customers": {
+    "findings": [],
+    "passed": "boolean",
+    "schema_version": "integer",
+    "spec": "string"
+   },
+   "Orders": {
+    "findings": [
+     {
+      "code": "string",
+      "columns": [
+       "string"
+      ],
+      "count": "integer",
+      "details": "object",
+      "key": "string",
+      "message": "string",
+      "samples": "array"
+     }
+    ],
+    "passed": "boolean",
+    "schema_version": "integer",
+    "spec": "string"
+   }
+  },
+  "schema_version": "integer"
+ }
+}

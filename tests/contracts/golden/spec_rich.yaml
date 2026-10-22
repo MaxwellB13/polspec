@@ -1,0 +1,97 @@
+version: 4
+name: Shipments
+columns:
+  id:
+    dtype: Int64
+    bounds:
+    - 1
+    - 1000000
+    unique: true
+  ref:
+    dtype: String
+    unique: true
+    format: uuid4
+  country:
+    dtype: String
+    format: iso_country
+    extra_values:
+      UK (ISO): 0.02
+  status:
+    dtype:
+      Enum:
+      - NEW
+      - SENT
+      - LOST
+    tags: state
+    weights:
+    - 0.5
+    - 0.45
+    - 0.05
+  weight_kg:
+    dtype:
+      Decimal:
+        precision: 8
+        scale: 2
+    nullable: true
+    bounds:
+    - 0
+    - 999
+  ratio:
+    dtype: Float32
+    bounds:
+    - 0.0
+    - 1.0
+    nan_probability: 0.01
+  sent_at:
+    dtype:
+      Datetime:
+        time_unit: us
+        time_zone: UTC
+    nullable: true
+  labels:
+    dtype:
+      List: String
+    string_length:
+    - 1
+    - 8
+    list_length:
+    - 0
+    - 3
+  dims:
+    dtype:
+      Struct:
+        w: Int16
+        h: Int16
+    fields:
+      w:
+        dtype: Int16
+        bounds:
+        - 1
+        - 300
+  code:
+    dtype: String
+    string_length:
+    - 8
+    - 8
+    pattern: ^[A-Z]{3}-\d{4}$
+  parent_id:
+    dtype: Int64
+    nullable: true
+    null_probability: 0.3
+unique_together:
+- - country
+  - code
+foreign_keys:
+- columns:
+  - parent_id
+  references: self
+  ref_columns:
+  - id
+checks:
+- expr:
+    le:
+    - col: ratio
+    - 1.0
+  name: ratio_at_most_one
+order_by:
+- id

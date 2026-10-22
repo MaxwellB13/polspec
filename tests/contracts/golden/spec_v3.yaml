@@ -1,0 +1,36 @@
+# Version 3: as version 2. Version 3 added `hierarchy:`, which this spec has
+# none of.
+version: 3
+name: Orders
+columns:
+  region:
+    dtype:
+      Enum:
+      - UK
+      - US
+    tags: geo
+  carrier:
+    dtype:
+      Enum:
+      - RM
+      - UPS
+    rules:
+    - when:
+        eq:
+        - col: region
+        - UK
+      choices:
+      - RM
+  amount:
+    dtype: Float64
+    bounds:
+    - 0.0
+    - 100.0
+    distribution: normal
+    distribution_params:
+      mean: 50.0
+      std: 10.0
+  note:
+    dtype: String
+    nullable: true
+    null_probability: 0.25

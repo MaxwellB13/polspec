@@ -15,6 +15,7 @@ from polspec.cli._io import (
     frames_named_after_specs,
 )
 from polspec.drift import DriftOptions, DriftReport, diff, drift
+from polspec.drift.report import SCHEMA_VERSION as REPORT_SCHEMA_VERSION
 from polspec.errors import CliError
 
 _FAIL_ON = ("breaking", "any", "none")
@@ -100,7 +101,13 @@ def _drift_all(args: argparse.Namespace) -> int:
         for name, frame in frames.items()
     }
     if args.json:
-        print(json.dumps({n: r.to_dict() for n, r in reports.items()}, indent=2))
+        # Keyed under `reports`: a spec may be called anything, `schema_version`
+        # included.
+        document = {
+            "schema_version": REPORT_SCHEMA_VERSION,
+            "reports": {n: r.to_dict() for n, r in reports.items()},
+        }
+        print(json.dumps(document, indent=2))
         status = 0
     else:
         status = 0
