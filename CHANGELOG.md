@@ -8,6 +8,17 @@ seed produces; see
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-22
+
+**A consolidation release: what 0.20 added, made sound.** `passing_rows()`
+keeps its promise under `order_by` and a key into the frame's own rows,
+`profile()` is fast again, and an error in a spec file says where it is.
+Profiling takes one options object, `ProfileOptions`, as validation takes
+`ValidationOptions`, and `synthesize` takes all of it. The rest is
+groundwork for the 0.22 contract: three `FrameSpec` accessors deprecated in
+favour of `.spec`, a weekly deep run of the properties, and a test suite
+that tests through the public API only.
+
 ### Added
 
 - **`ProfileOptions`: one definition of what profiling takes.** `profile`,
@@ -2533,7 +2544,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/MaxwellB13/polspec/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/MaxwellB13/polspec/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/MaxwellB13/polspec/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/MaxwellB13/polspec/compare/v0.17.0...v0.18.0
