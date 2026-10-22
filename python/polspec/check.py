@@ -5,7 +5,7 @@ Internal: not part of the public API.
 
 from __future__ import annotations
 
-from dataclasses import KW_ONLY, dataclass
+from dataclasses import KW_ONLY, dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
@@ -49,7 +49,9 @@ class Check:
     name: str = FILLED_IN
     description: str | None = None
     ignore_nulls: bool = True
-    pred: Pred | None = None
+    # The predicate a check was built from, when it was: what lets it be
+    # written to a file. Filled in from `expr`, never passed.
+    pred: Pred | None = field(default=None, init=False)
 
     if TYPE_CHECKING:
 
@@ -60,7 +62,6 @@ class Check:
             name: str | None = None,
             description: str | None = None,
             ignore_nulls: bool = True,
-            pred: Pred | None = None,
         ) -> None: ...
 
     def __post_init__(self) -> None:

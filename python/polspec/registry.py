@@ -43,6 +43,7 @@ from polspec.errors import (
     RegistryError,
     SpecError,
 )
+from polspec.foreign_key import bound_to
 from polspec.frames import to_eager
 from polspec.generation.seeds import stable_seed
 from polspec.render import registry_to_mermaid
@@ -289,7 +290,7 @@ class Registry:
                     keys.append(fk)
                     continue
                 newly_bound = newly_bound or fk.target is not target
-                keys.append(dataclasses.replace(fk, target=target))
+                keys.append(bound_to(fk, target))
             if not newly_bound:
                 bound[name] = spec
                 continue

@@ -61,6 +61,7 @@ from polspec import (
     to_python,
     validate,
 )
+from polspec.expr import literals
 from polspec.formats import FORMATS
 
 # Polars 2's `Map`; on Polars 1, no dtype is one.
@@ -763,8 +764,8 @@ def test_the_spec_strategy_reaches_rules_and_checks():
                 seen.add("descending")
         for check in spec.checks:
             seen.add("checks")
-            literals = check.pred.literals() if check.pred is not None else []
-            seen.update(type(v).__name__ for v in literals)
+            found = literals(check.pred) if check.pred is not None else []
+            seen.update(type(v).__name__ for v in found)
 
     record()
     reached = {"rules", "checks", "date", "datetime", "time", "timedelta"}

@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from polspec.spec import ColSpec
 
 
+from polspec.expr import root_names
 from polspec.rules import rule_condition
 from polspec.validation.constraints._base import Constraint, as_strings, in_values
 
@@ -71,7 +72,7 @@ def rule_constraints(
     claimed = pl.lit(False)
 
     for index, rule in enumerate(spec.rules):
-        if not rule.when.root_names() <= set(df_col_names):
+        if not root_names(rule.when) <= set(df_col_names):
             # Reported through missing_cols. Which rows this rule claimed
             # cannot be known, so neither can the rows every later rule on
             # the column governs: checking them anyway reports a row this

@@ -89,7 +89,7 @@ class Pred:
         """This predicate as the `col(...)` Python that would rebuild it."""
         raise NotImplementedError
 
-    def children(self) -> tuple[Pred, ...]:
+    def _children(self) -> tuple[Pred, ...]:
         """The operand nodes this one is built from, in written order.
 
         The three traversals below are derived from this, so a node only has
@@ -97,23 +97,23 @@ class Pred:
         """
         raise NotImplementedError
 
-    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+    def _rebuild(self, children: tuple[Pred, ...]) -> Pred:
         """This node with `children` in place of its own, same order.
 
         A leaf ignores them and returns itself.
         """
         raise NotImplementedError
 
-    def root_names(self) -> set[builtins.str]:
+    def _root_names(self) -> set[builtins.str]:
         """Every column name this predicate reads."""
-        return set().union(*(c.root_names() for c in self.children()))
+        return set().union(*(c._root_names() for c in self._children()))
 
-    def literals(self) -> list[Any]:
+    def _literals(self) -> list[Any]:
         """Every constant this predicate compares against.
 
         Used to check a rule's operands against the column's own domain.
         """
-        return [v for c in self.children() for v in c.literals()]
+        return [v for c in self._children() for v in c._literals()]
 
     def rename(self, mapping: Mapping[builtins.str, builtins.str]) -> Pred:
         """The same predicate with its columns renamed by `mapping`.
@@ -122,10 +122,10 @@ class Pred:
         which would leave a rule pointing at a column that no longer exists
         and only surface much later, as a spec failing its own validation.
         """
-        children = self.children()
+        children = self._children()
         if not children:
             return self
-        return self.rebuild(tuple(c.rename(mapping) for c in children))
+        return self._rebuild(tuple(c.rename(mapping) for c in children))
 
     def equals(self, other: object) -> bool:
         """Structural equality, since `==` builds a predicate."""
@@ -236,13 +236,13 @@ class Col(Pred):
     def to_source(self) -> str:
         return f"col({self.name!r})"
 
-    def children(self) -> tuple[Pred, ...]:
+    def _children(self) -> tuple[Pred, ...]:
         return ()
 
-    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+    def _rebuild(self, children: tuple[Pred, ...]) -> Pred:
         return self
 
-    def root_names(self) -> set[str]:
+    def _root_names(self) -> set[str]:
         return {self.name}
 
     def rename(self, mapping: Mapping[str, str]) -> Pred:
@@ -268,13 +268,13 @@ class Lit(Pred):
     def to_source(self) -> str:
         return repr(self.value)
 
-    def children(self) -> tuple[Pred, ...]:
+    def _children(self) -> tuple[Pred, ...]:
         return ()
 
-    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+    def _rebuild(self, children: tuple[Pred, ...]) -> Pred:
         return self
 
-    def literals(self) -> list[Any]:
+    def _literals(self) -> list[Any]:
         return [self.value]
 
 
@@ -308,10 +308,10 @@ class Cmp(Pred):
         )
         return f"{left} {_CMP_SYMBOLS[self.op]} {_source(self.right)}"
 
-    def children(self) -> tuple[Pred, ...]:
+    def _children(self) -> tuple[Pred, ...]:
         return (self.left, self.right)
 
-    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+    def _rebuild(self, children: tuple[Pred, ...]) -> Pred:
         return Cmp(self.op, *children)
 
 
@@ -336,10 +336,10 @@ class Arith(Pred):
     def to_source(self) -> str:
         return f"{_source(self.left)} {_ARITH_SYMBOLS[self.op]} {_source(self.right)}"
 
-    def children(self) -> tuple[Pred, ...]:
+    def _children(self) -> tuple[Pred, ...]:
         return (self.left, self.right)
 
-    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+    def _rebuild(self, children: tuple[Pred, ...]) -> Pred:
         return Arith(self.op, *children)
 
 
@@ -356,10 +356,10 @@ class And(Pred):
     def to_source(self) -> str:
         return " & ".join(_source(item) for item in self.items)
 
-    def children(self) -> tuple[Pred, ...]:
+    def _children(self) -> tuple[Pred, ...]:
         return self.items
 
-    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+    def _rebuild(self, children: tuple[Pred, ...]) -> Pred:
         return And(children)
 
 
@@ -376,10 +376,10 @@ class Or(Pred):
     def to_source(self) -> str:
         return " | ".join(_source(item) for item in self.items)
 
-    def children(self) -> tuple[Pred, ...]:
+    def _children(self) -> tuple[Pred, ...]:
         return self.items
 
-    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+    def _rebuild(self, children: tuple[Pred, ...]) -> Pred:
         return Or(children)
 
 
@@ -398,10 +398,10 @@ class Not(Pred):
             return f"{_source(self.item.item)}.is_not_null()"
         return f"~{_source(self.item)}"
 
-    def children(self) -> tuple[Pred, ...]:
+    def _children(self) -> tuple[Pred, ...]:
         return (self.item,)
 
-    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+    def _rebuild(self, children: tuple[Pred, ...]) -> Pred:
         return Not(*children)
 
 
@@ -431,15 +431,15 @@ class IsIn(Pred):
     def to_source(self) -> str:
         return f"{_source(self.item)}.is_in({list(self.values)!r})"
 
-    def children(self) -> tuple[Pred, ...]:
+    def _children(self) -> tuple[Pred, ...]:
         return (self.item,)
 
-    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+    def _rebuild(self, children: tuple[Pred, ...]) -> Pred:
         return IsIn(children[0], self.values)
 
-    def literals(self) -> list[Any]:
+    def _literals(self) -> list[Any]:
         # Its own values are operands too, though they are not nodes.
-        return self.item.literals() + list(self.values)
+        return self.item._literals() + list(self.values)
 
 
 @dataclass(frozen=True, slots=True, eq=False, repr=False)
@@ -455,10 +455,10 @@ class IsNull(Pred):
     def to_source(self) -> str:
         return f"{_source(self.item)}.is_null()"
 
-    def children(self) -> tuple[Pred, ...]:
+    def _children(self) -> tuple[Pred, ...]:
         return (self.item,)
 
-    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+    def _rebuild(self, children: tuple[Pred, ...]) -> Pred:
         return IsNull(*children)
 
 
@@ -484,10 +484,10 @@ class Between(Pred):
             f"{self.lower.to_source()}, {self.upper.to_source()})"
         )
 
-    def children(self) -> tuple[Pred, ...]:
+    def _children(self) -> tuple[Pred, ...]:
         return (self.item, self.lower, self.upper)
 
-    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+    def _rebuild(self, children: tuple[Pred, ...]) -> Pred:
         return Between(*children)
 
 
@@ -514,10 +514,10 @@ class StrPred(Pred):
     def to_source(self) -> str:
         return f"{_source(self.item)}.str.{self.op}({self.pattern!r})"
 
-    def children(self) -> tuple[Pred, ...]:
+    def _children(self) -> tuple[Pred, ...]:
         return (self.item,)
 
-    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+    def _rebuild(self, children: tuple[Pred, ...]) -> Pred:
         return StrPred(self.op, children[0], self.pattern)
 
 
@@ -534,10 +534,10 @@ class StrLen(Pred):
     def to_source(self) -> str:
         return f"{_source(self.item)}.str.len_chars()"
 
-    def children(self) -> tuple[Pred, ...]:
+    def _children(self) -> tuple[Pred, ...]:
         return (self.item,)
 
-    def rebuild(self, children: tuple[Pred, ...]) -> Pred:
+    def _rebuild(self, children: tuple[Pred, ...]) -> Pred:
         return StrLen(*children)
 
 
@@ -685,3 +685,20 @@ def _pair(data: Any, payload: Any) -> tuple[Any, Any]:
     ):
         raise _bad(data, "expected a two-element list")
     return payload[0], payload[1]
+
+
+# ---------------------------------------------------------------------------
+# What the library reads off a predicate. Functions rather than methods on
+# `Pred`, which keeps the public class to evaluating, writing and renaming
+# one; the tree walks underneath them are `Pred`'s own.
+# ---------------------------------------------------------------------------
+
+
+def root_names(pred: Pred) -> set[str]:
+    """Every column `pred` reads."""
+    return pred._root_names()
+
+
+def literals(pred: Pred) -> list[Any]:
+    """Every literal value `pred` compares against, in order."""
+    return pred._literals()

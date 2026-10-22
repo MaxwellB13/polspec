@@ -152,7 +152,6 @@ def test_foreign_key_to_an_unresolved_name_is_allowed():
     fk = spec.foreign_keys[0]
     assert fk.references == "Orders"
     assert fk.target is None
-    assert spec.resolve_target(fk) is None
     # Generation leaves the column alone with no parent to sample from.
     assert FrameSpec.from_spec(spec).generate(5, seed=1).height == 5
 

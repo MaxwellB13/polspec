@@ -121,14 +121,18 @@ def test_data_form_is_plain_yaml_values():
     }
 
 
-def test_root_names_literals_and_rename():
+def _reads(pred: Pred) -> set[str]:
+    """The columns `pred` reads, as the Polars expression it stands for says."""
+    return set(pred.to_expr().meta.root_names())
+
+
+def test_rename_renames_every_column_a_predicate_reads():
     pred = (col("total") >= col("subtotal") * 2) & col("d").is_between(
         dt.date(2024, 1, 1), dt.date(2025, 1, 1)
     )
-    assert pred.root_names() == {"total", "subtotal", "d"}
-    assert pred.literals() == [2, dt.date(2024, 1, 1), dt.date(2025, 1, 1)]
+    assert _reads(pred) == {"total", "subtotal", "d"}
     renamed = pred.rename({"total": "amount", "d": "when"})
-    assert renamed.root_names() == {"amount", "subtotal", "when"}
+    assert _reads(renamed) == {"amount", "subtotal", "when"}
     assert renamed.to_source() == (
         "(col('amount') >= (col('subtotal') * 2)) & "
         "(col('when').is_between(datetime.date(2024, 1, 1), datetime.date(2025, 1, 1)))"
@@ -272,28 +276,13 @@ def _sample_of(cls: type[Pred]) -> Pred:
     return samples[cls.__name__]
 
 
-def test_every_node_type_reports_its_children():
-    for cls in _every_node_type():
-        node = _sample_of(cls)
-        children = node.children()
-        assert isinstance(children, tuple)
-        assert all(isinstance(c, Pred) for c in children)
-
-
-def test_rebuild_puts_the_same_children_back():
-    """`rebuild` with a node's own children is the identity."""
-    for cls in _every_node_type():
-        node = _sample_of(cls)
-        assert node.rebuild(node.children()).equals(node)
-
-
 def test_rename_reaches_every_column_a_node_reads():
     """The property the derived rename exists to guarantee."""
     for cls in _every_node_type():
         node = _sample_of(cls)
-        before = node.root_names()
+        before = _reads(node)
         renamed = node.rename({name: f"{name}_new" for name in before})
-        assert renamed.root_names() == {f"{name}_new" for name in before}
+        assert _reads(renamed) == {f"{name}_new" for name in before}
 
 
 def test_a_node_that_forgets_children_is_not_silently_wrong():
@@ -304,4 +293,4 @@ def test_a_node_that_forgets_children_is_not_silently_wrong():
             return pl.lit(True)
 
     with pytest.raises(NotImplementedError):
-        Forgetful().root_names()
+        Forgetful().rename({"a": "b"})

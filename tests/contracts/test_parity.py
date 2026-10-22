@@ -106,7 +106,8 @@ def test_the_declared_constructor_matches_the_fields(cls):
     stub = _type_checking_init(cls)
     positional = [a.arg for a in stub.args.args if a.arg != "self"]
     keyword_only = [a.arg for a in stub.args.kwonlyargs]
-    fields = dataclasses.fields(cls)
+    # What the constructor takes; a field filled in for it (`init=False`) is not.
+    fields = [f for f in dataclasses.fields(cls) if f.init]
     assert positional + keyword_only == [f.name for f in fields]
     # Keyword-only from the same field on (0.23): what identifies the thing
     # is positional, the rest is named.

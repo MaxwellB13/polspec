@@ -89,6 +89,19 @@ guide.
   where they took untyped `**options`.
 - **`FrameSpec.from_dataframe()` names its spec `"Profiled"`**, as
   `profile()` does, not `"ProfiledFrameSpec"`.
+- **Internals out of the public API.** `Pred` is what builds, evaluates,
+  writes and renames a predicate: `to_expr`, `to_data`, `to_source`,
+  `rename`, `equals`, and the operators. Its tree walks -- `children()`,
+  `rebuild()`, `root_names()`, `literals()` -- are internal, as is
+  `TableSpec.resolve_target()`. `Check` and `ForeignKey` no longer take
+  `pred=` and `target=`, which they fill in themselves; `check.pred` and
+  `fk.target` are still there to read.
+
+  | Before | Now |
+  |:--|:--|
+  | `pred.root_names()` | `set(pred.to_expr().meta.root_names())` |
+  | `spec.resolve_target(fk)` | `fk.target` (or the spec itself, for `references="self"`) |
+
 - **`TableSpec.estimated_size(n)`** is `polspec.estimated_size(spec, n)`;
   `FrameSpec.estimated_size(n)` stays.
 - **`Finding.rows(frame)`** is internal; `report.rows(finding)` is how a
