@@ -31,7 +31,7 @@ from polspec import generation, reading, serialization, sizing, validation
 from polspec._deprecation import deprecated
 from polspec.catspec import CatSpec
 from polspec.check import Check
-from polspec.compare import DriftOptions, DriftReport
+from polspec.compare import DriftKeywords, DriftOptions, DriftReport
 from polspec.errors import SpecError
 from polspec.foreign_key import ForeignKey
 from polspec.frames import Method, References, sample_rows
@@ -371,7 +371,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         cls,
         df: pl.DataFrame,
         *,
-        name: str = "ProfiledFrameSpec",
+        name: str = "Profiled",
         options: ProfileOptions | None = None,
         **keywords: Unpack[ProfileKeywords],
     ) -> type[FrameSpec]:
@@ -473,17 +473,17 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     # ------------------------------------------------------------------
 
     @classmethod
-    def to_yaml(cls, source: str | Path | None = None) -> str | None:
-        """This spec as human-readable YAML: written to the file `source`, or,
-        with no `source`, returned as text."""
-        return serialization.to_yaml(cls.spec, source)
+    def to_yaml(cls, path: str | Path | None = None) -> str | None:
+        """This spec as human-readable YAML: written to the file `path`, or,
+        with no `path`, returned as text."""
+        return serialization.to_yaml(cls.spec, path)
 
     @classmethod
-    def to_python(cls, source: str | Path | None = None) -> str | None:
+    def to_python(cls, path: str | Path | None = None) -> str | None:
         """This spec as an importable Python module defining a subclass:
-        written to the file `source`, or, with no `source`, returned as
+        written to the file `path`, or, with no `path`, returned as
         text."""
-        return serialization.to_python(cls.spec, source)
+        return serialization.to_python(cls.spec, path)
 
     # ------------------------------------------------------------------
     # Generation
@@ -723,12 +723,15 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         *,
         renames: Mapping[str, str] | None = None,
         options: DriftOptions | None = None,
+        **keywords: Unpack[DriftKeywords],
     ) -> DriftReport:
         """What changed from this spec to `other`, as a `DriftReport`.
 
-        This spec is the *old* side. See `polspec.compare.diff`.
+        This spec is the *old* side. See `polspec.diff`.
         """
-        return drift_module.diff(cls.spec, other, renames=renames, options=options)
+        return drift_module.diff(
+            cls.spec, other, renames=renames, options=options, **keywords
+        )
 
     @classmethod
     def drift(
@@ -736,27 +739,12 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         df: pl.DataFrame | pl.LazyFrame,
         *,
         options: DriftOptions | None = None,
-        null_rate_tolerance: float | None = None,
-        unseen_values: bool | None = None,
-        strict_dtypes: bool | None = None,
-        max_samples: int | None = None,
+        **keywords: Unpack[DriftKeywords],
     ) -> DriftReport:
-        """How `df` has moved relative to this spec, as a `DriftReport`.
-
-        Each keyword left as `None` takes the `DriftOptions` default. See
-        `polspec.compare.drift`.
-        """
-        return drift_module.drift(
-            cls.spec,
-            df,
-            options=options,
-            **_given(
-                null_rate_tolerance=null_rate_tolerance,
-                unseen_values=unseen_values,
-                strict_dtypes=strict_dtypes,
-                max_samples=max_samples,
-            ),
-        )
+        """How `df` has moved relative to this spec, as a `DriftReport`:
+        `polspec.drift`, which takes every `DriftOptions` field as a keyword
+        or `options=` as an object."""
+        return drift_module.drift(cls.spec, df, options=options, **keywords)
 
     # ------------------------------------------------------------------
     # Documentation
@@ -872,8 +860,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             The options one at a time, as `ValidationKeywords` lists them:
             `extra_cols`, `missing_cols`, `strict_dtypes`, `cast` and
             `streaming`, and each check switch with `validate_` in front of
-            the `ValidationOptions` field it sets (`validate_unique`,
-            `validate_order`, ...).
+            the `ValidationOptions` field it sets (`unique`,
+            `order`, ...).
 
         Notes
         -----

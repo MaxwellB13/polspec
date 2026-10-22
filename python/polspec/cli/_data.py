@@ -133,8 +133,8 @@ def _write_split(
 
 
 def _skipped(args: argparse.Namespace) -> dict[str, Any]:
-    """`--skip NAME ...` as the `validate_NAME=False` switches `inspect` takes."""
-    return {f"validate_{name}": False for name in args.skip or ()}
+    """`--skip NAME ...` as the `NAME=False` switches `inspect` takes."""
+    return dict.fromkeys(args.skip or (), False)
 
 
 def _cmd_generate(args: argparse.Namespace) -> int:

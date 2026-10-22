@@ -66,7 +66,7 @@ def assert_roundtrip(
     seed: int = SEED,
     method: str = "random",
     references=None,
-    validate_checks: bool = True,
+    checks: bool = True,
 ) -> pl.DataFrame:
     """Generates from `spec_cls` and asserts its own validate() accepts the result.
 
@@ -78,9 +78,7 @@ def assert_roundtrip(
     df = spec_cls.generate(n, method=method, seed=seed, references=references)
     assert df.schema == spec_cls.schema()
     df.to_dicts()
-    validated = spec_cls.validate(
-        df, references=references, validate_checks=validate_checks
-    )
+    validated = spec_cls.validate(df, references=references, checks=checks)
     assert validated.equals(df)
     return df
 
@@ -632,7 +630,7 @@ class CheckedSpec(FrameSpec):
 def test_frame_checks_are_validation_only():
     """__checks__ constrain validation; generation makes no attempt to satisfy them."""
     df = CheckedSpec.generate(ROWS, seed=SEED)
-    CheckedSpec.validate(df, validate_checks=False)
+    CheckedSpec.validate(df, checks=False)
     with pytest.raises(Exception, match="hi_gte_lo"):
         CheckedSpec.validate(df)
 
@@ -644,7 +642,7 @@ def test_column_validators_are_validation_only():
         ColSpec(pl.Int64, bounds=(1, 10), validators=[pl.col("c") > 100]),
     )
     df = spec_cls.generate(ROWS, seed=SEED)
-    spec_cls.validate(df, validate_validators=False)
+    spec_cls.validate(df, validators=False)
     with pytest.raises(Exception, match="validator"):
         spec_cls.validate(df)
 
@@ -678,7 +676,7 @@ def test_a_pattern_is_validation_only():
     """
     spec_cls = _spec_for("patterned", ColSpec(pl.String, pattern=r"^[A-Z]{3}-\d{4}$"))
     df = spec_cls.generate(ROWS, seed=SEED)
-    spec_cls.validate(df, validate_pattern=False)
+    spec_cls.validate(df, pattern=False)
     with pytest.raises(Exception, match="not matching pattern"):
         spec_cls.validate(df)
 

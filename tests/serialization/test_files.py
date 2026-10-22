@@ -50,7 +50,7 @@ class YamlSource(FrameSpec):
 
 def test_yaml_roundtrip_generates_identical_data(tmp_path):
     yaml_path = tmp_path / "spec.yaml"
-    YamlSource.to_yaml(source=yaml_path)
+    YamlSource.to_yaml(path=yaml_path)
     Loaded = FrameSpec.from_yaml(source=yaml_path)
 
     assert Loaded.schema() == YamlSource.schema()
@@ -66,7 +66,7 @@ def test_yaml_roundtrip_preserves_column_order():
 
 def test_yaml_roundtrip_preserves_rule_behavior(tmp_path):
     yaml_path = tmp_path / "spec.yaml"
-    YamlSource.to_yaml(source=yaml_path)
+    YamlSource.to_yaml(path=yaml_path)
     Loaded = FrameSpec.from_yaml(source=yaml_path)
 
     df = Loaded.generate(2_000, seed=1)
@@ -78,7 +78,7 @@ def test_yaml_roundtrip_preserves_rule_behavior(tmp_path):
 
 def test_yaml_file_is_plain_readable_yaml(tmp_path):
     yaml_path = tmp_path / "spec.yaml"
-    YamlSource.to_yaml(source=yaml_path)
+    YamlSource.to_yaml(path=yaml_path)
     text = yaml_path.read_text()
     # no python-object tags (!!python/..., etc) -- must be safe_load-able
     # plain data, and should read like the sketch from the design discussion
@@ -92,7 +92,7 @@ def test_to_yaml_requires_columns(tmp_path):
         pass
 
     with pytest.raises(ValueError, match="declares no ColSpec columns"):
-        Empty.to_yaml(source=tmp_path / "spec.yaml")
+        Empty.to_yaml(path=tmp_path / "spec.yaml")
 
 
 def test_from_yaml_requires_columns(tmp_path):
@@ -107,7 +107,7 @@ def test_yaml_defaults_are_omitted_for_compactness(tmp_path):
         plain_int = ColSpec(dtype=pl.Int32)
 
     yaml_path = tmp_path / "spec.yaml"
-    Minimal.to_yaml(source=yaml_path)
+    Minimal.to_yaml(path=yaml_path)
     parsed = yaml.safe_load(yaml_path.read_text())
     col = parsed["columns"]["plain_int"]
     # nullable=False and the default null_probability shouldn't be written
@@ -138,7 +138,7 @@ def test_distributions_and_weights_yaml_roundtrip(tmp_path):
         )
 
     yaml_file = tmp_path / "full_spec.yaml"
-    FullFeatureSpec.to_yaml(source=yaml_file)
+    FullFeatureSpec.to_yaml(path=yaml_file)
 
     Loaded = FrameSpec.from_yaml(source=yaml_file)
     assert Loaded.schema() == FullFeatureSpec.schema()

@@ -176,7 +176,7 @@ def test_every_frame_passes_the_spec_inferred_from_it(case, step):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")  # an infinity outside the bounds says so
         spec = profile(frame, round_bounds=step, round_rates=step, detect_order=False)
-    report = validate(spec, frame, validate_bounds=True)
+    report = validate(spec, frame, bounds=True)
     assert report.equals(frame)
 
 

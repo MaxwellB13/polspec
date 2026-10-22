@@ -241,7 +241,7 @@ row it was generated in, so every rule, check, composite key, foreign key
 and hierarchy the rows satisfy, they still satisfy. The sort is stable, so
 the same seed gives the same frame. `validate()` reports each row that
 belongs before the one above it, under the finding code `order`; skip it
-with `validate_order=False`, or `--skip order` on the command line.
+with `order=False`, or `--skip order` on the command line.
 
 An order is a property of the whole frame, so the streaming verbs refuse an
 ordered spec, as they refuse a hierarchy -- write `generate()`'s frame out
@@ -314,7 +314,7 @@ Orders.validate(orders, references={Customers: customers})
 Without `references`, generation leaves the column freely generated — but
 `validate()` then *raises*, because it has nothing to check against. Supply the
 parent to both calls, or disable the check with
-`validate(..., validate_foreign_keys=False)`.
+`validate(..., foreign_keys=False)`.
 
 Composite keys are sampled as one joint pick per row, so multi-column keys stay
 internally consistent.

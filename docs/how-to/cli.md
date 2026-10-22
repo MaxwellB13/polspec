@@ -152,7 +152,7 @@ def test_invoices_roundtrip():
     # __checks__ wraps arbitrary expressions that generation cannot be made
     # to satisfy
     df = Invoices.generate(500, seed=42)
-    Invoices.validate(df, validate_checks=False)
+    Invoices.validate(df, checks=False)
 ```
 
 `unique=True` and `__unique_together__` used to be on that list. They are
@@ -304,10 +304,10 @@ polspec validate orders.py orders.csv --output clean.parquet --failing rejected.
 `--references NAME=PATH` supplies parent data for a foreign key to another
 spec, by that spec's name; repeat it for several. `--allow-extra` and
 `--allow-missing` relax the structural checks; `--strict-dtypes` tightens the
-dtype check. `--skip CHECK` turns off one kind of check, as the matching
-`validate_*=False` does in Python -- `--skip bounds --skip checks` -- and
-takes any of `rules`, `validators`, `unique`, `checks`, `foreign_keys`,
-`hierarchy`, `pattern` and `bounds`.
+dtype check. `--skip CHECK` turns off one kind of check, as `CHECK=False`
+does in Python -- `--skip bounds --skip checks` -- and takes any of `rules`,
+`validators`, `unique`, `checks`, `foreign_keys`, `hierarchy`, `order`,
+`pattern` and `bounds`.
 
 A CSV, TSV or JSON file has no date type, so a date arrives as text -- and
 JSON holds a decimal or a duration as text too. The CLI reads each column

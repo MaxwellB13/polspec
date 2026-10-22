@@ -144,9 +144,9 @@ def test_validation_check_inheritance_and_bypass():
         ExtendedOrderSpec.validate(df_bad)
     assert len(exc_info.value.errors) == 2
 
-    # validate_checks=False disables check execution
+    # checks=False disables check execution
     df_valid_types = pl.DataFrame({"a": [-1, 2], "b": [5, 5], "c": [3, 10]})
-    res = ExtendedOrderSpec.validate(df_valid_types, validate_checks=False)
+    res = ExtendedOrderSpec.validate(df_valid_types, checks=False)
     assert res.height == 2
 
 
@@ -234,7 +234,7 @@ def test_validation_column_validators_ignore_nulls_behavior():
 
 def test_validation_column_validators_false_bypasses_check():
     df = pl.DataFrame({"price": [1.00, 1.03], "quantity": [2, 3]})
-    result = ProductValidatorSpec.validate(df, validate_validators=False)
+    result = ProductValidatorSpec.validate(df, validators=False)
     assert result.height == 2
 
 
@@ -309,7 +309,7 @@ def test_a_check_naming_a_column_twice_validates():
     good = pl.DataFrame({"total": [1.0, 9.0]})
     assert FrameSpec.from_spec(spec).inspect(good).passed
     (finding,) = FrameSpec.from_spec(spec).inspect(
-        pl.DataFrame({"total": [50.0]}), validate_bounds=False
+        pl.DataFrame({"total": [50.0]}), bounds=False
     )
     assert finding.columns == ("total",)
     assert finding.samples == ({"total": 50.0},)

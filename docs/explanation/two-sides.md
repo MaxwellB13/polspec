@@ -94,5 +94,5 @@ at declaration rather than producing data that fails its own spec.
 
 **A validation-only claim is still worth declaring.** A validator that
 generation cannot satisfy is not wasted: it still guards real data on the way
-in. Generate with `validate_validators=False` when you need synthetic rows,
+in. Generate with `validators=False` when you need synthetic rows,
 and keep the claim for the data that matters.

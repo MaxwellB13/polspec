@@ -90,7 +90,7 @@ def json_value(value: Any) -> Any:
     return repr(value)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Finding:
     """One violation of one claim the spec makes.
 

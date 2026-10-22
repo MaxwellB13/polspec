@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypedDict, Unpack
 
 import polars as pl
 
@@ -48,7 +48,7 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class DriftOptions:
     """What counts as drift, said once.
 
@@ -117,6 +117,20 @@ class DriftOptions:
             )
 
 
+class DriftKeywords(TypedDict, total=False):
+    """`DriftOptions` as keywords, each by its field's name -- what `drift`,
+    `diff` and the `FrameSpec` facades take. See `DriftOptions` for what each
+    means and its default."""
+
+    significance: float
+    null_rate_tolerance: float
+    frequency_tolerance: float
+    distribution_tolerance: float
+    unseen_values: bool
+    strict_dtypes: bool
+    max_samples: int
+
+
 def _options_from(
     options_obj: DriftOptions | None = None, /, **options: Any
 ) -> DriftOptions:
@@ -147,6 +161,7 @@ def diff(
     *,
     renames: Mapping[str, str] | None = None,
     options: DriftOptions | None = None,
+    **keywords: Unpack[DriftKeywords],
 ) -> DriftReport:
     """What changed between two declarations, as a `DriftReport`.
 
@@ -163,6 +178,8 @@ def diff(
         similar names.
     options : DriftOptions, optional
         Only `strict_dtypes` is read when diffing two specs.
+    **keywords
+        The fields of `DriftOptions`, one at a time, instead of `options`.
 
     Notes
     -----
@@ -172,7 +189,7 @@ def diff(
     widened domain or a removed constraint is *compatible*.
     """
     old_spec, new_spec = as_table_spec(old), as_table_spec(new)
-    opts = _options_from(options)
+    opts = _options_from(options, **keywords)
     findings: list[DriftFinding] = []
 
     if renames:
@@ -236,7 +253,7 @@ def drift(
     df: Frame,
     *,
     options: DriftOptions | None = None,
-    **option_kwargs: Any,
+    **keywords: Unpack[DriftKeywords],
 ) -> DriftReport:
     """How `df` has moved relative to what `spec` declares, as a `DriftReport`.
 
@@ -249,8 +266,10 @@ def drift(
         summary of the whole column.
     options : DriftOptions, optional
         Every option at once. Cannot be combined with the keywords.
-    **option_kwargs
-        The fields of `DriftOptions`, one at a time.
+    **keywords
+        The fields of `DriftOptions`, one at a time. Cannot be combined
+        with `options`; an unknown name raises `TypeError` naming the
+        closest match.
 
     Notes
     -----
@@ -265,7 +284,7 @@ def drift(
     """
     table = as_table_spec(spec)
     require_columns(table)
-    opts = _options_from(options, **option_kwargs)
+    opts = _options_from(options, **keywords)
     frame = to_eager(df)
     findings: list[DriftFinding] = []
     # A column a pass writes is not held to the claims that pass overrides

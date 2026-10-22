@@ -107,9 +107,9 @@ def test_the_check_has_a_switch_like_the_other_validation_only_claims():
     spec_cls = spec_for(ColSpec(pl.String, pattern=SKU))
     df = pl.DataFrame({"c": ["nope"]})
     assert not spec_cls.inspect(df).passed
-    assert spec_cls.inspect(df, validate_pattern=False).passed
+    assert spec_cls.inspect(df, pattern=False).passed
     assert spec_cls.validate(df, options=ValidationOptions(pattern=False)).height == 1
-    assert inspect(spec_cls.spec, df, validate_pattern=False).passed
+    assert inspect(spec_cls.spec, df, pattern=False).passed
 
 
 def test_a_pattern_is_not_checked_on_a_column_of_the_wrong_dtype():
@@ -176,5 +176,5 @@ def test_the_generated_test_knows_a_pattern_is_validation_only(tmp_path):
     out = tmp_path / "test_skus.py"
     assert main(["test", str(source), "-o", str(out)]) == 0
     text = out.read_text(encoding="utf-8")
-    assert "validate_pattern=False" in text
+    assert "pattern=False" in text
     assert "checked by validation only" in text

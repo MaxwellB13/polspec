@@ -282,10 +282,10 @@ def test_an_unknown_validation_option_names_the_one_you_meant():
 
     df = Rows.generate(5, seed=1)
     with pytest.raises(TypeError) as excinfo:
-        inspect(Rows.spec, df, validate_uniqe=True)
+        inspect(Rows.spec, df, uniqe=True)
     message = str(excinfo.value)
-    assert "validate_uniqe" in message
-    assert "did you mean 'validate_unique'?" in message
+    assert "'uniqe'" in message
+    assert "did you mean 'unique'?" in message
     # The private options dataclass is no longer what gets named.
     assert "ValidationOptions" not in message
 
@@ -301,27 +301,26 @@ def test_the_facade_refuses_a_typo_naming_the_option_meant():
 
     df = Rows.generate(5, seed=1)
     for verb in (Rows.inspect, Rows.validate):
-        with pytest.raises(
-            TypeError, match=r"'validate_uniqe' \(did you mean 'validate_unique'\?\)"
-        ):
-            verb(df, validate_uniqe=True)
+        with pytest.raises(TypeError, match=r"'uniqe' \(did you mean 'unique'\?\)"):
+            verb(df, uniqe=True)
 
 
 def test_the_option_switches_have_one_spelling():
-    """`inspect` used to accept a second, bare spelling that `validate` did not."""
+    """A switch is spelt as the field it sets; the `validate_` spelling of
+    0.22 and before is refused, naming the one meant."""
 
     class Rows(FrameSpec):
         a = ColSpec(pl.Int64, unique=True, bounds=(1, 1000))
 
     dupes = pl.DataFrame({"a": [1, 1, 2]})
-    assert Rows.inspect(dupes, validate_unique=False).passed
-    assert Rows.validate(dupes, validate_unique=False).height == 3
+    assert Rows.inspect(dupes, unique=False).passed
+    assert Rows.validate(dupes, unique=False).height == 3
     for verb in (inspect, validate):
-        with pytest.raises(TypeError, match="Unknown validation option"):
-            verb(Rows.spec, dupes, unique=False)
+        with pytest.raises(TypeError, match="did you mean 'unique'"):
+            verb(Rows.spec, dupes, validate_unique=False)
     for verb in (Rows.inspect, Rows.validate):
-        with pytest.raises(TypeError, match="Unknown validation option"):
-            verb(dupes, unique=False)
+        with pytest.raises(TypeError, match="did you mean 'unique'"):
+            verb(dupes, validate_unique=False)
 
 
 def test_options_can_be_passed_as_one_value():
@@ -334,6 +333,6 @@ def test_options_can_be_passed_as_one_value():
     assert Rows.validate(dupes, options=opts).height == 3
 
     with pytest.raises(TypeError, match="not both"):
-        Rows.validate(dupes, options=opts, validate_unique=False)
+        Rows.validate(dupes, options=opts, unique=False)
     with pytest.raises(TypeError, match="must be a ValidationOptions"):
         Rows.validate(dupes, options={"unique": False})

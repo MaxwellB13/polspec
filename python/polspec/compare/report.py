@@ -67,7 +67,7 @@ side could fail the new one, `compatible` otherwise."""
 Kind = Literal["diff", "drift"]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class DriftFinding:
     """One difference between two declarations, or a declaration and data.
 

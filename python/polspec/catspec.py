@@ -554,11 +554,11 @@ class CatSpec(metaclass=_CatSpecMeta):
 
         return catspec_to_dict(self)
 
-    def to_yaml(self, source: str | Path | None = None) -> str | None:
-        """Writes this registry as YAML to `source`, or returns the text."""
+    def to_yaml(self, path: str | Path | None = None) -> str | None:
+        """Writes this registry as YAML to `path`, or returns the text."""
         from polspec.serialization import catspec_to_yaml
 
-        return catspec_to_yaml(self, source)
+        return catspec_to_yaml(self, path)
 
     def to_markdown(
         self, path: str | Path | None = None, *, title: str | None = None

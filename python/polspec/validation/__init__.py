@@ -61,7 +61,7 @@ __all__ = [
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ValidationOptions:
     """Which checks to run and what to do about structural mismatches.
 
@@ -98,29 +98,26 @@ class ValidationOptions:
 _Options = ValidationOptions
 
 
-# The switches are spelled `validate_*` in the public signature and named for
-# what they switch on the dataclass. One mapping between the two, rather than a
-# second spelling reachable through `inspect` alone, which is what it used to
-# be: `inspect(spec, df, unique=False)` worked and `validate(spec, df,
-# unique=False)` did not.
+# One spelling for each option, whichever way it is passed: a keyword is the
+# field it sets, as `ValidationOptions(checks=False)` and `--skip checks` say
+# it. Until 0.23 the switches were spelt `checks` as keywords.
 class ValidationKeywords(TypedDict, total=False):
-    """`ValidationOptions` as keywords: the structural options by their own
-    names, each check switch with `validate_` in front -- what `validate`,
-    `inspect` and the `FrameSpec` facades take. See `ValidationOptions` for
-    what each means and its default."""
+    """`ValidationOptions` as keywords, each by its field's name -- what
+    `validate`, `inspect` and the `FrameSpec` facades take. See
+    `ValidationOptions` for what each means and its default."""
 
     extra_cols: Literal["drop", "allow", "raise"]
     missing_cols: Literal["add", "allow", "raise"]
     strict_dtypes: bool
-    validate_rules: bool
-    validate_validators: bool
-    validate_unique: bool
-    validate_checks: bool
-    validate_foreign_keys: bool
-    validate_hierarchy: bool
-    validate_order: bool
-    validate_pattern: bool
-    validate_bounds: bool
+    rules: bool
+    validators: bool
+    unique: bool
+    checks: bool
+    foreign_keys: bool
+    hierarchy: bool
+    order: bool
+    pattern: bool
+    bounds: bool
     cast: bool
     streaming: bool
 
@@ -136,8 +133,7 @@ SWITCHES = (
     "pattern",
     "bounds",
 )
-_RENAMED_OPTIONS = {f"validate_{name}": name for name in SWITCHES}
-_ACCEPTED_OPTIONS = accepted_options(ValidationOptions, renames=_RENAMED_OPTIONS)
+_ACCEPTED_OPTIONS = accepted_options(ValidationOptions)
 
 
 def _options_from(
@@ -148,7 +144,6 @@ def _options_from(
         options_obj,
         options,
         what="validation",
-        renames=_RENAMED_OPTIONS,
     )
 
 
@@ -374,13 +369,10 @@ def validate(
         that spec, its FrameSpec class, or its name. A key with no entry is
         reported as a `foreign_key_unresolved` finding.
     **option_kwargs
-        The fields of `ValidationOptions`, one at a time, with the check
-        switches spelled `validate_rules`, `validate_validators`,
-        `validate_unique`, `validate_checks`, `validate_foreign_keys`,
-        `validate_hierarchy`, `validate_order`, `validate_pattern` and
-        `validate_bounds`. See
-        `ValidationOptions` for what each means and what it defaults to; an
-        unknown name raises `TypeError` naming the closest match.
+        The fields of `ValidationOptions`, one at a time, by their names --
+        `checks=False`, `unique=False`. See `ValidationOptions` for what each
+        means and what it defaults to; an unknown name raises `TypeError`
+        naming the closest match.
 
     Returns
     -------

@@ -104,13 +104,21 @@ def test_the_declared_constructor_matches_the_fields(cls):
     to one is silently missing from the other.
     """
     stub = _type_checking_init(cls)
-    params = [a.arg for a in stub.args.args if a.arg != "self"]
-    fields = [f.name for f in dataclasses.fields(cls)]
-    assert params == fields
-    defaulted = params[len(params) - len(stub.args.defaults) :]
+    positional = [a.arg for a in stub.args.args if a.arg != "self"]
+    keyword_only = [a.arg for a in stub.args.kwonlyargs]
+    fields = dataclasses.fields(cls)
+    assert positional + keyword_only == [f.name for f in fields]
+    # Keyword-only from the same field on (0.23): what identifies the thing
+    # is positional, the rest is named.
+    assert keyword_only == [f.name for f in fields if f.kw_only]
+    defaulted = positional[len(positional) - len(stub.args.defaults) :] + [
+        a.arg
+        for a, default in zip(stub.args.kwonlyargs, stub.args.kw_defaults, strict=True)
+        if default is not None
+    ]
     assert defaulted == [
         f.name
-        for f in dataclasses.fields(cls)
+        for f in fields
         if f.default is not dataclasses.MISSING
         or f.default_factory is not dataclasses.MISSING
     ]
@@ -130,6 +138,46 @@ def test_the_facade_names_exactly_the_options_the_function_accepts():
         assert [p.kind for p in params.values()][-1] is Parameter.VAR_KEYWORD
         named = {n for n, p in params.items() if p.kind is not Parameter.VAR_KEYWORD}
         assert named == {"df", "options", "references"}, verb.__name__
+
+
+def test_every_entry_point_takes_every_option_as_a_typed_keyword():
+    """`ValidationKeywords` and `DriftKeywords` are their options' fields,
+    typed; and every function, facade and registry method that validates
+    or measures drift takes `options=` or those keywords. Until 0.23
+    `FrameSpec.drift` named four of the seven drift options."""
+    from inspect import Parameter, signature
+
+    import polspec
+    from polspec import DriftOptions, Registry, ValidationOptions
+    from polspec.compare import DriftKeywords
+    from polspec.validation import ValidationKeywords
+
+    for options, keywords in (
+        (ValidationOptions, ValidationKeywords),
+        (DriftOptions, DriftKeywords),
+    ):
+        assert set(keywords.__annotations__) == {
+            f.name for f in dataclasses.fields(options)
+        }, keywords.__name__
+    verbs = {
+        ValidationKeywords: (
+            polspec.validate,
+            polspec.inspect,
+            FrameSpec.validate,
+            FrameSpec.inspect,
+            Registry.inspect_all,
+            Registry.validate_all,
+        ),
+        DriftKeywords: (polspec.drift, polspec.diff, FrameSpec.drift, FrameSpec.diff),
+    }
+    for keywords, functions in verbs.items():
+        for verb in functions:
+            params = signature(verb).parameters
+            assert "options" in params, verb.__qualname__
+            last = list(params.values())[-1]
+            assert last.kind is Parameter.VAR_KEYWORD, verb.__qualname__
+            # The annotation as written: `Unpack[ValidationKeywords]`.
+            assert keywords.__name__ in str(last.annotation), verb.__qualname__
 
 
 def test_the_profiling_keywords_are_its_options():

@@ -214,7 +214,7 @@ def _rounded_weight(weight: float, rounding: Rounding) -> float:
     return float(nearest if nearest > 0 else step)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ProfileOptions:
     """What `profile()` infers from data, and how finely it writes it.
 

@@ -224,22 +224,22 @@ MIGRATIONS: dict[str, dict[int, Callable[[dict[str, Any]], dict[str, Any]]]] = {
 }
 
 
-def migrate(data: Any, kind: str, source: str) -> dict[str, Any]:
+def migrate(data: Any, kind: str, where: str) -> dict[str, Any]:
     """Brings a file's raw data up to `FORMAT_VERSION`, or refuses it."""
     if data is None:
         data = {}
     if not isinstance(data, Mapping):
         raise SerializationError(
-            f"{source}: expected a mapping at the top level, got {type(data).__name__}"
+            f"{where}: expected a mapping at the top level, got {type(data).__name__}"
         )
     version = data.get("version", 1)
     if not isinstance(version, int) or isinstance(version, bool) or version < 1:
         raise SerializationError(
-            f"{source}: 'version' must be a positive integer, got {version!r}"
+            f"{where}: 'version' must be a positive integer, got {version!r}"
         )
     if version > FORMAT_VERSION:
         raise SerializationError(
-            f"{source} was written by a newer polspec (format version {version}); "
+            f"{where} was written by a newer polspec (format version {version}); "
             f"this version reads up to {FORMAT_VERSION}. Upgrade polspec to read it."
         )
     current = dict(data)

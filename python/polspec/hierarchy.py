@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from polspec.errors import SpecError
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Hierarchy:
     """Declares that two columns of a spec form a parent/child edge list.
 

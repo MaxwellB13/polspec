@@ -239,7 +239,7 @@ def test_nulls_and_nan_sort_as_polars_sorts_them():
 
 def test_the_order_check_can_be_skipped():
     df = Events.generate(200, seed=2).reverse()
-    assert not inspect(Events.spec, df, validate_order=False).findings
+    assert not inspect(Events.spec, df, order=False).findings
     assert [f.code for f in inspect(Events.spec, df).findings] == ["order"]
 
 

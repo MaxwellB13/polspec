@@ -11,7 +11,7 @@ import math
 import warnings
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
@@ -281,6 +281,9 @@ class ColSpec:
     # to the same parameters, so a field added to one is a red test in the
     # other.
     dtype: pl.DataType
+    # Everything after this is keyword-only: a positional call would freeze
+    # the order of the fields, and say nothing about what each argument is.
+    _: KW_ONLY
     col_name: str | None = None
     seed_name: str | None = None
     nullable: bool = False
@@ -308,6 +311,7 @@ class ColSpec:
         def __init__(
             self,
             dtype: pl.DataType | type[pl.DataType],
+            *,
             col_name: str | None = None,
             seed_name: str | None = None,
             nullable: bool = False,

@@ -252,7 +252,7 @@ def test_generated_test_validates_the_uniqueness_it_can_now_satisfy(tmp_path):
     content = test_path.read_text(encoding="utf-8")
     # A unique column is generated distinct now, so the generated test
     # validates it like every other constraint rather than switching it off.
-    assert "validate_unique=False" not in content
+    assert "unique=False" not in content
 
     result = run_pytest_on(test_path)
     assert result.returncode == 0, result.stdout + result.stderr
