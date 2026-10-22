@@ -274,10 +274,9 @@ that page describes.
 
 ## A caveat, not a footnote
 
-polspec is in beta, frozen pending 1.0 — see [Stability](../explanation/stability.md).
-A seed gives the same frame on every machine for a given version, but a
-release may change what a seed produces; when one does, the changelog says
-so, and [Stability](../explanation/stability.md#seeded-output) lists every
-release that has. Assert the properties a
-test cares about (shape, referential integrity, which rows a stage keeps),
-not a snapshot of the exact values, and a polspec upgrade won't break it.
+A seed gives the same frame on every machine, and from 1.0 a minor release
+changes it only to fix output that broke its own spec
+([Stability](../explanation/stability.md#seeded-output)). Even so, assert
+the properties a test cares about -- shape, referential integrity, which rows
+a stage keeps -- rather than a snapshot of the exact values: a test of what
+matters survives a fix, and one of everything does not.

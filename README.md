@@ -145,10 +145,10 @@ polspec works with Polars 1.39 and later, Polars 2 included, on Python 3.12
 to 3.15 (on 3.15, Polars 2: Polars 1 does not run on it). Wheels are published for Linux (x86_64, aarch64), macOS (Intel
 and Apple silicon) and Windows (x86_64), so you don't need a Rust toolchain.
 
-> **Beta: the API is frozen pending 1.0.** No public name changes in place,
-> and what 1.0 removes warns today.
+> **Stable.** A public name, a spec file's format, a seed's output and the
+> command line change only in a major release, after a deprecation.
 > [Stability](https://maxwellb13.github.io/polspec/explanation/stability/)
-> says what is promised now and from 1.0, each promise held by a test, and
+> says what is promised, each promise held by a test, and
 > [Known limitations](https://maxwellb13.github.io/polspec/explanation/limitations/)
 > what polspec does not do.
 

@@ -1,39 +1,9 @@
 # Stability
 
-What polspec promises: before 1.0, and from it. Each promise names the test
-that holds it, so a release cannot break one without a test failing first.
+What polspec promises, from 1.0 on. Each promise names the test that holds
+it, so a release cannot break one without a test failing first.
 
-## Where polspec is now
-
-0.22 is the beta. The API is frozen pending 1.0: no public name is renamed
-or removed in place, and what is deprecated is listed
-[below](#deprecated). Until 1.0, two promises are weaker than they will
-be:
-
-- **Seeded output may change in any release.** When one changes what a seed
-  produces, its changelog says so, by name; [Seeded output](#seeded-output)
-  lists every release that has.
-- **A spec file's keys may change**, but only with a migration: a file
-  carries its format `version:`, an older one is migrated as it is read,
-  and one from a newer polspec is refused by name. So an upgrade never
-  leaves a file unreadable.
-
-### Deprecated
-
-Nothing is deprecated. A name deprecated in 1.x is listed here, warns with a
-`DeprecationWarning` naming its replacement, and keeps working until the
-next major release removes it. To find what your code uses, run its tests
-with deprecations as errors: `pytest -W error::DeprecationWarning`.
-
-1.0 removed what 0.x had deprecated: `profile_dataframe`,
-`polspec.serialization`'s five `*_FIELDS` tables, and `FrameSpec.checks()`,
-`.foreign_keys()` and `.unique_together()`. The
-[changelog](https://github.com/MaxwellB13/polspec/blob/main/CHANGELOG.md) gives the replacement for each.
-
-*Held by* `tests/contracts/test_deprecation.py`, which checks that what is
-listed here is exactly what warns.
-
-## What 1.0 promises
+## What is promised
 
 ### The public API
 
@@ -117,6 +87,21 @@ or filters by one keeps working.
 
 *Held by* `tests/contracts/test_contract.py`, which holds the codes polspec
 produces and the tables on that page to each other, in both directions.
+
+### Deprecated
+
+Nothing is deprecated. A name deprecated in 1.x is listed here, warns with a
+`DeprecationWarning` naming its replacement, and keeps working until the
+next major release removes it. To find what your code uses, run its tests
+with deprecations as errors: `pytest -W error::DeprecationWarning`.
+
+1.0 removed what 0.x had deprecated: `profile_dataframe`,
+`polspec.serialization`'s five `*_FIELDS` tables, and `FrameSpec.checks()`,
+`.foreign_keys()` and `.unique_together()`. The
+[changelog](https://github.com/MaxwellB13/polspec/blob/main/CHANGELOG.md) gives the replacement for each.
+
+*Held by* `tests/contracts/test_deprecation.py`, which checks that what is
+listed here is exactly what warns.
 
 ## What is not promised
 

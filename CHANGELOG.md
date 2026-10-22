@@ -8,6 +8,17 @@ seed produces; see
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-22
+
+**Stable.** The public API, the spec-file format, seeded output, the
+command line and the finding and drift codes now change only in a major
+release, after a deprecation: the
+[Stability](https://maxwellb13.github.io/polspec/explanation/stability/)
+page states each promise and the test that holds it. 1.0 removes what 0.x
+deprecated, below; its other changes were made in 0.23, so code that runs
+on 0.23 without deprecation warnings runs on 1.0. **No seeded output
+changes.**
+
 ### Removed
 
 What 0.x deprecated, each of which warned for at least one minor release:
@@ -23,6 +34,16 @@ What 0.x deprecated, each of which warned for at least one minor release:
 A column may now be called `checks`, `foreign_keys` or `unique_together`
 without shadowing anything. From 1.0, a deprecated name is removed only at
 the next major release.
+
+### Documentation
+
+- The site is slimmer: the changelog (on GitHub), roadmap and
+  generation-and-validation pages are gone -- the seeded-output history now
+  sits under Stability's promise, and the registry's edges and the
+  two-sides argument in Known limitations -- and the architecture page is
+  `ARCHITECTURE.md`, for contributors. Inferring a spec sits beside
+  declaring one, and the command-line guide links to its generated
+  reference rather than copying its flag tables.
 
 ## [0.23.0] - 2026-10-22
 
@@ -2760,7 +2781,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/MaxwellB13/polspec/compare/v0.23.0...v1.0.0
 [0.23.0]: https://github.com/MaxwellB13/polspec/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/MaxwellB13/polspec/compare/v0.21.1...v0.22.0
 [0.21.1]: https://github.com/MaxwellB13/polspec/compare/v0.21.0...v0.21.1
