@@ -555,8 +555,8 @@ def test_class_body_declares_enum_and_categorical():
         pl.Categorical(pl.Categories("CURRENCY", physical=pl.UInt8))
         == Categories.CURRENCY
     )
-    assert Categories._declared_enums == {"STATUS": ["NEW", "PAID", "SHIPPED"]}
-    assert set(Categories._declared_categoricals) == {"CURRENCY"}
+    assert Categories().enums == {"STATUS": ["NEW", "PAID", "SHIPPED"]}
+    assert set(Categories().categoricals) == {"CURRENCY"}
 
 
 def test_class_body_value_plugs_straight_into_colspec():
@@ -650,7 +650,7 @@ def test_class_body_inheritance_collects_base_and_subclass_entries():
     class Derived(Base):
         B = pl.Enum(["p", "q"])
 
-    assert Derived._declared_enums == {"A": ["x", "y"], "B": ["p", "q"]}
+    assert Derived().enums == {"A": ["x", "y"], "B": ["p", "q"]}
 
 
 def test_class_body_rejects_an_unnamed_categorical():
@@ -693,7 +693,7 @@ def test_plain_catspec_is_unaffected_by_declared_defaults():
     """CatSpec itself declares nothing, so the dict constructor works exactly as before."""
     cats = CatSpec(enums={"STATUS": ["A", "B"]})
     assert pl.Enum(["A", "B"]) == cats.STATUS
-    assert CatSpec._declared_enums == {}
+    assert CatSpec().enums == {}
 
 
 def test_the_class_form_is_accepted_wherever_the_value_is():

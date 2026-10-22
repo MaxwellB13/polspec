@@ -10,6 +10,7 @@ batch, and passes drawn per batch.
 from __future__ import annotations
 
 import importlib
+import inspect
 import itertools
 
 import polars as pl
@@ -25,7 +26,6 @@ from polspec import (
     col,
     scan,
 )
-from polspec.generation.scan import _takes_explain_labels, needed_columns
 
 ROWS, SEED = 250_000, 1
 
@@ -90,14 +90,19 @@ def test_a_column_no_pass_rewrites_is_the_frame_generate_would_make():
     assert lf.select(plain).collect().equals(eager.select(plain))
 
 
-def test_the_closure_follows_what_a_pass_reads():
-    spec = Source.spec
-    assert needed_columns(spec, frozenset({"plain"})) == ["plain"]
-    # A ruled column pulls in the column its `when` names.
-    assert needed_columns(spec, frozenset({"ruled"})) == ["flag", "ruled"]
-    # A composite key is repaired as a group, so one member pulls in the rest.
-    assert needed_columns(spec, frozenset({"a"})) == ["a", "b"]
-    assert needed_columns(spec, frozenset({"flag"})) == ["flag"]
+@pytest.mark.parametrize(
+    "column",
+    [
+        "plain",
+        "ruled",  # its rule reads `flag`, so `flag` is generated with it
+        "a",  # a composite key is repaired as a group, so `b` comes too
+        "flag",
+    ],
+)
+def test_one_column_scans_as_the_whole_scan_holds_it(column):
+    """Projected alone, a column still gets what its passes read."""
+    lf = Source.scan(ROWS, seed=SEED)
+    assert lf.select(column).collect().equals(lf.collect().select(column))
 
 
 def test_a_foreign_key_column_scans_against_its_parent():
@@ -327,8 +332,13 @@ def test_the_detail_says_what_was_asked_for(monkeypatch):
     )
 
 
+def _polars_takes_explain_labels() -> bool:
+    parameters = inspect.signature(pl.io.plugins.register_io_source).parameters
+    return "explain_name" in parameters and "explain_detail" in parameters
+
+
 @pytest.mark.skipif(
-    not _takes_explain_labels(pl.io.plugins.register_io_source),
+    not _polars_takes_explain_labels(),
     reason="this Polars gives an IO source no name in explain()",
 )
 def test_explain_names_the_scan_where_polars_can():

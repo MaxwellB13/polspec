@@ -22,7 +22,6 @@ from polspec import (
     col,
 )
 from polspec.serialization import from_yaml, to_python, to_yaml
-from polspec.serialization.fields import colspec_to_data
 
 # ---------------------------------------------------------------------------
 # YAML round-trip
@@ -58,17 +57,7 @@ def test_yaml_roundtrip_generates_identical_data(tmp_path):
 
 
 def test_yaml_roundtrip_preserves_column_order():
-    yaml_text = yaml.safe_dump(
-        {
-            "name": "X",
-            "columns": {
-                name: colspec_to_data(spec)
-                for name, spec in YamlSource.spec.columns.items()
-            },
-        },
-        sort_keys=False,
-    )
-    parsed = yaml.safe_load(yaml_text)
+    parsed = yaml.safe_load(to_yaml(YamlSource))
     assert list(parsed["columns"].keys()) == list(YamlSource.spec.columns.keys())
 
 
@@ -438,10 +427,8 @@ def test_to_python_renders_categorical_and_datetime_dtypes(tmp_path):
 
 
 def test_dtype_to_python_renders_time_zone():
-    from polspec.serialization.dtypes import dtype_to_source
-
-    src = dtype_to_source(pl.Datetime(time_unit="us", time_zone="UTC"))
-    assert src == "pl.Datetime(time_unit='us', time_zone='UTC')"
+    spec = TableSpec("T", {"at": ColSpec(pl.Datetime(time_unit="us", time_zone="UTC"))})
+    assert "pl.Datetime(time_unit='us', time_zone='UTC')" in to_python(spec)
 
 
 # ---------------------------------------------------------------------------

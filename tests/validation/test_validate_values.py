@@ -388,10 +388,13 @@ def _fits(value: int, dtype: pl.DataType) -> bool:
 def test_a_wider_integer_that_holds_nothing_past_the_declared_one_adds_no_check():
     """`Int8` arriving as `Int8`, or as a narrower `UInt8` for an `Int16`,
     cannot hold a value its declaration cannot."""
-    from polspec.validation.constraints._values import _unholdable
-
-    assert _unholdable(pl.col("n"), pl.Int16, pl.UInt8) is None
-    assert _unholdable(pl.col("n"), pl.Int64, pl.Int64) is None
+    for declared, arriving, extremes in [
+        (pl.Int16, pl.UInt8, [0, 255]),
+        (pl.Int64, pl.Int64, [-(2**63), 2**63 - 1]),
+    ]:
+        spec = TableSpec("T", {"n": ColSpec(declared)})
+        frame = pl.DataFrame({"n": pl.Series(extremes, dtype=arriving)})
+        assert not inspect(spec, frame), (declared, arriving)
 
 
 @pytest.mark.parametrize(

@@ -16,6 +16,7 @@ import pytest
 from polspec import (
     ColSpec,
     FrameSpec,
+    SerializationError,
     SpecError,
     TableSpec,
     generate,
@@ -23,8 +24,7 @@ from polspec import (
     inspect,
 )
 from polspec.drift import drift
-from polspec.errors import SerializationError
-from polspec.serialization import dtypes as dtype_codec
+from polspec.serialization import from_dict
 
 HAS_MAP = hasattr(pl, "Map")
 needs_map = pytest.mark.skipif(not HAS_MAP, reason="Map is a Polars 2 dtype")
@@ -240,12 +240,19 @@ def test_a_profiled_map_column_can_be_saved_and_checked(tmp_path):
     FrameSpec.from_yaml(tmp_path / "p.yaml").validate(df)
 
 
-def test_polars_1_names_the_version_a_map_needs(monkeypatch):
-    monkeypatch.setattr(dtype_codec, "MAP", None)
+def _map_file(dtype_data) -> dict:
+    return {"name": "T", "columns": {"m": {"dtype": dtype_data}}}
+
+
+@pytest.mark.skipif(HAS_MAP, reason="this Polars has a Map dtype")
+def test_polars_1_names_the_version_a_map_needs():
     with pytest.raises(SerializationError, match="a dtype Polars 2 introduced"):
-        dtype_codec.dtype_from_data({"Map": {"key": "String", "value": "Int64"}})
+        from_dict(_map_file({"Map": {"key": "String", "value": "Int64"}}))
+
+
+def test_a_malformed_map_is_refused_naming_its_form():
     with pytest.raises(SerializationError, match=r"written as \{Map"):
-        dtype_codec.dtype_from_data({"Map": ["String", "Int64"]})
+        from_dict(_map_file({"Map": ["String", "Int64"]}))
 
 
 # ---------------------------------------------------------------------------

@@ -218,7 +218,7 @@ def test_sink_nested_directory_creation(tmp_path):
     assert df.height == 50
 
 
-def test_a_lazy_parent_is_collected_once_not_once_per_batch(monkeypatch):
+def test_a_lazy_parent_is_collected_once_not_once_per_batch():
     """Resolving references belongs above the batch loop, not inside it.
 
     Each batch is its own `generate()` call, and reference resolution used to
@@ -226,7 +226,6 @@ def test_a_lazy_parent_is_collected_once_not_once_per_batch(monkeypatch):
     batch. On a scan-backed parent that is the whole file re-read, however
     many batches there are.
     """
-    from polspec.generation import pipeline as generation
 
     class Parent(FrameSpec):
         id = ColSpec(pl.Int64, bounds=(1, 1_000), unique=True)
@@ -237,19 +236,17 @@ def test_a_lazy_parent_is_collected_once_not_once_per_batch(monkeypatch):
 
     parent = Parent.generate(200, seed=1)
     collected = 0
-    real_collect = generation.to_eager
 
-    def counting_collect(frame):
+    def counting(frame: pl.DataFrame) -> pl.DataFrame:
         nonlocal collected
-        if isinstance(frame, pl.LazyFrame):
-            collected += 1
-        return real_collect(frame)
+        collected += 1
+        return frame
 
-    monkeypatch.setattr(generation, "to_eager", counting_collect)
+    lazy_parent = parent.lazy().map_batches(counting)
 
     batches = list(
         Child.generate_batches(
-            500, batch_size=50, seed=2, references={Parent: parent.lazy()}
+            500, batch_size=50, seed=2, references={Parent: lazy_parent}
         )
     )
     assert len(batches) == 10

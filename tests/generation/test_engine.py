@@ -220,3 +220,21 @@ def test_permuted_indices_refuse_a_window_past_the_domain():
     with pytest.raises(GenerationError, match="110 distinct indices"):
         _ffi.permuted_indices(100, 1, 90, 20)
     assert _ffi.permuted_indices(0, 1, 0, 0).len() == 0
+
+
+def test_rust_engine_complaints_surface_as_generation_error():
+    class Spec(FrameSpec):
+        a = ColSpec(
+            pl.Float64,
+            distribution="normal",
+            distribution_params={"mean": 0.0, "std": 1.0},
+        )
+
+    # A valid spec; then reach the engine with a parameter it rejects by
+    # bypassing ColSpec's own check, which is what a future bug would do.
+    with pytest.raises(GenerationError) as info:
+        _ffi.column_plan(
+            "a", "float64", distribution="normal", params={"mean": 0.0, "std": -1.0}
+        )
+    assert isinstance(info.value.__cause__, ValueError)
+    assert "'a'" in str(info.value) and "must be positive" in str(info.value)

@@ -49,18 +49,20 @@ from polspec import (
     SpecError,
     TableSpec,
     col,
-    frames,
     generate,
     generate_batches,
     inspect,
     profile,
+    to_markdown,
+    to_mermaid,
     validate,
 )
 from polspec.drift import drift
-from polspec.dtypes import map_parts
 from polspec.formats import FORMATS
-from polspec.render import framespec_to_markdown, framespec_to_mermaid
 from polspec.serialization import from_dict, to_dict, to_python
+
+# Polars 2's `Map`; on Polars 1, no dtype is one.
+MAP = getattr(pl, "Map", ())
 
 MAX_ROWS = 120
 
@@ -444,7 +446,7 @@ def specs(
 
 def _sortable(column: ColSpec) -> bool:
     """A column `order_by` may name: one of single values."""
-    return not column.dtype.is_nested() and map_parts(column.dtype) is None
+    return not column.dtype.is_nested() and not isinstance(column.dtype, MAP)
 
 
 def _order(
@@ -615,7 +617,7 @@ def test_any_name_splits_a_frame_into_passing_and_failing_exactly(spec, n, seed)
     bad = df.with_columns(
         pl.when(pl.int_range(pl.len()) % 3 == 0)
         .then(pl.lit(None, dtype=df.schema[first]))
-        .otherwise(frames.column(first))
+        .otherwise(pl.nth(0))  # by place: a name may read as a pattern
         .alias(first)
     )
     report = inspect(spec, bad)
@@ -641,7 +643,7 @@ def test_any_name_keeps_the_data_dictionary_a_table(spec):
     """Every row of every table has as many cells as its header, whatever
     the names, choices and categories hold."""
     tables: list[list[str]] = [[]]
-    for line in framespec_to_markdown(spec).splitlines():
+    for line in to_markdown(spec).splitlines():
         if line.startswith("|"):
             tables[-1].append(line)
         elif tables[-1]:
@@ -655,7 +657,7 @@ def test_any_name_keeps_the_data_dictionary_a_table(spec):
 def test_any_name_draws_an_er_diagram_mermaid_reads(spec):
     """An entity is one word; each attribute a different one, never read as
     a key; each comment one quoted string on the attribute's own line."""
-    lines = framespec_to_mermaid(spec).splitlines()
+    lines = to_mermaid(spec).splitlines()
     assert lines[0] == "erDiagram"
     assert re.fullmatch(r"    [A-Za-z_][A-Za-z0-9_]* \{", lines[1]), lines[1]
     assert lines[-1] == "    }"

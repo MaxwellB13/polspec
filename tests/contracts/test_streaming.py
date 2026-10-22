@@ -37,7 +37,9 @@ from polspec import (
     scan,
     validate,
 )
-from polspec.dtypes import map_entries
+
+# Polars 2's `Map`; on Polars 1, no dtype is one.
+MAP = getattr(pl, "Map", ())
 
 ROWS, BATCH, SEED = 300, 97, 11
 
@@ -50,7 +52,7 @@ def _batches(spec: TableSpec, references=None) -> list[pl.DataFrame]:
 
 def _is_nested(dtype: pl.DataType) -> bool:
     """Whether a column's elements are drawn per batch."""
-    return isinstance(dtype, (pl.List, pl.Array)) or map_entries(dtype) is not None
+    return isinstance(dtype, (pl.List, pl.Array, MAP))
 
 
 def _shape(column: pl.Series) -> pl.DataFrame:

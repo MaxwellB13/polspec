@@ -14,6 +14,7 @@ exactly what it did before any of this existed.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import math
 from pathlib import Path
@@ -32,11 +33,8 @@ from polspec import (
     synthesize,
     validate,
 )
-from polspec.bound import Bound
 from polspec.drift import drift
 from polspec.serialization import to_dict
-from polspec.shape import fit
-from polspec.synthesis import synthesized
 
 FIXTURES = Path(__file__).parent / "fixtures"
 ROWS = 20_000
@@ -139,6 +137,12 @@ def test_a_source_that_is_not_data_is_refused(real):
 # ---------------------------------------------------------------------------
 
 
+def _fitted(values, dtype) -> ColSpec:
+    """The column `profile` declares for `values`, its shape fitted."""
+    frame = pl.DataFrame({"c": pl.Series(values).cast(dtype)})
+    return profile(frame, detect_unique=False, seed=0)["c"]
+
+
 @pytest.mark.parametrize(
     ("values", "dtype", "expected"),
     [
@@ -151,9 +155,7 @@ def test_a_source_that_is_not_data_is_refused(real):
     ids=["lognormal", "normal", "poisson", "beta", "uniform"],
 )
 def test_the_shape_fitted_is_the_shape_drawn_from(values, dtype, expected):
-    series = pl.Series(values).cast(dtype)
-    fitted = fit(series, Bound(series.min(), series.max()), dtype, seed=0)
-    assert (fitted.distribution if fitted else None) == expected
+    assert _fitted(values, dtype).distribution == expected
 
 
 @pytest.mark.parametrize(
@@ -169,10 +171,9 @@ def test_a_fitted_parameter_keeps_twelve_significant_digits(values, dtype):
     """Measured with the platform's float maths -- a log-normal's through
     `ln` -- a parameter could differ in its last bit between operating
     systems; at 12 digits that difference rounds away."""
-    series = pl.Series(values).cast(dtype)
-    fitted = fit(series, Bound(series.min(), series.max()), dtype, seed=0)
-    assert fitted is not None
-    for value in fitted.params.values():
+    fitted = _fitted(values, dtype)
+    assert fitted.distribution_params is not None
+    for value in fitted.distribution_params.values():
         assert value == float(f"{value:.12g}")
         # A last-bit difference in what it was rounded from rounds away.
         assert float(f"{math.nextafter(value, math.inf):.12g}") == value
@@ -261,10 +262,17 @@ def test_nested_and_temporal_columns_synthesize():
     over 400 rows -- has its range widened by one to hold them: the fake
     frame validates against the spec it was generated from, which says so."""
     frame = golden_frame()
-    fake, spec = synthesized(frame, seed=1)
+    fake = synthesize(frame, seed=1)
     assert fake.schema == frame.schema
-    assert spec["maybe"].unique and spec["maybe"].bounds.max == 400
-    validate(spec, fake.with_columns(pl.col("status").cast(spec["status"].dtype)))
+    spec = profile(frame, seed=1)
+    assert spec["maybe"].unique and spec["maybe"].bounds.max == 399
+    # The fake key is as distinct as the real one, in a range one wider.
+    maybe = fake["maybe"].drop_nulls()
+    assert maybe.is_unique().all() and maybe.max() <= 400
+    widened = spec.with_columns(
+        maybe=dataclasses.replace(spec["maybe"], bounds=(1, 400))
+    )
+    validate(widened, fake.with_columns(pl.col("status").cast(spec["status"].dtype)))
 
 
 def test_a_profiled_spec_survives_a_file(real, tmp_path):

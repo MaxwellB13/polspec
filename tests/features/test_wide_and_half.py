@@ -12,7 +12,6 @@ import polars as pl
 import pytest
 from helpers import spec_for
 from polspec import ColSpec, FrameSpec, GenerationError, SpecError, TableSpec
-from polspec.dtypes import float16_inside
 
 # ---------------------------------------------------------------------------
 # 128-bit integers
@@ -71,13 +70,24 @@ def test_rounding_to_a_half_never_carries_a_value_past_a_bound(bounds):
     spec_cls.validate(spec_cls.generate(20_000, seed=3))
 
 
-def test_the_half_inside_a_bound_is_a_neighbour_not_a_leap():
-    assert float16_inside(0.1001, up=False) < 0.1001 < float16_inside(0.1001, up=True)
-    assert float16_inside(0.5, up=True) == 0.5  # an exact half stays put
-    assert float16_inside(0.0, up=True) == 0.0
-    # A value that rounds to zero steps to the smallest subnormal past it.
-    assert float16_inside(1e-10, up=True) > 1e-10 > float16_inside(1e-10, up=False)
-    assert float16_inside(-1.3, up=True) > -1.3 > float16_inside(-1.3, up=False)
+@pytest.mark.parametrize(
+    ("bounds", "lowest", "highest"),
+    [
+        # The half nearest 0.1001 is above it; the one just below is drawn.
+        ((0.0, 0.1001), None, 0.10009765625),
+        # Only one half lies between these, and it is all that is drawn.
+        ((-1.3, -1.299), -1.2998046875, -1.2998046875),
+        # A bound that rounds to zero steps to the smallest subnormal past it.
+        ((1e-10, 1e-3), 2**-24, 0.00099945068359375),
+    ],
+)
+def test_the_half_inside_a_bound_is_a_neighbour_not_a_leap(bounds, lowest, highest):
+    """Drawn between the halves just inside each bound -- not ones further
+    in, which would narrow the column for no reason."""
+    values = spec_for(ColSpec(pl.Float16, bounds=bounds)).generate(50_000, seed=3)["c"]
+    if lowest is not None:
+        assert values.min() == lowest
+    assert values.max() == highest
 
 
 def test_bounds_that_hold_no_half_are_refused_where_they_are_written():

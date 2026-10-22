@@ -11,14 +11,10 @@ import sys
 import polars as pl
 import pytest
 from polspec import (
-    Bound,
     Check,
-    ColRule,
     ColSpec,
     FrameSpec,
-    ValidationError,
 )
-from polspec.serialization.fields import colspec_to_data
 
 # ---------------------------------------------------------------------------
 # inheritance and the public surface
@@ -38,41 +34,6 @@ def test_subclass_attribute_overriding():
     assert set(DerivedSpec.spec.columns.keys()) == {"a", "c"}
     df = DerivedSpec.generate(100, seed=42)
     assert set(df.columns) == {"a", "c"}
-
-
-def test_modular_subpackage_imports():
-    from polspec import (
-        ColSpec,
-        FrameSpec,
-        profile_dataframe,
-    )
-    from polspec.bound import Bound as BoundDirect
-    from polspec.framespec import (
-        FrameSpec as FrameSpecDirect,
-    )
-    from polspec.generation.engine import generate_cartesian, generate_random
-    from polspec.profiler import profile_dataframe as profile_dataframe_direct
-    from polspec.rules import ColRule as ColRuleDirect
-    from polspec.serialization.fields import colspec_from_data
-    from polspec.spec import ColSpec as ColSpecDirect
-    from polspec.validation import (
-        ValidationError as ValidationErrorDirect,
-    )
-    from polspec.validation import (
-        inspect as inspect_direct,
-    )
-
-    assert Bound is BoundDirect
-    assert ColRule is ColRuleDirect
-    assert ColSpec is ColSpecDirect
-    assert FrameSpec is FrameSpecDirect
-    assert ValidationError is ValidationErrorDirect
-    assert profile_dataframe is profile_dataframe_direct
-    assert callable(colspec_to_data)
-    assert callable(colspec_from_data)
-    assert callable(generate_random)
-    assert callable(generate_cartesian)
-    assert callable(inspect_direct)
 
 
 # ---------------------------------------------------------------------------

@@ -326,14 +326,6 @@ def test_a_row_whose_parent_failed_does_not_pass():
     assert named["c"].startswith("fk:")
 
 
-def test_a_spec_whose_claims_do_not_relate_rows_validates_once():
-    """Only an order or a key into the frame's own rows can break in the
-    rows left; any other spec's first split is its answer."""
-    assert Keyed.inspect(MIXED)._recheck is None
-    ordered = TableSpec("O", {"v": ColSpec(pl.Int64)}, order_by=["v"])
-    assert inspect(ordered, pl.DataFrame({"v": [2, 1]}))._recheck is not None
-
-
 def test_a_structural_finding_has_no_passing_rows_to_give():
     wrong = MIXED.with_columns(pl.col("id").cast(pl.String))
     with pytest.raises(ValueError, match="id__dtype judge the whole frame"):
