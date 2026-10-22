@@ -10,6 +10,12 @@ seed produces; see
 
 ### Changed
 
+- **Beta.** The `Development Status` classifier says so, and the API is
+  frozen pending 1.0: no public name changes in place. What 1.0 removes is
+  listed on the Stability page, *Removed at 1.0*, and each one warns today:
+  `profile_dataframe`, serialization's five `*_FIELDS` tables, and
+  `FrameSpec.checks()`, `.foreign_keys()` and `.unique_together()`.
+
 - **Every `--json` document carries a `schema_version`**, and so does
   `ValidationReport.to_dict()` and `DriftReport.to_dict()`. Its keys and
   their types are the promise, and the version rises if one is ever renamed,

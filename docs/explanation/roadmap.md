@@ -1,6 +1,6 @@
 # Roadmap
 
-!!! note "Pre-1.0"
+!!! note "Beta"
 
     polspec is in beta, frozen pending 1.0. What it promises, now and from
     1.0, is on [Stability](stability.md). This page is where it is going:

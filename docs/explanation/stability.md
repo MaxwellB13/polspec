@@ -6,9 +6,9 @@ that holds it, so a release cannot break one without a test failing first.
 ## Where polspec is now
 
 0.22 is the beta. The API is frozen pending 1.0: no public name is renamed
-or removed in place, and what is deprecated today is removed at 1.0 (the
-[changelog](../changelog.md) lists each one, under *Deprecated*). Until 1.0,
-two promises are weaker than they will be:
+or removed in place, and what is deprecated today is removed at 1.0 --
+[below](#removed-at-10). Until 1.0, two promises are weaker than they will
+be:
 
 - **Seeded output may change in any release.** When one changes what a seed
   produces, its changelog says so, by name. The
@@ -18,6 +18,29 @@ two promises are weaker than they will be:
   carries its format `version:`, an older one is migrated as it is read,
   and one from a newer polspec is refused by name. So an upgrade never
   leaves a file unreadable.
+
+### Removed at 1.0
+
+Each of these warns today, with a `DeprecationWarning` naming its
+replacement, and still works until 1.0 removes it:
+
+| Deprecated | Since | Use instead |
+|:--|:--|:--|
+| `polspec.profile_dataframe(df)` | 0.18.0 | `polspec.profile(df, weights=False, shape=False, detect_unique=False).columns` |
+| `polspec.serialization.COLSPEC_FIELDS` | 0.18.0 | the keys [Spec files](../reference/spec-files.md) lists |
+| `polspec.serialization.TABLESPEC_FIELDS` | 0.18.0 | the keys [Spec files](../reference/spec-files.md) lists |
+| `polspec.serialization.COLRULE_FIELDS` | 0.18.0 | the keys [Spec files](../reference/spec-files.md) lists |
+| `polspec.serialization.CHECK_FIELDS` | 0.18.0 | the keys [Spec files](../reference/spec-files.md) lists |
+| `polspec.serialization.FK_FIELDS` | 0.18.0 | the keys [Spec files](../reference/spec-files.md) lists |
+| `FrameSpec.checks()` | 0.21.0 | `FrameSpec.spec.checks` |
+| `FrameSpec.foreign_keys()` | 0.21.0 | `FrameSpec.spec.foreign_keys` |
+| `FrameSpec.unique_together()` | 0.21.0 | `FrameSpec.spec.unique_together` |
+
+To find what your code uses, run its tests with deprecations as errors:
+`pytest -W error::DeprecationWarning`.
+
+*Held by* `tests/contracts/test_deprecation.py`, which checks that each name
+here warns and still works, and that nothing else does.
 
 ## What 1.0 promises
 
