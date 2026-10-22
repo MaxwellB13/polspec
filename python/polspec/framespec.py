@@ -28,7 +28,6 @@ import polars as pl
 
 from polspec import compare as drift_module
 from polspec import generation, reading, serialization, sizing, validation
-from polspec._deprecation import deprecated
 from polspec.catspec import CatSpec
 from polspec.check import Check
 from polspec.compare import DriftKeywords, DriftOptions, DriftReport
@@ -425,27 +424,6 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     ) -> list[str]:
         """Column names carrying any (or all) of the tags, in declaration order."""
         return cls.spec.tag(*tags, match=match)
-
-    # Everything else the declaration says is on `.spec`, which no column
-    # can shadow; these three predate that rule.
-
-    @classmethod
-    @deprecated("FrameSpec.checks()", use="FrameSpec.spec.checks")
-    def checks(cls) -> tuple[Check, ...]:
-        """The Check constraints defined on this FrameSpec."""
-        return tuple(cls.spec.checks)
-
-    @classmethod
-    @deprecated("FrameSpec.foreign_keys()", use="FrameSpec.spec.foreign_keys")
-    def foreign_keys(cls) -> tuple[ForeignKey, ...]:
-        """The ForeignKey constraints defined on this FrameSpec."""
-        return tuple(cls.spec.foreign_keys)
-
-    @classmethod
-    @deprecated("FrameSpec.unique_together()", use="FrameSpec.spec.unique_together")
-    def unique_together(cls) -> tuple[tuple[str, ...], ...]:
-        """The composite unique column groups defined on this FrameSpec."""
-        return tuple(tuple(g) for g in cls.spec.unique_together)
 
     # ------------------------------------------------------------------
     # Shared categories

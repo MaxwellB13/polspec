@@ -87,7 +87,6 @@ from polspec import (
     ValidationError,
     ValidationReport,
     col,
-    profile_dataframe,
 )
 
 """

@@ -61,32 +61,6 @@ __all__ = [
     "to_yaml",
 ]
 
-# The field tables, exported here until 0.18 and internal since: each still
-# works, and warns, until 1.0.
-_MOVED_FIELDS = frozenset(
-    {
-        "CHECK_FIELDS",
-        "COLRULE_FIELDS",
-        "COLSPEC_FIELDS",
-        "FK_FIELDS",
-        "TABLESPEC_FIELDS",
-    }
-)
-
-
-def __getattr__(name: str) -> Any:
-    if name in _MOVED_FIELDS:
-        from polspec import _deprecation
-        from polspec.serialization import fields
-
-        _deprecation.warn_deprecated(
-            f"polspec.serialization.{name}",
-            use="the keys the Spec files reference lists",
-        )
-        return getattr(fields, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
 # ---------------------------------------------------------------------------
 # What a file cannot hold
 # ---------------------------------------------------------------------------

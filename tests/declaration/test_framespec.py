@@ -314,22 +314,20 @@ def test_tags_given_as_a_set_are_ordered_the_same_in_every_process():
 
 
 # ---------------------------------------------------------------------------
-# The declaration is on `.spec`: the three older accessors are deprecated
+# What the declaration says is on `.spec`, which no column can shadow
 # ---------------------------------------------------------------------------
 
 
-class _Declared(FrameSpec):
-    __unique_together__ = [("a", "b")]
-    __checks__ = [Check(pl.col("a") <= pl.col("b"), name="ordered")]
-    a = ColSpec(pl.Int64)
-    b = ColSpec(pl.Int64)
+def test_a_column_may_be_named_as_a_table_level_claim():
+    """`FrameSpec.checks()` and its two siblings were removed in 1.0, so a
+    column may be called what a table-level claim is called."""
 
+    class Report(FrameSpec):
+        __checks__ = [Check(pl.col("checks") >= 0, name="non_negative")]
+        checks = ColSpec(pl.Int64, bounds=(0, 9))
+        foreign_keys = ColSpec(pl.Int64, bounds=(0, 9))
+        unique_together = ColSpec(pl.Int64, bounds=(0, 9))
 
-@pytest.mark.parametrize("name", ["checks", "foreign_keys", "unique_together"])
-def test_the_older_accessors_are_deprecated_for_spec_and_still_work(name):
-    with pytest.warns(
-        DeprecationWarning,
-        match=rf"FrameSpec\.{name}\(\) is deprecated.*use FrameSpec\.spec\.{name}",
-    ):
-        old = getattr(_Declared, name)()
-    assert old == getattr(_Declared.spec, name)
+    assert set(Report.spec.columns) == {"checks", "foreign_keys", "unique_together"}
+    assert [c.name for c in Report.spec.checks] == ["non_negative"]
+    Report.validate(Report.generate(20, seed=1))

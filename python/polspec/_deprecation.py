@@ -1,8 +1,8 @@
 """Deprecation, said one way: a `DeprecationWarning` naming what to use
 instead and the release the old name goes in.
 
-A deprecated name keeps working, unchanged, until its removal release. In
-0.x that is 1.0 for everything; see CONTRIBUTING, "Deprecations".
+A deprecated name keeps working, unchanged, until its removal release: in
+1.x, the next major; see CONTRIBUTING, "Deprecations".
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ from typing import Any, ParamSpec, TypeVar
 P = ParamSpec("P")
 R = TypeVar("R")
 
-#: The release every name deprecated in 0.x is removed in.
-REMOVAL = "1.0"
+#: The release every name deprecated in 1.x is removed in.
+REMOVAL = "2.0"
 
 
 def warn_deprecated(
