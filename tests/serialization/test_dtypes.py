@@ -12,11 +12,13 @@ import polars as pl
 import pytest
 import yaml
 from cases import EVERY_DTYPE
-from polspec import CatSpec, ColSpec, SerializationError, TableSpec, profile
-from polspec.serialization import (
-    catspec_from_dict,
-    catspec_to_dict,
+from polspec import (
+    CatSpec,
+    ColSpec,
+    SerializationError,
+    TableSpec,
     from_dict,
+    profile,
     to_dict,
     to_python,
     to_yaml,
@@ -62,9 +64,9 @@ def test_every_dtype_survives_data_and_source(dtype):
 
 def test_a_categoricals_physical_dtype_is_named_and_read_back():
     cats = CatSpec(categoricals={"C": {"physical": "UInt16"}})
-    written = catspec_to_dict(cats)
+    written = cats.to_dict()
     assert written["categoricals"]["C"]["physical"] == "UInt16"
-    assert catspec_from_dict(written).dtype_of("C") == cats.dtype_of("C")
+    assert CatSpec.from_dict(written)["C"] == cats["C"]
     with pytest.raises(SerializationError, match="Unknown physical dtype"):
         CatSpec(categoricals={"C": {"physical": "Float64"}})
 
@@ -78,7 +80,7 @@ def test_a_registry_reference_resolves_against_the_registry():
     assert _read("STATUS", cats) == pl.Enum(["A", "B"])
     assert _read({"Enum": "STATUS"}, cats) == pl.Enum(["A", "B"])
     colour = _read({"Categorical": "COLOUR"}, cats)
-    assert colour == cats.dtype_of("COLOUR")
+    assert colour == cats.get("COLOUR")
     assert _read({"Categorical": {"name": "COLOUR"}}, cats) == colour
     # A name the registry does not hold is a fresh, named Categories.
     assert _read({"Categorical": "fresh"}) == pl.Categorical(pl.Categories("fresh"))

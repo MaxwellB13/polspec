@@ -12,6 +12,7 @@ test pins what Polars 1 says on meeting one in a file.
 from __future__ import annotations
 
 import polars as pl
+import polspec
 import pytest
 from polspec import (
     ColSpec,
@@ -19,12 +20,12 @@ from polspec import (
     SerializationError,
     SpecError,
     TableSpec,
+    drift,
+    from_dict,
     generate,
     generate_batches,
     inspect,
 )
-from polspec.drift import drift
-from polspec.serialization import from_dict
 
 HAS_MAP = hasattr(pl, "Map")
 needs_map = pytest.mark.skipif(not HAS_MAP, reason="Map is a Polars 2 dtype")
@@ -382,10 +383,12 @@ def test_a_map_is_sized_as_the_list_it_is():
     )
     spec = TableSpec("S", {"c": as_map})
     df = generate(spec, 100_000, seed=1)
-    assert spec.estimated_size(100_000) == pytest.approx(df.estimated_size(), rel=0.02)
+    assert polspec.estimated_size(spec, 100_000) == pytest.approx(
+        df.estimated_size(), rel=0.02
+    )
     # An undeclared length is as long as the map draws: two, for Boolean keys.
     flags = TableSpec("F", {"c": ColSpec(_map(pl.Boolean, pl.Int64))})
-    assert flags.estimated_size(100_000) == pytest.approx(
+    assert polspec.estimated_size(flags, 100_000) == pytest.approx(
         generate(flags, 100_000, seed=1).estimated_size(), rel=0.05
     )
 

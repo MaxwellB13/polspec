@@ -11,6 +11,7 @@ import json
 import polars as pl
 import pytest
 from polspec import (
+    FINDING_COLUMN,
     Check,
     ColRule,
     ColSpec,
@@ -21,12 +22,11 @@ from polspec import (
     ValidationError,
     ValidationReport,
     col,
+    drift,
     inspect,
     profile,
     validate,
 )
-from polspec.drift import drift
-from polspec.validation import FINDING_COLUMN
 
 
 class Customers(FrameSpec):

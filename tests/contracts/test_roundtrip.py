@@ -27,6 +27,7 @@ import polars as pl
 import pytest
 from cases import COLUMN_CASES, EVERY_DTYPE
 from polspec import (
+    FINDING_COLUMN,
     CatSpec,
     Check,
     ColRule,
@@ -38,16 +39,16 @@ from polspec import (
     TableSpec,
     ValidationError,
     col,
+    drift,
+    from_dict,
     generate,
     generate_batches,
     inspect,
     profile,
+    to_dict,
     validate,
 )
-from polspec.drift import drift
 from polspec.formats import FORMATS
-from polspec.serialization import from_dict, to_dict
-from polspec.validation import FINDING_COLUMN
 
 ROWS = 300
 SEED = 11

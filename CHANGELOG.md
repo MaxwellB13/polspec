@@ -8,6 +8,50 @@ seed produces; see
 
 ## [Unreleased]
 
+### Breaking
+
+0.23 makes every change to the public surface before 1.0 freezes it, so 1.0
+freezes one that has been released. Each is made outright, without a
+deprecation period; this list, with its replacements, is the migration
+guide.
+
+- **One namespace: everything public is imported from `polspec`.**
+  `polspec.drift`, `polspec.validation` and `polspec.serialization` are
+  internal now, as every other module is.
+
+  | Before | Now |
+  |:--|:--|
+  | `from polspec.drift import drift, diff` | `from polspec import drift, diff` (or `polspec.drift(spec, df)`) |
+  | `polspec.drift.DriftCode`, `polspec.drift.Severity` | `polspec.DriftCode`, `polspec.Severity` |
+  | `polspec.validation.FINDING_COLUMN`, `polspec.validation.FindingCode` | `polspec.FINDING_COLUMN`, `polspec.FindingCode` |
+  | `polspec.serialization.to_dict`, `from_dict`, `FORMAT_VERSION` | `polspec.to_dict`, `polspec.from_dict`, `polspec.FORMAT_VERSION` |
+  | `polspec.serialization.catspec_to_dict(cats)`, `catspec_to_yaml(cats, path)` | `cats.to_dict()`, `cats.to_yaml(path)` |
+  | `polspec.serialization.catspec_from_dict(data)`, `catspec_from_yaml(path)` | `CatSpec.from_dict(data)`, `CatSpec.from_yaml(path)` |
+  | `polspec.serialization.registry_to_dict(r)`, `registry_to_yaml(r, path)` | `r.to_dict()`, `r.to_yaml(path)` |
+  | `polspec.serialization.registry_from_dict(data)`, `registry_from_yaml(path)` | `Registry.from_dict(data)`, `Registry.from_yaml(path)` |
+
+  Every name already at the top level stays where it was.
+- **`CatSpec` reads an entry three ways, and its parts from three
+  mappings.** `cats["X"]`, `cats.X` and `cats.get("X")` give the dtype, matching
+  a name's case as before; `cats.enums`, `cats.categoricals` and
+  `cats.choices` hold what is underneath, keyed exactly.
+
+  | Before | Now |
+  |:--|:--|
+  | `cats.dtype_of("X")` | `cats.get("X")` |
+  | `cats.enum.X`, `cats.enum["X"]`, `cats.enum("X")` | `cats.X` or `cats["X"]` |
+  | `cats.categorical.X` (and its item and call forms) | `cats.X` or `cats["X"]` |
+  | `cats.get_enum("X")` | `cats.enums["X"]`, or `cats["x"].categories.to_list()` for any case |
+  | `cats.get_categorical("X")` | `cats.categoricals["X"]`, or `cats["x"].categories` for any case |
+  | `cats.get_choices("X")` | `cats.choices.get("X")` |
+
+- **`TableSpec.estimated_size(n)`** is `polspec.estimated_size(spec, n)`;
+  `FrameSpec.estimated_size(n)` stays.
+- **`Finding.rows(frame)`** is internal; `report.rows(finding)` is how a
+  report's rows are read.
+- **`CliError`** is no longer exported. The command line never let one
+  reach a caller: `main()` turns every polspec error into an exit status.
+
 ## [0.22.0] - 2026-10-22
 
 **Beta: the contract, written down and tested.** The

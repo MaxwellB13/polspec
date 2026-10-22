@@ -23,7 +23,7 @@ from polspec import (
     FrameSpec,
     TableSpec,
 )
-from polspec.drift.fields import FIELD_COMPARATORS, TABLE_COMPARATORS
+from polspec.compare.fields import FIELD_COMPARATORS, TABLE_COMPARATORS
 from polspec.serialization.fields import (
     CHECK_FIELDS,
     COLRULE_FIELDS,
@@ -275,9 +275,9 @@ _DRIFT_FLAGS = {
 def test_every_drift_option_has_a_flag():
     """0.14.0 added three drift options and no flags for them; this is what
     holds the command to the options from now on."""
+    from polspec import DriftOptions
     from polspec.cli import _build_parser
     from polspec.cli._drift import _drift_options
-    from polspec.drift import DriftOptions
 
     assert set(_DRIFT_FLAGS) == {f.name for f in dataclasses.fields(DriftOptions)}
     parser = _build_parser()

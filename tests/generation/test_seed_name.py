@@ -19,8 +19,8 @@ from polspec import (
     SpecError,
     TableSpec,
     col,
+    diff,
 )
-from polspec.drift import diff
 
 ROWS, SEED = 200, 42
 

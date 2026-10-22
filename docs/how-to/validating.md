@@ -110,11 +110,11 @@ report.failing_rows(once=True).collect()  # each violating row once, naming
 exactly, every row in one or the other, and it is what
 `polspec validate --failing` writes.
 
-The column `failing_rows()` adds is named by `polspec.validation.FINDING_COLUMN`
+The column `failing_rows()` adds is named by `polspec.FINDING_COLUMN`
 rather than spelled out, so grouping by it does not hard-code the name:
 
 ```python
-from polspec.validation import FINDING_COLUMN
+from polspec import FINDING_COLUMN
 
 quarantined = report.failing_rows().collect()
 quarantined.group_by(FINDING_COLUMN).len()   # how many rows each claim caught

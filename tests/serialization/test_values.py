@@ -29,8 +29,12 @@ from polspec import (
     SpecError,
     TableSpec,
     col,
+    from_dict,
+    from_yaml,
+    to_dict,
+    to_python,
+    to_yaml,
 )
-from polspec.serialization import from_dict, from_yaml, to_dict, to_python, to_yaml
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

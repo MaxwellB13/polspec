@@ -14,8 +14,8 @@ from polspec.cli._io import (
     _single_spec,
     frames_named_after_specs,
 )
-from polspec.drift import DriftOptions, DriftReport, diff, drift
-from polspec.drift.report import SCHEMA_VERSION as REPORT_SCHEMA_VERSION
+from polspec.compare import DriftOptions, DriftReport, diff, drift
+from polspec.compare.report import SCHEMA_VERSION as REPORT_SCHEMA_VERSION
 from polspec.errors import CliError
 
 _FAIL_ON = ("breaking", "any", "none")

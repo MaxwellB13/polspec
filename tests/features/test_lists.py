@@ -15,6 +15,7 @@ import json
 from decimal import Decimal
 
 import polars as pl
+import polspec
 import pytest
 from helpers import spec_for
 from polspec import (
@@ -25,11 +26,12 @@ from polspec import (
     TableSpec,
     ValidationError,
     col,
+    diff,
+    drift,
     generate,
     inspect,
     validate,
 )
-from polspec.drift import diff, drift
 
 # ---------------------------------------------------------------------------
 # Declaration
@@ -412,7 +414,9 @@ def test_an_element_null_is_sized_as_a_slot_and_a_validity_bit():
     )
     spec = TableSpec("S", {"c": column})
     df = spec_for(column).generate(100_000, seed=1)
-    assert spec.estimated_size(100_000) == pytest.approx(df.estimated_size(), rel=0.02)
+    assert polspec.estimated_size(spec, 100_000) == pytest.approx(
+        df.estimated_size(), rel=0.02
+    )
 
 
 @pytest.mark.parametrize(

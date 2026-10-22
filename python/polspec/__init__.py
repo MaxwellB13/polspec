@@ -6,9 +6,16 @@ from importlib.metadata import version as _version
 from polspec.bound import Bound
 from polspec.catspec import CatSpec
 from polspec.check import Check
-from polspec.drift import DriftFinding, DriftOptions, DriftReport
+from polspec.compare import (
+    DriftCode,
+    DriftFinding,
+    DriftOptions,
+    DriftReport,
+    Severity,
+    diff,
+    drift,
+)
 from polspec.errors import (
-    CliError,
     GenerationError,
     MultiValidationError,
     PolspecError,
@@ -35,13 +42,22 @@ from polspec.reading import read
 from polspec.registry import Registry
 from polspec.render import to_markdown, to_mermaid
 from polspec.rules import ColRule
-from polspec.serialization import from_yaml, to_python, to_yaml
+from polspec.serialization import (
+    FORMAT_VERSION,
+    from_dict,
+    from_yaml,
+    to_dict,
+    to_python,
+    to_yaml,
+)
 from polspec.sizing import estimated_size
 from polspec.spec import ColSpec
 from polspec.synthesis import profile, synthesize
 from polspec.tablespec import TableSpec
 from polspec.validation import (
+    FINDING_COLUMN,
     Finding,
+    FindingCode,
     ValidationOptions,
     ValidationReport,
     inspect,
@@ -57,16 +73,19 @@ except _PackageNotFoundError:
     __version__ = "0+unknown"
 
 __all__ = [
+    "FINDING_COLUMN",
+    "FORMAT_VERSION",
     "Bound",
     "CatSpec",
     "Check",
-    "CliError",
     "ColRule",
     "ColSpec",
+    "DriftCode",
     "DriftFinding",
     "DriftOptions",
     "DriftReport",
     "Finding",
+    "FindingCode",
     "ForeignKey",
     "FrameSpec",
     "GenerationError",
@@ -78,13 +97,17 @@ __all__ = [
     "Registry",
     "RegistryError",
     "SerializationError",
+    "Severity",
     "SpecError",
     "TableSpec",
     "ValidationError",
     "ValidationOptions",
     "ValidationReport",
     "col",
+    "diff",
+    "drift",
     "estimated_size",
+    "from_dict",
     "from_yaml",
     "generate",
     "generate_batches",
@@ -99,6 +122,7 @@ __all__ = [
     "sink_ndjson",
     "sink_parquet",
     "synthesize",
+    "to_dict",
     "to_markdown",
     "to_mermaid",
     "to_python",

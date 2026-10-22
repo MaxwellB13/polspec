@@ -8,6 +8,10 @@ Two entry points over the same machinery:
 - `validate(spec, df)` inspects, raises `ValidationError` carrying that
   report if anything was found, and otherwise returns the frame with the
   requested structural transformations applied.
+
+What is public here is exported from `polspec` itself.
+
+Internal: not part of the public API.
 """
 
 from __future__ import annotations

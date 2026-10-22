@@ -5,9 +5,8 @@ to read. Each takes a `TableSpec` or a `FrameSpec` class, and each has a
 method on `FrameSpec` of the same name. See
 [Specs as files](../../how-to/files.md) for the format and what survives a
 round trip, and [Documenting a spec](../../how-to/documenting.md) for the
-Markdown and the diagram. `polspec.serialization` also has the `CatSpec`
-and `Registry` forms (`catspec_to_yaml`, `registry_to_yaml`, ...) and the
-dict forms (`to_dict`, `from_dict`).
+Markdown and the diagram. A `CatSpec` and a `Registry` read and write
+themselves, with methods of the same names.
 
 ## to_yaml
 
@@ -16,6 +15,18 @@ dict forms (`to_dict`, `from_dict`).
 ## from_yaml
 
 ::: polspec.from_yaml
+
+## to_dict
+
+::: polspec.to_dict
+
+## from_dict
+
+::: polspec.from_dict
+
+## FORMAT_VERSION
+
+::: polspec.FORMAT_VERSION
 
 ## to_python
 

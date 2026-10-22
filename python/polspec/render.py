@@ -23,7 +23,7 @@ from polspec.tablespec import TableSpec, as_table_spec
 
 if TYPE_CHECKING:
     from polspec.catspec import CatSpec
-    from polspec.drift import DriftFinding, DriftReport
+    from polspec.compare import DriftFinding, DriftReport
     from polspec.foreign_key import ForeignKey
 
 __all__ = [

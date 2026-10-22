@@ -27,6 +27,9 @@ cannot describe a signature the code does not have.
 | [`sink_csv`][polspec.sink_csv] | [Generation](generation.md) |
 | [`sink_ndjson`][polspec.sink_ndjson] | [Generation](generation.md) |
 | [`to_yaml`][polspec.to_yaml] | [Files and documents](files.md) |
+| [`to_dict`][polspec.to_dict] | [Files and documents](files.md) |
+| [`from_dict`][polspec.from_dict] | [Files and documents](files.md) |
+| [`FORMAT_VERSION`][polspec.FORMAT_VERSION] | [Files and documents](files.md) |
 | [`from_yaml`][polspec.from_yaml] | [Files and documents](files.md) |
 | [`to_python`][polspec.to_python] | [Files and documents](files.md) |
 | [`to_markdown`][polspec.to_markdown] | [Files and documents](files.md) |
@@ -37,8 +40,14 @@ cannot describe a signature the code does not have.
 | [`ValidationOptions`][polspec.ValidationOptions] | [Validation](validation.md) |
 | [`ValidationReport`][polspec.ValidationReport] | [Validation](validation.md) |
 | [`Finding`][polspec.Finding] | [Validation](validation.md) |
+| [`FindingCode`][polspec.FindingCode] | [Validation](validation.md) |
+| [`FINDING_COLUMN`][polspec.FINDING_COLUMN] | [Validation](validation.md) |
 | [`DriftOptions`][polspec.DriftOptions] | [Drift](drift.md) |
 | [`DriftReport`][polspec.DriftReport] | [Drift](drift.md) |
+| [`diff`][polspec.diff] | [Drift](drift.md) |
+| [`drift`][polspec.drift] | [Drift](drift.md) |
+| [`DriftCode`][polspec.DriftCode] | [Drift](drift.md) |
+| [`Severity`][polspec.Severity] | [Drift](drift.md) |
 | [`DriftFinding`][polspec.DriftFinding] | [Drift](drift.md) |
 | [`synthesize`][polspec.synthesize] | [Profiling](profiling.md) |
 | [`profile`][polspec.profile] | [Profiling](profiling.md) |
@@ -51,7 +60,6 @@ cannot describe a signature the code does not have.
 | [`MultiValidationError`][polspec.MultiValidationError] | [Errors](errors.md) |
 | [`SerializationError`][polspec.SerializationError] | [Errors](errors.md) |
 | [`RegistryError`][polspec.RegistryError] | [Errors](errors.md) |
-| [`CliError`][polspec.CliError] | [Errors](errors.md) |
 
 Anything not listed here is internal: it can change in a patch release without
 a changelog entry.

@@ -28,13 +28,13 @@ from polspec import (
     ColSpec,
     FrameSpec,
     TableSpec,
+    drift,
     generate,
     profile,
     synthesize,
+    to_dict,
     validate,
 )
-from polspec.drift import drift
-from polspec.serialization import to_dict
 
 FIXTURES = Path(__file__).parent / "fixtures"
 ROWS = 20_000

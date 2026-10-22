@@ -21,16 +21,18 @@ from cases import COLUMN_CASES
 from polspec import (
     ColRule,
     ColSpec,
+    DriftOptions,
     ForeignKey,
     FrameSpec,
     GenerationError,
     Hierarchy,
     TableSpec,
     col,
+    drift,
     generate,
     profile,
 )
-from polspec.drift import DriftOptions, drift, stats
+from polspec.compare import stats
 
 scipy_stats = pytest.importorskip("scipy.stats")
 

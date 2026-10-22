@@ -169,7 +169,7 @@ source_modules = [
 forbidden_modules = [
     "polspec._ffi",
     "polspec.cli",
-    "polspec.drift",
+    "polspec.compare",
     "polspec.framespec",
     "polspec.generation",
     "polspec.registry",
@@ -198,7 +198,7 @@ name = "Only generation reaches the Rust extension"
 type = "forbidden"
 source_modules = [
     "polspec.catspec",
-    "polspec.drift",
+    "polspec.compare",
     "polspec.profiler",
     "polspec.reading",
     "polspec.render",

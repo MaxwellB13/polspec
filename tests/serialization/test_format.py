@@ -11,15 +11,13 @@ import polars as pl
 import pytest
 import yaml
 from polspec import (
+    FORMAT_VERSION,
     CatSpec,
     Check,
     ColSpec,
     FrameSpec,
     SerializationError,
     col,
-)
-from polspec.serialization import (
-    FORMAT_VERSION,
     from_dict,
     to_dict,
 )
@@ -201,13 +199,13 @@ def test_registry_round_trips_including_loose_choices(tmp_path):
     cats.to_yaml(path)
     loaded = CatSpec.from_yaml(path)
     assert loaded.enums == {"STATUS": ["NEW", "PAID"]}
-    assert loaded.get_categorical("currency").physical() == pl.UInt8
-    assert loaded.get_choices("CURRENCY") == ["GBP", "USD"]
-    assert loaded.get_choices("plain") == ["a", "b"]
+    assert loaded["currency"].categories.physical() == pl.UInt8
+    assert loaded.choices.get("CURRENCY") == ["GBP", "USD"]
+    assert loaded.choices.get("plain") == ["a", "b"]
     assert loaded.to_dict() == cats.to_dict()
 
 
 def test_flat_version_1_registry_still_loads():
     cats = CatSpec.from_dict({"STATUS": ["A", "B"], "CURRENCY": {"physical": "UInt8"}})
     assert cats.status == pl.Enum(["A", "B"])
-    assert cats.get_categorical("currency").physical() == pl.UInt8
+    assert cats["currency"].categories.physical() == pl.UInt8

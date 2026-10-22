@@ -11,10 +11,10 @@ from polspec import (
     ForeignKey,
     FrameSpec,
     TableSpec,
+    diff,
     to_markdown,
     to_mermaid,
 )
-from polspec.drift import diff
 
 
 def test_framespec_to_markdown_and_to_mermaid(tmp_path):

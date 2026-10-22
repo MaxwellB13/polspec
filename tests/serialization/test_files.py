@@ -16,12 +16,15 @@ from polspec import (
     ColSpec,
     ForeignKey,
     FrameSpec,
+    Registry,
     SerializationError,
     TableSpec,
     ValidationError,
     col,
+    from_yaml,
+    to_python,
+    to_yaml,
 )
-from polspec.serialization import from_yaml, to_python, to_yaml
 
 # ---------------------------------------------------------------------------
 # YAML round-trip
@@ -582,7 +585,6 @@ def test_with_no_path_a_spec_comes_back_as_text(tmp_path):
     """`to_yaml` and `to_python` return what they would write, for a test, a
     notebook or a review; `catspec_to_yaml` and `to_markdown` already did."""
     from polspec import FrameSpec, Registry
-    from polspec.serialization import registry_to_yaml
 
     class Orders(FrameSpec):
         __order_by__ = ["id"]
@@ -599,7 +601,6 @@ def test_with_no_path_a_spec_comes_back_as_text(tmp_path):
     assert Orders.to_python() == source
 
     registry = Registry(Orders)
-    assert registry_to_yaml(registry) == registry.to_yaml()
     assert "specs:" in registry.to_yaml()
 
 
@@ -647,7 +648,6 @@ def test_a_table_claim_error_names_the_file(tmp_path):
 
 def test_a_registry_error_names_the_file_and_the_spec(tmp_path):
     from polspec import SpecError
-    from polspec.serialization import registry_from_yaml
 
     path = _file(
         tmp_path,
@@ -656,4 +656,4 @@ def test_a_registry_error_names_the_file_and_the_spec(tmp_path):
         "        dtype: Float64\n        bounds: [5, 1]\n",
     )
     with pytest.raises(SpecError, match=r"specs\.yaml: specs\.orders: columns\.total:"):
-        registry_from_yaml(path)
+        Registry.from_yaml(path)

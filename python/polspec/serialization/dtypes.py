@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
+from polspec.catspec import categories_of, dtype_of, enum_categories
 from polspec.dtypes import MAP, DtypeLike, element_dtype, field_dtypes, map_parts
 from polspec.errors import SerializationError
 from polspec.spec import is_categorical_dtype
@@ -180,7 +181,7 @@ def _strip_registry_prefix(name: str) -> str:
 
 def _from_registry(name: str, categories: CatSpec | None) -> pl.DataType | None:
     """Resolves a name against a CatSpec, as an Enum or a Categorical."""
-    return None if categories is None else categories.dtype_of(name)
+    return None if categories is None else dtype_of(categories, name)
 
 
 def _decimal_from_data(payload: Any, _: CatSpec | None) -> pl.DataType:
@@ -245,7 +246,7 @@ def _enum_from_data(payload: Any, categories: CatSpec | None) -> pl.DataType:
         return pl.Enum(payload)
     name = _strip_registry_prefix(payload)
     if categories is not None and name in categories:
-        return pl.Enum(categories.get_enum(name))
+        return pl.Enum(enum_categories(categories, name))
     raise SerializationError(
         f"Enum {payload!r} referenced in YAML but not found in provided CatSpec"
     )
@@ -258,7 +259,7 @@ def categories_from_data(
     if isinstance(payload, str):
         name = _strip_registry_prefix(payload)
         if categories is not None and name in categories:
-            return categories.get_categorical(name)
+            return categories_of(categories, name)
         return pl.Categories(name)
     if not isinstance(payload, dict):
         raise SerializationError(
@@ -266,7 +267,7 @@ def categories_from_data(
         )
     name = str(payload.get("name", key))
     if categories is not None and name and name in categories.categoricals:
-        return categories.get_categorical(name)
+        return categories_of(categories, name)
     return pl.Categories(
         name,
         namespace=str(payload.get("namespace", "")),

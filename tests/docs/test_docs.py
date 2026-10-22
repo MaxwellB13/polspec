@@ -12,10 +12,11 @@ import importlib.util
 import inspect
 import re
 import tomllib
+import typing
 from pathlib import Path
 
 import polspec
-from polspec.serialization import FORMAT_VERSION
+from polspec import FORMAT_VERSION
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCS = ROOT / "docs"
@@ -156,6 +157,8 @@ def test_every_public_name_carries_a_docstring():
     undocumented = []
     for name in polspec.__all__:
         obj = getattr(polspec, name)
+        if typing.get_origin(obj) is typing.Literal:
+            continue  # its docstring follows it in the source, for the reference
         if not inspect.getdoc(obj):
             undocumented.append(name)
         if not inspect.isclass(obj):

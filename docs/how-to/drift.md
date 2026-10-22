@@ -7,7 +7,7 @@ validation.
 
 <!-- docs: skip -->
 ```python
-from polspec.drift import diff, drift
+from polspec import diff, drift
 
 report = diff(OldOrders, NewOrders)   # two declarations
 report = drift(Orders, df)            # a declaration and a frame

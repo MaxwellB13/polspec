@@ -46,11 +46,10 @@ here warns and still works, and that nothing else does.
 
 ### The public API
 
-The public API is `polspec.__all__`, plus the `__all__` of three
-submodules: `polspec.drift`, `polspec.validation` and
-`polspec.serialization`. The [API reference](../reference/api/index.md)
-documents each name. Every other module is internal, says so in its
-docstring, and may change in any release.
+The public API is `polspec.__all__`: everything public is imported from
+`polspec` itself. The [API reference](../reference/api/index.md) documents
+each name. Every module is internal, says so in its docstring, and may
+change in any release.
 
 A public name is never renamed or removed in place. It is deprecated first:
 it keeps working, and each use warns with a `DeprecationWarning` naming what

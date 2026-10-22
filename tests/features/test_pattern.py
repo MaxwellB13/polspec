@@ -21,10 +21,10 @@ from polspec import (
     SpecError,
     TableSpec,
     ValidationOptions,
+    diff,
     inspect,
 )
 from polspec.cli import main
-from polspec.drift import diff
 
 SKU = r"^[A-Z]{3}-\d{4}$"
 

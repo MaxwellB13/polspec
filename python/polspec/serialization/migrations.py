@@ -42,6 +42,7 @@ from polspec.errors import SerializationError
 from polspec.expr import Pred, col
 
 FORMAT_VERSION = 4
+"""The spec-file format version this polspec writes, and the newest it reads."""
 
 
 # ---------------------------------------------------------------------------

@@ -58,8 +58,11 @@ FindingCode = Literal[
     "hierarchy_depth",
     "order",
 ]
+"""The code of a `Finding`: what kind of claim it found broken. The full list,
+with what raises each, is on the *Errors and findings* page."""
 
 FINDING_COLUMN = "__polspec_finding"
+"""The column `failing_rows()` adds, naming the claim each row broke."""
 
 # A row's position while `passing_rows()` works out which rows were found;
 # never in what it returns.
@@ -133,8 +136,9 @@ class Finding:
         """Whether this finding can name the rows that violate it."""
         return self._locate is not None
 
-    def rows(self, frame: pl.LazyFrame) -> pl.LazyFrame:
-        """The rows of `frame` that violate this claim, lazily."""
+    def _rows(self, frame: pl.LazyFrame) -> pl.LazyFrame:
+        """The rows of `frame` that violate this claim, lazily: what
+        `ValidationReport.rows` returns."""
         if self._locate is None:
             raise ValueError(
                 f"Finding {self.key!r} ({self.code}) is structural and has no rows"
@@ -212,7 +216,7 @@ class ValidationReport:
 
     def rows(self, finding: Finding) -> pl.LazyFrame:
         """The rows violating one finding, lazily."""
-        return finding.rows(self.frame)
+        return finding._rows(self.frame)
 
     def failing_rows(self, *, once: bool = False) -> pl.LazyFrame:
         """Every row that violates a row-level finding, lazily, with a
@@ -239,7 +243,7 @@ class ValidationReport:
             return self._failing_once()
         self._require_finding_column_free()
         parts = [
-            f.rows(self.frame).with_columns(pl.lit(f.key).alias(FINDING_COLUMN))
+            f._rows(self.frame).with_columns(pl.lit(f.key).alias(FINDING_COLUMN))
             for f in self.findings
             if f.row_level
         ]
@@ -263,7 +267,7 @@ class ValidationReport:
         indexed = self.frame.with_row_index(index)
         hits = pl.concat(
             [
-                f.rows(indexed).select(
+                f._rows(indexed).select(
                     index, pl.lit(f.key, dtype=pl.String).alias(FINDING_COLUMN)
                 )
                 for f in row_level
@@ -331,7 +335,7 @@ class ValidationReport:
         """`frame`'s rows -- carrying `index` -- that none of this report's
         findings found. Each finding locates its rows on a frame carrying
         the index, which a filter and an anti-join both keep."""
-        failed = pl.concat([f.rows(frame).select(index) for f in self.findings])
+        failed = pl.concat([f._rows(frame).select(index) for f in self.findings])
         return frame.join(failed.unique(), on=index, how="anti", maintain_order="left")
 
     def _settle(self, index: str) -> dict[str, pl.DataFrame]:
@@ -356,7 +360,7 @@ class ValidationReport:
                 break  # settled -- or a verdict on the whole frame, unchanged
             found = pl.concat(
                 [
-                    f.rows(kept.lazy()).select(
+                    f._rows(kept.lazy()).select(
                         index, pl.lit(f.key, dtype=pl.String).alias(FINDING_COLUMN)
                     )
                     for f in row_level

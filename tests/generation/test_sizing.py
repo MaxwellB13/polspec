@@ -12,6 +12,7 @@ from __future__ import annotations
 import warnings
 
 import polars as pl
+import polspec
 import pytest
 from polspec import ColSpec, FrameSpec, GenerationError, TableSpec
 
@@ -19,7 +20,7 @@ VIEW = 16
 
 
 def _per_row(column: ColSpec) -> float:
-    return TableSpec("S", {"c": column}).estimated_size(1_000_000) / 1_000_000
+    return polspec.estimated_size(TableSpec("S", {"c": column}), 1_000_000) / 1_000_000
 
 
 @pytest.mark.parametrize(
@@ -110,7 +111,7 @@ def test_a_whole_spec_is_the_sum_of_its_columns():
         per_row * 1_000_000, rel=0.01
     )
     assert Sandbox.estimated_size(0) == 0
-    assert Sandbox.spec.estimated_size(10) == Sandbox.estimated_size(10)
+    assert polspec.estimated_size(Sandbox.spec, 10) == Sandbox.estimated_size(10)
     with pytest.raises(ValueError, match="n must be >= 0"):
         Sandbox.estimated_size(-1)
 

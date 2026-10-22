@@ -9,8 +9,17 @@ import datetime as dt
 
 import polars as pl
 import pytest
-from polspec import Check, ColRule, ColSpec, FrameSpec, Pred, SpecError, col, lit
-from polspec.serialization import from_dict
+from polspec import (
+    Check,
+    ColRule,
+    ColSpec,
+    FrameSpec,
+    Pred,
+    SpecError,
+    col,
+    from_dict,
+    lit,
+)
 
 # Every column a predicate below names, so a spec file can hold it.
 NAMED = {

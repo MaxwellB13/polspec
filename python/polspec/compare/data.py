@@ -34,7 +34,7 @@ from polspec.spec import entries_of, field_of
 from polspec.validation.constraints import is_dtype_compatible
 
 if TYPE_CHECKING:
-    from polspec.drift import DriftOptions
+    from polspec.compare import DriftOptions
     from polspec.spec import ColSpec
 
 # The most values of a column a distribution is compared by. A two-sample

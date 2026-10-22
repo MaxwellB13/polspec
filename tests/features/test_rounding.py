@@ -23,9 +23,9 @@ from polspec import (
     from_yaml,
     generate,
     profile,
+    to_dict,
     validate,
 )
-from polspec.serialization import to_dict
 
 STEPS = ["auto", 1000, 0.01, 7, 0.3, "1M"]
 
