@@ -60,7 +60,8 @@ nav = [
     { "Generation and validation" = "explanation/two-sides.md" },
     { "Known limitations" = "explanation/limitations.md" },
     { "Comparison" = "explanation/comparison.md" },
-    { "Roadmap and stability" = "explanation/roadmap.md" },
+    { "Stability" = "explanation/stability.md" },
+    { "Roadmap" = "explanation/roadmap.md" },
   ] },
   { "Changelog" = "changelog.md" },
 ]

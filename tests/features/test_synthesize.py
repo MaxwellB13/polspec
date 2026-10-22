@@ -87,6 +87,7 @@ def test_from_dataframe_with_no_options_infers_what_it_always_did():
     asked, so a spec `polspec schema infer` wrote before still comes out the
     same. 0.14.0 changed the default on purpose, twice: an Enum needs its
     values to repeat, and a text column names its format -- `contact` here.
+    0.22.0 once more: a column with no nulls carries no null rate.
     Regenerate the fixture only on purpose."""
     golden = yaml.safe_load(
         (FIXTURES / "profiled_by_default.yaml").read_text(encoding="utf-8")

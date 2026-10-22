@@ -81,7 +81,7 @@ which is what a [rule](constraints.md) is for.
 `seed_name` covers the column's passes as well as its values: a ruled
 column renamed with one keeps its rule's draw. What no seed name holds is
 the frame across polspec *versions* -- see
-[Roadmap and stability](../explanation/roadmap.md#yaml-format-and-generated-values-may-change).
+[Stability](../explanation/stability.md#seeded-output).
 
 ## Lazy output — `scan()`
 

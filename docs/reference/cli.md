@@ -46,7 +46,7 @@ polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
 | `--keys` | Declare an all-distinct integer or text column unique |
 | `--order` | Declare order_by when the rows come sorted by a column |
 | `--round-bounds` `STEP` | Round each numeric column's bounds outward to STEP (1000, 1k, 10k, 1M, 0.01), within its dtype, so the data stays inside; 'auto' keeps two significant figures of the span and whole seconds; 'exact' writes them as observed (default: auto) |
-| `--round-rates` `STEP` | Round each null and NaN rate up to STEP (0.01); 'auto' keeps two significant figures; 'exact' writes them as observed. A rate of 0 stays 0 (default: auto) |
+| `--round-rates` `STEP` | Round each null and NaN rate up to STEP (0.01), and each --weights frequency to its nearest STEP; 'auto' keeps two significant figures; 'exact' writes them as observed. A rate of 0 stays 0 (default: auto) |
 | `--replace` `COL` | Columns whose values must not be carried into the spec |
 
 ## `polspec schema new`
@@ -171,7 +171,7 @@ polspec diff [-h] [--rename OLD=NEW] [--json | --markdown]
 | `--rename` `OLD=NEW` | A column renamed between the two; repeat for several |
 | `--json` | Print the report as JSON |
 | `--markdown` | Print the report as Markdown, for a pull-request comment |
-| `--fail-on` `FAIL_ON` | Which findings make the exit status 1: breaking (default), any, or none One of `breaking`, `any`, `none`. |
+| `--fail-on` `FAIL_ON` | Which findings make the exit status 1: breaking (default), any, or none. One of `breaking`, `any`, `none`. |
 | `--strict-dtypes` | A dtype change is breaking unless the dtypes are identical |
 | `--class` `NAME` | Use only this class (a .py source may define several) |
 
@@ -202,6 +202,6 @@ polspec drift [-h] [--all] [--sample N] [--significance P]
 | `--max-samples` `N` | Offending values to carry per finding (default: 10) |
 | `--json` | Print the report as JSON |
 | `--markdown` | Print the report as Markdown, for a pull-request comment |
-| `--fail-on` `FAIL_ON` | Which findings make the exit status 1: breaking (default), any, or none One of `breaking`, `any`, `none`. |
+| `--fail-on` `FAIL_ON` | Which findings make the exit status 1: breaking (default), any, or none. One of `breaking`, `any`, `none`. |
 | `--strict-dtypes` | A dtype change is breaking unless the dtypes are identical |
 | `--class` `NAME` | Use only this class (a .py source may define several) |

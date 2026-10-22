@@ -26,7 +26,7 @@ import dataclasses
 import warnings
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, localcontext
+from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_EVEN, Decimal, localcontext
 from types import MappingProxyType
 from typing import Any, Literal, TypedDict
 
@@ -189,6 +189,31 @@ def rounded_rate(rate: float, rounding: Rounding) -> float:
     )
 
 
+def rounded_weights(
+    weights: tuple[float, ...] | None, rounding: Rounding
+) -> tuple[float, ...] | None:
+    """`weights` at `rounding`'s precision, as `rounded_rate` writes a rate --
+    but each to its nearest step, since a weight is relative and bounds
+    nothing the data has to stay inside. A weight above 0 stays above 0, so
+    no category the data holds stops being drawn."""
+    if weights is None or rounding is None:
+        return weights
+    return tuple(_rounded_weight(weight, rounding) for weight in weights)
+
+
+def _rounded_weight(weight: float, rounding: Rounding) -> float:
+    if weight <= 0:
+        return weight
+    exact = _exact(weight)
+    step = (
+        Decimal(1).scaleb(exact.adjusted() - 1)
+        if rounding == "auto"
+        else _exact(rounding)
+    )
+    nearest = (exact / step).to_integral_value(rounding=ROUND_HALF_EVEN) * step
+    return float(nearest if nearest > 0 else step)
+
+
 @dataclass(frozen=True, slots=True)
 class ProfileOptions:
     """What `profile()` infers from data, and how finely it writes it.
@@ -249,7 +274,9 @@ class ProfileOptions:
     round_rates : number, "auto" or None, default None
         Write each null, NaN and list-element null rate rounded up to this
         step, never past 1; "auto" keeps two significant figures. A rate of
-        0 stays 0. None writes them exactly as observed.
+        0 stays 0. Category frequencies (`weights`) are written at the same
+        precision, each to its nearest step and never to 0. None writes them
+        exactly as observed.
 
     """
 
@@ -548,11 +575,22 @@ def _profile_column(
         top=top,
         non_null=series.drop_nulls(),
         nullable=nullable,
-        null_probability=rounded_rate(null_probability, options.round_rates),
+        null_probability=(
+            rounded_rate(null_probability, options.round_rates)
+            if nullable
+            else null_probability
+        ),
     )
     for belongs, describe in _FAMILIES:
         if belongs(column.dtype):
-            return describe(column)
+            described = describe(column)
+            if described.weights is None or options.round_rates is None:
+                return described
+            # Frequencies are written at the precision rates are.
+            return dataclasses.replace(
+                described,
+                weights=rounded_weights(described.weights, options.round_rates),
+            )
     # A dtype with nothing to measure (an `Object`): recorded faithfully so
     # validation still reads it.
     return column.spec(dtype=column.dtype)
@@ -904,7 +942,9 @@ def _nullability(series: pl.Series, total_rows: int) -> tuple[bool, float]:
     """Whether the column holds nulls, and how often."""
     null_count = series.null_count()
     if null_count == 0:
-        return False, 0.0
+        # Not nullable, so no rate: the default is what a spec written by
+        # hand would leave, and a file then says nothing about nulls.
+        return False, DEFAULT_NULL_PROBABILITY
     if total_rows > 0:
         return True, float(null_count / total_rows)
     return True, DEFAULT_NULL_PROBABILITY

@@ -183,6 +183,22 @@ naming what to use instead and the release it goes in.
   "(deprecated)" in the API reference; and test that it warns and still
   works.
 
+## Supported versions
+
+What polspec supports, and how that changes. The user-facing statement is
+the [Stability](https://maxwellb13.github.io/polspec/explanation/stability/)
+page; keep the two in step.
+
+- **Python:** every CPython from 3.12 until its end of life, and each new
+  release within one minor polspec release of its final. Adding one means a
+  classifier in `pyproject.toml`, the CI matrix in `test.yml`, and wheels
+  that install on it (`abi3-py312` covers the build).
+- **Polars:** the `polars` bounds in `pyproject.toml`. A floor moves only in
+  a minor release, announced in the changelog of the release before. A new
+  Polars major is supported in a minor release once the suite passes on it;
+  raise the upper bound then, not before.
+- **Operating systems:** the targets `release.yml` builds wheels for.
+
 ## Conventions
 
 - **Generate and validate must agree.** Anything `generate()` produces,

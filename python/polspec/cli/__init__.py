@@ -150,7 +150,8 @@ def _add_schema_parser(subparsers: argparse._SubParsersAction) -> None:
         type=_rounding,
         metavar="STEP",
         help=(
-            "Round each null and NaN rate up to STEP (0.01); 'auto' keeps two "
+            "Round each null and NaN rate up to STEP (0.01), and each "
+            "--weights frequency to its nearest STEP; 'auto' keeps two "
             "significant figures; 'exact' writes them as observed. A rate of "
             "0 stays 0 (default: auto)"
         ),
@@ -454,7 +455,7 @@ def _add_report_options(sub: argparse.ArgumentParser) -> None:
         choices=_FAIL_ON,
         default="breaking",
         help=(
-            "Which findings make the exit status 1: breaking (default), any, or none"
+            "Which findings make the exit status 1: breaking (default), any, or none."
         ),
     )
     sub.add_argument(

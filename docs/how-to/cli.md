@@ -37,10 +37,10 @@ reader and profiled with `FrameSpec.from_dataframe`, rounding what it writes;
 source file, rather than a data file `from_yaml` re-parses.
 
 ```console
-$ polspec schema infer orders.parquet -o orders.yaml
+$ polspec schema infer orders.parquet -o orders.yaml --weights
 Inferred 3 column(s) from 12,483 row(s) of orders.parquet -> orders.yaml
 
-$ polspec schema infer orders.parquet -o orders.py
+$ polspec schema infer orders.parquet -o orders.py --weights
 Inferred 3 column(s) from 12,483 row(s) of orders.parquet -> orders.py
 ```
 
@@ -53,15 +53,16 @@ from polspec import ColSpec, FrameSpec
 
 class Orders(FrameSpec):
     __columns__ = {
-        "order_id": ColSpec(pl.Int64, bounds=(0, 13000), null_probability=0.0),
-        "status": ColSpec(pl.Enum(["NEW", "PAID", "SHIPPED"]), null_probability=0.0),
-        "total": ColSpec(pl.Float64, bounds=(10.0, 500.0), null_probability=0.0),
+        "order_id": ColSpec(pl.Int64, bounds=(0, 13000)),
+        "status": ColSpec(pl.Enum(["NEW", "PAID", "SHIPPED"]), weights=[0.4, 0.3, 0.3]),
+        "total": ColSpec(pl.Float64, bounds=(10.0, 500.0)),
     }
 ```
 
-`order_id` ran from 1 to 12,483, and its bounds are written rounded outward,
-as the options below describe. `--weights` adds each category's observed
-frequency to `status`.
+`order_id` ran from 1 to 12,483, and `status` was 40.2% `NEW`: bounds are
+written rounded outward and frequencies to two significant figures, as the
+options below describe. A column with no nulls says nothing about them, as
+one written by hand would not.
 
 Columns are declared through `__columns__` rather than as class attributes,
 same as `from_yaml` — see [Column names that are not
@@ -81,7 +82,7 @@ new`.
 | `--keys` | Declare an all-distinct integer or text column unique |
 | `--order` | Declare `order_by` when the rows come sorted by a column |
 | `--round-bounds STEP` | Round each numeric column's bounds outward to `STEP` (`1000`, `1k`, `10k`, `1M`, `0.01`), within its dtype; `auto` (the default) keeps two significant figures of the span and whole seconds; `exact` writes them as observed |
-| `--round-rates STEP` | Round each null and NaN rate up to `STEP` (`0.01`); `auto` (the default) keeps two significant figures; `exact` writes them as observed |
+| `--round-rates STEP` | Round each null and NaN rate up to `STEP` (`0.01`), and each `--weights` frequency to its nearest `STEP`; `auto` (the default) keeps two significant figures; `exact` writes them as observed |
 | `--replace COL...` | Columns whose values must not be carried into the spec |
 
 Treat the output as a draft. It describes the sample it saw — edit bounds,
@@ -362,7 +363,10 @@ Every subcommand returns `0` on success and `1` on a reported error, printed
 as `error: ...` on stderr rather than a traceback — a missing file, an
 unreadable format, an invalid class name. `validate`, `diff` and `drift`
 also return `1` when the report itself fails, so a `1` means "look at the
-output", whichever kind of problem it was.
+output", whichever kind of problem it was. A command line that is itself
+wrong — an unknown verb, flag or choice — returns `2`, with a usage message.
+[Stability](../explanation/stability.md#the-command-line) says which of
+these are promised.
 
 ```console
 $ polspec schema infer nope.csv -o out.yaml

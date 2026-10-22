@@ -25,6 +25,7 @@ from polspec import (
     profile,
     validate,
 )
+from polspec.serialization import to_dict
 
 STEPS = ["auto", 1000, 0.01, 7, 0.3, "1M"]
 
@@ -97,12 +98,40 @@ def test_a_float_rounds_without_artifacts():
         (2_365, 100_000, 0.01, 0.03),
         (999, 1_000, 0.01, 1.0),
         (1, 2, 3, 1.0),  # never past 1
-        (0, 100, "auto", 0.0),  # none stays none
-        (0, 100, 0.01, 0.0),
     ],
 )
-def test_rates_round_up_and_zero_stays_zero(nulls, rows, step, written):
+def test_rates_round_up(nulls, rows, step, written):
     assert _rate(nulls, rows, step) == written
+
+
+@pytest.mark.parametrize("step", [None, "auto", 0.01])
+def test_a_column_with_no_nulls_says_nothing_about_them(step):
+    """Not nullable, so no rate to round: a file written from it carries none,
+    as one written by hand would not."""
+    frame = pl.DataFrame({"c": [1, 2, 3]})
+    column = FrameSpec.from_dataframe(frame, round_rates=step).spec["c"]
+    assert not column.nullable
+    assert (
+        "null_probability" not in to_dict(TableSpec("T", {"c": column}))["columns"]["c"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("step", "written"),
+    [
+        (None, (0.40236, 0.29875, 0.29889)),
+        ("auto", (0.4, 0.3, 0.3)),
+        (0.05, (0.4, 0.3, 0.3)),
+        (0.5, (0.5, 0.5, 0.5)),
+    ],
+)
+def test_frequencies_are_written_at_the_rates_precision(step, written):
+    """To the nearest step, since a weight is relative and bounds nothing --
+    and never to 0, so a category the data holds is still drawn."""
+    counts = {"NEW": 40_236, "PAID": 29_875, "SHIPPED": 29_889}
+    frame = pl.DataFrame({"s": [k for k, n in counts.items() for _ in range(n)]})
+    column = FrameSpec.from_dataframe(frame, weights=True, round_rates=step).spec["s"]
+    assert column.weights == pytest.approx(written)
 
 
 @pytest.mark.parametrize(
