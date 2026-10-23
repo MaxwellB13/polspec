@@ -15,6 +15,7 @@ nav = [
   { "How-to guides" = [
     { "Declaring a spec" = [
       { "Declare columns" = "how-to/columns.md" },
+      { "Infer a spec from data" = "how-to/profiling.md" },
       { "String formats" = "how-to/formats.md" },
       { "Constraints" = "how-to/constraints.md" },
       { "Shared categories" = "how-to/categories.md" },
@@ -25,7 +26,6 @@ nav = [
       { "Validate data" = "how-to/validating.md" },
       { "Schema and data drift" = "how-to/drift.md" },
       { "Test pipelines" = "how-to/testing.md" },
-      { "Infer a spec from data" = "how-to/profiling.md" },
       { "Fake data from real data" = "how-to/synthesizing.md" },
     ] },
     { "Specs as values and files" = [
@@ -56,14 +56,10 @@ nav = [
     { "Errors and findings" = "reference/errors.md" },
   ] },
   { "Explanation" = [
-    { "Architecture" = "explanation/architecture.md" },
-    { "Generation and validation" = "explanation/two-sides.md" },
     { "Known limitations" = "explanation/limitations.md" },
     { "Comparison" = "explanation/comparison.md" },
     { "Stability" = "explanation/stability.md" },
-    { "Roadmap" = "explanation/roadmap.md" },
   ] },
-  { "Changelog" = "changelog.md" },
 ]
 
 [project.plugins.mkdocstrings.handlers.python]

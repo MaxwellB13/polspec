@@ -21,12 +21,6 @@ The generator is written in Rust and runs the columns in parallel, so a spec
 that describes a realistic table produces millions of rows in the time it takes
 to describe one.
 
-!!! note "Beta"
-
-    The API is frozen pending 1.0: no public name changes in place, and
-    what 1.0 removes warns today. [Stability](explanation/stability.md) says
-    what is promised.
-
 ## Why two directions from one declaration
 
 Most schema tools do one or the other. A validation library tells you when

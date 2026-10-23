@@ -58,7 +58,7 @@ reporting. A command line that is itself wrong exits 2.
 ## Finding codes
 
 Every violation `inspect()` reports, and `validate()` raises, is a `Finding`
-with one of these codes. Row-level findings can return the offending rows
+with one of these codes -- `polspec.FindingCode`, for a type checker. Row-level findings can return the offending rows
 through `report.rows(finding)`; structural ones describe the frame's shape.
 
 | Code | Kind | Raised when |
@@ -90,7 +90,7 @@ through `report.rows(finding)`; structural ones describe the frame's shape.
 ## Drift codes
 
 A `DriftReport` (from `diff()` or `drift()`) carries `DriftFinding`s with one
-of these codes. Each also carries a `severity`: **breaking** when a frame
+of these codes -- `polspec.DriftCode`, for a type checker. Each also carries a `severity`: **breaking** when a frame
 that satisfied the old side could fail the new one, **compatible**
 otherwise. See [Schema and data drift](../how-to/drift.md).
 

@@ -4,9 +4,10 @@ polspec is a small Python package over a Rust extension. The Python side owns
 the vocabulary — what a column can declare and what that means; the Rust side
 owns only the inner loop that fills arrays with values.
 
-This page is for contributors, and for anyone curious how it works. The
-modules it names are internal: they can change in any release, so code
-outside polspec should use only [the public API](../reference/api/index.md).
+For contributors, and for anyone curious how it works; start with
+[CONTRIBUTING.md](CONTRIBUTING.md). The modules named here are internal:
+they can change in any release, so code outside polspec should use only
+[the public API](https://maxwellb13.github.io/polspec/reference/api/).
 
 ## Modules
 

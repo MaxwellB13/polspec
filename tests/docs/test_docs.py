@@ -273,7 +273,7 @@ def test_the_package_says_which_version_it_is():
 def test_every_module_is_on_the_architecture_page():
     """The module table is the map of the package; a module added without a
     row is how it fell six modules behind before."""
-    page = (DOCS / "explanation" / "architecture.md").read_text(encoding="utf-8")
+    page = (ROOT / "ARCHITECTURE.md").read_text(encoding="utf-8")
     listed = set(re.findall(r"^\| `([A-Za-z_]+)` \|", page, re.M))
     package = ROOT / "python" / "polspec"
     modules = {
@@ -282,8 +282,8 @@ def test_every_module_is_on_the_architecture_page():
         if (p.suffix == ".py" and p.stem not in ("__init__", "__main__"))
         or (p.is_dir() and (p / "__init__.py").exists())
     }
-    assert modules - listed == set(), "add a row to architecture.md"
-    assert listed - modules == set(), "architecture.md names a module that is gone"
+    assert modules - listed == set(), "add a row to ARCHITECTURE.md"
+    assert listed - modules == set(), "ARCHITECTURE.md names a module that is gone"
 
 
 def test_every_test_file_lives_in_a_folder_and_says_what_it_covers():

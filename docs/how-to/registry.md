@@ -107,8 +107,11 @@ registry.validate_all(frames)              # raises once, listing every spec's f
 Every frame is a possible parent for every other, so no `references=` is
 needed for keys inside the set; pass one for parents that live outside it.
 Both take the options `validate()` does, and `validate_all` returns the frames
-with the same structural transformations applied. A frame for a spec not in
-the registry is a `RegistryError`.
+with the same structural transformations applied. When any frame fails,
+`validate_all` raises one `MultiValidationError` -- a `ValidationError`, so
+one `except` catches both -- whose `reports` hold every failing spec's
+report, keyed by name. A frame for a spec not in the registry is a
+`RegistryError`.
 
 ## Shared categories
 

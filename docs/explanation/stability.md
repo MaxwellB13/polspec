@@ -1,40 +1,9 @@
 # Stability
 
-What polspec promises: before 1.0, and from it. Each promise names the test
-that holds it, so a release cannot break one without a test failing first.
+What polspec promises, from 1.0 on. Each promise names the test that holds
+it, so a release cannot break one without a test failing first.
 
-## Where polspec is now
-
-0.22 is the beta. The API is frozen pending 1.0: no public name is renamed
-or removed in place, and what is deprecated is listed
-[below](#deprecated). Until 1.0, two promises are weaker than they will
-be:
-
-- **Seeded output may change in any release.** When one changes what a seed
-  produces, its changelog says so, by name. The
-  [roadmap](roadmap.md#generated-values-may-change-until-10) lists every
-  release that has.
-- **A spec file's keys may change**, but only with a migration: a file
-  carries its format `version:`, an older one is migrated as it is read,
-  and one from a newer polspec is refused by name. So an upgrade never
-  leaves a file unreadable.
-
-### Deprecated
-
-Nothing is deprecated. A name deprecated in 1.x is listed here, warns with a
-`DeprecationWarning` naming its replacement, and keeps working until the
-next major release removes it. To find what your code uses, run its tests
-with deprecations as errors: `pytest -W error::DeprecationWarning`.
-
-1.0 removed what 0.x had deprecated: `profile_dataframe`,
-`polspec.serialization`'s five `*_FIELDS` tables, and `FrameSpec.checks()`,
-`.foreign_keys()` and `.unique_together()`. The
-[changelog](../changelog.md) gives the replacement for each.
-
-*Held by* `tests/contracts/test_deprecation.py`, which checks that what is
-listed here is exactly what warns.
-
-## What 1.0 promises
+## What is promised
 
 ### The public API
 
@@ -78,6 +47,19 @@ Anything else that changes seeded output waits for the next major release.
 *Held by* `tests/contracts/test_seeded.py`, which checks the digest of
 every case in the catalogue on every platform CI runs.
 
+Before 1.0, these releases changed what a seed produces, each once; every
+other release since 0.7.0 produced exactly what the one before it did, on
+every Polars it supported:
+
+| Release | What a seed produced differently |
+|:--|:--|
+| 0.7.0 | Specs with rules, a foreign key, a hierarchy or a composite key, so that inserting a column never changes its neighbours again |
+| 0.8.0 | Batched and sunk output, now windows onto the frame `generate()` makes, whatever the batch size |
+| 0.10.0 | Unique columns, now a permutation of their value space, unique across a whole frame however it is batched |
+| 0.11.0 | A unique column a foreign key fills, now a permutation of its parent's keys |
+| 0.12.0 | A `List`, `Array` or `Map` column's elements past the first batch (`generate()` did not change) |
+| 0.19.0 | `lognormal` and `beta` columns, where operating systems' maths libraries disagreed: the samplers' `exp`, `ln` and `pow` are polspec's own, so a seed gives the same values on every OS |
+
 ### The command line
 
 The verbs, their flags and their exit codes:
@@ -105,6 +87,21 @@ or filters by one keeps working.
 
 *Held by* `tests/contracts/test_contract.py`, which holds the codes polspec
 produces and the tables on that page to each other, in both directions.
+
+### Deprecated
+
+Nothing is deprecated. A name deprecated in 1.x is listed here, warns with a
+`DeprecationWarning` naming its replacement, and keeps working until the
+next major release removes it. To find what your code uses, run its tests
+with deprecations as errors: `pytest -W error::DeprecationWarning`.
+
+1.0 removed what 0.x had deprecated: `profile_dataframe`,
+`polspec.serialization`'s five `*_FIELDS` tables, and `FrameSpec.checks()`,
+`.foreign_keys()` and `.unique_together()`. The
+[changelog](https://github.com/MaxwellB13/polspec/blob/main/CHANGELOG.md) gives the replacement for each.
+
+*Held by* `tests/contracts/test_deprecation.py`, which checks that what is
+listed here is exactly what warns.
 
 ## What is not promised
 
