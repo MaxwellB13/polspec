@@ -36,6 +36,13 @@ regex has no answer for `.*`. Validate generated data with
 yourself. For a shape polspec *can* generate, declare a
 [`format`](../how-to/formats.md) instead of a pattern.
 
+### `rows` does not limit `generate()`
+
+This is by design too. A spec's `rows` describes the real table, and generating
+a small frame from it is the normal use of `generate()`, so `n` wins: the rows
+asked for are made, and `validate()` reports `row_count` if they are outside
+`rows`. Validate such a frame with `rows=False`.
+
 ### A self-referencing foreign key is referential, not acyclic
 
 A `ForeignKey(..., references="self")` guarantees exactly what it says: every

@@ -118,7 +118,10 @@ def _write_split(
             "leave out --failing"
         )
     if args.output:
-        passing = report.passing_rows().collect()
+        try:
+            passing = report.passing_rows().collect()
+        except ValueError as exc:  # too few rows pass for the spec's `rows`
+            raise CliError(str(exc)) from exc
         typed = validate(spec, passing, references=references, cast=True, **options)
         _write_data_file(typed, Path(args.output))
         print(f"Wrote {typed.height} passing row(s) to {args.output}", file=sys.stderr)

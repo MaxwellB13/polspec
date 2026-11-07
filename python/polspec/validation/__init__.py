@@ -79,6 +79,7 @@ class ValidationOptions:
     foreign_keys: bool = True
     hierarchy: bool = True
     order: bool = True
+    rows: bool = True
     pattern: bool = True
     bounds: bool = True
     cast: bool = False
@@ -116,6 +117,7 @@ class ValidationKeywords(TypedDict, total=False):
     foreign_keys: bool
     hierarchy: bool
     order: bool
+    rows: bool
     pattern: bool
     bounds: bool
     cast: bool
@@ -130,6 +132,7 @@ SWITCHES = (
     "foreign_keys",
     "hierarchy",
     "order",
+    "rows",
     "pattern",
     "bounds",
 )
@@ -270,6 +273,7 @@ def inspect(
             spec.checks if opts.checks else None,
             readable,
             order=(spec.order_by, spec.descending) if opts.order else None,
+            rows=spec.rows if opts.rows else None,
         )
     )
 
@@ -322,6 +326,7 @@ def inspect(
         lf,
         opts,
         _recheck=recheck if relates_rows else None,
+        _min_rows=(spec.rows.min or 0) if opts.rows and spec.rows is not None else 0,
     )
 
 

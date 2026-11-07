@@ -123,6 +123,11 @@ def _pop_order(ns: dict[str, Any]) -> tuple[Any, Any] | None:
     return ns.pop("__order_by__"), ns.pop("__descending__", False)
 
 
+# `__rows__` left out of a class body, as opposed to `__rows__ = None`, which
+# clears what a parent declared.
+_INHERITED = object()
+
+
 def _pop_description(ns: dict[str, Any]) -> str | None:
     """`__description__`: this class's alone, so never inherited -- a
     subclass is another table. A docstring is not read, as it is written for
@@ -149,6 +154,7 @@ def _build_table_spec(
     hierarchy: Hierarchy | None,
     order: tuple[Any, Any] | None = None,
     description: str | None = None,
+    rows: Any = _INHERITED,
 ) -> tuple[TableSpec, dict[str, str]]:
     """Merges inherited specs with a class body's own declarations.
 
@@ -241,10 +247,15 @@ def _build_table_spec(
                 break
     order_by, descending = order if order is not None else ((), False)
 
+    # A row count as well: a subclass is held to it unless it says otherwise.
+    if rows is _INHERITED:
+        rows = next((p.spec.rows for p in parents if p.spec.rows is not None), None)
+
     spec = TableSpec(
         name,
         columns,
         description=description,
+        rows=rows,
         checks=all_checks,
         unique_together=all_unique,
         foreign_keys=all_fks,
@@ -280,6 +291,7 @@ class _FrameSpecMeta(type):
         hierarchy = _pop_hierarchy(ns)
         order = _pop_order(ns)
         description = _pop_description(ns)
+        rows = ns.pop("__rows__", _INHERITED)
         # A non-ColSpec value assigned over an inherited column attribute
         # removes that column; the value itself stays an ordinary attribute.
         removed = {
@@ -305,6 +317,7 @@ class _FrameSpecMeta(type):
                 hierarchy,
                 order,
                 description,
+                rows,
             )
         return cls
 

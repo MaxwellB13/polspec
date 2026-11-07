@@ -1,21 +1,22 @@
 """What the frame as a whole asserts: composite uniqueness, `__checks__`,
-and the order its rows come in."""
+the order its rows come in, and how many there are."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
 if TYPE_CHECKING:
+    from polspec.bound import Bound
     from polspec.check import Check
 
 from polspec import frames
 from polspec.check import failure_mask
 from polspec.validation.constraints._base import Constraint, struct_of
-from polspec.validation.report import FindingCode
+from polspec.validation.report import Finding, FindingCode
 
 
 @dataclass(kw_only=True)
@@ -78,6 +79,31 @@ class _FrameCheck(Constraint):
         )
 
 
+@dataclass(kw_only=True)
+class _RowCount(Constraint):
+    """The frame's height against `rows`: a verdict on the whole frame, with
+    no rows of its own to name, so it counts rather than masks."""
+
+    rows: Bound[int]
+    mask: pl.Expr = field(default_factory=lambda: pl.lit(False))
+    code: FindingCode = "row_count"
+
+    def aggregations(self) -> list[pl.Expr]:
+        return [pl.len().alias(self._alias("cnt"))]
+
+    def failure(self, stats: dict[str, list]) -> Finding | None:
+        height = int(stats[self._alias("cnt")][0])
+        low, high = self.rows.min, self.rows.max
+        if (low is None or height >= low) and (high is None or height <= high):
+            return None
+        return Finding(
+            code=self.code,
+            key=self.key,
+            message=f"The frame holds {height} row(s), expected {self.rows}",
+            details={"rows": height, "min": low, "max": high},
+        )
+
+
 def _named_once(expr: pl.Expr) -> tuple[str, ...]:
     """The columns `expr` reads, each once, in the order it first reads them.
 
@@ -95,9 +121,13 @@ def frame_constraints(
     df_col_names: Sequence[str],
     *,
     order: tuple[Sequence[str], Sequence[bool]] | None = None,
+    rows: Bound[int] | None = None,
 ) -> list[Constraint]:
     """Constraints spanning several columns rather than belonging to one."""
     constraints: list[Constraint] = []
+
+    if rows is not None:
+        constraints.append(_RowCount(key="row_count", rows=rows))
 
     if order is not None and order[0] and all(c in df_col_names for c in order[0]):
         columns, descending = tuple(order[0]), tuple(order[1])

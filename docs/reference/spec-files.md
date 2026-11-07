@@ -29,6 +29,7 @@ every key still at its default.
 | `checks` | A list of checks |
 | `hierarchy` | A hierarchy |
 | `description` | What the table holds |
+| `rows` | How many rows the table may hold: `[min, max]`; either end may be `null` |
 | `order_by` | The columns the rows come sorted by, the first the major key |
 | `descending` | Whether each `order_by` column runs high to low: `true`, or a list of one flag per column |
 

@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import polars as pl
 
+from polspec.bound import Bound, coerce_bound
 from polspec.check import Check
 from polspec.domain import Domain
 from polspec.dtypes import map_parts
@@ -34,6 +35,31 @@ from polspec.spec import ColSpec, check_description, column_kind
 
 if TYPE_CHECKING:
     from polspec.catspec import CatSpec
+
+
+def _parse_rows(rows: Any) -> Bound[int] | None:
+    """`TableSpec.rows` as a `Bound`: whole, non-negative ends, at least one
+    of them saying something."""
+    if rows is None:
+        return None
+    if not isinstance(rows, (Bound, tuple, list)) or (
+        not isinstance(rows, Bound) and len(rows) != 2
+    ):
+        raise SpecError(f"TableSpec.rows must be a (min, max) pair, got {rows!r}")
+    bound = coerce_bound(rows)
+    assert bound is not None  # noqa: S101 - None returned above
+    for end in (bound.min, bound.max):
+        if end is None:
+            continue
+        if not isinstance(end, int) or isinstance(end, bool) or end < 0:
+            raise SpecError(
+                f"TableSpec.rows ends must be non-negative integers, got {rows!r}"
+            )
+    if bound.is_open_both:
+        raise SpecError(
+            "TableSpec.rows needs at least one end; leave it out for any number of rows"
+        )
+    return bound
 
 
 def parse_order(
@@ -157,6 +183,11 @@ class TableSpec:
     description : str | None
         What the table holds, for a reader: `to_markdown` shows it, and
         neither generation nor validation reads it.
+    rows : Bound[int] | tuple[int | None, int | None] | None
+        How many rows the table may hold, either end open: `(1, None)` for a
+        table that must not be empty. `validate()` reports a `row_count`
+        finding outside it. `generate()` makes the rows it is asked for, so a
+        smaller frame than `rows` allows is validated with `rows=False`.
     checks : Sequence[Check]
         Multi-column invariants; see `FrameSpec.__checks__`.
     unique_together : Sequence[Sequence[str]]
@@ -186,6 +217,7 @@ class TableSpec:
     # the order of the fields, and say nothing about what each argument is.
     _: KW_ONLY
     description: str | None = None
+    rows: Bound[int] | None = None
     checks: Sequence[Check] = ()
     unique_together: Sequence[Sequence[str]] = ()
     foreign_keys: Sequence[ForeignKey] = ()
@@ -204,6 +236,7 @@ class TableSpec:
             columns: Mapping[str, ColSpec] = MappingProxyType({}),
             *,
             description: str | None = None,
+            rows: Bound[int] | tuple[int | None, int | None] | None = None,
             checks: Sequence[Check] = (),
             unique_together: Sequence[Sequence[str]] = (),
             foreign_keys: Sequence[ForeignKey] = (),
@@ -218,6 +251,7 @@ class TableSpec:
                 f"TableSpec.name must be a non-empty string, got {self.name!r}"
             )
         check_description(self.description, "TableSpec")
+        object.__setattr__(self, "rows", _parse_rows(self.rows))
         if not isinstance(self.columns, Mapping):
             raise SpecError(
                 "TableSpec.columns must be a mapping of column name to ColSpec, "
@@ -560,6 +594,7 @@ class TableSpec:
         return (
             self.name == other.name
             and self.description == other.description
+            and self.rows == other.rows
             and list(self.columns.items()) == list(other.columns.items())
             and self.checks == other.checks
             and self.unique_together == other.unique_together
@@ -628,6 +663,12 @@ class TableSpec:
     def with_name(self, name: str) -> TableSpec:
         """A copy of this spec under a different name."""
         return dataclasses.replace(self, name=name)
+
+    def with_rows(
+        self, rows: Bound[int] | tuple[int | None, int | None] | None
+    ) -> TableSpec:
+        """A copy of this spec holding `rows` rows; `None` for any number."""
+        return dataclasses.replace(self, rows=rows)
 
     def with_description(self, description: str | None) -> TableSpec:
         """A copy of this spec with `description` in place of its own."""

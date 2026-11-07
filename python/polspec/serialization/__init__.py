@@ -363,6 +363,8 @@ def to_python(spec: SpecLike, path: str | Path | None = None) -> str | None:
     body = [f"class {spec.name}(FrameSpec):"]
     if spec.description is not None:
         body.append(f"    __description__ = {spec.description!r}")
+    if spec.rows is not None:
+        body.append(f"    __rows__ = {(spec.rows.min, spec.rows.max)!r}")
     body.append("    __columns__ = {")
     for name, cs in spec.columns.items():
         body.append(f"        {name!r}: {colspec_to_source(cs)},")

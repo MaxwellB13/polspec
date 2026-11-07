@@ -1138,9 +1138,47 @@ def _compare_description(old: TableSpec, new: TableSpec) -> list[DriftFinding]:
     ]
 
 
+def _compare_rows(old: TableSpec, new: TableSpec) -> list[DriftFinding]:
+    """A row count added is a constraint added, and one removed, removed.
+    Between two counts, each end moved in or out says whether the new one
+    accepts less, more, or neither inside the other."""
+    before, after = old.rows, new.rows
+    if before == after:
+        return []
+    if before is None or after is None:
+        return _table_named(
+            "rows",
+            [] if before is None else [before],
+            [] if after is None else [after],
+            str,
+            lambda _: (),
+        )
+    low_before, low_after = before.min or 0, after.min or 0
+    high_before = float("inf") if before.max is None else before.max
+    high_after = float("inf") if after.max is None else after.max
+    narrowed = low_after > low_before or high_after < high_before
+    widened = low_after < low_before or high_after > high_before
+    code: Literal["domain_narrowed", "domain_widened", "domain_changed"]
+    if narrowed and widened:
+        code = "domain_changed"
+    else:
+        code = "domain_narrowed" if narrowed else "domain_widened"
+    return [
+        DriftFinding(
+            code=code,
+            severity="breaking" if narrowed else "compatible",
+            key="rows",
+            message=f"row count changed from {before} to {after}",
+            columns=(),
+            details={"old": str(before), "new": str(after)},
+        )
+    ]
+
+
 TABLE_COMPARATORS: dict[str, TableComparator] = {
     "name": _table_ignore,  # a spec's name is what the report is *about*
     "description": _compare_description,
+    "rows": _compare_rows,
     "columns": _table_ignore,  # compared column by column by the runner
     "checks": _compare_checks,
     "unique_together": _compare_unique_together,

@@ -143,6 +143,7 @@ RICH = TableSpec(
         "parent_id": ColSpec(pl.Int64, nullable=True, null_probability=0.3),
     },
     description="One row per shipment.",
+    rows=(1, None),
     foreign_keys=[ForeignKey("parent_id", references="self", ref_columns="id")],
     checks=[Check(col("ratio") <= 1.0, name="ratio_at_most_one")],
     unique_together=[("country", "code")],

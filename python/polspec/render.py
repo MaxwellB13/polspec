@@ -141,6 +141,8 @@ def _overview_section(spec: TableSpec, doc_title: str) -> list[str]:
         f"- **Schema:** {_code(spec.name)}",
         f"- **Total Columns:** {len(spec.columns)}",
     ]
+    if spec.rows is not None:
+        lines.append(f"- **Row Count:** {spec.rows}")
     if spec.unique_together:
         groups = ", ".join(_code(list(g)) for g in spec.unique_together)
         lines.append(f"- **Composite Unique Keys:** {groups}")

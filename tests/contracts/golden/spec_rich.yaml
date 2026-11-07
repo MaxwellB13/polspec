@@ -97,3 +97,6 @@ checks:
   name: ratio_at_most_one
 order_by:
 - id
+rows:
+- 1
+- null

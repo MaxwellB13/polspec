@@ -82,6 +82,7 @@ through `report.rows(finding)`; structural ones describe the frame's shape.
 | `unique_together` | row-level | a composite key holds duplicate combinations |
 | `check` | row-level | a `__checks__` predicate is false |
 | `order` | row-level | a row belongs before the row above it, by the spec's `order_by`; `details` name the order |
+| `row_count` | structural | the frame holds a number of rows outside the spec's `rows`; `details` carry the count and both ends |
 | `foreign_key` | row-level | a key value has no matching parent row (also structural when the parent lacks the referenced columns) |
 | `hierarchy_multi_parent` | row-level | a reference appears as a child in more than one row, so it has no single ultimate parent; see [Hierarchies](../how-to/hierarchies.md) |
 | `hierarchy_cycle` | row-level | a row's chain of parents never reaches an ultimate parent |
@@ -101,7 +102,7 @@ otherwise. See [Schema and data drift](../how-to/drift.md).
 | `column_renamed` | `diff` | compatible | a rename given through `renames=` |
 | `dtype_changed` | both | as validation decides | the dtypes differ; compatible when the old values would still validate. Against data, only a dtype that fails validation is reported -- or any difference, under `strict_dtypes` |
 | `nullability_changed` | both | off → on compatible; on → off breaking; nulls in a non-nullable column breaking | `nullable`, or a list's `element_null_probability` between 0 and not |
-| `domain_widened` | `diff` | compatible | bounds, choices, format or string length accept more than before -- or a float value now allows NaN |
+| `domain_widened` | `diff` | compatible | bounds, choices, format, string length or a table's `rows` accept more than before -- or a float value now allows NaN |
 | `domain_narrowed` | `diff` | breaking | they accept less |
 | `domain_changed` | `diff` | breaking | neither is inside the other |
 | `bounds_exceeded` | `drift` | breaking | values escape `bounds`, `string_length` or `list_length`; `details` say which and by how much |
@@ -112,7 +113,7 @@ otherwise. See [Schema and data drift](../how-to/drift.md).
 | `frequencies_moved` | `drift` | compatible | a weighted column's frequencies have moved from its `weights` by at least `frequency_tolerance`, and significantly |
 | `distribution_moved` | `drift` | compatible | the values have moved from a sample drawn from the declared `distribution` by at least `distribution_tolerance`, and significantly |
 | `cardinality_moved` | `drift` | compatible | declared `choices`, `Enum` categories or extra values the data never holds, and at their declared share would not miss by chance -- never a finite format's own codes |
-| `constraint_added` | `diff` | breaking | `unique`, a validator, rule, check, composite key, foreign key or hierarchy present only in the new spec |
+| `constraint_added` | `diff` | breaking | `unique`, a validator, rule, check, composite key, foreign key, hierarchy or `rows` present only in the new spec |
 | `constraint_removed` | `diff` | compatible | the reverse |
 | `field_changed` | `diff` | compatible | `tags`, `weights`, `distribution`, `distribution_params`, `null_probability`, `pattern` or `seed_name` differ |
 
