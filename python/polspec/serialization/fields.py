@@ -219,6 +219,19 @@ def _values_from_data(value: Any, path: str) -> Any:
         raise SerializationError(f"{path}: {exc}") from exc
 
 
+def _value_to_data(value: Any) -> Any:
+    """One value, as `_values_to_data` writes each choice."""
+    (written,) = _values_to_data([value])
+    return written
+
+
+def _value_from_data(value: Any, ctx: Ctx, path: str) -> Any:
+    try:
+        return from_plain(value)
+    except ValueError as exc:
+        raise SerializationError(f"{path}: {exc}") from exc
+
+
 def _bound_to_source(value: Bound) -> str:
     return f"({value.min!r}, {value.max!r})"
 
@@ -349,6 +362,15 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
     # The column's key already is its name; col_name is a class-body affordance.
     Field("col_name", omit_if=lambda v, obj: True),
     Field("nullable", omit_if=_if_false),
+    # Added optional keys on version 4: a file without them claims nothing
+    # it did not before.
+    Field("optional", omit_if=_if_false, since=4),
+    Field(
+        "default",
+        since=4,
+        to_data=_value_to_data,
+        from_data=_value_from_data,
+    ),
     Field(
         "bounds",
         to_data=_bound_to_data,

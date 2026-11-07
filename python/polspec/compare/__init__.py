@@ -222,12 +222,15 @@ def diff(
             )
     for name in new_columns:
         if name not in old_columns:
+            optional = new_columns[name].optional
             findings.append(
                 _table_finding(
                     "column_added",
-                    "breaking",
+                    "compatible" if optional else "breaking",
                     f"column:{name}",
-                    f"Column '{name}' added; a frame without it fails "
+                    f"Column '{name}' added, optional; a frame without it still passes"
+                    if optional
+                    else f"Column '{name}' added; a frame without it fails "
                     "missing_cols='raise'",
                     (name,),
                 )
@@ -308,6 +311,8 @@ def drift(
                 )
             )
     for name, declared in table.columns.items():
+        if name not in present and declared.optional:
+            continue  # it may be absent; nothing about it can be measured
         if name not in present:
             findings.append(
                 _table_finding(

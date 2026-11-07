@@ -20,6 +20,14 @@ seed produces; see
   structural finding `row_count`; `rows=False` and `--skip rows` turn it off.
   `generate()` still makes the rows it is asked for. `polspec test` skips the
   check in the tests it writes.
+- `default=` and `optional=` on `ColSpec`, and `fill_defaults=True`
+  (`--fill-defaults`) on validation. A default is a value its column accepts,
+  checked where it is declared; `fill_defaults` fills a defaulted column's
+  nulls, and adds it when absent, before any claim is checked. An optional
+  column may be absent without a `missing_columns` finding. `missing_cols="add"`
+  adds a column holding its default. `diff` reports a column made optional,
+  or an optional column added, as `compatible`; made required, `breaking`.
+  `generate()` reads neither.
 
 ## [1.0.0] - 2026-10-22
 

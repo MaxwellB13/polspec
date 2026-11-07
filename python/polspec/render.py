@@ -119,7 +119,14 @@ def _describe_nullable(cs) -> str:
     rate = getattr(cs, "element_null_probability", 0.0)
     described = f"{cell} (elements {rate:.0%})" if rate else cell
     nan = getattr(cs, "nan_probability", 0.0)
-    return f"{described}; NaN {nan:.0%}" if nan else described
+    if nan:
+        described = f"{described}; NaN {nan:.0%}"
+    # What stands in for a missing value, and whether the column may be.
+    if getattr(cs, "default", None) is not None:
+        described = f"{described}; default {_code(cs.default)}"
+    if getattr(cs, "optional", False):
+        described = f"{described}; optional"
+    return described
 
 
 def _describe_choices(choices) -> str:

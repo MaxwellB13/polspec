@@ -83,6 +83,7 @@ class ValidationOptions:
     pattern: bool = True
     bounds: bool = True
     cast: bool = False
+    fill_defaults: bool = False
     streaming: bool = False
 
     def __post_init__(self) -> None:
@@ -121,6 +122,7 @@ class ValidationKeywords(TypedDict, total=False):
     pattern: bool
     bounds: bool
     cast: bool
+    fill_defaults: bool
     streaming: bool
 
 
@@ -148,6 +150,29 @@ def _options_from(
         options,
         what="validation",
     )
+
+
+def _filled(lf: pl.LazyFrame, columns: dict[str, Any], *, strict: bool) -> pl.LazyFrame:
+    """`fill_defaults=True`: each defaulted column's nulls filled with its
+    default, and each absent one added holding it -- before any claim is
+    checked, so a null in a column that allows none is judged filled.
+
+    A NaN is a value, and is left. A column whose dtype is already wrong is
+    left too: it is a `dtype` finding, and filling it is not this option's
+    to decide.
+    """
+    schema = lf.collect_schema()
+    fills = []
+    for name, declared in columns.items():
+        if declared.default is None:
+            continue
+        value = pl.lit(declared.default, dtype=declared.dtype)
+        if name not in schema:
+            fills.append(value.alias(name))
+        elif is_dtype_compatible(declared.dtype, schema[name], strict=strict):
+            column = frames.column(name)
+            fills.append(column.fill_null(value).alias(name))
+    return lf.with_columns(fills) if fills else lf
 
 
 def _resolve_foreign_keys(
@@ -199,11 +224,16 @@ def inspect(
     opts = _options_from(options, **option_kwargs)
     lf = to_lazy(df)
     columns = dict(spec.columns)
+    if opts.fill_defaults:
+        lf = _filled(lf, columns, strict=opts.strict_dtypes)
 
     df_schema = lf.collect_schema()
     df_col_names = df_schema.names()
     extra = [col for col in df_col_names if col not in columns]
-    missing = [col for col in columns if col not in df_col_names]
+    # An optional column may be absent; one present is held to every claim.
+    missing = [
+        col for col in columns if col not in df_col_names and not columns[col].optional
+    ]
 
     findings: list[Finding] = []
     if extra and opts.extra_cols == "raise":
@@ -426,8 +456,9 @@ def _apply_transformations(
         lf = lf.drop(cs.by_name(extra))
 
     if missing and options.missing_cols == "add":
+        # A column with a default is added holding it; one without, null.
         lf = lf.with_columns(
-            pl.lit(None, dtype=columns[c].dtype).alias(c) for c in missing
+            pl.lit(columns[c].default, dtype=columns[c].dtype).alias(c) for c in missing
         )
 
     schema = lf.collect_schema()

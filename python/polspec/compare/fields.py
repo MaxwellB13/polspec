@@ -703,6 +703,26 @@ def _constraint(pair: Pair, kind: str, added: bool, what: str) -> DriftFinding:
     )
 
 
+def _compare_optional(pair: Pair) -> list[DriftFinding]:
+    """A column made required is a claim added: a frame without it, which
+    passed, now fails. Made optional, the claim is removed. Data has no
+    opinion: a present column says nothing of whether it may be absent."""
+    if pair.mode == "drift" or pair.declared.optional == pair.new.optional:
+        return []
+    return [
+        pair.finding(
+            "constraint_removed" if pair.new.optional else "constraint_added",
+            "compatible" if pair.new.optional else "breaking",
+            "now optional; a frame without it is accepted"
+            if pair.new.optional
+            else "no longer optional; a frame without it now fails "
+            "missing_cols='raise'",
+            suffix="optional",
+            kind="optional",
+        )
+    ]
+
+
 def _compare_unique(pair: Pair) -> list[DriftFinding]:
     if pair.mode == "drift" or pair.declared.unique == pair.new.unique:
         return []  # uniqueness in data is validation's job, not drift's
@@ -974,6 +994,10 @@ FIELD_COMPARATORS: dict[str, Comparator] = {
     "dtype": _compare_dtype,
     "col_name": _ignore,  # the column's key already is its name
     "nullable": _compare_nullable,
+    "optional": _compare_optional,
+    # A default fills only when asked to, and is always a value the column
+    # accepts, so a new one changes what is filled, never what passes.
+    "default": _compare_field("default"),
     "bounds": _compare_domain,
     "choices": _compare_domain,
     "format": _compare_domain,

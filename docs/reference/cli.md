@@ -88,7 +88,8 @@ Check a data file against a schema.
 ```
 polspec validate [-h] [--all] [--references NAME=PATH] [--class NAME]
                         [--allow-extra] [--allow-missing] [--strict-dtypes]
-                        [--skip CHECK] [--json] [--output PATH] [--failing PATH]
+                        [--fill-defaults] [--skip CHECK] [--json] [--output PATH]
+                        [--failing PATH]
                         spec data
 ```
 
@@ -102,6 +103,7 @@ polspec validate [-h] [--all] [--references NAME=PATH] [--class NAME]
 | `--allow-extra` | Do not report columns the spec does not declare |
 | `--allow-missing` | Do not report declared columns the data lacks |
 | `--strict-dtypes` | Require exact dtypes rather than compatible ones |
+| `--fill-defaults` | Fill each defaulted column's nulls with its default, and add it when absent, before checking; --output writes the filled rows |
 | `--skip` `CHECK` | Turn off one kind of check, as CHECK=False does in Python; repeat for several. One of `rules`, `validators`, `unique`, `checks`, `foreign_keys`, `hierarchy`, `order`, `rows`, `pattern`, `bounds`. |
 | `--json` | Print the report as JSON instead of text |
 | `--output` `PATH` | Write the rows that passed, typed as the spec declares, to PATH (the format by its extension) |

@@ -158,6 +158,20 @@ class ColSpec:
         identical values.
     nullable : bool, optional
         Whether the column allows null values.
+    optional : bool, optional
+        Whether the column may be absent from a frame. An absent optional
+        column is no `missing_columns` finding, and none of its other claims
+        is checked; present, it is held to every one. Generation makes it
+        like any other column.
+    default : Any, optional
+        The value that stands for a missing one: `validate(fill_defaults=True)`
+        fills the column's nulls with it, and adds the column holding it when
+        it is absent; `missing_cols="add"` adds it holding it too. It must be
+        a value the column's own claims accept -- its dtype, bounds, choices,
+        format, pattern, lengths and validators -- and is refused at
+        declaration if not. `None`, the default, is no default. A `List`,
+        `Array`, `Map` or `Struct` column takes none. Generation does not
+        read it.
     bounds : Bound | tuple | list | None, optional
         The inclusive range of values allowed in the column, as a `Bound` or a
         2-sequence. Only supported for numeric and temporal data types. Either
@@ -300,6 +314,8 @@ class ColSpec:
     col_name: str | None = None
     seed_name: str | None = None
     nullable: bool = False
+    optional: bool = False
+    default: Any = None
     bounds: Bound[Any] | None = None
     tags: tuple[str, ...] = ()
     description: str | None = None
@@ -329,6 +345,8 @@ class ColSpec:
             col_name: str | None = None,
             seed_name: str | None = None,
             nullable: bool = False,
+            optional: bool = False,
+            default: Any = None,
             bounds: Bound[Any] | tuple[Any, Any] | list[Any] | None = None,
             tags: str | Sequence[str] | None = (),
             description: str | None = None,
@@ -384,6 +402,8 @@ class ColSpec:
         self._validate_list_fields()
         self._validate_struct_fields()
         self._validate_map()
+        self._validate_optional()
+        self._validate_default()
 
     @property
     def value_dtype(self) -> pl.DataType:
@@ -437,8 +457,17 @@ class ColSpec:
                     f"struct declares {declared[name]!r}. The dtype is the "
                     "schema; fields describes the values in it."
                 )
-            for claim in ("unique", "rules", "validators", "seed_name", "col_name"):
-                if getattr(spec, claim):
+            for claim in (
+                "unique",
+                "rules",
+                "validators",
+                "seed_name",
+                "col_name",
+                "optional",
+                "default",
+            ):
+                value = getattr(spec, claim)
+                if value is not None and value is not False and value != ():
                     raise SpecError(
                         f"ColSpec.fields[{name!r}] sets {claim}, which has no "
                         "meaning on a struct field: it is a value, not a column "
@@ -522,6 +551,104 @@ class ColSpec:
                 "repeats within a map. Widen the key's domain, or lower "
                 "list_length."
             )
+
+    def _validate_optional(self) -> None:
+        if not isinstance(self.optional, bool):
+            raise SpecError(
+                f"ColSpec.optional must be True or False, got {self.optional!r}"
+            )
+
+    def _validate_default(self) -> None:
+        """Refuses a default the column could not hold, or would itself
+        report, and keeps the one it accepts as the column holds it.
+
+        Filling with a value the column then fails would only trade a null
+        for another finding, so the default is held to every claim about a
+        value -- by validation's own constraints, on a one-row frame of it,
+        so the two cannot disagree. A claim among rows (`unique`, a rule
+        reading other columns) has nothing to say of one value, and is not
+        asked.
+        """
+        default = self.default
+        if default is None:
+            return
+        dtype = self.dtype
+        if (
+            isinstance(dtype, (pl.List, pl.Array, pl.Struct))
+            or map_parts(dtype) is not None
+        ):
+            raise SpecError(
+                f"ColSpec.default is not supported on {dtype!r}: a default is "
+                "one value, and only a scalar column takes one."
+            )
+        if dtype == pl.Null:
+            raise SpecError(
+                "ColSpec.default has no meaning on pl.Null: the column holds "
+                "nothing but nulls, which a default would replace."
+            )
+        if isinstance(default, float) and math.isnan(default):
+            raise SpecError(
+                "ColSpec.default cannot be NaN: a default fills a null, and a "
+                "NaN is a value, not a stand-in for one."
+            )
+        if isinstance(dtype, pl.Decimal) and isinstance(default, str):
+            with suppress(decimal.InvalidOperation):
+                default = decimal.Decimal(default)
+        textual = dtype in (pl.String, pl.Utf8, pl.Categorical) or isinstance(
+            dtype, (pl.Categorical, pl.Enum)
+        )
+        if textual and not isinstance(default, str):
+            raise SpecError(
+                f"ColSpec.default {default!r} is not text, and {dtype!r} holds "
+                "text. Write it as a string."
+            )
+        if isinstance(dtype, pl.Enum):
+            categories = dtype.categories.to_list()
+            if default not in categories:
+                raise SpecError(
+                    f"ColSpec.default {default!r} is not among this column's "
+                    f"Enum categories {categories}"
+                )
+        elif unholdable([default], dtype):
+            raise SpecError(
+                f"ColSpec.default {default!r} cannot be held by {dtype!r}: it "
+                "would come out as a null or as a different value."
+            )
+        # A validator names its column, which a ColSpec does not know: the
+        # one-row frame takes that name. Validators naming several columns
+        # are a TableSpec's to refuse, and are not asked here.
+        named = {n for v in self.validators for n in v.expr.meta.root_names()}
+        name = next(iter(named)) if len(named) == 1 else "default"
+        held = pl.Series(name, [default], dtype=dtype, strict=False)
+        # Imported here: validation is built on this module.
+        from polspec.validation import ValidationOptions
+        from polspec.validation.constraints import column_constraints
+
+        constraints = column_constraints(
+            name,
+            dataclasses.replace(self, default=None),
+            dtype,
+            compatible=True,
+            options=ValidationOptions(
+                rules=False, unique=False, validators=len(named) <= 1
+            ),
+            df_col_names=[name],
+        )
+        if constraints:
+            stats = (
+                held.to_frame()
+                .select(e for c in constraints for e in c.aggregations())
+                .to_dict(as_series=False)
+            )
+            failures = [f for f in (c.failure(stats) for c in constraints) if f]
+            if failures:
+                broken = ", ".join(sorted({f.code for f in failures}))
+                raise SpecError(
+                    f"ColSpec.default {default!r} is not a value this column "
+                    f"accepts: it breaks its {broken}. A default fills a "
+                    "missing value, so it has to be one the column passes."
+                )
+        object.__setattr__(self, "default", held[0])
 
     def _validate_unique_is_generatable(self) -> None:
         """Rejects what `unique=True` cannot be combined with.

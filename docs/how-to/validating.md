@@ -284,6 +284,7 @@ Orders.validate(
     missing_cols="raise",      # "raise" | "add" | "allow"
     strict_dtypes=False,
     cast=False,
+    fill_defaults=False,
     streaming=False,
     references=None,
     rules=True,
@@ -335,13 +336,37 @@ refuse, drop them from the result, or keep them (appended after the declared
 ones).
 
 `missing_cols` decides what happens to declared columns the frame lacks —
-refuse, add them as all-null, or ignore them.
+refuse, add them, or ignore them. An added column holds its `default`, or
+nulls when it has none. A column declared `optional=True` may be absent
+whatever this says; present, it is checked like any other.
 
 !!! warning "`missing_cols="add"` can produce a frame that fails re-validation"
 
     Columns are added *after* validation has run, including for columns
-    declared `nullable=False`. Feed the result straight back into `validate()`
-    and it will object to the nulls it just inserted.
+    declared `nullable=False`. A column with no `default` is added as nulls,
+    and fed straight back into `validate()` it will object to them.
+
+### Filling defaults
+
+`fill_defaults=True` (`--fill-defaults`) fills each column's nulls with its
+`default`, and adds an absent column holding it, *before* anything is
+checked — so a null in a column that allows none passes once filled, and the
+frame `validate` returns, `report.frame` and `passing_rows()` are all the
+filled one. A NaN is not filled: it is a value.
+
+```python
+class Tickets(FrameSpec):
+    status = ColSpec(pl.Enum(["open", "closed"]), default="open")
+    channel = ColSpec(pl.String, optional=True)
+
+Tickets.validate(pl.DataFrame({"status": [None, "closed"]}), fill_defaults=True)
+# status: ["open", "closed"]; channel may be absent
+```
+
+A default must be a value its column accepts — its dtype, bounds, choices,
+format, pattern, lengths and validators — and one that is not is refused
+where it is declared. Filling is opt-in: a spec that gains a default changes
+nothing until asked, and without it a null is still a finding.
 
 ### Dtype strictness
 
