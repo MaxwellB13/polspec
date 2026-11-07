@@ -360,7 +360,10 @@ def to_python(spec: SpecLike, path: str | Path | None = None) -> str | None:
     if has_rules or has_validators or persistable_checks:
         imports.append("col")
 
-    body = [f"class {spec.name}(FrameSpec):", "    __columns__ = {"]
+    body = [f"class {spec.name}(FrameSpec):"]
+    if spec.description is not None:
+        body.append(f"    __description__ = {spec.description!r}")
+    body.append("    __columns__ = {")
     for name, cs in spec.columns.items():
         body.append(f"        {name!r}: {colspec_to_source(cs)},")
     body.append("    }")

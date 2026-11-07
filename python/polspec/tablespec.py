@@ -30,7 +30,7 @@ from polspec.expr import root_names
 from polspec.foreign_key import ForeignKey, default_fk_name
 from polspec.hierarchy import Hierarchy
 from polspec.pass_order import ordered_passes
-from polspec.spec import ColSpec, column_kind
+from polspec.spec import ColSpec, check_description, column_kind
 
 if TYPE_CHECKING:
     from polspec.catspec import CatSpec
@@ -154,6 +154,9 @@ class TableSpec:
         `name:` key for a file. Foreign keys refer to a spec by this name.
     columns : Mapping[str, ColSpec]
         Column name to declaration, in the order columns should appear.
+    description : str | None
+        What the table holds, for a reader: `to_markdown` shows it, and
+        neither generation nor validation reads it.
     checks : Sequence[Check]
         Multi-column invariants; see `FrameSpec.__checks__`.
     unique_together : Sequence[Sequence[str]]
@@ -182,6 +185,7 @@ class TableSpec:
     # Everything after this is keyword-only: a positional call would freeze
     # the order of the fields, and say nothing about what each argument is.
     _: KW_ONLY
+    description: str | None = None
     checks: Sequence[Check] = ()
     unique_together: Sequence[Sequence[str]] = ()
     foreign_keys: Sequence[ForeignKey] = ()
@@ -199,6 +203,7 @@ class TableSpec:
             name: str,
             columns: Mapping[str, ColSpec] = MappingProxyType({}),
             *,
+            description: str | None = None,
             checks: Sequence[Check] = (),
             unique_together: Sequence[Sequence[str]] = (),
             foreign_keys: Sequence[ForeignKey] = (),
@@ -212,6 +217,7 @@ class TableSpec:
             raise SpecError(
                 f"TableSpec.name must be a non-empty string, got {self.name!r}"
             )
+        check_description(self.description, "TableSpec")
         if not isinstance(self.columns, Mapping):
             raise SpecError(
                 "TableSpec.columns must be a mapping of column name to ColSpec, "
@@ -553,6 +559,7 @@ class TableSpec:
             return NotImplemented
         return (
             self.name == other.name
+            and self.description == other.description
             and list(self.columns.items()) == list(other.columns.items())
             and self.checks == other.checks
             and self.unique_together == other.unique_together
@@ -621,6 +628,10 @@ class TableSpec:
     def with_name(self, name: str) -> TableSpec:
         """A copy of this spec under a different name."""
         return dataclasses.replace(self, name=name)
+
+    def with_description(self, description: str | None) -> TableSpec:
+        """A copy of this spec with `description` in place of its own."""
+        return dataclasses.replace(self, description=description)
 
     def with_columns(
         self,

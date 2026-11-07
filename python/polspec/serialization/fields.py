@@ -356,6 +356,8 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
         to_source=_bound_to_source,
     ),
     Field("tags", omit_if=_if_falsy, to_data=_tags_to_data, to_source=_tags_to_source),
+    # An added optional key on version 4: nothing reads it but a person.
+    Field("description", omit_if=_if_none, since=4),
     Field("unique", omit_if=_if_false),
     Field(
         "null_probability",
@@ -538,6 +540,8 @@ def _columns_from_data(value: Any, ctx: Ctx, path: str) -> dict[str, ColSpec]:
 
 TABLESPEC_FIELDS: tuple[Field, ...] = (
     Field("name", omit_if=_never),
+    # An added optional key on version 4: nothing reads it but a person.
+    Field("description", omit_if=_if_none, since=4),
     Field(
         "columns",
         omit_if=_never,

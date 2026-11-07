@@ -46,6 +46,23 @@ The document has three parts: an overview, a table of every column, and — when
 the spec declares any — a constraints section covering composite keys, checks,
 foreign keys, conditional rules and column validators.
 
+To say what a table or a column means, give it a description. The table's
+appears under the title, and the columns' in a *Description* column, which the
+table has only when something fills it. Nothing else reads one: it changes no
+generated value and no validation.
+
+```python
+class Orders(FrameSpec):
+    __description__ = "One row per order, as placed."
+
+    order_id = ColSpec(pl.Int64, unique=True, description="The order's number.")
+```
+
+A class's docstring is not used, and a subclass does not inherit
+`__description__`, since it describes another table; its inherited columns keep
+theirs. A `TableSpec` takes `description=`, and `with_description()` makes a
+copy.
+
 ```markdown
 # Orders
 

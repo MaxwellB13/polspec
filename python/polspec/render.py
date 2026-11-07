@@ -133,9 +133,10 @@ def _describe_choices(choices) -> str:
 
 
 def _overview_section(spec: TableSpec, doc_title: str) -> list[str]:
-    lines = [
-        f"# {doc_title}",
-        "",
+    lines = [f"# {doc_title}", ""]
+    if spec.description is not None:
+        lines += [spec.description, ""]
+    lines += [
         "## Overview",
         f"- **Schema:** {_code(spec.name)}",
         f"- **Total Columns:** {len(spec.columns)}",
@@ -156,42 +157,63 @@ def _overview_section(spec: TableSpec, doc_title: str) -> list[str]:
     return lines
 
 
+def _is_described(cs) -> bool:
+    """Whether `cs`, or a struct field beneath it, carries a description."""
+    value_dtype = cs.value_dtype
+    fields = value_dtype.fields if isinstance(value_dtype, pl.Struct) else ()
+    return cs.description is not None or any(
+        _is_described(field_of(cs, field.name)) for field in fields
+    )
+
+
 def _columns_section(spec: TableSpec) -> list[str]:
+    # The column appears only when it has something to show: most specs
+    # describe nothing, and the table is wide enough already.
+    described = any(_is_described(cs) for cs in spec.columns.values())
+    heading = (
+        "| Column | Type | Nullable | Bounds | Domain / Choices | String Length "
+        "| Tags | Rules | Unique |"
+    )
     lines = [
         "",
         "## Columns",
         "",
-        "| Column | Type | Nullable | Bounds | Domain / Choices | String Length | Tags | Rules | Unique |",
-        "|:---|:---|:---|:---|:---|:---|:---|:---|:---|",
+        f"{heading} Description |" if described else heading,
+        "|:---" * (10 if described else 9) + "|",
     ]
     for name, cs in spec.columns.items():
-        lines.extend(_column_rows(name, cs))
+        lines.extend(_column_rows(name, cs, described))
     return lines
 
 
-def _column_rows(name: str, cs) -> list[str]:
+def _column_rows(name: str, cs, described: bool) -> list[str]:
     """A column's row, then a row per struct field beneath it, named by
     path (`point.lat`) and nested as deeply as the dtype does."""
     length = (
         f"[{cs.string_length.min}, {cs.string_length.max}]" if cs.string_length else "-"
     )
-    rows = [
-        _row(
-            _code(name),
-            _code(_describe_dtype(cs.dtype)),
-            _describe_nullable(cs),
-            str(cs.bounds) if cs.bounds else "-",
-            _describe_domain(cs),
-            length,
-            ", ".join(_code(t) for t in cs.tags) if cs.tags else "-",
-            f"{len(cs.rules)} rule(s)" if cs.rules else "-",
-            "Yes" if cs.unique else "No",
-        )
+    cells = [
+        _code(name),
+        _code(_describe_dtype(cs.dtype)),
+        _describe_nullable(cs),
+        str(cs.bounds) if cs.bounds else "-",
+        _describe_domain(cs),
+        length,
+        ", ".join(_code(t) for t in cs.tags) if cs.tags else "-",
+        f"{len(cs.rules)} rule(s)" if cs.rules else "-",
+        "Yes" if cs.unique else "No",
     ]
+    if described:
+        cells.append(cs.description or "-")
+    rows = [_row(*cells)]
     value_dtype = cs.value_dtype
     if isinstance(value_dtype, pl.Struct):
         for field in value_dtype.fields:
-            rows.extend(_column_rows(f"{name}.{field.name}", field_of(cs, field.name)))
+            rows.extend(
+                _column_rows(
+                    f"{name}.{field.name}", field_of(cs, field.name), described
+                )
+            )
     return rows
 
 

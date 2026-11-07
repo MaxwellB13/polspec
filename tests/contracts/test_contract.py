@@ -116,7 +116,12 @@ def test_todays_format_is_written_byte_for_byte():
 RICH = TableSpec(
     "Shipments",
     {
-        "id": ColSpec(pl.Int64, bounds=(1, 1_000_000), unique=True),
+        "id": ColSpec(
+            pl.Int64,
+            bounds=(1, 1_000_000),
+            unique=True,
+            description="The shipment's number.",
+        ),
         "ref": ColSpec(pl.String, format="uuid4", unique=True),
         "country": ColSpec(
             pl.String, format="iso_country", extra_values={"UK (ISO)": 0.02}
@@ -137,6 +142,7 @@ RICH = TableSpec(
         "code": ColSpec(pl.String, pattern=r"^[A-Z]{3}-\d{4}$", string_length=(8, 8)),
         "parent_id": ColSpec(pl.Int64, nullable=True, null_probability=0.3),
     },
+    description="One row per shipment.",
     foreign_keys=[ForeignKey("parent_id", references="self", ref_columns="id")],
     checks=[Check(col("ratio") <= 1.0, name="ratio_at_most_one")],
     unique_together=[("country", "code")],

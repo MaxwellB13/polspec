@@ -20,6 +20,7 @@ and `null_probability` describe the cell itself.
 | `nullable` | `nullable` | every column | allows nulls, at `null_probability` | a null is a `nullability` finding unless this is set |
 | `bounds` | `bounds` | numeric and temporal values | draws within them; an open end falls back to the default range | a value outside a declared end is a `bounds` finding |
 | `tags` | `tags` | every column | -- | -- (selects columns: `spec.tag(...)`) |
+| `description` | `description` | every column | -- | -- (`to_markdown` shows it) |
 | `unique` | `unique` | scalar columns | draws without replacement, unique across a whole frame however it is batched | a repeated value is a `unique` finding |
 | `null_probability` | `null_probability` | a `nullable` column | the rate nulls are drawn at | -- (drift compares it to the observed rate) |
 | `nan_probability` | `nan_probability` | float values -- a column's, a list's elements, a struct's fields | the share of present values drawn as NaN | a NaN is a `nan` finding while this is `0`; `bounds` and `choices` never judge a NaN |

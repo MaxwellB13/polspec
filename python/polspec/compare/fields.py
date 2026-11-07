@@ -996,6 +996,7 @@ FIELD_COMPARATORS: dict[str, Comparator] = {
     "rules": _compare_rules,
     "validators": _compare_validators,
     "tags": _compare_field("tags"),
+    "description": _compare_field("description"),
     "weights": _compare_weights,
     # One claim in two fields: the distribution and its parameters.
     "distribution": _compare_shape,
@@ -1122,8 +1123,24 @@ def _compare_order(old: TableSpec, new: TableSpec) -> list[DriftFinding]:
     )
 
 
+def _compare_description(old: TableSpec, new: TableSpec) -> list[DriftFinding]:
+    if old.description == new.description:
+        return []
+    return [
+        DriftFinding(
+            code="field_changed",
+            severity="compatible",
+            key="description",
+            message="description changed",
+            columns=(),
+            details={"field": "description"},
+        )
+    ]
+
+
 TABLE_COMPARATORS: dict[str, TableComparator] = {
     "name": _table_ignore,  # a spec's name is what the report is *about*
+    "description": _compare_description,
     "columns": _table_ignore,  # compared column by column by the runner
     "checks": _compare_checks,
     "unique_together": _compare_unique_together,
