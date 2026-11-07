@@ -280,6 +280,29 @@ Fewer rows than the bounds hold give distinct IDs in order, with gaps. More
 rows are refused, since the bounds don't hold enough values. Leave out
 `__order_by__` for the same IDs in a shuffled order.
 
+## Row count — `__rows__`
+
+An empty file passes every claim about its rows, as there are none to break.
+`__rows__` says how many a table may hold, either end open.
+
+```python
+class Orders(FrameSpec):
+    __rows__ = (1, None)   # must not be empty
+
+    order_id = ColSpec(pl.Int64, unique=True)
+```
+
+Outside it, `validate()` reports a `row_count` finding, on a `LazyFrame` too.
+It judges the whole frame, so `passing_rows()` refuses a report that holds one,
+and refuses too when fewer rows pass than the table needs. `rows=False` and
+`--skip rows` turn it off. A subclass inherits it; `__rows__ = None` clears it.
+On a `TableSpec`, it is `rows=`, and `with_rows()` makes a copy.
+
+`generate()` makes the rows it is asked for, whatever `__rows__` says. The count
+describes the real table, and a small generated frame is usually what you want,
+so validate one with `rows=False`. `profile()` declares no count, as the size of
+one file is not a rule about the next.
+
 ## Referential integrity — `ForeignKey`
 
 ```python

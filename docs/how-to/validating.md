@@ -293,6 +293,7 @@ Orders.validate(
     foreign_keys=True,
     hierarchy=True,
     order=True,
+    rows=True,
     pattern=True,
     bounds=True,
 )

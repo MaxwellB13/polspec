@@ -1028,7 +1028,7 @@ def test_validate_skip_turns_off_a_kind_of_check(tmp_path, capsys):
 
 def test_validate_skip_takes_every_switch_and_nothing_else(tmp_path, capsys):
     switches = ["rules", "validators", "unique", "checks", "foreign_keys"]
-    switches += ["hierarchy", "order", "pattern", "bounds"]  # as documented
+    switches += ["hierarchy", "order", "rows", "pattern", "bounds"]  # as documented
     source = _temporal_spec(tmp_path)
     data = tmp_path / "events.csv"
     data.write_text(

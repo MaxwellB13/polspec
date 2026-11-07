@@ -14,6 +14,12 @@ seed produces; see
   `FrameSpec`, and `TableSpec.with_description()`: what a table or column
   means. `to_markdown` shows it, spec files and `to_python` keep it, and
   `diff` reports a change as `compatible`. Nothing else reads it.
+- `rows=` on `TableSpec`, `__rows__` on a `FrameSpec`, and
+  `TableSpec.with_rows()`: how many rows a table may hold, such as `(1, None)`
+  for a table that must not be empty. Outside it, validation reports the new
+  structural finding `row_count`; `rows=False` and `--skip rows` turn it off.
+  `generate()` still makes the rows it is asked for. `polspec test` skips the
+  check in the tests it writes.
 
 ## [1.0.0] - 2026-10-22
 

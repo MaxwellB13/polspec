@@ -57,6 +57,7 @@ FindingCode = Literal[
     "hierarchy_cycle",
     "hierarchy_depth",
     "order",
+    "row_count",
 ]
 """The code of a `Finding`: what kind of claim it found broken. The full list,
 with what raises each, is on the *Errors and findings* page."""
@@ -177,6 +178,8 @@ class ValidationReport:
     _recheck: Callable[[pl.LazyFrame], ValidationReport] | None = field(
         default=None, repr=False, compare=False
     )
+    # The fewest rows the spec accepts, which `passing_rows()` cannot make up.
+    _min_rows: int = field(default=0, repr=False, compare=False)
     # The settled split, computed once: the original positions that pass,
     # and those a later round found, with the finding that found them.
     _settled: dict[str, dict[str, pl.DataFrame]] = field(
@@ -310,10 +313,12 @@ class ValidationReport:
         claim they broke -- the two split a frame exactly.
 
         Raises `ValueError` when a structural finding (a wrong `dtype`,
-        `missing_columns`, `extra_columns`, `foreign_key_unresolved`) is in
-        the report: that is a verdict on the whole frame, not on rows, so
-        there is no row-level answer to give. A `dtype` finding about values
-        the declared dtype cannot hold has rows, and does not raise.
+        `missing_columns`, `extra_columns`, `foreign_key_unresolved`,
+        `row_count`) is in the report: that is a verdict on the whole frame,
+        not on rows, so there is no row-level answer to give. A `dtype`
+        finding about values the declared dtype cannot hold has rows, and
+        does not raise. It raises too when fewer rows pass than the spec's
+        `rows` allow, as no frame of what passed would be accepted.
         """
         structural = [f.key for f in self.findings if not f.row_level]
         if structural:
@@ -325,6 +330,11 @@ class ValidationReport:
             return self.frame
         index = self._row_index()
         passing = self._settle(index)["passing"]
+        if passing.height < self._min_rows:
+            raise ValueError(
+                f"passing_rows() found {passing.height} passing row(s), but "
+                f"{self.spec_name} needs at least {self._min_rows}"
+            )
         return (
             self.frame.with_row_index(index)
             .join(passing.lazy(), on=index, how="semi", maintain_order="left")

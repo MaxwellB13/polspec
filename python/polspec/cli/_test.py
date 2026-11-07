@@ -44,6 +44,13 @@ def _skip_reasons(spec_cls: type[FrameSpec]) -> tuple[dict[str, bool], list[str]
             "be made to satisfy"
         )
 
+    if spec_cls.spec.rows is not None:
+        flags["rows"] = False
+        reasons.append(
+            "__rows__ describes the real table; the test generates its own "
+            "number of rows"
+        )
+
     if any(c.validators for c in spec_cls.spec.columns.values()):
         flags["validators"] = False
         reasons.append(

@@ -587,6 +587,15 @@ TABLESPEC_FIELDS: tuple[Field, ...] = (
         to_data=lambda flags: flags[0] if len(set(flags)) == 1 else list(flags),
         since=4,
     ),
+    # An added optional key on version 4: a file without it allows any number
+    # of rows, which is what an older reader assumes of it.
+    Field(
+        "rows",
+        omit_if=_if_none,
+        to_data=_bound_to_data,
+        from_data=_bound_from_data,
+        since=4,
+    ),
 )
 
 # Keys a spec file may carry that are not TableSpec fields.
