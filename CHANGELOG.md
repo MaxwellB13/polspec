@@ -8,6 +8,13 @@ seed produces; see
 
 ## [Unreleased]
 
+### Added
+
+- `description=` on `ColSpec` and `TableSpec`, `__description__` on a
+  `FrameSpec`, and `TableSpec.with_description()`: what a table or column
+  means. `to_markdown` shows it, spec files and `to_python` keep it, and
+  `diff` reports a change as `compatible`. Nothing else reads it.
+
 ## [1.0.0] - 2026-10-22
 
 **Stable.** The public API, the spec-file format, seeded output, the

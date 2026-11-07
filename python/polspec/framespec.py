@@ -123,6 +123,13 @@ def _pop_order(ns: dict[str, Any]) -> tuple[Any, Any] | None:
     return ns.pop("__order_by__"), ns.pop("__descending__", False)
 
 
+def _pop_description(ns: dict[str, Any]) -> str | None:
+    """`__description__`: this class's alone, so never inherited -- a
+    subclass is another table. A docstring is not read, as it is written for
+    whoever maintains the class."""
+    return ns.pop("__description__", None)
+
+
 def _pop_unique_together(ns: dict[str, Any]) -> Any:
     for attr in ("__unique_together__", "unique_together"):
         if attr in ns and _is_declaration_value(ns[attr]):
@@ -141,6 +148,7 @@ def _build_table_spec(
     unique_together: Any,
     hierarchy: Hierarchy | None,
     order: tuple[Any, Any] | None = None,
+    description: str | None = None,
 ) -> tuple[TableSpec, dict[str, str]]:
     """Merges inherited specs with a class body's own declarations.
 
@@ -236,6 +244,7 @@ def _build_table_spec(
     spec = TableSpec(
         name,
         columns,
+        description=description,
         checks=all_checks,
         unique_together=all_unique,
         foreign_keys=all_fks,
@@ -270,6 +279,7 @@ class _FrameSpecMeta(type):
         unique_together = _pop_unique_together(ns)
         hierarchy = _pop_hierarchy(ns)
         order = _pop_order(ns)
+        description = _pop_description(ns)
         # A non-ColSpec value assigned over an inherited column attribute
         # removes that column; the value itself stays an ordinary attribute.
         removed = {
@@ -294,6 +304,7 @@ class _FrameSpecMeta(type):
                 unique_together,
                 hierarchy,
                 order,
+                description,
             )
         return cls
 

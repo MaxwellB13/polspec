@@ -28,6 +28,7 @@ every key still at its default.
 | `foreign_keys` | A list of foreign keys |
 | `checks` | A list of checks |
 | `hierarchy` | A hierarchy |
+| `description` | What the table holds |
 | `order_by` | The columns the rows come sorted by, the first the major key |
 | `descending` | Whether each `order_by` column runs high to low: `true`, or a list of one flag per column |
 
@@ -43,6 +44,7 @@ Each key is the `ColSpec` field of the same name; see
 | `nullable` | `true` or `false` |
 | `bounds` | `[min, max]`; either end may be `null`. A `Decimal`'s fractional ends are strings, such as `'1.50'`, so they read back exactly; a time or a duration is [tagged](#times-and-durations) |
 | `tags` | A string, or a list of them |
+| `description` | A string |
 | `unique` | `true` or `false` |
 | `null_probability` | A number from 0 to 1 |
 | `nan_probability` | A number from 0 to 1 |

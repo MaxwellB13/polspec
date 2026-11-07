@@ -465,6 +465,7 @@ def test_equality_reads_every_field():
     )
     changed = {
         "name": base.with_name("U"),
+        "description": base.with_description("A table."),
         "columns": base.with_columns(extra=ColSpec(pl.Int64)),
         "checks": base.with_checks(Check(col("child") > 0, name="positive")),
         "unique_together": base.with_unique_together(["child", "parent"]),

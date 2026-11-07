@@ -45,6 +45,16 @@ from polspec.formats import lookup as _lookup_format
 from polspec.rules import ColRule, reject_duplicate_choices
 
 
+def check_description(description: Any, owner: str) -> None:
+    """Refuses a description with nothing in it for a reader."""
+    if description is None:
+        return
+    if not isinstance(description, str) or not description.strip():
+        raise SpecError(
+            f"{owner}.description must be a non-empty string, got {description!r}"
+        )
+
+
 def column_kind(dtype: pl.DataType) -> str:
     if dtype.is_integer():
         return "int"
@@ -164,6 +174,9 @@ class ColSpec:
         behaves rather than adding a third rule.
     tags : str | Sequence[str], optional
         Tag or tags classifying the column, for later selection.
+    description : str, optional
+        What the column means, for a reader: `to_markdown` shows it, and
+        neither generation nor validation reads it.
     unique : bool, optional
         Whether values in the column must be distinct. Generation draws the
         column without replacement; nulls are exempt. Cannot be combined with
@@ -289,6 +302,7 @@ class ColSpec:
     nullable: bool = False
     bounds: Bound[Any] | None = None
     tags: tuple[str, ...] = ()
+    description: str | None = None
     unique: bool = False
     null_probability: float = DEFAULT_NULL_PROBABILITY
     nan_probability: float = 0.0
@@ -317,6 +331,7 @@ class ColSpec:
             nullable: bool = False,
             bounds: Bound[Any] | tuple[Any, Any] | list[Any] | None = None,
             tags: str | Sequence[str] | None = (),
+            description: str | None = None,
             unique: bool = False,
             null_probability: float = DEFAULT_NULL_PROBABILITY,
             nan_probability: float = 0.0,
@@ -345,6 +360,7 @@ class ColSpec:
         # ones that compare fields against each other.
         self._validate_col_name()
         self._validate_seed_name()
+        check_description(self.description, "ColSpec")
         self._normalize_dtype()
         self._validate_nesting()
         self._normalize_ranges()
