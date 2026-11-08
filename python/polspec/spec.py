@@ -17,8 +17,9 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
+from polspec import frames
 from polspec.bound import Bound, coerce_bound
-from polspec.check import Check
+from polspec.check import Check, failure_mask
 from polspec.constants import (
     DEFAULT_EXTRA_SHARE,
     DEFAULT_LIST_LEN,
@@ -37,6 +38,7 @@ from polspec.dtypes import (
     float16_inside,
     map_entries,
     map_parts,
+    typed_values,
     unholdable,
 )
 from polspec.errors import SpecError
@@ -564,10 +566,10 @@ class ColSpec:
 
         Filling with a value the column then fails would only trade a null
         for another finding, so the default is held to every claim about a
-        value -- by validation's own constraints, on a one-row frame of it,
-        so the two cannot disagree. A claim among rows (`unique`, a rule
-        reading other columns) has nothing to say of one value, and is not
-        asked.
+        value, on a one-row frame of it. A claim among rows (`unique`, a
+        rule reading other columns) has nothing to say of one value, and is
+        not asked. A test holds the answer to validation's on the same
+        value, since a declaration may not import validation.
         """
         default = self.default
         if default is None:
@@ -620,35 +622,59 @@ class ColSpec:
         named = {n for v in self.validators for n in v.expr.meta.root_names()}
         name = next(iter(named)) if len(named) == 1 else "default"
         held = pl.Series(name, [default], dtype=dtype, strict=False)
-        # Imported here: validation is built on this module.
-        from polspec.validation import ValidationOptions
-        from polspec.validation.constraints import column_constraints
-
-        constraints = column_constraints(
-            name,
-            dataclasses.replace(self, default=None),
-            dtype,
-            compatible=True,
-            options=ValidationOptions(
-                rules=False, unique=False, validators=len(named) <= 1
-            ),
-            df_col_names=[name],
-        )
-        if constraints:
-            stats = (
-                held.to_frame()
-                .select(e for c in constraints for e in c.aggregations())
-                .to_dict(as_series=False)
+        broken = self._claims_refusing(held, check_validators=len(named) <= 1)
+        if broken:
+            raise SpecError(
+                f"ColSpec.default {default!r} is not a value this column "
+                f"accepts: it breaks its {', '.join(broken)}. A default fills a "
+                "missing value, so it has to be one the column passes."
             )
-            failures = [f for f in (c.failure(stats) for c in constraints) if f]
-            if failures:
-                broken = ", ".join(sorted({f.code for f in failures}))
-                raise SpecError(
-                    f"ColSpec.default {default!r} is not a value this column "
-                    f"accepts: it breaks its {broken}. A default fills a "
-                    "missing value, so it has to be one the column passes."
-                )
         object.__setattr__(self, "default", held[0])
+
+    def _claims_refusing(self, held: pl.Series, *, check_validators: bool) -> list[str]:
+        """The claims about a value that `held`'s one value breaks, named by
+        the finding code validation would give each."""
+        value = held[0]
+        frame = held.to_frame()
+        column = frames.column(held.name)
+        broken: list[str] = []
+
+        def fails(mask: pl.Expr) -> bool:
+            return bool(frame.select(mask.fill_null(False)).item())
+
+        if self.bounds is not None:
+
+            def limit(end: Any) -> Any:
+                return pl.lit(end).cast(self.dtype) if self.dtype.is_temporal() else end
+
+            low, high = self.bounds.min, self.bounds.max
+            if (low is not None and fails(column < limit(low))) or (
+                high is not None and fails(column > limit(high))
+            ):
+                broken.append("bounds")
+        if self.choices is not None and value not in (
+            typed_values(self.choices, self.dtype).to_list()
+        ):
+            broken.append("choices")
+        if self.format is not None:
+            fmt = _lookup_format(self.format)
+            extras = self.extra_values or {}
+            if value not in extras and fails(~fmt.check(column)):
+                broken.append("format")
+        if self.pattern is not None and fails(~column.str.contains(self.pattern)):
+            broken.append("pattern")
+        if self.string_length is not None and isinstance(value, (str, bytes)):
+            low, high = self.string_length.min, self.string_length.max
+            size = len(value)
+            if (low is not None and size < low) or (high is not None and size > high):
+                broken.append("string_length")
+        if check_validators:
+            broken.extend(
+                "validator"
+                for validator in self.validators
+                if fails(failure_mask(validator))
+            )
+        return sorted(set(broken))
 
     def _validate_unique_is_generatable(self) -> None:
         """Rejects what `unique=True` cannot be combined with.

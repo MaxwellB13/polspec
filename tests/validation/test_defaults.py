@@ -1,6 +1,7 @@
 """`default=`, `optional=` and `fill_defaults`: what stands in for a missing
 value, and which columns may be missing altogether."""
 
+import dataclasses
 import datetime as dt
 import decimal
 import json
@@ -96,6 +97,42 @@ def test_a_default_is_held_to_the_columns_validators():
     with pytest.raises(SpecError, match="validator"):
         ColSpec(pl.Int64, validators=pl.col("x") % 2 == 0, default=3)
     assert ColSpec(pl.Int64, validators=pl.col("x") % 2 == 0, default=4).default == 4
+
+
+AGREEMENT = [
+    (ColSpec(pl.Int64, bounds=(0, 10)), [0, 10, -1, 11]),
+    (ColSpec(pl.Float64, bounds=(0.0, 1.0)), [0.5, 1.5, math.inf]),
+    (ColSpec(pl.Date, bounds=(dt.date(2026, 1, 1), None)), [dt.date(2025, 12, 31)]),
+    (
+        ColSpec(pl.Datetime("us"), bounds=(dt.date(2026, 1, 1), None)),
+        [dt.datetime(2026, 1, 1), dt.datetime(2025, 12, 31, 23)],
+    ),
+    (ColSpec(pl.Decimal(8, 2), bounds=(1, 2)), [decimal.Decimal("1.50"), 3]),
+    (ColSpec(pl.String, choices=["a", "b"]), ["a", "c"]),
+    (ColSpec(pl.Int64, choices=[1, 2]), [1, 3]),
+    (ColSpec(pl.String, format="email"), ["a@b.co", "nope"]),
+    (
+        ColSpec(pl.String, format="ipv4", extra_values=["N/A"]),
+        ["N/A", "1.2.3.4", "x"],
+    ),
+    (ColSpec(pl.String, pattern=r"^[A-Z]{2}$"), ["AB", "abc"]),
+    (ColSpec(pl.String, string_length=(2, 3)), ["ab", "a", "abcd"]),
+    (ColSpec(pl.Binary, string_length=(2, 2)), [b"ab", b"a"]),
+    (ColSpec(pl.Int64, validators=pl.col("x") > 0), [1, 0]),
+]
+
+
+@pytest.mark.parametrize(("column", "values"), AGREEMENT)
+def test_a_default_is_refused_exactly_when_validation_would_report_it(column, values):
+    for value in values:
+        frame = pl.DataFrame({"x": pl.Series([value], dtype=column.dtype)})
+        passes = inspect(TableSpec("T", {"x": column}), frame).passed
+        try:
+            dataclasses.replace(column, default=value)
+            accepted = True
+        except SpecError:
+            accepted = False
+        assert accepted is passes, value
 
 
 @pytest.mark.parametrize(
