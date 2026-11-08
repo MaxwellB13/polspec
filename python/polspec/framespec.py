@@ -502,6 +502,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         cycles: int = 0,
         self_references: int = 0,
         max_bytes: int | None = None,
+        fixed: Mapping[str, Any] | None = None,
     ) -> pl.DataFrame:
         """Generates a DataFrame matching this spec.
 
@@ -519,6 +520,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             cycles=cycles,
             self_references=self_references,
             max_bytes=max_bytes,
+            fixed=fixed,
         )
 
     @classmethod

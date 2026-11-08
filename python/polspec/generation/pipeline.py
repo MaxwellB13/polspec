@@ -15,13 +15,14 @@ import dataclasses
 import difflib
 import random
 import warnings
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any
 
 import polars as pl
 
 from polspec import frames
 from polspec.constants import DEFAULT_WIDE_INT_BOUND, LARGE_FRAME_BYTES
+from polspec.dtypes import map_parts, unholdable
 from polspec.errors import GenerationError, SpecError
 from polspec.frames import Method, References, to_eager
 from polspec.generation.engine import generate_cartesian, generate_random
@@ -33,9 +34,9 @@ from polspec.generation.passes.hierarchy import apply_hierarchy
 from polspec.generation.passes.rules import apply_column_rules
 from polspec.generation.passes.unique_together import apply_unique_together
 from polspec.generation.seeds import pass_seed
-from polspec.pass_order import ordered_passes, rewritable_members
+from polspec.pass_order import ordered_passes, passes_of, rewritable_members
 from polspec.sizing import estimated_size
-from polspec.spec import ColSpec
+from polspec.spec import ColSpec, claims_refused
 from polspec.tablespec import (
     SpecLike,
     TableSpec,
@@ -183,6 +184,7 @@ def generate(
     cycles: int = 0,
     self_references: int = 0,
     max_bytes: int | None = None,
+    fixed: Mapping[str, Any] | None = None,
 ) -> pl.DataFrame:
     """Generates a DataFrame matching `spec`.
 
@@ -233,6 +235,16 @@ def generate(
     after every pass: each value keeps its row, so every claim the rows make
     about their own columns still holds. Nulls come last.
 
+    `fixed` pins columns to values given: `{"status": ["open", "closed"],
+    "region": "EU"}`, a scalar for every row or a sequence or Series of
+    exactly `n`, cast strictly to the column's dtype. Every other column is
+    what it would have been, since each is seeded by its own name; a rule
+    reading a pinned column follows the pin. A pin must be values its
+    column accepts, and a column a pass writes -- a rule's, a foreign
+    key's, a hierarchy's, a composite key's -- cannot be pinned. With
+    `order_by`, pinned rows move with the sort like any other.
+    `method="cartesian"`, whose row count is not `n`, takes no pins.
+
     The whole frame is built before this returns. `scan()` is the lazy
     verb: it generates as the plan is collected, so only the columns and
     rows a plan asks for are made.
@@ -243,6 +255,7 @@ def generate(
     _check_faults(spec, cycles, self_references)
     _check_size(spec, n, max_bytes)
     check_method(method)
+    pins = _pins(spec, fixed, n, method) if fixed else {}
     spec = room_for_open_keys(spec, n)
 
     frame = _window(
@@ -253,8 +266,94 @@ def generate(
         references=references,
         cycles=cycles,
         self_references=self_references,
+        pins=pins,
     )
     return ordered(frame, spec)
+
+
+def _pins(
+    spec: TableSpec, fixed: Mapping[str, Any], n: int, method: Method
+) -> dict[str, pl.Series]:
+    """`fixed` as one Series per column, each the column's dtype and `n`
+    long, or a `GenerationError` naming the column that cannot be pinned.
+
+    A pin is held to the promise `generate` makes, that its output
+    validates: values the column refuses are refused here, and a column a
+    pass rewrites would either overwrite the pin or break the claim the
+    pass exists to keep.
+    """
+    if not isinstance(fixed, Mapping):
+        raise GenerationError(
+            f"fixed= must map column names to values, got {type(fixed).__name__}"
+        )
+    if method == "cartesian":
+        raise GenerationError(
+            "fixed= does not combine with method='cartesian': its row count is "
+            "the coverage it needs, not n, so a pin's length cannot be known."
+        )
+    writers = {column: p.label for p in passes_of(spec) for column in sorted(p.writes)}
+    pins: dict[str, pl.Series] = {}
+    for name, given in fixed.items():
+        if name not in spec.columns:
+            close = difflib.get_close_matches(str(name), list(spec.columns), n=1)
+            hint = f" Did you mean {close[0]!r}?" if close else ""
+            raise GenerationError(
+                f"fixed= names {name!r}, which {spec.name} does not declare.{hint}"
+            )
+        if name in writers:
+            raise GenerationError(
+                f"fixed= cannot pin {name!r}: {writers[name]} writes it after "
+                "the columns are drawn, and would overwrite the pin or break "
+                "for it. Pin a column it reads instead."
+            )
+        declared = spec.columns[name]
+        dtype = declared.dtype
+        if (
+            isinstance(dtype, (pl.List, pl.Array, pl.Struct))
+            or map_parts(dtype) is not None
+        ):
+            raise GenerationError(
+                f"fixed= cannot pin {name!r}: a {dtype!r} column cannot be "
+                "pinned yet. Pin a scalar column."
+            )
+        values = _pin_values(name, given, n, dtype)
+        broken = claims_refused(declared, values)
+        if broken:
+            raise GenerationError(
+                f"fixed= pins {name!r} to values it does not accept: they break "
+                f"its {', '.join(broken)}. generate() makes a frame its spec "
+                "accepts, so a pin has to be one too."
+            )
+        pins[name] = values
+    return pins
+
+
+def _pin_values(name: str, given: Any, n: int, dtype: pl.DataType) -> pl.Series:
+    """One pin as `n` values of `dtype`, cast strictly: a value the dtype
+    holds only as another -- `1.5` on an `Int64` -- is refused."""
+    scalar = isinstance(given, (str, bytes)) or not isinstance(
+        given, (Sequence, pl.Series)
+    )
+    values = [given] if scalar else list(given)
+    if not scalar and len(values) != n:
+        raise GenerationError(
+            f"fixed= gives {name!r} {len(values)} value(s) for {n} row(s): give "
+            "one value for every row, or a sequence of exactly n."
+        )
+    try:
+        series = pl.Series(name, values, dtype=dtype, strict=True)
+    except (TypeError, ValueError, pl.exceptions.PolarsError) as exc:
+        raise GenerationError(
+            f"fixed= gives {name!r} values {dtype!r} cannot hold: "
+            f"{str(exc).splitlines()[0]}"
+        ) from exc
+    offending = unholdable([v for v in values if v is not None], dtype)
+    if offending:
+        raise GenerationError(
+            f"fixed= gives {name!r} {offending[:5]}, which {dtype!r} would hold "
+            "only as different values."
+        )
+    return series.new_from_index(0, n) if scalar else series
 
 
 def ordered(frame: pl.DataFrame, spec: TableSpec) -> pl.DataFrame:
@@ -335,9 +434,13 @@ def _window(
     row_offset: int = 0,
     cycles: int = 0,
     self_references: int = 0,
+    pins: Mapping[str, pl.Series] | None = None,
 ) -> pl.DataFrame:
     """Rows `[row_offset, row_offset + n)` of the frame `frame_seed` describes,
     with the passes run over them.
+
+    `pins` replace their columns after the draw and before the passes, so
+    a pass reading a pinned column reads the pin.
 
     The columns are a window onto one frame: the engine numbers its chunks
     from the offset, so the same rows come back whatever `n` the call asks
@@ -351,6 +454,8 @@ def _window(
         df = generate_cartesian(columns, n, frame_seed)
     else:
         df = generate_random(columns, n, frame_seed, row_offset)
+    if pins:
+        df = df.with_columns(pins.values())
     pass_seed_ = (
         frame_seed if row_offset == 0 else pass_seed(frame_seed, f"window:{row_offset}")
     )

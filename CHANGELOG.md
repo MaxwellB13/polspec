@@ -28,6 +28,12 @@ seed produces; see
   adds a column holding its default. `diff` reports a column made optional,
   or an optional column added, as `compatible`; made required, `breaking`.
   `generate()` reads neither.
+- `generate(fixed=)` and `FrameSpec.generate(fixed=)`: pin columns to given
+  values, a scalar or exactly `n` of them, and generate the rest. A rule
+  keyed on a pinned column follows it, and no other column's values change.
+  A pin its column would refuse, or one on a column a pass writes, is a
+  `GenerationError` naming the column. Not yet taken by `generate_batches`,
+  `scan`, the sinks or the command line.
 
 ## [1.0.0] - 2026-10-22
 

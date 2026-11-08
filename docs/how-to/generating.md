@@ -83,6 +83,38 @@ column renamed with one keeps its rule's draw. What no seed name holds is
 the frame across polspec *versions* -- see
 [Stability](../explanation/stability.md#seeded-output).
 
+## Pinning columns — `fixed=`
+
+`fixed=` sets columns to values you give, and generates the rest: a scalar
+for every row, or a sequence or Series of exactly `n`.
+
+```python
+df = Orders.generate(3, seed=1, fixed={"status": ["NEW", "PAID", "PAID"]})
+df["status"].to_list()   # ['NEW', 'PAID', 'PAID']
+```
+
+The pins replace their columns after the draw and before the
+[passes](#what-generation-does-not-enforce), so a `ColRule` keyed on a
+pinned column follows it: pin `country` to `"UK"` and a currency rule on it
+gives `"GBP"`. No other column moves, since each is seeded by its own name.
+
+A pin is held to the promise the rest of `generate()` makes, that its output
+validates:
+
+- Its values must be ones the column accepts -- dtype, nullability, bounds,
+  choices, format, pattern, lengths, `unique` and the column's validators.
+  Values are cast strictly, so `1.5` on an `Int64` is refused rather than
+  rounded. This makes a pin the way to fill a `pattern` column, which
+  generation cannot.
+- A column a pass writes -- a rule's, a foreign key's, a hierarchy's, a
+  composite key's -- cannot be pinned; the error names the pass. A column a
+  pass only reads can.
+
+Each refusal is a `GenerationError` naming the column. With `order_by`,
+pinned rows are sorted like any other. `method="cartesian"` takes no pins,
+since its row count is not `n`, and `generate_batches`, `scan`, the sinks
+and the command line do not take `fixed=` yet.
+
 ## Lazy output — `scan()`
 
 `scan()` returns a `pl.LazyFrame` that has not been generated. Nothing is

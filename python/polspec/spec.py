@@ -622,7 +622,7 @@ class ColSpec:
         named = {n for v in self.validators for n in v.expr.meta.root_names()}
         name = next(iter(named)) if len(named) == 1 else "default"
         held = pl.Series(name, [default], dtype=dtype, strict=False)
-        broken = self._claims_refusing(held, check_validators=len(named) <= 1)
+        broken = claims_refused(self, held)
         if broken:
             raise SpecError(
                 f"ColSpec.default {default!r} is not a value this column "
@@ -630,51 +630,6 @@ class ColSpec:
                 "missing value, so it has to be one the column passes."
             )
         object.__setattr__(self, "default", held[0])
-
-    def _claims_refusing(self, held: pl.Series, *, check_validators: bool) -> list[str]:
-        """The claims about a value that `held`'s one value breaks, named by
-        the finding code validation would give each."""
-        value = held[0]
-        frame = held.to_frame()
-        column = frames.column(held.name)
-        broken: list[str] = []
-
-        def fails(mask: pl.Expr) -> bool:
-            return bool(frame.select(mask.fill_null(False)).item())
-
-        if self.bounds is not None:
-
-            def limit(end: Any) -> Any:
-                return pl.lit(end).cast(self.dtype) if self.dtype.is_temporal() else end
-
-            low, high = self.bounds.min, self.bounds.max
-            if (low is not None and fails(column < limit(low))) or (
-                high is not None and fails(column > limit(high))
-            ):
-                broken.append("bounds")
-        if self.choices is not None and value not in (
-            typed_values(self.choices, self.dtype).to_list()
-        ):
-            broken.append("choices")
-        if self.format is not None:
-            fmt = _lookup_format(self.format)
-            extras = self.extra_values or {}
-            if value not in extras and fails(~fmt.check(column)):
-                broken.append("format")
-        if self.pattern is not None and fails(~column.str.contains(self.pattern)):
-            broken.append("pattern")
-        if self.string_length is not None and isinstance(value, (str, bytes)):
-            low, high = self.string_length.min, self.string_length.max
-            size = len(value)
-            if (low is not None and size < low) or (high is not None and size > high):
-                broken.append("string_length")
-        if check_validators:
-            broken.extend(
-                "validator"
-                for validator in self.validators
-                if fails(failure_mask(validator))
-            )
-        return sorted(set(broken))
 
     def _validate_unique_is_generatable(self) -> None:
         """Rejects what `unique=True` cannot be combined with.
@@ -1344,6 +1299,69 @@ class ColSpec:
             normalized.append(chk)
 
         object.__setattr__(self, "validators", tuple(normalized))
+
+
+def claims_refused(spec: ColSpec, values: pl.Series) -> list[str]:
+    """The claims about values, of a scalar column, that `values` break,
+    each named by the finding code validation would give it.
+
+    A default and a pinned column are held to them before either is used,
+    and a declaration may not import validation, so the claims are asked
+    here; a test holds the answers to validation's. A claim among columns
+    -- a rule, a check, a validator reading another column -- is not
+    asked: `values` is one column. `values` is named as the column is, so
+    a validator naming it reads it.
+    """
+    frame = values.to_frame()
+    column = frames.column(values.name)
+    present = values.drop_nulls()
+    broken: list[str] = []
+
+    def fails(mask: pl.Expr) -> bool:
+        return bool(frame.select(mask.fill_null(False).any()).item())
+
+    if not spec.nullable and values.null_count():
+        broken.append("nullability")
+    if values.dtype.is_float() and not spec.nan_probability and fails(column.is_nan()):
+        broken.append("nan")
+    if spec.unique and present.is_duplicated().any():
+        broken.append("unique")
+    if spec.bounds is not None:
+
+        def limit(end: Any) -> Any:
+            return pl.lit(end).cast(spec.dtype) if spec.dtype.is_temporal() else end
+
+        low, high = spec.bounds.min, spec.bounds.max
+        if (low is not None and fails(column < limit(low))) or (
+            high is not None and fails(column > limit(high))
+        ):
+            broken.append("bounds")
+    if spec.choices is not None:
+        allowed = typed_values(spec.choices, spec.dtype).to_list()
+        if any(value not in allowed for value in present.to_list()):
+            broken.append("choices")
+    if spec.format is not None:
+        fmt = _lookup_format(spec.format)
+        extras = list(spec.extra_values or {})
+        if fails(~(fmt.check(column) | column.is_in(extras))):
+            broken.append("format")
+    if spec.pattern is not None and fails(~column.str.contains(spec.pattern)):
+        broken.append("pattern")
+    if spec.string_length is not None and values.dtype in (pl.String, pl.Binary):
+        size = (
+            column.str.len_chars() if values.dtype == pl.String else column.bin.size()
+        )
+        low, high = spec.string_length.min, spec.string_length.max
+        if (low is not None and fails(size < low)) or (
+            high is not None and fails(size > high)
+        ):
+            broken.append("string_length")
+    for validator in spec.validators:
+        if set(validator.expr.meta.root_names()) == {values.name} and fails(
+            failure_mask(validator)
+        ):
+            broken.append("validator")
+    return sorted(set(broken))
 
 
 def field_of(spec: ColSpec, name: str) -> ColSpec:
