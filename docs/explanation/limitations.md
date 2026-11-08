@@ -5,14 +5,14 @@ directions are not symmetric. A validator only has to *recognise* a
 violation, which a Polars expression can do for almost any claim; a
 generator has to *avoid* one, which is easy only for a claim with a shape a
 sampler can use. `bounds=(1, 100)` has that shape;
-`pl.col("email").str.contains("@")` does not -- though `format="email"`,
+`pl.col("email").str.contains("@")` does not — though `format="email"`,
 which says the same thing in a sampler's terms, does.
 
 Where both sides read the same definition they cannot drift: what values a
 column may hold, and the order in which rules, keys and hierarchies rewrite
 a generated frame, are each defined once and read by both. A declaration
-whose claims contradict each other -- a foreign key whose parent cannot fit
-its column, two rules that each read the other -- is refused when it is
+whose claims contradict each other — a foreign key whose parent cannot fit
+its column, two rules that each read the other — is refused when it is
 written, not when it runs. What is left below is what generation does not
 attempt at all, plus a few edges worth knowing about.
 
@@ -31,9 +31,10 @@ This one is by design, not a defect: checks and validators wrap arbitrary
 Polars expressions, and a pattern is an arbitrary regex; nothing can generate
 data satisfying an arbitrary predicate, and generating from an arbitrary
 regex has no answer for `.*`. Validate generated data with
-`checks=False` / `validators=False` /
-`pattern=False`, or construct the rows those invariants describe
-yourself. For a shape polspec *can* generate, declare a
+`checks=False`, `validators=False` or `pattern=False`, or pin the columns
+concerned to values that pass with
+[`generate(fixed=)`](../how-to/generating.md#pinning-columns-fixed). For a
+shape polspec *can* generate, declare a
 [`format`](../how-to/formats.md) instead of a pattern.
 
 ### `rows` does not limit `generate()`
@@ -116,13 +117,13 @@ them. See [String formats](../how-to/formats.md).
 its own, so every column of the fake frame looks like the source's and no
 relationship between columns survives: a correlation, a conditional mix, a
 foreign key. A text column's format is recognised only among the formats
-polspec knows, and from at least twenty distinct values; anything else --
-a product code, a postcode -- becomes text of its lengths. See
+polspec knows, and from at least twenty distinct values; anything else —
+a product code, a postcode — becomes text of its lengths. See
 [Fake data from real data](../how-to/synthesizing.md#how-close-the-fake-data-is).
 
 ### A float's infinities are outside its profiled bounds
 
-A bound cannot be infinite, and an infinity is a matter of bounds -- an
+A bound cannot be infinite, and an infinity is a matter of bounds — an
 open end admits one, a closed end refuses it. So `profile()`,
 `from_dataframe()`, `polspec schema infer` and `polspec synthesize` take a
 float column's bounds from its finite values, and warn once per column that
@@ -131,14 +132,14 @@ profile then reports them as `bounds` findings, and a synthesized frame
 holds none; open the bound on that side (`None`) where infinities belong.
 A column with no finite value at all gets no bounds. This is deliberate, and
 pinned by a passing test. A NaN, by contrast, is recorded as the column's
-`nan_probability` (0.14.0) and carried into the fake data.
+`nan_probability` and carried into the fake data.
 
 ## Smaller sharp edges
 
 - **Specs know about each other only through a `Registry`.** A
   `ForeignKey` names the spec it points at, and nothing above one spec
   knows which specs exist unless they are put in a
-  [`Registry`](../how-to/registry.md) -- two test modules may each define
+  [`Registry`](../how-to/registry.md) — two test modules may each define
   an `Orders`. `Registry.discover("specs/")` imports every `.py` file it
   finds, so a declared `Registry(...)` is the safer shape; shared
   categories are checked against a `CatSpec` only when one is given; and a
@@ -146,8 +147,8 @@ pinned by a passing test. A NaN, by contrast, is recorded as the column's
   `registry.to_mermaid()` draws them all.
 - **A `Decimal`, `Int128` or `UInt128` is drawn through 64 bits.**
   Generation fills a Decimal as its physical integer and a 128-bit integer
-  as a 64-bit one, so bounds past what 64 bits hold -- eighteen significant
-  digits, for a Decimal -- are refused at `generate()`. Validation checks
+  as a 64-bit one, so bounds past what 64 bits hold — eighteen significant
+  digits, for a Decimal — are refused at `generate()`. Validation checks
   the full range.
 - **A `Float16` is drawn as a `Float32` and rounded.** Values are drawn
   between the halves nearest each bound from inside, so rounding never
@@ -174,7 +175,7 @@ pinned by a passing test. A NaN, by contrast, is recorded as the column's
   So `drift()` does not hold either column to them.
 - **A composite key is distinct within a batch, not across batches.** A
   `unique=True` column is a permutation of its value space, unique across a
-  whole frame however it is batched -- including one a foreign key fills,
+  whole frame however it is batched — including one a foreign key fills,
   which takes a permutation of its parent's keys. A `__unique_together__`
   group, and a unique key that references its own spec, are drawn afresh per
   batch of `generate_batches`, a `scan()` or a `sink_*`, so they collide
@@ -184,7 +185,7 @@ pinned by a passing test. A NaN, by contrast, is recorded as the column's
   are a window onto the whole frame, but which element a row starts at
   depends on every earlier row's length, so the elements of a `List`,
   `Array` or `Map` column are drawn afresh in each batch of
-  `generate_batches`, a `scan()` or a `sink_*` -- deterministic for a seed,
+  `generate_batches`, a `scan()` or a `sink_*` — deterministic for a seed,
   but not the values `generate()` would put there past the first batch.
 - **On Polars 1.39, a nullable struct with no fields holds no nulls.**
   Polars 1.39 cannot hold a null in a `Struct({})`; 1.40 and later can. Such
@@ -197,7 +198,7 @@ pinned by a passing test. A NaN, by contrast, is recorded as the column's
   value at a row comes from that row's place in a permutation, and a null
   row spends its place; so a nullable unique column of a thousand rows
   needs a thousand values, not only as many as are drawn.
-- **A `unique` column ignores `weights` and a non-uniform `distribution`** --
+- **A `unique` column ignores `weights` and a non-uniform `distribution`** —
   both are refused at declaration rather than silently dropped, since neither
   has anything to say about a draw without replacement.
 - **A foreign key still overwrites its column's distribution.** The parent's

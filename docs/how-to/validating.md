@@ -3,9 +3,8 @@
 The examples on this page check data against these specs:
 
 ```python
-from pathlib import Path
-
 from datetime import date
+from pathlib import Path
 
 import polars as pl
 from polspec import ColSpec, ForeignKey, FrameSpec
@@ -121,7 +120,7 @@ quarantined.group_by(FINDING_COLUMN).len()   # how many rows each claim caught
 ```
 
 It is the one name polspec adds to your rows, so a frame that already has a
-column called `__polspec_finding` is refused by name -- rename it -- rather
+column called `__polspec_finding` is refused by name — rename it — rather
 than losing that column to the finding keys. Every other name works: the
 helper columns polspec uses along the way take names the frame does not
 have.
@@ -129,8 +128,8 @@ have.
 `passing_rows()` is the other half: the rows that pass, in the frame's
 order, so the two split a frame into what to keep and what to send back. A
 duplicate key fails both of its rows, and an orphaned foreign key its row.
-Some claims relate rows to each other -- an `order_by`, a key into the
-frame's own rows -- and taking rows away can break them in the rows left: a
+Some claims relate rows to each other — an `order_by`, a key into the
+frame's own rows — and taking rows away can break them in the rows left: a
 row whose parent was taken, rows no longer in order. So what is left is
 validated again, and anything that now fails goes too, until nothing more
 does; `failing_rows(once=True)` names those rows by the claim they broke.
@@ -141,17 +140,18 @@ kept = report.passing_rows().collect()
 Orders.validate(kept)                 # passes
 ```
 
-A structural finding -- a missing column, a wrong dtype -- judges the whole
-frame rather than rows, so `passing_rows()` refuses to answer until it is
-fixed.
+Some findings are *structural*: they judge the frame as a whole, not
+particular rows — an extra or missing column, a wrong dtype, a foreign key
+with no parent supplied, a row count outside `__rows__`. They have no rows
+to return, and `passing_rows()` refuses to answer until they are fixed. (A
+`dtype` finding about values the declared dtype cannot hold, keyed
+`<column>__dtype_range`, is the exception: it has rows.) The full list of
+codes, and which kind each is, is in
+[Errors and findings](../reference/errors.md#finding-codes).
 
-Structural findings (`extra_columns`, `missing_columns`, a wrong `dtype`,
-`foreign_key_unresolved`) describe the frame's shape rather than its rows and
-have no rows to return. A `dtype` finding about values the declared dtype
-cannot hold -- keyed `<column>__dtype_range` -- is row-level: it has rows. `inspect()` takes exactly the options `validate()`
-does; `validate()` is `inspect()` followed by `report.raise_if_failed()` and
-the structural transformations below. The full list of codes is in
-[Errors](../reference/errors.md#finding-codes), and `polspec validate` on the
+`inspect()` takes exactly the options `validate()` does: `validate()` is
+`inspect()`, then `report.raise_if_failed()`, then the structural
+transformations described below. `polspec validate` on the
 [command line](cli.md#validate-check-data-against-a-schema) prints the same
 report.
 
@@ -178,19 +178,19 @@ given = Customers.read("customers.csv")
 ```
 
 `read()` picks the reader from the extension (`.csv`, `.tsv`, `.parquet`,
-`.ndjson`, `.json`, `.arrow` -- the set `polspec validate` reads, with any
+`.ndjson`, `.json`, `.arrow` — the set `polspec validate` reads, with any
 Polars reader option passed through, such as `separator=";"`) and does one
 thing in the spec's name. A CSV has no date type, so `signed_up` arrives as
 text; `read()` parses each column the spec declares as a date or time, when
 every value in it parses. Without that, the report would say only *expected
 Date, got String*, and none of the column's own checks would run. The other
-gaps between a CSV and a spec take care of themselves -- a `String` column
+gaps between a CSV and a spec take care of themselves — a `String` column
 is accepted where an `Enum` or `Categorical` is declared, an integer where a
 float or `Decimal` is, and the values are checked either way.
 
 JSON has a few more gaps, and `read()` closes each the same way, only for
 what the spec declares and only when every value reads exactly. Polars
-writes a `Decimal` as text (`"1.25"`), read back from its digits -- never
+writes a `Decimal` as text (`"1.25"`), read back from its digits — never
 rounded, so `"1.255"` in a two-place column stays text and is reported. It
 writes a `Duration` as ISO 8601 seconds (`"PT3600S"`, `"-PT0.5S"`, `"P0D"`),
 a fixed-size `Array` as a list, dates inside a list or struct as text, and a
@@ -212,7 +212,7 @@ pl.read_csv("customers.csv", schema_overrides=Customers.schema())
 # ComputeError: could not parse `FR` as dtype `enum` at column 'country' ...
 ```
 
-**2. Ask what is wrong -- all of it.**
+**2. Ask what is wrong — all of it.**
 
 ```python
 report = Customers.inspect(given)
@@ -235,8 +235,8 @@ report.rows(report.by_code("choices")[0]).collect()   # the row with country "FR
 ```
 
 **3. Decide which is wrong: the file, or the spec.** A bad row is fixed or
-filtered at the source. A spec that has fallen behind -- `FR` is a real
-country now -- is changed, and [`diff`](drift.md#two-declarations) says
+filtered at the source. A spec that has fallen behind — `FR` is a real
+country now — is changed, and [`diff`](drift.md#two-declarations) says
 whether the change is breaking for anything already validated against it:
 
 ```python
@@ -256,8 +256,8 @@ split it (see [Findings as data](#findings-as-data-inspect)), and
 `polspec validate --output --failing` does the same from the shell.
 
 **4. Then take the typed frame.** Once it passes, `cast=True` returns each
-column as its declared dtype -- the `Enum` an `Enum`, not the `String` the
-CSV held -- so the code downstream reads the types the spec promises:
+column as its declared dtype — the `Enum` an `Enum`, not the `String` the
+CSV held — so the code downstream reads the types the spec promises:
 
 ```python
 corrected = given.filter(pl.col("name") == "Ada Lovelace")   # the file, fixed
@@ -376,8 +376,8 @@ a declared integer, an integer or float for a declared float, and
 a `Date` and a `Datetime` stand in for each other, since text formats hand
 one back as the other, while a `Time` stands in only for a `Time` and a
 `Duration` only for a `Duration`, of any unit. A zoned `Datetime` and a
-naive one do not stand in for each other -- one is an instant, the other a
-wall-clock reading -- but two zones do, being the same instants shown
+naive one do not stand in for each other — one is an instant, the other a
+wall-clock reading — but two zones do, being the same instants shown
 differently. `strict_dtypes=True` requires the exact dtype, treating only
 `String` and `Utf8` as interchangeable.
 
@@ -387,7 +387,7 @@ can. An `Int64` column where an `Int8` is declared passes with values from
 samples; so is a float or integer too large for a declared `Decimal`'s
 integer digits, after rounding to its scale. A declared bound has to fit its
 dtype, so on a side a bound closes such a value is out of bounds as well,
-and reported only as that -- unless `bounds=False`. That is what makes a frame
+and reported only as that — unless `bounds=False`. That is what makes a frame
 with no findings safe to hand to `cast=True`. Floats are left alone: a
 `Float64` too large for a declared `Float32` casts to an infinity rather
 than failing.
@@ -404,16 +404,16 @@ than memory.
 
 ### Turning checks off
 
-Each switch disables a whole category of check. Most exist for
-what generation cannot satisfy yet -- `__checks__`, validators and `pattern`
-are validated but not generated:
+Each switch disables a whole category of check. Most exist for what
+generation cannot satisfy — `__checks__`, validators and `pattern` are
+validated but not generated, and `__rows__` is not a limit on `generate()`:
 
 ```python
 Orders.validate(Orders.generate(1_000, seed=1), checks=False)
 ```
 
 `bounds=False` is the other way round: generation always stays in
-bounds, so it is for real data -- a file whose ranges you want to look at
+bounds, so it is for real data — a file whose ranges you want to look at
 before holding it to them, while every other claim is still checked. It
 covers every `bounds`, including a `List`'s elements and a struct's fields;
 `string_length` and `list_length` have codes of their own and stay on.
@@ -446,6 +446,7 @@ validate(loose, df)
 | Value within range | `bounds` |
 | Length within range | `string_length` |
 | List has the declared number of elements | `list_length` |
+| No NaN where none is declared | `nan_probability` |
 | Value has the declared shape | `format` |
 | Value matches the regex | `pattern` |
 | Conditional values hold | `rules` |
@@ -453,7 +454,10 @@ validate(loose, df)
 | Values distinct | `unique` |
 | Composite key distinct | `__unique_together__` |
 | Multi-column invariants | `__checks__` |
+| Rows in the declared order | `__order_by__` |
+| Number of rows within range | `__rows__` |
 | Referential integrity | `__foreign_keys__` |
+| One parent, bounded depth, no cycles | `__hierarchy__` |
 
 Bounds, lengths, rules, validators and uniqueness are skipped for a column
 whose dtype is already wrong — comparing values of the wrong type would bury

@@ -1,10 +1,9 @@
 # Errors
 
-Everything polspec raises on its own behalf derives from one base class, so
-a caller can separate "polspec objected" from "something else went wrong"
-with a single clause:
-
-The examples on this page use this spec:
+Everything polspec raises on its own behalf derives from one base class,
+`PolspecError`, so a caller can separate "polspec objected" from "something
+else went wrong" with a single `except`. The example on this page uses this
+spec:
 
 ```python
 from datetime import date
@@ -23,6 +22,8 @@ class Orders(FrameSpec):
 
 df = Orders.generate(500, seed=2)
 ```
+
+One clause catches anything polspec raises:
 
 ```python
 from polspec import PolspecError
@@ -58,7 +59,7 @@ reporting. A command line that is itself wrong exits 2.
 ## Finding codes
 
 Every violation `inspect()` reports, and `validate()` raises, is a `Finding`
-with one of these codes -- `polspec.FindingCode`, for a type checker. Row-level findings can return the offending rows
+with one of these codes — `polspec.FindingCode`, for a type checker. Row-level findings can return the offending rows
 through `report.rows(finding)`; structural ones describe the frame's shape.
 
 | Code | Kind | Raised when |
@@ -66,7 +67,7 @@ through `report.rows(finding)`; structural ones describe the frame's shape.
 | `extra_columns` | structural | the frame has columns the spec does not declare (`extra_cols="raise"`) |
 | `missing_columns` | structural | the frame lacks declared columns (`missing_cols="raise"`) |
 | `dtype` | structural | a column's dtype is not compatible with its declaration |
-| `dtype` | row-level | a compatible, wider dtype holds a value the declared one cannot -- `Int8` declared, an `Int64` of 1000; keyed `<column>__dtype_range` |
+| `dtype` | row-level | a compatible, wider dtype holds a value the declared one cannot — `Int8` declared, an `Int64` of 1000; keyed `<column>__dtype_range` |
 | `foreign_key_unresolved` | structural | a key references another spec and `references=` had no entry for it |
 | `nullability` | row-level | a non-nullable column holds nulls |
 | `nan` | row-level | a float value holds NaN while `nan_probability` is `0` |
@@ -91,32 +92,32 @@ through `report.rows(finding)`; structural ones describe the frame's shape.
 ## Drift codes
 
 A `DriftReport` (from `diff()` or `drift()`) carries `DriftFinding`s with one
-of these codes -- `polspec.DriftCode`, for a type checker. Each also carries a `severity`: **breaking** when a frame
+of these codes — `polspec.DriftCode`, for a type checker. Each also carries a `severity`: **breaking** when a frame
 that satisfied the old side could fail the new one, **compatible**
 otherwise. See [Schema and data drift](../how-to/drift.md).
 
 | Code | From | Severity | Raised when |
 |:--|:--|:--|:--|
-| `column_added` | both | breaking | the new spec declares a column the old lacks, or the data has an undeclared column |
+| `column_added` | both | breaking; compatible for an `optional=True` column | the new spec declares a column the old lacks, or the data has an undeclared column |
 | `column_removed` | both | breaking | the old spec declares a column the new lacks, or the data lacks a declared column |
 | `column_renamed` | `diff` | compatible | a rename given through `renames=` |
-| `dtype_changed` | both | as validation decides | the dtypes differ; compatible when the old values would still validate. Against data, only a dtype that fails validation is reported -- or any difference, under `strict_dtypes` |
+| `dtype_changed` | both | as validation decides | the dtypes differ; compatible when the old values would still validate. Against data, only a dtype that fails validation is reported — or any difference, under `strict_dtypes` |
 | `nullability_changed` | both | off → on compatible; on → off breaking; nulls in a non-nullable column breaking | `nullable`, or a list's `element_null_probability` between 0 and not |
-| `domain_widened` | `diff` | compatible | bounds, choices, format, string length or a table's `rows` accept more than before -- or a float value now allows NaN |
+| `domain_widened` | `diff` | compatible | bounds, choices, format, string length or a table's `rows` accept more than before — or a float value now allows NaN |
 | `domain_narrowed` | `diff` | breaking | they accept less |
 | `domain_changed` | `diff` | breaking | neither is inside the other |
 | `bounds_exceeded` | `drift` | breaking | values escape `bounds`, `string_length` or `list_length`; `details` say which and by how much |
-| `new_values` | `drift` | breaking | values outside `choices`, an `Enum` or a finite format -- or a NaN in a float value that declares none |
+| `new_values` | `drift` | breaking | values outside `choices`, an `Enum` or a finite format — or a NaN in a float value that declares none |
 | `format_violated` | `drift` | breaking | values that do not match the declared `format` |
-| `null_rate_moved` | `drift` | compatible | the null rate has moved from `null_probability` -- or the element null rate from `element_null_probability` -- by at least the tolerance, and significantly over the rows seen |
+| `null_rate_moved` | `drift` | compatible | the null rate has moved from `null_probability` — or the element null rate from `element_null_probability` — by at least the tolerance, and significantly over the rows seen |
 | `nan_rate_moved` | `drift` | compatible | the share of present values that are NaN has moved from `nan_probability` by at least the tolerance, and significantly |
 | `frequencies_moved` | `drift` | compatible | a weighted column's frequencies have moved from its `weights` by at least `frequency_tolerance`, and significantly |
 | `distribution_moved` | `drift` | compatible | the values have moved from a sample drawn from the declared `distribution` by at least `distribution_tolerance`, and significantly |
-| `cardinality_moved` | `drift` | compatible | declared `choices`, `Enum` categories or extra values the data never holds, and at their declared share would not miss by chance -- never a finite format's own codes |
-| `constraint_added` | `diff` | breaking | `unique`, a validator, rule, check, composite key, foreign key, hierarchy or `rows` present only in the new spec |
-| `constraint_removed` | `diff` | compatible | the reverse |
-| `field_changed` | `diff` | compatible | `tags`, `weights`, `distribution`, `distribution_params`, `null_probability`, `pattern` or `seed_name` differ |
+| `cardinality_moved` | `drift` | compatible | declared `choices`, `Enum` categories or extra values the data never holds, and at their declared share would not miss by chance — never a finite format's own codes |
+| `constraint_added` | `diff` | breaking | `unique`, a validator, rule, check, composite key, foreign key, hierarchy or `rows` present only in the new spec, or a column no longer `optional` |
+| `constraint_removed` | `diff` | compatible | the reverse, including a column made `optional` |
+| `field_changed` | `diff` | compatible | `tags`, `description`, `default`, `weights`, `distribution`, `distribution_params`, `null_probability`, `pattern` or `seed_name` differ, or a table's `description` |
 
 A struct's fields are compared by every row above, as columns are, and a
-finding about one is keyed by its path -- `point.lat__domain` -- with
+finding about one is keyed by its path — `point.lat__domain` — with
 `columns` naming the struct column.

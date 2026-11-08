@@ -37,7 +37,7 @@ version's file byte for byte.
 
 ### Seeded output
 
-The same call -- spec, seed, row count and method -- gives the same frame
+The same call — spec, seed, row count and method — gives the same frame
 on every supported operating system and Polars, and on every later 1.x
 release. A minor release changes what a seed produces
 only to fix output that broke its own spec, since data that never met its
@@ -67,7 +67,7 @@ The verbs, their flags and their exit codes:
 | Exit code | Means |
 |:--|:--|
 | `0` | Success, and the data or spec passed |
-| `1` | A reported error -- `error: ...` on stderr -- or a report that failed: `validate`, `diff` and `drift` exit `1` when the report says so |
+| `1` | A reported error — `error: ...` on stderr — or a report that failed: `validate`, `diff` and `drift` exit `1` when the report says so |
 | `2` | The command line itself was wrong: an unknown verb, flag or value |
 
 Every `--json` document carries a `schema_version`. Its keys, and the types

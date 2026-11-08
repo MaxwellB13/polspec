@@ -1,7 +1,7 @@
 # Command line
 
 Every `polspec` command and argument, generated from the command's own
-parser -- `polspec <command> --help` prints the same. [Command line](../how-to/cli.md)
+parser — `polspec <command> --help` prints the same. [Command line](../how-to/cli.md)
 shows the workflows, and what the exit codes mean.
 
 Generate a schema from data, a test from a schema, or check data against a schema.

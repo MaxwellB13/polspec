@@ -27,6 +27,7 @@ class Orders(FrameSpec):
     status        = ColSpec(pl.Enum(["NEW", "PAID", "SHIPPED"]))
     total         = ColSpec(pl.Float64, bounds=(0.0, 5_000.0))
     internal_note = ColSpec(pl.String, string_length=(0, 40), nullable=True)
+    __foreign_keys__ = [ForeignKey("customer_id", references=Customers, ref_columns="id")]
 
 
 class OrderLines(FrameSpec):
@@ -44,7 +45,39 @@ markdown = Orders.to_markdown()        # just returns
 
 The document has three parts: an overview, a table of every column, and — when
 the spec declares any — a constraints section covering composite keys, checks,
-foreign keys, conditional rules and column validators.
+foreign keys, conditional rules and column validators:
+
+```markdown
+# Orders
+
+## Overview
+- **Schema:** `Orders`
+- **Total Columns:** 5
+- **Foreign Keys:** 1 key(s)
+
+## Columns
+
+| Column | Type | Nullable | Bounds | Domain / Choices | String Length | Tags | Rules | Unique |
+|:---|:---|:---|:---|:---|:---|:---|:---|:---|
+| `order_id` | `Int64` | No | [1, 1000000] | - | - | - | - | Yes |
+| `customer_id` | `Int64` | No | [1, 10000] | - | - | - | - | No |
+| `status` | `Enum(['NEW', 'PAID', 'SHIPPED'])` | No | - | - | - | - | - | No |
+| `total` | `Float64` | No | [0.0, 5000.0] | - | - | - | - | No |
+| `internal_note` | `String` | Yes | - | - | [0, 40] | - | - | No |
+
+## Constraints & Invariants
+
+### Foreign Keys
+- **`fk_customer_id__Customers`**: `['customer_id']` -> `Customers.['id']`
+```
+
+Long category and choice lists are elided rather than blowing out the table,
+and an open-ended bound reads as `>= 0.0` rather than `[0.0, None]`. The
+*Nullable* cell also notes a column's `default` and whether it is
+`optional`. Pass `title=` to override the heading, which otherwise uses the
+class name.
+
+### Descriptions
 
 To say what a table or a column means, give it a description. The table's
 appears under the title, and the columns' in a *Description* column, which the
@@ -52,7 +85,7 @@ table has only when something fills it. Nothing else reads one: it changes no
 generated value and no validation.
 
 ```python
-class Orders(FrameSpec):
+class Described(FrameSpec):
     __description__ = "One row per order, as placed."
 
     order_id = ColSpec(pl.Int64, unique=True, description="The order's number.")
@@ -63,29 +96,6 @@ A class's docstring is not used, and a subclass does not inherit
 theirs. A `TableSpec` takes `description=`, and `with_description()` makes a
 copy.
 
-```markdown
-# Orders
-
-## Overview
-- **Schema:** `Orders`
-- **Total Columns:** 4
-- **Composite Unique Keys:** `['order_id', 'status']`
-- **Foreign Keys:** 1 key(s)
-
-## Columns
-
-| Column | Type | Nullable | Bounds | Domain / Choices | String Length | Tags | Rules | Unique |
-|:---|:---|:---|:---|:---|:---|:---|:---|:---|
-| `order_id` | `Int64` | No | [1, 100000] | - | - | - | - | Yes |
-| `status` | `Enum(['NEW', 'PAID', 'SHIPPED'])` | No | - | - | - | - | - | No |
-| `total` | `Float64` | No | >= 0.0 | - | - | - | - | No |
-```
-
-Long category and choice lists are elided rather than blowing out the table,
-and an open-ended bound reads as `>= 0.0` rather than `[0.0, None]`.
-
-Pass `title=` to override the heading, which otherwise uses the class name.
-
 ## Entity-relationship diagram
 
 ```python
@@ -95,10 +105,11 @@ Orders.to_mermaid("docs/orders.mmd")
 ```mermaid
 erDiagram
     Orders {
-        Int64 order_id PK
+        Int64 order_id PK "bounds: [1, 1000000]"
+        Int64 customer_id FK "bounds: [1, 10000]"
         Enum status
-        Float64 total "bounds: >= 0.0"
-        Date placed "nullable"
+        Float64 total "bounds: [0.0, 5000.0]"
+        String internal_note "nullable, len: [0, 40]"
     }
     Customers ||--o{ Orders : "fk_customer_id__Customers"
 ```

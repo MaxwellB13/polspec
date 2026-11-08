@@ -104,8 +104,8 @@ longer has.
 
 ## Joining two specs
 
-`join` takes the arguments `LazyFrame.join` takes -- `on`, or `left_on` and
-`right_on`, `how`, `suffix`, `coalesce` -- and returns the spec of the frame
+`join` takes the arguments `LazyFrame.join` takes — `on`, or `left_on` and
+`right_on`, `how`, `suffix`, `coalesce` — and returns the spec of the frame
 that join makes. Its columns, their order and their names are the ones the
 installed Polars gives: polspec runs the join on two empty frames and reads
 the result, so a suffixed clash or a coalesced key is named as it will be.
@@ -125,16 +125,16 @@ enriched["tier"].nullable      # True: a sale may meet no customer
 enriched["sale_id"].unique     # True: each sale meets one customer at most
 ```
 
-Each column keeps what it claims about its values -- dtype, bounds,
+Each column keeps what it claims about its values — dtype, bounds,
 choices, weights, format, pattern, lengths, tags, description, validators
-and default -- from the side it came from. A side that can go unmatched
+and default — from the side it came from. A side that can go unmatched
 becomes nullable: the right of `left`, the left of `right`, both of `full`.
 
 What a spec says about its *rows* is not carried, since a join changes
 which rows there are: checks, rules, foreign keys, composite keys, the
 hierarchy, the order and `rows` are dropped; add back any that still holds
 with its `with_*`. `unique` stays on a side's columns only when the other
-side's join key is declared unique -- a unique column, or a composite key --
+side's join key is declared unique — a unique column, or a composite key —
 because then no row of that side is repeated. `semi` and `anti` keep the
 left spec, but for `rows` and the order: Polars does not promise a join
 keeps its rows' order. Join keys of different dtypes are refused, as Polars

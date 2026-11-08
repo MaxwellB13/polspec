@@ -20,9 +20,8 @@ Users.validate(df)   # passes -- which is the point
 
 Without a format, a column carrying a validator as ordinary as
 `col("email").str.contains("@")` could not be generated to satisfy its own
-spec. With one it can, because the sampler and the validator are one
-declaration in polspec's table of formats, reviewed in one diff and pinned by one
-round-trip test per format.
+spec: generation cannot read a validator. A format is a sampler and a test
+defined together, so the data it generates always passes its own check.
 
 ## The formats
 
@@ -44,8 +43,9 @@ lowercase ones. It is never wider than the standard it names.
 The set is closed. A named format is a twenty-line sampler with an
 unambiguous test; generating from an arbitrary regex would need a
 regex-to-sampler compiler and has no answer for `.*`. Validation of an
-arbitrary regex is what [`pattern=`](columns.md#string-patterns) is for --
-checked like a format, generated like nothing at all.
+arbitrary regex is what [`pattern=`](columns.md#string-patterns) is for: it
+is checked like a format, but not generated, so a generated frame fills such
+a column with values you [pin](generating.md#pinning-columns-fixed).
 
 ## What a format promises
 
@@ -74,7 +74,7 @@ assert (sessions["ip"] == "NOT AVAILABLE").mean() > 0.04  # about 5% of the rows
 ```
 
 Validation accepts a value that has the format *or* is one of the extras;
-anything else -- `uk (iso)`, `NA` -- is still a `format` finding, and the
+anything else — `uk (iso)`, `NA` — is still a `format` finding, and the
 finding's details name the extras beside the format. Generation draws each
 extra on its share of the present rows: a list gives every extra 1%, a
 mapping sets each share. The format's own values fill the rest, so test data
@@ -158,10 +158,10 @@ Column 'host': found 3 value(s) that are not ipv4 (four dotted decimal
 octets, each 0-255). Invalid samples: ['300.1.1.1', 'abc']
 ```
 
-A format is one scalar key in a spec file -- `format: email` -- and one
+A format is one scalar key in a spec file — `format: email` — and one
 keyword in generated Python. Neither changes the file format version.
 `from_dataframe()`, `profile()` and `polspec schema infer` name a format
-when at least twenty distinct values have it and every value does -- see
+when at least twenty distinct values have it and every value does — see
 [Fake data from real data](synthesizing.md#how-close-the-fake-data-is) for
 the near misses kept as `extra_values`, and for when a country or currency
 column stays an `Enum` of its codes instead. `formats=False` turns it off.
