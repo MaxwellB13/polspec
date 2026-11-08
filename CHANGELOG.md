@@ -34,6 +34,14 @@ seed produces; see
   A pin its column would refuse, or one on a column a pass writes, is a
   `GenerationError` naming the column. Not yet taken by `generate_batches`,
   `scan`, the sinks or the command line.
+- `TableSpec.join()`: the spec of a join of two frames, for every `how`,
+  `suffix` and `coalesce` Polars takes, its columns named as the installed
+  Polars names them. Claims about values are kept, a side that can go
+  unmatched becomes nullable, and claims about rows are dropped, except a
+  `unique` the other side's unique key preserves. `semi` and `anti` keep the
+  left spec but for its row count and order.
+- `TableSpec.prefix()` and `TableSpec.suffix()`: every column renamed, as
+  `rename` renames.
 
 ## [1.0.0] - 2026-10-22
 

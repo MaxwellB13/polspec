@@ -82,6 +82,8 @@ Each operation returns a new `TableSpec`; the original is never changed.
 | `drop(*names)` | Remove columns, and any composite key, foreign key or check that used them |
 | `select(*names)` | Keep only the named columns, in that order, and the constraints that still apply |
 | `rename({old: new})` | Rename columns, rewriting rules, validators, checks, composite keys, foreign keys and the hierarchy |
+| `prefix(text)`, `suffix(text)` | Rename every column, as `rename` does |
+| `join(other, on=..., how=...)` | The spec of a join of two frames; see [below](#joining-two-specs) |
 | `with_checks(*checks)`, `with_foreign_keys(*fks)`, `with_unique_together(*groups)` | Append constraints |
 | `with_name(name)` | Change the name |
 | `with_catspec(registry)` | Re-type columns against a `CatSpec`; see [Shared categories](categories.md) |
@@ -99,6 +101,44 @@ like everything else, but refuses to rename a column that one written as a
 raw `pl.Expr` names: rewriting Polars expressions is not something this
 library does, and leaving it would keep a check naming a column the spec no
 longer has.
+
+## Joining two specs
+
+`join` takes the arguments `LazyFrame.join` takes -- `on`, or `left_on` and
+`right_on`, `how`, `suffix`, `coalesce` -- and returns the spec of the frame
+that join makes. Its columns, their order and their names are the ones the
+installed Polars gives: polspec runs the join on two empty frames and reads
+the result, so a suffixed clash or a coalesced key is named as it will be.
+
+```python
+class Customers(FrameSpec):
+    customer_id = ColSpec(pl.Int64, unique=True)
+    tier        = ColSpec(pl.Enum(["gold", "silver"]))
+
+class Sales(FrameSpec):
+    sale_id     = ColSpec(pl.Int64, unique=True)
+    customer_id = ColSpec(pl.Int64)
+
+enriched = Sales.spec.join(Customers, on="customer_id", how="left")
+enriched.name                  # 'Sales_Customers'
+enriched["tier"].nullable      # True: a sale may meet no customer
+enriched["sale_id"].unique     # True: each sale meets one customer at most
+```
+
+Each column keeps what it claims about its values -- dtype, bounds,
+choices, weights, format, pattern, lengths, tags, description, validators
+and default -- from the side it came from. A side that can go unmatched
+becomes nullable: the right of `left`, the left of `right`, both of `full`.
+
+What a spec says about its *rows* is not carried, since a join changes
+which rows there are: checks, rules, foreign keys, composite keys, the
+hierarchy, the order and `rows` are dropped; add back any that still holds
+with its `with_*`. `unique` stays on a side's columns only when the other
+side's join key is declared unique -- a unique column, or a composite key --
+because then no row of that side is repeated. `semi` and `anti` keep the
+left spec, but for `rows` and the order: Polars does not promise a join
+keeps its rows' order. Join keys of different dtypes are refused, as Polars
+refuses them.
 
 ## Column names and method names
 
