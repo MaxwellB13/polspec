@@ -1,7 +1,8 @@
-# YAML specs
+# Specs as files
 
-A spec can live in a file instead of a class body, so tooling outside Python
-can read it and so it can be reviewed as a document. [Spec files](../reference/spec-files.md)
+A spec can live in a YAML file instead of a class body, so tooling outside
+Python can read it and so it can be reviewed as a document. It can also be
+written out as a Python module, to edit by hand from then on. [Spec files](../reference/spec-files.md)
 is the format, key by key.
 
 The examples on this page write and read these specs:
@@ -44,7 +45,7 @@ Loaded.generate(1_000, seed=1)
 ```
 
 With no path, `to_yaml()` and `to_python()` return the text instead of
-writing it -- for a test, a notebook or a review. `polspec.to_dict(spec)`
+writing it — for a test, a notebook or a review. `polspec.to_dict(spec)`
 and `polspec.from_dict(data)` are the same file as plain Python data, for
 storing a spec somewhere other than a file.
 
@@ -57,28 +58,43 @@ name: Orders
 columns:
   order_id:
     dtype: Int64
-    bounds: [1, 100000]
+    bounds:
+    - 1
+    - 1000000
     unique: true
+  customer_id:
+    dtype: Int64
+    bounds:
+    - 1
+    - 10000
   status:
     dtype:
-      Enum: [NEW, PAID, SHIPPED]
+      Enum:
+      - NEW
+      - PAID
+      - SHIPPED
   total:
     dtype: Float64
-    bounds: [0.0, null]
-  placed:
-    dtype: Date
+    bounds:
+    - 0.0
+    - 5000.0
+  internal_note:
+    dtype: String
     nullable: true
-unique_together:
-  - [order_id, status]
+    string_length:
+    - 0
+    - 40
 ```
 
-An open-ended bound writes as `null` and reads back unchanged.
+An open-ended bound, such as `bounds=(0, None)`, writes its open end as
+`null` and reads back unchanged. A file you write by hand may use either
+YAML list style: `bounds: [1, 1000000]` reads the same.
 
 `version:` records the file format that wrote the file. A file from an
 earlier version is migrated on the way in; a file from a later polspec is
 refused with a message saying so. A key the reader does not know is an
 error naming the closest known key, since silently reading a misspelt option
-as its default is the worst outcome -- pass `strict=False` to
+as its default is the worst outcome — pass `strict=False` to
 `from_yaml` to downgrade that to a warning.
 
 ## What survives a round-trip
@@ -86,10 +102,11 @@ as its default is the worst outcome -- pass `strict=False` to
 | | Round-trips |
 |:--|:--:|
 | dtypes, including parametrized `Enum` / `Datetime` / `Duration` / named `Categorical` | yes |
-| `nullable`, `null_probability`, `bounds`, `string_length`, `list_length`, `element_null_probability`, `fields`, `format`, `pattern`, `seed_name`, `unique`, `tags` | yes |
+| `nullable`, `optional`, `default`, `null_probability`, `nan_probability`, `bounds`, `string_length`, `list_length`, `element_null_probability`, `fields` | yes |
+| `format`, `extra_values`, `pattern`, `seed_name`, `unique`, `tags`, `description` | yes |
 | `choices`, `weights`, `distribution`, `distribution_params` | yes |
 | `rules` (`ColRule`) | yes |
-| `__unique_together__` | yes |
+| `__unique_together__`, `__order_by__`, `__descending__`, `__rows__`, `__hierarchy__`, `__description__` | yes |
 | `__foreign_keys__`, self-referencing or to another spec (by name) | yes |
 | `__checks__` and `ColSpec.validators` written with `col()` | yes |
 | `__checks__` and `ColSpec.validators` over a raw `pl.Expr` | **no** |
@@ -168,8 +185,9 @@ Orders.catspec().to_yaml("categories.yaml")
 ## Python instead of YAML
 
 The same spec can be written as an importable Python module. It is the right
-choice when the spec will be edited by hand from now on, or when it needs the
-parts YAML cannot hold:
+choice when the spec will be edited by hand from now on — including to add
+back the raw-expression checks a file cannot hold. The `Orders` subclass
+above carries one, so writing it warns:
 
 <!-- docs: warns -->
 ```python
@@ -185,19 +203,19 @@ from polspec import ColSpec, FrameSpec
 
 class Orders(FrameSpec):
     __columns__ = {
-        'order_id': ColSpec(pl.Int64, bounds=(1, 100000), unique=True),
+        'order_id': ColSpec(pl.Int64, bounds=(1, 1000000), unique=True),
+        'customer_id': ColSpec(pl.Int64, bounds=(1, 10000)),
         'status': ColSpec(pl.Enum(['NEW', 'PAID', 'SHIPPED'])),
-        'total': ColSpec(pl.Float64, bounds=(0.0, None)),
-        'placed': ColSpec(pl.Date, nullable=True),
+        'total': ColSpec(pl.Float64, bounds=(0.0, 5000.0)),
+        'internal_note': ColSpec(pl.String, nullable=True, string_length=(0, 40)),
     }
-    __unique_together__ = [['order_id', 'status']]
 ```
 
 Columns are declared through `__columns__` because a name straight from data
 is not always a valid identifier. What survives is exactly the
-[round-trip table](#what-survives-a-round-trip) above: `__checks__`,
-cross-spec `ForeignKey`s and `ColSpec.validators` warn and are dropped, and
-the file is where you then add them back by hand. `polspec schema infer` uses
+[round-trip table](#what-survives-a-round-trip) above: a check or validator
+over a raw `pl.Expr` warns and is dropped, and the module is where you add
+it back by hand. A foreign key to another spec is kept, by the spec's name. `polspec schema infer` uses
 this path when its output ends in `.py`; see
 [Command line](cli.md).
 

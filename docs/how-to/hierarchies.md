@@ -52,8 +52,8 @@ Hierarchy(child="CHILD_REF", parent="PARENT_REF", max_depth=5, roots=40)
 ## Generating data that is deliberately broken
 
 Code that walks a hierarchy has to cope with data that is not one. A loop in
-the parent chain is the case that matters; because a resolver written without
-a visited set does not fail on it — it runs forever.
+the parent chain is the case that matters, because a resolver written without
+a visited set does not fail on it: it runs forever.
 
 ```python
 Links.generate(1_000_000, seed=7, cycles=10)

@@ -2,7 +2,7 @@
 
 `polspec.synthesize` turns a real dataset into a fake one that looks like
 it: the same schema, the same shape of values in each column, the same
-category mix and null rates -- and none of its rows. It is for the data you
+category mix and null rates — and none of its rows. It is for the data you
 cannot share, cannot copy into a test environment, or cannot keep: hand
 over a stand-in instead.
 
@@ -36,8 +36,8 @@ assert fake["order_id"].is_unique().all()        # a key stays a key
 assert not set(fake["name"]) & set(real["name"])  # no real name carried over
 ```
 
-The source can be a `DataFrame`, a `LazyFrame` -- anything Polars can
-`scan_*`, a file, a glob, cloud storage -- or the path of a data file:
+The source can be a `DataFrame`, a `LazyFrame` — anything Polars can
+`scan_*`, a file, a glob, cloud storage — or the path of a data file:
 
 <!-- docs: skip -->
 ```python
@@ -51,7 +51,7 @@ fake = polspec.synthesize(pl.scan_parquet("s3://bucket/customers/*.parquet"), se
 
 `synthesize` is two steps: `polspec.profile` describes the source as a
 `TableSpec`, and `generate` makes data from it. Take them one at a time when
-the description is worth looking at, editing or keeping -- a reviewed spec
+the description is worth looking at, editing or keeping — a reviewed spec
 is a safer thing to share than a function call over real data.
 [Infer a spec from data](profiling.md) covers `profile` on its own:
 
@@ -84,7 +84,7 @@ Two lines of that table decide what to put in `replace=`:
 - **A text column with few distinct values keeps them.** A column of at
   most `max_unique_enum` (50) distinct values, each repeated twice on
   average, becomes an `Enum` of them, so a status column stays
-  `NEW`/`PAID`/`SHIPPED` -- and a column of thirty customer names, over a
+  `NEW`/`PAID`/`SHIPPED` — and a column of thirty customer names, over a
   few hundred rows, stays those thirty names. Name every column whose values
   are sensitive in `replace=`: it is then generated from its lengths alone.
 - **Extremes are real values.** The smallest and largest amount, the
@@ -97,8 +97,8 @@ Each column is described on its own, so each column on its own looks like
 the source:
 
 - **Shape.** A numeric or temporal column's values are fitted against every
-  distribution polspec can draw -- `normal`, `lognormal`, `gamma`,
-  `exponential`, `beta`, `poisson` -- by drawing from each and comparing the
+  distribution polspec can draw — `normal`, `lognormal`, `gamma`,
+  `exponential`, `beta`, `poisson` — by drawing from each and comparing the
   draws with the data. The closest wins if it beats drawing evenly between
   the extremes; otherwise the column stays even. A log-normal amount comes
   out log-normal, a bell-curved age bell-curved, and a count as counts.
@@ -107,12 +107,12 @@ the source:
 - **Keys.** An integer or text column whose values are all distinct, over
   at least a hundred of them, is declared unique, and the fake one is
   distinct too. Asked for more rows than the key's range holds, the range
-  widens upward to make room -- and a nullable key's range has to hold its
+  widens upward to make room — and a nullable key's range has to hold its
   null rows as well, so it can widen by a little even at the source's size.
 - **Categories and nulls.** Category frequencies and null rates are
   measured and reproduced.
-- **Order.** When the rows come sorted by a column -- a timestamp, an
-  increasing ID -- the spec declares it as `order_by`, and the fake rows come
+- **Order.** When the rows come sorted by a column — a timestamp, an
+  increasing ID — the spec declares it as `order_by`, and the fake rows come
   sorted the same way.
 
 What columns do *together* is not kept: a fake `age` does not follow a fake
@@ -123,16 +123,16 @@ relationship back where one matters.
 A text column's *format* is recognised: a column of emails, UUIDs, IP or MAC
 addresses, hostnames, or ISO country or currency codes is profiled as that
 `format`, so the fake values have the format and none of the source's. It
-takes at least twenty distinct values, every one of them in the format -- or
+takes at least twenty distinct values, every one of them in the format — or
 99% of rows, with the rest a few repeated stand-ins such as `N/A`, which
 become `extra_values` at their observed shares (not for a `replace`d column:
 its stand-ins would be the source's values). A hostname has to hold a dot.
 A country or currency column of a few repeated codes stays an `Enum` of
-them, which keeps how often each occurs -- the format would spread the fake
+them, which keeps how often each occurs — the format would spread the fake
 values over every code; it is named once the column holds more distinct
 codes than `max_unique_enum`, or is `replace`d. `formats=False`, or
 `--no-formats`, turns it off. A shape polspec has no
-format for -- a product code, a postcode -- is still text of its lengths;
+format for — a product code, a postcode — is still text of its lengths;
 declare a `pattern` on the profiled spec to validate it.
 
 A float column's NaNs are carried over as a share: the profile records
@@ -145,7 +145,7 @@ many, and the fake column holds none. See
 ## Large sources
 
 `sample=` profiles a random sample of that many rows instead of all of
-them, and `seed` makes the sample -- and the fake data -- the same every
+them, and `seed` makes the sample — and the fake data — the same every
 run:
 
 <!-- docs: skip -->
@@ -161,7 +161,7 @@ polspec synthesize customers.parquet -o fake_customers.parquet \
 ```
 
 `--spec` writes the profiled spec beside the data, so the fake data can be
-reproduced -- `polspec generate fake_customers.yaml -n 1000000 --seed 1`
--- and the spec reviewed. `polspec schema infer` takes the same profiling
+reproduced — `polspec generate fake_customers.yaml -n 1000000 --seed 1`
+— and the spec reviewed. `polspec schema infer` takes the same profiling
 steps one at a time, as `--shape`, `--keys`, `--order` and `--replace`; see
 [Command line](cli.md).

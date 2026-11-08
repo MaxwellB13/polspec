@@ -51,9 +51,9 @@ and the value are interchangeable.
 
 ## The dict constructor
 
-The form `CatSpec.infer()`, `from_dataframe()` and `from_yaml()` build
-programmatically, since their entry names come from data at runtime rather
-than from a class body someone writes by hand:
+`CatSpec` can also be built from mappings. This is the form
+`CatSpec.infer()`, `from_dataframe()` and `from_yaml()` use, since their
+entry names come from data rather than from a class body:
 
 ```python
 categories = CatSpec(
@@ -101,8 +101,8 @@ categories.categoricals["CURRENCY"]   # -> pl.Categories
 categories.choices.get("CURRENCY")    # -> the domain pool, or None
 ```
 
-Naming an entry falls back to case variants, so `categories["status"]` -- and a
-column named `status` -- finds an entry named `STATUS`. Convenient, but worth
+Naming an entry falls back to case variants, so `categories["status"]` — and a
+column named `status` — finds an entry named `STATUS`. Convenient, but worth
 knowing about if you have entries differing only in case. The mappings match
 exactly.
 
@@ -184,7 +184,7 @@ categoricals:
 ```
 
 A spec's YAML can point at a registry file, and `FrameSpec.from_yaml` resolves
-it automatically — see [YAML specs](files.md).
+it automatically — see [Specs as files](files.md#sharing-categories-between-files).
 
 Also available: `to_markdown()` for a documentation table, and `to_mermaid()`
 for a class diagram of the registry.

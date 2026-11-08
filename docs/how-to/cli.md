@@ -123,17 +123,17 @@ def test_orders_cartesian_coverage():
     Orders.validate(df)
 ```
 
-Its options -- `--rows`, `--seed`, `--no-cartesian`, `--class` -- are in
+Its options — `--rows`, `--seed`, `--no-cartesian`, `--class` — are in
 the [command-line reference](../reference/cli.md#polspec-test).
 
 ### It will not hand you a test that fails on the spot
 
 `generate()` does not attempt everything `validate()` checks — see
-[Known limitations](../explanation/limitations.md). A spec using `__checks__` or
-`ColSpec.validators` would otherwise generate a test that fails the moment it
-runs, because both wrap arbitrary expressions nothing can be generated to
-satisfy. The generator checks for each and disables the corresponding
-`validate()` flag, with a comment explaining why:
+[Known limitations](../explanation/limitations.md). A spec using `__checks__`,
+`ColSpec.validators` or `pattern` would otherwise get a test that fails the
+moment it runs, since generation cannot satisfy them, and one declaring
+`__rows__` a test of the wrong size. The generator checks for each and turns
+off the matching `validate()` switch, with a comment explaining why:
 
 ```python
 def test_invoices_roundtrip():
@@ -142,9 +142,6 @@ def test_invoices_roundtrip():
     df = Invoices.generate(500, seed=42)
     Invoices.validate(df, checks=False)
 ```
-
-`unique=True` and `__unique_together__` used to be on that list. They are
-generated now, so the generated test validates them like anything else.
 
 A spec with a foreign key referencing *another* spec needs that spec's data
 via `references=`, which the CLI cannot supply on its own — that test is
@@ -230,7 +227,7 @@ outside the directory.
 polspec synthesize customers.parquet -o fake_customers.parquet     -n 1000000 --seed 1 --replace name email --spec fake_customers.yaml
 ```
 
-Profiles the file -- shapes, keys, category frequencies, null rates -- and
+Profiles the file — shapes, keys, category frequencies, null rates — and
 writes a fake one with the same schema, `-n` rows (as many as the source,
 by default). `--replace` names the columns whose values must not be carried
 over; `--sample N` profiles a random sample of N rows; `--spec` writes the
@@ -245,7 +242,7 @@ polspec validate specs.py orders.parquet --class Orders --references Customers=c
 polspec validate orders.yaml orders.csv --json > report.json
 ```
 
-Reads a data file (CSV, Parquet, NDJSON or Arrow IPC), runs
+Reads a data file, in any of the formats `generate` writes, runs
 [`inspect()`](validating.md#findings-as-data-inspect) against the spec, and
 prints the report: the same text `validate()` would raise, or the full
 structured report with `--json`. The exit status is 0 when the data passes
@@ -272,9 +269,9 @@ The keys, and the types of their values, are what
 may be added, and `schema_version` rises if one is ever renamed, removed or
 changes type.
 
-`--output PATH` writes the rows that passed, typed as the spec declares --
+`--output PATH` writes the rows that passed, typed as the spec declares —
 they are validated again with `cast=True`, so the file is one the spec
-accepts -- and `--failing PATH` writes the rows that did not, each once, in
+accepts — and `--failing PATH` writes the rows that did not, each once, in
 the file's order, with a `__polspec_finding` column naming every claim it
 broke, comma-separated. The two files split the input exactly: their rows
 add up to the file's. (In Python, `report.failing_rows(once=True)` is the
@@ -292,12 +289,15 @@ polspec validate orders.py orders.csv --output clean.parquet --failing rejected.
 `--references NAME=PATH` supplies parent data for a foreign key to another
 spec, by that spec's name; repeat it for several. `--allow-extra` and
 `--allow-missing` relax the structural checks; `--strict-dtypes` tightens the
-dtype check. `--skip CHECK` turns off one kind of check, as `CHECK=False`
-does in Python -- `--skip bounds --skip checks` -- and takes any of `rules`,
-`validators`, `unique`, `checks`, `foreign_keys`, `hierarchy`, `order`,
-`pattern` and `bounds`.
+dtype check. `--fill-defaults` fills each defaulted column's nulls, and adds
+it when absent, before checking, as
+[`fill_defaults=True`](validating.md#filling-defaults) does. `--skip CHECK`
+turns off one kind of check, as `CHECK=False` does in Python —
+`--skip bounds --skip checks` — and takes any of `rules`, `validators`,
+`unique`, `checks`, `foreign_keys`, `hierarchy`, `order`, `rows`, `pattern`
+and `bounds`.
 
-A CSV, TSV or JSON file has no date type, so a date arrives as text -- and
+A CSV, TSV or JSON file has no date type, so a date arrives as text — and
 JSON holds a decimal or a duration as text too. The CLI reads each column
 the spec declares as a `Date`, `Datetime`, `Time`, `Decimal` or `Duration`
 as that type when every value in it parses exactly, as
@@ -319,8 +319,8 @@ CLI reads). Every spec with a file is checked, **each seeing the others'
 files as its parents**, as [`Registry.inspect_all`](registry.md#validating-a-related-set)
 does; specs with no file are listed and skipped. The exit status is 1 when
 any report fails; `--json` prints one document with every report keyed by
-spec name under `reports` -- `{"schema_version": 1, "reports": {"Orders":
-{...}}}` -- since a spec may be called anything.
+spec name under `reports` — `{"schema_version": 1, "reports": {"Orders":
+{...}}}` — since a spec may be called anything.
 
 ## `diff` and `drift` — what moved
 
@@ -348,9 +348,9 @@ polspec diff main/orders.yaml pr/orders.yaml --markdown --fail-on breaking
 
 `--strict-dtypes` makes any dtype change breaking, as it does for
 `validate`. `drift` also takes a flag for every other
-[`DriftOptions`](drift.md#options) field -- `--significance`,
+[`DriftOptions`](drift.md#options) field — `--significance`,
 `--null-rate-tolerance`, `--frequency-tolerance`,
-`--distribution-tolerance`, `--no-unseen`, `--max-samples` -- each
+`--distribution-tolerance`, `--no-unseen`, `--max-samples` — each
 defaulting to the option's own default, and `--sample N`, a seeded random
 sample of N rows.
 

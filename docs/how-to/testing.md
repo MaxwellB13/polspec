@@ -213,13 +213,25 @@ positive amount, and a null — the sign/null boundary a naive `amount < 0`
 check is actually at risk of getting wrong — without hand-writing twelve
 rows.
 
-### Forcing a specific case with `ColRule`
+### Forcing a specific case with `fixed=`
 
 Cartesian coverage guarantees signs and combinations exist somewhere in the
 frame; it doesn't put a specific value on a specific row. When a test needs an
-exact scenario — "a wire transfer of exactly zero, paired with this other
-column's exact value" — a `ColRule` pins it deterministically instead of
-filtering generated rows and hoping one matches:
+exact scenario — "a wire transfer of exactly zero" — pin those columns with
+`fixed=` and let everything else be generated, instead of filtering generated
+rows and hoping one matches:
+
+```python
+def test_zero_amount_wire_transfer_is_not_a_refund():
+    df = Payment.generate(3, seed=1, fixed={"method": "wire", "amount": [0, -5, 7]})
+    assert refund_flag(df)["is_refund"].to_list() == [False, True, False]
+```
+
+A pin is a scalar for every row or exactly `n` values, and it must be values
+the column accepts; see [Pinning columns](generating.md#pinning-columns-fixed).
+
+When *every* row of some kind should hold a value, rather than the rows of
+one test, say so in the spec with a `ColRule`:
 
 ```python
 from polspec import ColRule, col
@@ -233,15 +245,14 @@ class PaymentWithForcedCase(FrameSpec):
     )
 
 
-def test_zero_amount_wire_transfer_is_not_a_refund():
+def test_every_wire_transfer_is_zero_and_not_a_refund():
     df = PaymentWithForcedCase.generate(20, seed=1)
     result = refund_flag(df)
     assert not result.filter(pl.col("method") == "wire")["is_refund"].any()
 ```
 
-Every `wire` row is forced to `amount = 0`, while `card` and `cash` still vary
-normally — useful for a boundary the pipeline treats specially and cartesian
-coverage alone wouldn't reliably isolate.
+Every `wire` row is forced to `amount = 0`, while `card` and `cash` still
+vary normally.
 
 ## Generating the test boilerplate
 
@@ -277,6 +288,6 @@ that page describes.
 A seed gives the same frame on every machine, and from 1.0 a minor release
 changes it only to fix output that broke its own spec
 ([Stability](../explanation/stability.md#seeded-output)). Even so, assert
-the properties a test cares about -- shape, referential integrity, which rows
-a stage keeps -- rather than a snapshot of the exact values: a test of what
+the properties a test cares about — shape, referential integrity, which rows
+a stage keeps — rather than a snapshot of the exact values: a test of what
 matters survives a fix, and one of everything does not.

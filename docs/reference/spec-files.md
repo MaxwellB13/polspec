@@ -5,7 +5,7 @@ key by key. [Specs as files](../how-to/files.md) shows the workflow; this is
 the format. A test holds every table here to the reader's own field
 registry, so a key the reader accepts cannot be missing from this page.
 
-Every file starts with `version: 4` -- `polspec.FORMAT_VERSION`, the format
+Every file starts with `version: 4` — `polspec.FORMAT_VERSION`, the format
 version that wrote it. A
 file from an older version is migrated as it is read; one from a newer
 polspec is refused, naming the version it needs. A key the reader does not
@@ -40,7 +40,7 @@ Each key is the `ColSpec` field of the same name; see
 
 | Key | Written as |
 |:--|:--|
-| `dtype` | A dtype -- see [Dtypes](#dtypes) |
+| `dtype` | A dtype — see [Dtypes](#dtypes) |
 | `col_name` | A string |
 | `nullable` | `true` or `false` |
 | `optional` | `true` or `false` |
@@ -54,7 +54,7 @@ Each key is the `ColSpec` field of the same name; see
 | `element_null_probability` | A number from 0 to 1 |
 | `string_length` | `[min, max]` |
 | `list_length` | `[min, max]` |
-| `fields` | Field name to column, for a `Struct` -- or `key` and `value`, for a `Map` |
+| `fields` | Field name to column, for a `Struct` — or `key` and `value`, for a `Map` |
 | `format` | A format's name, such as `email` |
 | `extra_values` | A list of values beside the format's own, each on 1% of the rows; or a mapping of value to share |
 | `pattern` | A regular expression |
@@ -70,7 +70,7 @@ Each key is the `ColSpec` field of the same name; see
 
 | Key | Written as |
 |:--|:--|
-| `when` | A predicate -- see [Predicates](#predicates) |
+| `when` | A predicate — see [Predicates](#predicates) |
 | `choices` | A list of values |
 | `weights` | A list of numbers, one per choice |
 
@@ -132,7 +132,7 @@ and a spec file's `categories:` may name one.
 A dtype with no parameters is its name: `Int8`, `Int16`, `Int32`, `Int64`,
 `Int128`, `UInt8`, `UInt16`, `UInt32`, `UInt64`, `UInt128`, `Float16`,
 `Float32`, `Float64`, `Boolean`, `String`, `Binary`, `Date`, `Time`,
-`Datetime`, `Duration`, `Categorical` and `Null` -- a column of nothing but
+`Datetime`, `Duration`, `Categorical` and `Null` — a column of nothing but
 nulls, which is declared `nullable: true`. One with parameters is a mapping
 of one key:
 
@@ -146,10 +146,10 @@ of one key:
 | `List` | `{List: <dtype>}` |
 | `Array` | `{Array: {inner: <dtype>, width: 3}}` |
 | `Struct` | `{Struct: {field: <dtype>, ...}}` |
-| `Map` | `{Map: {key: <dtype>, value: <dtype>}}` -- Polars 2 only |
+| `Map` | `{Map: {key: <dtype>, value: <dtype>}}` — Polars 2 only |
 
-A bare name a category registry declares -- `STATUS`, or
-`$categories.STATUS` -- is that registry's `Enum` or `Categorical`.
+A bare name a category registry declares — `STATUS`, or
+`$categories.STATUS` — is that registry's `Enum` or `Categorical`.
 
 ## Predicates
 
@@ -175,14 +175,14 @@ col("subtotal")` is written `{ge: [{col: total}, {col: subtotal}]}`.
 ## Times and durations
 
 YAML has forms for numbers, text, dates, datetimes and bytes, and none for a
-time of day or a duration. Wherever a spec file holds one -- a bound, a
-choice, a rule's choice, a predicate's literal -- it is a mapping of one key
+time of day or a duration. Wherever a spec file holds one — a bound, a
+choice, a rule's choice, a predicate's literal — it is a mapping of one key
 saying which it is:
 
 | Value | Written as |
 |:--|:--|
-| `datetime.time(12, 30)` | `{time: "12:30:00"}` -- the ISO form, microseconds included when there are any |
-| `datetime.timedelta(days=1, hours=2)` | `{duration: {days: 1, seconds: 7200, microseconds: 0}}` -- `timedelta`'s own fields; a field left out is `0` |
+| `datetime.time(12, 30)` | `{time: "12:30:00"}` — the ISO form, microseconds included when there are any |
+| `datetime.timedelta(days=1, hours=2)` | `{duration: {days: 1, seconds: 7200, microseconds: 0}}` — `timedelta`'s own fields; a field left out is `0` |
 
 ```yaml
 columns:
@@ -206,10 +206,10 @@ version: a file could not hold a time or a duration at all until 0.13.0.
 | 3 | `hierarchy` |
 | 4 | `nan_probability` |
 
-A key added without changing another's meaning -- `format`, `pattern`,
-`seed_name` -- is not a new version: a file without it reads as before.
-`nan_probability` is, because its absence makes a claim -- a float that does
-not declare it holds no NaN -- that a reader too old to know the key would
+A key added without changing another's meaning — `format`, `pattern`,
+`seed_name` — is not a new version: a file without it reads as before.
+`nan_probability` is, because its absence makes a claim — a float that does
+not declare it holds no NaN — that a reader too old to know the key would
 not check: version 4 has that reader refuse the file by name instead of
 reading it more loosely than it was written. Every file carries the current
 version, so polspec 0.13 and earlier refuse every file 0.14.0 writes.

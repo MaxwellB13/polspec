@@ -2,32 +2,16 @@
 
 A `ColSpec` describes one column. Only `dtype` is required. This page shows
 the fields in use; [ColSpec fields](../reference/colspec-fields.md) is the
-table of all of them -- what each applies to, and what generation and
+table of all of them — what each applies to, and what generation and
 validation do with it.
 
-<!-- docs: skip -->
+Every other field is a keyword, so a declaration reads as a list of claims:
+
 ```python
-ColSpec(
-    dtype,
-    col_name=None,
-    seed_name=None,
-    nullable=False,
-    bounds=None,
-    tags=(),
-    unique=False,
-    null_probability=0.1,
-    string_length=None,
-    list_length=None,
-    fields=None,
-    format=None,
-    pattern=None,
-    distribution=None,
-    distribution_params=None,
-    choices=None,
-    weights=None,
-    rules=(),
-    validators=(),
-)
+import polars as pl
+from polspec import ColSpec
+
+ColSpec(pl.Int64, bounds=(1, None), unique=True, description="The order number.")
 ```
 
 ## Types
@@ -70,12 +54,10 @@ from polspec import ColSpec, FrameSpec
 ColSpec(pl.Int64, nullable=True, null_probability=0.25)   # about a quarter null
 ```
 
-`null_probability` is ignored when `nullable=False`, so switching nullability
-off does not silently leave a stale rate behind.
-
-Writing a rate of your own *without* `nullable=True` warns, though, because
-that is the other way round — it reads as asking for nulls, and the column
-generates none:
+The rate only matters while `nullable=True`, so you can turn nullability off
+without deleting the rate beside it. Setting a rate on a column that is not
+nullable warns, though, since it reads as asking for nulls the column will
+never hold:
 
 <!-- docs: warns -->
 ```python
@@ -84,13 +66,12 @@ ColSpec(pl.Int64, nullable=True, null_probability=0.25)    # about a quarter nul
 ColSpec(pl.Int64)                                          # no nulls, no warning
 ```
 
-Only a rate that cannot be a leftover warns: the default and an explicit
-`0.0` both already agree with `nullable=False`.
+The default rate and an explicit `0.0` never warn.
 
 ### NaN
 
 A float value can be present and still not a number. `nan_probability` says
-how often a *present* value is NaN -- nulls are counted first, and NaN is a
+how often a *present* value is NaN — nulls are counted first, and NaN is a
 share of what is left:
 
 ```python
@@ -98,12 +79,12 @@ ColSpec(pl.Float64, nullable=True, null_probability=0.1, nan_probability=0.05)
 ```
 
 The default, `0`, claims a column holds numbers: validation reports a NaN in
-it as a `nan` finding. NaN is not a value in any other sense -- it sits in no
-range and equals nothing -- so `bounds` and `choices` never judge one; the
+it as a `nan` finding. NaN is not a value in any other sense — it sits in no
+range and equals nothing — so `bounds` and `choices` never judge one; the
 NaN claim does, once. It applies wherever a float value sits: a column, a
 list's elements, a struct's field. A `unique=True` column cannot declare it,
 since no NaN equals another, and a column of any other dtype cannot hold
-one -- a missing value there is a null.
+one — a missing value there is a null.
 
 ## Bounds
 
@@ -122,7 +103,7 @@ or the physical integer the dtype stores.
 ### Decimal bounds
 
 A `Decimal(precision, scale)` column takes its bounds as an `int`, a
-`decimal.Decimal`, or a string read exactly -- the form a spec file writes.
+`decimal.Decimal`, or a string read exactly — the form a spec file writes.
 A float is read through its `repr`, so `0.1` is `0.1`. An endpoint with more
 decimal places than the scale keeps is refused rather than rounded, and one
 the precision cannot hold is refused like any other out-of-range bound:
@@ -144,7 +125,7 @@ Generation draws a Decimal as the integer it physically is and scales it
 back, so the default range with no bounds is the float default
 (`±1,000,000`) or the widest the precision allows, whichever is narrower.
 The draw is 64-bit: bounds needing more than eighteen significant digits
-are refused at `generate()`, and only there -- validation checks the full
+are refused at `generate()`, and only there — validation checks the full
 precision.
 
 ### Open-ended bounds
@@ -174,9 +155,6 @@ ColSpec(pl.Int64, bounds=(None, 0))    # non-positive
     one exception: when the frame needs more distinct values than the
     default range holds, the range widens upward to fit it, rather than
     refusing an ID column its dtype could hold.
-
-    This mirrors how `bounds=None` already behaves rather than adding a third
-    rule.
 
 For "always positive", note that bounds are *inclusive*: use `(1, None)` for
 integers, and either a small floor like `(1e-9, None)` for floats or an
@@ -216,7 +194,7 @@ ColSpec(pl.Boolean, weights=[0.9, 0.1])   # 10% true
 
 Choices are held in the column's own dtype, so a `datetime` choice on a
 `Datetime` column or a `bytes` choice on a `Binary` column stays what it is.
-They must be distinct once cast to that dtype -- `1` and `"1"` on a `String`
+They must be distinct once cast to that dtype — `1` and `"1"` on a `String`
 column are one value:
 
 <!-- docs: raises -->
@@ -255,7 +233,7 @@ required; without it generation makes 0 to 5. An `Array` takes its length
 from the dtype and refuses `list_length`.
 
 `nullable` and `null_probability` describe the list: a null *cell*.
-`element_null_probability` describes what is inside it -- how often an
+`element_null_probability` describes what is inside it — how often an
 element is null:
 
 ```python
@@ -397,25 +375,26 @@ cannot sit beside `choices` or `string_length`, and only a `String` column
 can carry one. See [String formats](formats.md) for what each generates,
 what each accepts, and what none of them promises.
 
-A format can be widened with the values a column holds beside it -- ISO
-countries plus `UK (ISO)`, IPv4 or `NOT AVAILABLE` -- with
+A format can be widened with the values a column holds beside it — ISO
+countries plus `UK (ISO)`, IPv4 or `NOT AVAILABLE` — with
 [`extra_values`](formats.md#extending-a-format-with-extra-values).
 
 ## String patterns
 
-`pattern=` is a regular expression every value must match -- **checked by
+`pattern=` is a regular expression every value must match — **checked by
 validation only**. Generation does not read it: a column with a pattern is
-filled with ordinary random text, so the round trip holds only with
-`pattern=False`, exactly as for `validators`. That is the honest
-half of the split `format=` makes: polspec can check any regex, and can
-generate a curated set.
+filled with ordinary random text, so generated data fails it. Either
+validate generated data with `pattern=False`, or pin the column to values
+that match with [`generate(fixed=)`](generating.md#pinning-columns-fixed).
+polspec can check any regex, but can only generate the shapes it has a
+`format` for.
 
 ```python
 ColSpec(pl.String, pattern=r"^[A-Z]{3}-\d{4}$")     # a SKU shape polspec cannot generate
 ```
 
 Reach for `format` when the shape is one polspec has; reach for `pattern`
-when it is not. The two cannot be combined -- a format already *is* a
+when it is not. The two cannot be combined — a format already *is* a
 pattern with a sampler. A pattern is compiled by Polars' regex engine at
 declaration, so one Polars cannot run (look-around, for instance) is refused
 with the engine's own message rather than failing on the first validation.
@@ -456,9 +435,9 @@ ColSpec(
 ## Uniqueness
 
 `unique=True` declares that values must be distinct. `generate()` draws the
-column as a permutation of everything it could hold -- the integers in its
+column as a permutation of everything it could hold — the integers in its
 bounds, its choices, a grid over a float range, every string its lengths or
-`format` allow -- so the data it produces satisfies it, and a value depends
+`format` allow — so the data it produces satisfies it, and a value depends
 only on its row and the seed. That makes a unique column unique across a
 whole frame however it is produced: `generate_batches`, `scan()` and the
 sinks give the same values `generate()` does.
@@ -490,6 +469,47 @@ Narrow.generate(300, seed=1)
 or `rules`: the first two describe how often a value recurs, which a draw
 without replacement has no room for, and a rule would reintroduce the
 duplicates. Each is refused at declaration rather than quietly ignored.
+
+## Describing a column
+
+`description=` says what a column means, for a reader. `to_markdown()` shows
+it, spec files keep it, and neither generation nor validation reads it:
+
+```python
+ColSpec(pl.Int64, unique=True, description="The order's number, as printed on the invoice.")
+```
+
+A table's own description is `__description__` on a `FrameSpec`, or
+`description=` on a `TableSpec`; see
+[Generated documentation](documenting.md#markdown-data-dictionary).
+
+## Defaults and optional columns
+
+Two fields say what to do when a value, or a whole column, is missing.
+
+`default=` is the value that stands in for a missing one. It is used only
+when you ask: `validate(fill_defaults=True)` fills the column's nulls with
+it before checking, and `missing_cols="add"` adds an absent column holding
+it. Generation does not read it.
+
+```python
+ColSpec(pl.Enum(["open", "closed"]), default="open")
+```
+
+A default has to be a value the column itself accepts — its dtype, bounds,
+choices, format, pattern, lengths and validators — and one that is not is
+refused where it is declared. A `List`, `Array`, `Map` or `Struct` column
+takes no default.
+
+`optional=True` means the column may be absent. A frame without it gives no
+`missing_columns` finding; a frame with it is checked against every claim
+as usual. Generation makes the column like any other.
+
+```python
+ColSpec(pl.String, optional=True)
+```
+
+[Filling defaults](validating.md#filling-defaults) shows both at work.
 
 ## Tags
 
@@ -546,7 +566,7 @@ producing the data it did under the old name. See
 A leading underscore is skipped by the class-body scan, so a column called
 `_id` needs the explicit mapping. A name that matches one of `FrameSpec`'s
 methods (`schema`, `tag`, …) is fine either way: the method keeps working and
-the column is reachable as `Spec.col("schema")` -- see
+the column is reachable as `Spec.col("schema")` — see
 [Specs as values](tablespec.md#column-names-and-method-names).
 
 ```python

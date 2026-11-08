@@ -172,6 +172,15 @@ tools don't generate matching synthetic data for you. `FrameSpec` is meant to
 be small enough to declare once and use for both jobs in a test suite, not to
 replace a data-quality platform watching a production warehouse.
 
+[Patito](https://github.com/JakobGM/patito) is the closest in spirit: a
+Polars frame declared as a Pydantic model, validated against it, and able to
+fill in example rows for a test from the values you give. polspec's
+declaration is not a Pydantic model, and its generation goes further — whole
+frames at volume, from distributions, weights and rules, with foreign keys
+kept across tables — while
+[`generate(fixed=)`](../how-to/generating.md#pinning-columns-fixed) covers
+the give-some-values, fill-the-rest case.
+
 ## What polspec doesn't try to be
 
 Worth being direct about, in the same spirit as the
@@ -181,7 +190,7 @@ Worth being direct about, in the same spirit as the
   addresses out of the box — pair it with Faker for that.
 - **Not a data-quality or monitoring platform.** `drift()` measures a frame
   against its declaration and says what moved, but there are no dashboards,
-  no scheduling, no history kept between runs and no anomaly scoring --
+  no scheduling, no history kept between runs and no anomaly scoring —
   polspec answers when asked.
 - **Not a property-based shrinking engine.** No search, no shrinking —
   `method="cartesian"` is a fixed set of known-important cases, not an

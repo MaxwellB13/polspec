@@ -39,7 +39,7 @@ column derives its own seed from the frame seed and its *name*, and each
 65,536-row chunk from its index, so the same seed gives the same frame
 regardless of how many threads did the work, and adding or reordering columns
 never changes the values of the others. The passes that run after the columns
-are filled -- rules, the hierarchy, foreign keys, composite uniqueness -- are
+are filled — rules, the hierarchy, foreign keys, composite uniqueness — are
 seeded the same way, from the frame seed and a key naming what the pass is
 for, so a column added beside a ruled or foreign-keyed one leaves it alone
 too.
@@ -53,7 +53,7 @@ Omit `seed` and generation is seeded from the clock.
 ### Renaming a column without changing its data
 
 Because a column's seed comes from its name, renaming a column changes the
-values it produces -- which matters when generated frames are snapshots that
+values it produces — which matters when generated frames are snapshots that
 other things are compared against. `seed_name` is the name the seed is
 derived from when it is not the column's own, so a renamed column keeps
 producing the data it did:
@@ -75,12 +75,12 @@ after["state"].equals(before["status"])   # True
 A rename is declared, never guessed: `TableSpec.rename()` does not set
 `seed_name`, and [`diff(renames=)`](drift.md) is told about the same rename
 on the validation side. Two columns of one spec cannot share a seed name, and
-one cannot borrow another column's name -- they would draw identical values,
+one cannot borrow another column's name — they would draw identical values,
 which is what a [rule](constraints.md) is for.
 
 `seed_name` covers the column's passes as well as its values: a ruled
 column renamed with one keeps its rule's draw. What no seed name holds is
-the frame across polspec *versions* -- see
+the frame across polspec *versions* — see
 [Stability](../explanation/stability.md#seeded-output).
 
 ## Pinning columns — `fixed=`
@@ -101,13 +101,13 @@ gives `"GBP"`. No other column moves, since each is seeded by its own name.
 A pin is held to the promise the rest of `generate()` makes, that its output
 validates:
 
-- Its values must be ones the column accepts -- dtype, nullability, bounds,
+- Its values must be ones the column accepts — dtype, nullability, bounds,
   choices, format, pattern, lengths, `unique` and the column's validators.
   Values are cast strictly, so `1.5` on an `Int64` is refused rather than
   rounded. This makes a pin the way to fill a `pattern` column, which
   generation cannot.
-- A column a pass writes -- a rule's, a foreign key's, a hierarchy's, a
-  composite key's -- cannot be pinned; the error names the pass. A column a
+- A column a pass writes — a rule's, a foreign key's, a hierarchy's, a
+  composite key's — cannot be pinned; the error names the pass. A column a
   pass only reads can.
 
 Each refusal is a `GenerationError` naming the column. With `order_by`,
@@ -174,7 +174,7 @@ INFO: 1,000,000 rows, seed=100, batches chosen by polars
 ```
 
 Polars 1 gives a Python source nowhere to put a name, so there the header
-stays `PYTHON SCAN` -- polspec asks `register_io_source` what it accepts and
+stays `PYTHON SCAN` — polspec asks `register_io_source` what it accepts and
 passes the labels only where they are taken.
 
 `Registry.scan_all()` is the same for a set of specs: parents are generated
@@ -224,17 +224,17 @@ for batch in Orders.generate_batches(10_000_000, batch_size=250_000, seed=1):
 
 Each batch is a **window onto the one frame the seed describes**: a column
 no pass rewrites holds, batch by batch, exactly the rows
-`Orders.generate(n, seed=1)` would, whatever `batch_size` is -- so a stream
+`Orders.generate(n, seed=1)` would, whatever `batch_size` is — so a stream
 written at one batch size and re-read at another is the same data, and the
 third batch can be checked against `generate(n).slice(...)`. What is drawn
 per batch instead, deterministic but not row for row the whole frame's, is
 a column with rules, a foreign key, a composite key, and the elements of a
-`List`, `Array` or `Map` column (a `List`'s lengths are a window) -- each
+`List`, `Array` or `Map` column (a `List`'s lengths are a window) — each
 batch drawing its elements from a seed of its own. A `unique=True` column is a window
 too: its values are a permutation of its value space, unique across every
 batch.
 
-A batch smaller than 65,536 rows -- the engine's chunk -- costs up to one
+A batch smaller than 65,536 rows — the engine's chunk — costs up to one
 chunk of extra draws per batch, because a window that starts mid-chunk fills
 the chunk from its start and slices the head off. Batches of a chunk or
 more cost nothing extra.

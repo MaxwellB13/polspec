@@ -52,8 +52,9 @@ production will reject.
 - **Rules and invariants**
 
     Conditional values, single-column validators, multi-column checks,
-    composite uniqueness, the order rows come in, foreign keys between
-    specs, and parent/child hierarchies with a bounded depth.
+    composite uniqueness, the order rows come in, how many rows a table
+    holds, foreign keys between specs, and parent/child hierarchies with a
+    bounded depth.
 
     [Constraints](how-to/constraints.md) ·
     [Hierarchies](how-to/hierarchies.md)
@@ -63,31 +64,33 @@ production will reject.
     `validate()` raises on any breach; `inspect()` returns every finding as
     data, with the offending rows a filter away. `read()` loads a data file
     in the spec's terms first, parsing dates, decimals and durations that
-    arrived as text.
+    arrived as text, and declared defaults can fill what is missing.
 
     [Validating data](how-to/validating.md)
 
 - **Data on demand**
 
-    Random or coverage-guaranteeing generation, reproducible seeds, and a
-    `LazyFrame` that generates only the columns and rows a plan asks for —
-    streaming straight to Parquet, CSV, Arrow IPC or NDJSON.
+    Random or coverage-guaranteeing generation, reproducible seeds, columns
+    pinned to the values a test needs, and a `LazyFrame` that generates only
+    the columns and rows a plan asks for — streaming straight to Parquet,
+    CSV, Arrow IPC or NDJSON.
 
     [Generating data](how-to/generating.md)
 
 - **Specs from elsewhere**
 
     Infer a spec by profiling existing data, load one from YAML so
-    non-Python tooling can read it too, and keep a set of related specs in
-    one `Registry` that generates and validates them together.
+    non-Python tooling can read it too, derive one by joining two, and keep
+    a set of related specs in one `Registry` that generates and validates
+    them together.
 
     [Infer a spec](how-to/profiling.md) · [Specs as files](how-to/files.md) ·
     [Multiple specs](how-to/registry.md)
 
 - **Fake data from real data**
 
-    `polspec.synthesize` turns a real dataset -- a frame, a lazy scan or a
-    file -- into a fake one with the same schema, shapes, frequencies and
+    `polspec.synthesize` turns a real dataset — a frame, a lazy scan or a
+    file — into a fake one with the same schema, shapes, frequencies and
     keys, and none of its rows or sensitive values.
 
     [Fake data from real data](how-to/synthesizing.md)
@@ -118,9 +121,13 @@ pip install polspec      # alternative
 
 The generator is a compiled Rust extension, but wheels are published for Linux
 (x86_64, aarch64), macOS (Intel and Apple silicon) and Windows (x86_64), so
-installing needs no Rust toolchain. At runtime polspec needs Polars --
-any release from 1.39, Polars 2 included (on Python 3.15, Polars 2), generating the same data for the
-same seed on each, and on every operating system -- and PyYAML, and on Windows `tzdata` for time-zone data.
+installing needs no Rust toolchain. At runtime polspec needs:
+
+- **Polars**, any release from 1.39, Polars 2 included (Python 3.15 needs
+  Polars 2). The same seed generates the same data on each, and on every
+  operating system.
+- **PyYAML**.
+- **tzdata**, on Windows only, for time-zone data.
 
 Building from a checkout — which does need Rust and
 [maturin](https://www.maturin.rs) — is covered in
@@ -139,5 +146,5 @@ the benchmark numbers behind the speed claim.
 The documentation is published in the [llms.txt](https://llmstxt.org) format:
 [`/llms.txt`](https://maxwellb13.github.io/polspec/llms.txt) indexes every
 page, and [`/llms-full.txt`](https://maxwellb13.github.io/polspec/llms-full.txt)
-carries the full text of all of them -- including the API reference, expanded
-to signatures and docstrings -- in one file.
+carries the full text of all of them — including the API reference, expanded
+to signatures and docstrings — in one file.

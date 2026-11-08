@@ -124,10 +124,11 @@ Profiled = FrameSpec.from_dataframe(existing_df, weights=True)
 print(Profiled.to_markdown())
 ```
 
-It infers nullability and observed null rates, narrows low-cardinality strings
-whose values repeat to `Enum` -- a column of distinct names stays text --
-and — with `weights=True` — records how often each category actually
-occurred, so regenerated data keeps the observed mix rather than a uniform one.
+It infers nullability and the observed null rates, and turns a text column
+whose few values repeat into an `Enum` of them; a column of distinct names
+stays text. With `weights=True` it also records how often each category
+occurred, so regenerated data keeps the observed mix rather than a uniform
+one.
 
 Treat the result as a first draft to edit, not a finished contract: it
 describes the sample it saw, which may be narrower than the rule you actually

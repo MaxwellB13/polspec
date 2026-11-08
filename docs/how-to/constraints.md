@@ -1,7 +1,8 @@
 # Constraints
 
-Beyond the shape of a single value, a spec can assert relationships. They fall
-into two groups worth keeping straight:
+Beyond the shape of a single value, a spec can assert relationships between
+values, rows and tables. Most are kept by generation as well as checked by
+validation; a few are only checked:
 
 | | Generated | Validated |
 |:--|:--:|:--:|
@@ -9,11 +10,15 @@ into two groups worth keeping straight:
 | `ForeignKey` | yes, when given parent data | yes |
 | `unique=True`, `__unique_together__` | yes | yes |
 | `__order_by__` | yes | yes |
+| `__hierarchy__` — see [Hierarchies](hierarchies.md) | yes | yes |
+| `__rows__` | no: `generate()` makes the rows asked for | yes |
 | `ColSpec.validators`, `__checks__` | no | yes |
 
-The last row is validation-only by design: both wrap arbitrary Polars
-expressions, and nothing can produce data satisfying an arbitrary predicate.
-Generation makes no attempt, and that boundary is pinned down by tests.
+Validators and checks are validation-only by design: both wrap arbitrary
+expressions, and nothing can produce data that satisfies an arbitrary
+predicate. Validate generated data with `validators=False` or
+`checks=False`, or [pin](generating.md#pinning-columns-fixed) a validated
+column to values you know pass.
 
 ## Writing conditions — `col()`
 
@@ -115,8 +120,11 @@ its own column:
 
 ```python
 class Accounts(FrameSpec):
-    email = ColSpec(pl.String, validators=[pl.col("email").str.contains("@")])
+    email = ColSpec(pl.String, validators=[col("email").str.contains("@")])
 ```
+
+A raw `pl.Expr` works too, for anything `col()` cannot say, but it cannot be
+written to a spec file.
 
 Wrap one in a `Check` to name it, describe it, or change null handling:
 
@@ -127,7 +135,7 @@ ColSpec(
     pl.Float64,
     validators=[
         Check(
-            pl.col("score") <= 100,
+            col("score") <= 100,
             name="score_ceiling",
             description="Scores are a percentage",
         )
@@ -146,7 +154,7 @@ class Invoices(FrameSpec):
     total    = ColSpec(pl.Float64, bounds=(0.0, 2000.0))
 
     __checks__ = [
-        Check(pl.col("total") >= pl.col("subtotal"), name="total_covers_subtotal"),
+        Check(col("total") >= col("subtotal"), name="total_covers_subtotal"),
     ]
 ```
 
@@ -204,7 +212,7 @@ fails its own validation.
 ## Row order — `__order_by__`
 
 An event log, a time series, a table a window function or `join_asof` reads
--- each comes in an order. `__order_by__` declares it, as
+— each comes in an order. `__order_by__` declares it, as
 `DataFrame.sort(by)` takes it: the first column is the major key.
 
 ```python
@@ -224,7 +232,7 @@ Events.validate(events)
 
 One column, `["ts"]`, is one order across the frame; listing a key first, as
 here, is an order within each key. `__descending__` turns a column high to
-low -- one bool for every column, or one per column:
+low — one bool for every column, or one per column:
 
 ```python
 class Latest(FrameSpec):
@@ -244,7 +252,7 @@ belongs before the one above it, under the finding code `order`; skip it
 with `order=False`, or `--skip order` on the command line.
 
 An order is a property of the whole frame, so the streaming verbs refuse an
-ordered spec, as they refuse a hierarchy -- write `generate()`'s frame out
+ordered spec, as they refuse a hierarchy — write `generate()`'s frame out
 instead:
 
 <!-- docs: raises -->
