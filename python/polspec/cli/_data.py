@@ -74,6 +74,7 @@ def _validation_options(args: argparse.Namespace) -> dict[str, Any]:
         "extra_cols": "allow" if args.allow_extra else "raise",
         "missing_cols": "allow" if args.allow_missing else "raise",
         "strict_dtypes": args.strict_dtypes,
+        "fill_defaults": args.fill_defaults,
         **_skipped(args),
     }
 

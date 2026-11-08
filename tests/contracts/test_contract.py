@@ -127,13 +127,16 @@ RICH = TableSpec(
             pl.String, format="iso_country", extra_values={"UK (ISO)": 0.02}
         ),
         "status": ColSpec(
-            pl.Enum(["NEW", "SENT", "LOST"]), weights=[0.5, 0.45, 0.05], tags="state"
+            pl.Enum(["NEW", "SENT", "LOST"]),
+            weights=[0.5, 0.45, 0.05],
+            tags="state",
+            default="NEW",
         ),
         "weight_kg": ColSpec(
             pl.Decimal(8, 2), bounds=(0, 999), nullable=True, null_probability=0.1
         ),
         "ratio": ColSpec(pl.Float32, bounds=(0.0, 1.0), nan_probability=0.01),
-        "sent_at": ColSpec(pl.Datetime("us", "UTC"), nullable=True),
+        "sent_at": ColSpec(pl.Datetime("us", "UTC"), nullable=True, optional=True),
         "labels": ColSpec(pl.List(pl.String), list_length=(0, 3), string_length=(1, 8)),
         "dims": ColSpec(
             pl.Struct({"w": pl.Int16, "h": pl.Int16}),

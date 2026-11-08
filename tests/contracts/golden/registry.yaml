@@ -29,6 +29,7 @@ specs:
           - NEW
           - SENT
           - LOST
+        default: NEW
         tags: state
         weights:
         - 0.5
@@ -55,6 +56,7 @@ specs:
             time_unit: us
             time_zone: UTC
         nullable: true
+        optional: true
       labels:
         dtype:
           List: String

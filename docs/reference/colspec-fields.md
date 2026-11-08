@@ -18,6 +18,8 @@ and `null_probability` describe the cell itself.
 | `col_name` | `col_name` | a `FrameSpec` attribute | names the column instead of the attribute | the column is looked up by this name |
 | `seed_name` | `seed_name` | every column | seeds the column, and its rules, from this name instead of its own | -- |
 | `nullable` | `nullable` | every column | allows nulls, at `null_probability` | a null is a `nullability` finding unless this is set |
+| `optional` | `optional` | every column | -- (generated like any other) | an absent column is no `missing_columns` finding; present, it is checked as usual |
+| `default` | `default` | scalar columns | -- | with `fill_defaults=True`, fills the column's nulls, and the column when absent; `missing_cols="add"` adds it holding this |
 | `bounds` | `bounds` | numeric and temporal values | draws within them; an open end falls back to the default range | a value outside a declared end is a `bounds` finding |
 | `tags` | `tags` | every column | -- | -- (selects columns: `spec.tag(...)`) |
 | `description` | `description` | every column | -- | -- (`to_markdown` shows it) |

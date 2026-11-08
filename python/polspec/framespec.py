@@ -860,10 +860,9 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             spec, its FrameSpec class, or its name.
         **keywords
             The options one at a time, as `ValidationKeywords` lists them:
-            `extra_cols`, `missing_cols`, `strict_dtypes`, `cast` and
-            `streaming`, and each check switch with `validate_` in front of
-            the `ValidationOptions` field it sets (`unique`,
-            `order`, ...).
+            `extra_cols`, `missing_cols`, `strict_dtypes`, `cast`,
+            `fill_defaults` and `streaming`, and each check switch by the
+            `ValidationOptions` field it sets (`unique`, `order`, ...).
 
         Notes
         -----

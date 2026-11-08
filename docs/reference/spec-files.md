@@ -43,6 +43,8 @@ Each key is the `ColSpec` field of the same name; see
 | `dtype` | A dtype -- see [Dtypes](#dtypes) |
 | `col_name` | A string |
 | `nullable` | `true` or `false` |
+| `optional` | `true` or `false` |
+| `default` | A value, written as a choice is |
 | `bounds` | `[min, max]`; either end may be `null`. A `Decimal`'s fractional ends are strings, such as `'1.50'`, so they read back exactly; a time or a duration is [tagged](#times-and-durations) |
 | `tags` | A string, or a list of them |
 | `description` | A string |

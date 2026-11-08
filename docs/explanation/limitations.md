@@ -150,6 +150,10 @@ pinned by a passing test. A NaN, by contrast, is recorded as the column's
   to the same half.
 - **`missing_cols="add"` can produce a frame that fails re-validation**, since
   columns are added after validation runs, including for non-nullable columns.
+  A column with a `default` is added holding it; one without is added as
+  nulls. `fill_defaults=True` fills before validation instead.
+- **A `List`, `Array`, `Map` or `Struct` column takes no `default`.** A
+  default is one scalar value; a struct field takes none either.
 - **A `Hierarchy` cannot be batched or streamed.** `generate_batches` and
   every `sink_*` refuse a spec that declares one, because each batch is
   generated independently and a forest is a property of the whole frame.

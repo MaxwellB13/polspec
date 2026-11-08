@@ -257,6 +257,14 @@ def _add_validate_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Require exact dtypes rather than compatible ones",
     )
     validate.add_argument(
+        "--fill-defaults",
+        action="store_true",
+        help=(
+            "Fill each defaulted column's nulls with its default, and add it "
+            "when absent, before checking; --output writes the filled rows"
+        ),
+    )
+    validate.add_argument(
         "--skip",
         action="append",
         choices=SWITCHES,
