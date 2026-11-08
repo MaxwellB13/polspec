@@ -1,12 +1,25 @@
 # Changelog
 
 All notable changes to polspec are recorded here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Until 1.0, minor
-versions may break the Python API, the YAML format, and the values a given
-seed produces; see
-[Roadmap and stability](https://maxwellb13.github.io/polspec/explanation/roadmap/).
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). From 1.0, the
+public API, the spec-file format, seeded output, the command line and the
+finding and drift codes change only as the
+[Stability](https://maxwellb13.github.io/polspec/explanation/stability/)
+page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
+
+## [1.1.0] - 2026-11-08
+
+**A spec says more.** A table or column can say what it means, how many
+rows a table holds, what fills a missing value and which columns may be
+absent; a generated frame can be pinned to the values a test needs; and a
+join of two specs is a spec. Everything is additive: code that runs on 1.0
+runs unchanged, **no seeded output changes**, and nothing is deprecated.
+
+The spec-file format stays at version 4. A file that uses none of the new
+keys reads in 1.0 as before; one that uses `description`, `rows`, `default`
+or `optional` is refused by 1.0, which names the key it does not know.
 
 ### Added
 
@@ -42,6 +55,15 @@ seed produces; see
   left spec but for its row count and order.
 - `TableSpec.prefix()` and `TableSpec.suffix()`: every column renamed, as
   `rename` renames.
+- The finding code `row_count`, added in a minor release as the
+  [Stability](https://maxwellb13.github.io/polspec/explanation/stability/#finding-and-drift-codes)
+  page allows.
+
+### Changed
+
+- The documentation was reviewed page by page: sample outputs match the
+  specs each page declares, the new fields are covered where a reader looks
+  for them, and the site renders a dash as a dash.
 
 ## [1.0.0] - 2026-10-22
 
@@ -2816,7 +2838,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/MaxwellB13/polspec/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/MaxwellB13/polspec/compare/v0.23.0...v1.0.0
 [0.23.0]: https://github.com/MaxwellB13/polspec/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/MaxwellB13/polspec/compare/v0.21.1...v0.22.0

@@ -28,7 +28,9 @@ A spec file any 1.x release writes, every later 1.x release reads, as the
 same spec. Each file carries a format `version:`. A new version is added
 only with a migration from every earlier one, so an old file is read as
 what it declared. A file written by a newer polspec than the reader is
-refused by name rather than misread.
+refused rather than misread: one of a newer format version by that version,
+and one that uses a key the reader does not know — `default`, say, read by
+1.0 — by the key.
 
 *Held by* `tests/serialization/test_migrations.py`, which reads a file of
 every earlier version, and `tests/contracts/test_contract.py`, which holds

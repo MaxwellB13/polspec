@@ -59,11 +59,13 @@ Orders.validate(orders)                        # ~27 ms; raises on any breach
   distributions, formats such as `email` and `uuid4`, uniqueness, nulls and
   NaNs are all declared per column.
 - **Tables that relate.** Foreign keys within and across specs, conditional
-  rules, composite keys and hierarchies are generated to hold, and validated.
+  rules, composite keys, row order and hierarchies are generated to hold, and
+  validated; a row count is validated. Joining two specs gives the spec of
+  the joined frame.
   Checks written as Polars expressions are enforced at validation.
 - **Validation as data.** `inspect()` returns every finding at once, with the
   offending rows a lazy filter away, and splits a frame into what passed and
-  what to quarantine.
+  what to quarantine. Declared defaults can fill what is missing first.
 - **Learn from real data.** `profile()` turns a frame into a spec, finding
   formats, frequencies, distributions and null rates; `synthesize()` makes a
   stand-in with the same shape.
