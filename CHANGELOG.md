@@ -9,6 +9,20 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+### Added
+
+- **`assert_valid(df, spec, **options)`**: `validate()` as an assertion,
+  for the end of a test. It returns the validated frame, so it chains, and
+  on a failure raises `AssertionError` -- a failed test in any runner, not
+  an error -- whose message names the spec, each finding by its key, and
+  up to ten failing rows as a table.
+- **`check_pipeline(fn, inputs, output, *, n=, seed=)`**: a pipeline test
+  in one call. Each input is a spec to generate or a frame to pass; the
+  specs are generated together, so a foreign key between inputs lines up,
+  from a seed that defaults to 0. It calls `fn` with them, checks the
+  result against `output` with `assert_valid`, and returns the result and
+  the inputs.
+
 ## [1.2.0] - 2026-11-14
 
 **Quicker to write, quicker to run.** Data read as text profiles and

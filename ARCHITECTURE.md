@@ -40,6 +40,7 @@ they can change in any release, so code outside polspec should use only
 | `formats` | Named string formats -- what each looks like, said once for generation and validation |
 | `hierarchy` | `Hierarchy` -- a self-referencing link table, declared |
 | `compare` | `diff` and `drift`: what changed between two specs, or between a spec and data. `fields.py` holds one comparator per `ColSpec` field, `data.py` measures a frame in the declaration's terms |
+| `asserting` | `assert_valid` and `check_pipeline`: `validate()` as an assertion whose message holds the findings and the first failing rows, and a pipeline test -- inputs generated together through a `Registry`, the call, the check -- in one call |
 | `sizing` | `estimated_size`: a frame's memory, read off the declaration |
 | `reading` | `read`: a data file in a spec's terms -- the reader chosen by extension, a declared type the file could not hold (a date, decimal or duration as text; an array as a list) read as declared. The CLI reads through the same table |
 | `catspec` | `CatSpec` — a shared registry of enums and categoricals, as a value, plus the metaclass that builds one from a class body (the same split as `tablespec`/`framespec`) |
