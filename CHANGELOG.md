@@ -143,6 +143,12 @@ them.
   deep-copied. Each now pickles and deep-copies, and a report still names
   its rows afterwards. Their read-only mappings print as dicts.
 
+- **Validating a number too large for a `Decimal` with choices crashed.**
+  Asking whether a float or integer standing in for a `Decimal(p, s)` was
+  one of its `choices`, or a rule's, cast it to the `Decimal`; Polars raises
+  on a cast past the precision, so `inspect()` and `validate()` raised
+  `ComputeError` where they should have reported the value. It is now the
+  `dtype` finding it is without choices.
 - **`profile()` could refuse its own hostname column.** A dot is what makes
   a column hostnames to the profiler, so a dotless value such as
   `localhost` or `0` was kept as an `extra_values` stand-in. But the
