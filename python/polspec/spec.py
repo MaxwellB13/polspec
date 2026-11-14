@@ -6,19 +6,20 @@ Internal: not part of the public API.
 from __future__ import annotations
 
 import dataclasses
+import datetime as dt
 import decimal
 import math
 import warnings
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import KW_ONLY, dataclass
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeGuard
 
 import polars as pl
 
 from polspec import frames
-from polspec.bound import Bound, coerce_bound
+from polspec.bound import Bound, coerce_bound, is_pair
 from polspec.check import Check, failure_mask
 from polspec.constants import (
     DEFAULT_EXTRA_SHARE,
@@ -55,6 +56,52 @@ def check_description(description: Any, owner: str) -> None:
         raise SpecError(
             f"{owner}.description must be a non-empty string, got {description!r}"
         )
+
+
+def is_dtype(value: object) -> TypeGuard[pl.DataType | type[pl.DataType]]:
+    """Whether `value` is a Polars dtype: an instance, or a class."""
+    return isinstance(value, pl.DataType) or (
+        isinstance(value, type) and issubclass(value, pl.DataType)
+    )
+
+
+# The Polars dtype each Python type a column is often declared with means.
+_POLARS_SPELLING: dict[object, str] = {
+    int: "pl.Int64",
+    float: "pl.Float64",
+    str: "pl.String",
+    bool: "pl.Boolean",
+    bytes: "pl.Binary",
+    dt.date: "pl.Date",
+    dt.datetime: "pl.Datetime",
+    dt.time: "pl.Time",
+    dt.timedelta: "pl.Duration",
+    decimal.Decimal: "pl.Decimal",
+}
+
+
+def _not_a_dtype(value: object) -> str:
+    """Why `value` cannot be a column's dtype, and its Polars spelling
+    where there is an obvious one."""
+    if value is None:
+        return "ColSpec needs a dtype, such as pl.Int64."
+    if isinstance(value, (Mapping, list, tuple, set)):
+        # The values a column holds, written where its dtype goes.
+        values = list(value)
+        shares = (
+            f", weights={list(value.values())!r}" if isinstance(value, Mapping) else ""
+        )
+        return (
+            f"ColSpec.dtype must be a Polars dtype, got the values {values!r}: for a "
+            f"column of them, use ColSpec(pl.Enum({values!r}){shares})."
+        )
+    spelling = _POLARS_SPELLING.get(value) if isinstance(value, type) else None
+    if spelling is None and isinstance(value, str):
+        named = getattr(pl, value, None)
+        spelling = f"pl.{value}" if is_dtype(named) else None
+    shown = getattr(value, "__name__", None) or repr(value)
+    suggestion = f"use {spelling}" if spelling else "use one such as pl.Int64"
+    return f"ColSpec.dtype must be a Polars dtype, got {shown}: {suggestion}."
 
 
 def column_kind(dtype: pl.DataType) -> str:
@@ -679,6 +726,8 @@ class ColSpec:
     def _normalize_dtype(self) -> None:
         """Instantiates a dtype passed as a class, so `pl.Int64` means `pl.Int64()`."""
         raw: Any = self.dtype
+        if not is_dtype(raw):
+            raise SpecError(_not_a_dtype(raw))
         if isinstance(raw, type) and issubclass(raw, pl.DataType):
             with suppress(TypeError):
                 object.__setattr__(self, "dtype", raw())
@@ -699,11 +748,20 @@ class ColSpec:
     def _normalize_ranges(self) -> None:
         """Coerces `bounds` and `string_length` to `Bound`, rejecting open lengths."""
         raw: Any = self.bounds
+        if raw is not None and not isinstance(raw, Bound) and not is_pair(raw):
+            raise SpecError(f"ColSpec.bounds must be a (min, max) pair, got {raw!r}")
         if raw is not None and isinstance(self.value_dtype, pl.Decimal):
             raw = self._decimal_endpoints(raw, self.value_dtype)
+        if raw is not None:
+            ends = (raw.min, raw.max) if isinstance(raw, Bound) else tuple(raw)
+            raw = self._temporal_endpoints(*ends)
         object.__setattr__(self, "bounds", coerce_bound(raw))
-        object.__setattr__(self, "string_length", coerce_bound(self.string_length))
-        object.__setattr__(self, "list_length", coerce_bound(self.list_length))
+        object.__setattr__(
+            self, "string_length", coerce_bound(self.string_length, "string_length")
+        )
+        object.__setattr__(
+            self, "list_length", coerce_bound(self.list_length, "list_length")
+        )
         if self.fields is not None:
             object.__setattr__(self, "fields", MappingProxyType(dict(self.fields)))
         # One internal representation for "unconstrained", so every downstream
@@ -722,6 +780,53 @@ class ColSpec:
                 f"{self.list_length!r}. An open end (None) is supported on "
                 "ColSpec.bounds only."
             )
+
+    def _temporal_endpoints(self, low: Any, high: Any) -> tuple[Any, Any]:
+        """The endpoints with each one written as text read as the value it
+        spells, on a column whose values are dates, datetimes or times -- as
+        a hand-written spec file holds them -- and text anywhere else
+        refused. A `Decimal`'s text was read already.
+
+        A `datetime` on a `Date` column is refused by name: Python counts a
+        datetime as a date, and it would otherwise be reported as outside the
+        range a Date can represent.
+        """
+        dtype = self.value_dtype
+        readers: dict[type, Callable[[str], Any]] = {
+            pl.Date: dt.date.fromisoformat,
+            pl.Datetime: dt.datetime.fromisoformat,
+            pl.Time: dt.time.fromisoformat,
+        }
+        read = next((r for kind, r in readers.items() if dtype == kind), None)
+        ends: list[Any] = []
+        for label, endpoint in (("min", low), ("max", high)):
+            if dtype == pl.Date and isinstance(endpoint, dt.datetime):
+                raise SpecError(
+                    f"ColSpec.bounds {label} ({endpoint!r}) is a datetime, and a "
+                    "Date column's bounds are dates: use its .date(), or declare "
+                    "a Datetime column."
+                )
+            if not isinstance(endpoint, str) or isinstance(dtype, pl.Decimal):
+                ends.append(endpoint)
+                continue
+            if read is None:
+                hint = (
+                    " Write a timedelta, or {duration: {days: ...}} in a spec file."
+                    if isinstance(dtype, pl.Duration)
+                    else ""
+                )
+                raise SpecError(
+                    f"ColSpec.bounds {label} ({endpoint!r}) is text; the bounds "
+                    f"of a {dtype!r} column are its own values.{hint}"
+                )
+            try:
+                ends.append(read(endpoint))
+            except ValueError as exc:
+                raise SpecError(
+                    f"ColSpec.bounds {label} ({endpoint!r}) is not an ISO "
+                    f"{type(dtype).__name__.lower()} a {dtype!r} column can read"
+                ) from exc
+        return ends[0], ends[1]
 
     @staticmethod
     def _decimal_endpoints(raw: Any, dtype: pl.Decimal) -> tuple[Any, Any]:

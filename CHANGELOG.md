@@ -29,6 +29,13 @@ page promises; before 1.0, a minor version could break any of them.
   with a value that does not parse stays text, and its `dtype` finding now
   counts those values and gives some as samples; `polspec validate` always
   reports them so.
+- **A bare dtype is a column.** `opened = pl.Date` in a class body, a dtype
+  in `__columns__` or in `TableSpec(columns=...)`, and `opened: Date` in a
+  spec file each mean `ColSpec` of that dtype. Spec files are still written
+  in the long form, which 1.0 and 1.1 read.
+- **Dates and times in bounds may be ISO text:**
+  `bounds=("2020-01-01", None)` on a `Date`, `Datetime` or `Time` column is
+  read as the date it spells, where it is declared.
 
 ### Changed
 
@@ -41,6 +48,31 @@ page promises; before 1.0, a minor version could break any of them.
   same way.
 
 ### Fixed
+
+Four declarations that never worked now fail where they are written, with a
+message saying why. A class or spec that hits one did not declare what it
+said, so each now raises `SpecError` at import where before it failed later,
+or silently declared less:
+
+- **A dtype that is not a Polars one.** `ColSpec(int)` or `ColSpec("Int64")`
+  failed on first use with an unrelated `AttributeError`. It is refused
+  with the Polars spelling: `use pl.Int64`.
+- **Text in the bounds of a date, datetime or time column** was kept as text,
+  and validating against it raised on Polars 2, which no longer casts text
+  to a date. It is read as the value it spells, and text that is not ISO,
+  or text on any other column but a `Decimal`, is refused. A `datetime` on
+  a `Date` column is refused as one, not as outside the range a `Date` holds.
+- **Class-body slips.** A trailing comma after `ColSpec(...)`, a `Check`,
+  `ForeignKey`, `Hierarchy` or `ColRule` under a name polspec does not
+  read, and a misspelt declaration dunder (`__unique_togther__`, `__check__`)
+  each built a spec without what they declared. Each is refused, a misspelt
+  dunder with the one meant.
+- **A range that is not a pair.** `bounds=(5,)` raised `ValueError: not
+  enough values to unpack`; `bounds`, `string_length` and `list_length` now
+  say they must be a `(min, max)` pair.
+
+An unknown dtype name in a spec file names the closest known one, or lists
+them.
 
 - **`profile()` could refuse its own hostname column.** A dot is what makes
   a column hostnames to the profiler, so a dotless value such as

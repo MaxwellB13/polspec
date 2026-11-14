@@ -12,6 +12,7 @@ Internal: not part of the public API.
 
 from __future__ import annotations
 
+import difflib
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
@@ -320,5 +321,14 @@ def dtype_from_data(value: Any, categories: CatSpec | None = None) -> DtypeLike:
         )
     dtype = NAME_TO_DTYPE.get(value) or _from_registry(value, categories)
     if dtype is None:
-        raise SerializationError(f"Unrecognized dtype name in YAML: {value!r}")
+        known = sorted(NAME_TO_DTYPE, key=str.lower)
+        close = difflib.get_close_matches(value, known, n=1, cutoff=0.6)
+        hint = (
+            f" Did you mean {close[0]!r}?"
+            if close
+            else f" Known names: {', '.join(known)}."
+        )
+        raise SerializationError(
+            f"Unrecognized dtype name in a spec file: {value!r}.{hint}"
+        )
     return dtype
