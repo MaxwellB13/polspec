@@ -33,10 +33,9 @@ from polspec.profiler import (
     ProfileKeywords,
     ProfileOptions,
     SynthesizeKeywords,
-    profile_columns,
     profile_options,
+    profiled_table,
 )
-from polspec.profiler import detect_order as detect_order_of
 from polspec.reading import read_file
 from polspec.tablespec import TableSpec
 
@@ -66,7 +65,8 @@ def profile(
         What to infer and how finely to write it -- or pass its fields as
         keywords instead: `replace`, `sample`, `seed`, `max_unique_enum`,
         `formats`, `weights`, `shape`, `detect_unique`, `calculate_bounds`,
-        `detect_order`, `round_bounds`, `round_rates`. See `ProfileOptions`.
+        `detect_order`, `round_bounds`, `round_rates`, `parse_text`. See
+        `ProfileOptions`.
 
     Returns
     -------
@@ -76,12 +76,7 @@ def profile(
     """
     opts = profile_options(options, keywords)
     frame, _ = _load(source, opts.sample, opts.seed)
-    columns = profile_columns(frame, opts)
-    order = detect_order_of(frame) if opts.detect_order else None
-    if order is None:
-        return TableSpec(name, columns)
-    order_by, descending = order
-    return TableSpec(name, columns, order_by=order_by, descending=descending)
+    return profiled_table(frame, opts, name)
 
 
 def synthesize(
@@ -103,7 +98,8 @@ def synthesize(
 
     `options` -- or its fields as keywords -- is how `source` is profiled:
     every `ProfileOptions` switch, `replace` and `sample` among them. See
-    `profile`.
+    `profile`. With `parse_text`, a text column read as a number, flag or
+    date is generated as one, so the result's dtype is the parsed one there.
 
     `seed` seeds the generation, and the sample and fitting behind it, so the
     same source and seed give the same frame. To look at, edit or keep the
@@ -138,14 +134,25 @@ def synthesized(
     spec = _room_for_keys(spec, rows)
     fake = generate(spec, rows, seed=seed)
     # The profile narrows a low-cardinality text column to an Enum of its
-    # values; a stand-in for the source has the source's own dtypes.
+    # values; a stand-in for the source has the source's own dtypes -- but
+    # for text `parse_text` read as what it holds, which stays parsed.
     # Column by column: `DataFrame.cast` skips a mapping's "" key.
     fake = fake.with_columns(
         frames.column(c).cast(dtype)
         for c, dtype in frame.schema.items()
-        if fake.schema[c] != dtype
+        if fake.schema[c] != dtype and not _parsed(dtype, fake.schema[c])
     )
     return fake, spec
+
+
+def _parsed(source: pl.DataType, profiled: pl.DataType) -> bool:
+    """Whether a column arrived as text and `parse_text` read it as a type
+    a profile of text never gives: a number, a flag or a date."""
+    return source == pl.String and (
+        profiled == pl.Boolean
+        or profiled.is_numeric()
+        or isinstance(profiled, (pl.Date, pl.Datetime))
+    )
 
 
 def _load(source: Source, sample: int | None, seed: int) -> tuple[pl.DataFrame, int]:

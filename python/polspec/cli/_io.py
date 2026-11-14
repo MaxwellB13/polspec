@@ -23,6 +23,7 @@ import polars as pl
 from polspec import FrameSpec
 from polspec.errors import CliError
 from polspec.frames import json_casts, sample_rows
+from polspec.profiler import TEXT_NOTE
 from polspec.reading import SUFFIXES, parse_declared_text, read_file
 from polspec.registry import Registry, load_module
 
@@ -221,6 +222,23 @@ def _warnings_printed() -> Iterator[None]:
         yield
     for warning in caught:
         print(f"warning: {warning.message}", file=sys.stderr)
+
+
+def _note_text(spec: TableSpec) -> None:
+    """Says on stderr which text columns would parse as another type, which
+    their descriptions say too, and the flag that reads them so."""
+    noted = [
+        name
+        for name, column in spec.columns.items()
+        if (column.description or "").startswith(TEXT_NOTE)
+    ]
+    if noted:
+        print(
+            f"note: {len(noted)} text column(s) hold numbers, flags or dates "
+            f"throughout: {', '.join(noted)}. --parse-text reads them as those "
+            "types; their descriptions say which.",
+            file=sys.stderr,
+        )
 
 
 def _maybe_format(path: Path) -> None:

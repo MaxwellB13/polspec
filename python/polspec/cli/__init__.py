@@ -107,6 +107,14 @@ def _add_schema_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Do not name the format a text column's values have (email, uuid4, ...)",
     )
     infer.add_argument(
+        "--parse-text",
+        action="store_true",
+        help=(
+            "Read a text column as the number, flag or date every value holds "
+            "(Boolean, Int64, Float64, Date, Datetime)"
+        ),
+    )
+    infer.add_argument(
         "--no-bounds",
         action="store_true",
         help="Skip computing numeric/temporal bounds and string lengths",

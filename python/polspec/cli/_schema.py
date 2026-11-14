@@ -9,6 +9,7 @@ from polspec import FrameSpec
 from polspec.cli._io import (
     _class_name_from,
     _maybe_format,
+    _note_text,
     _read_data_file,
     _require_identifier,
     _warnings_printed,
@@ -43,10 +44,12 @@ def _cmd_schema_infer(args: argparse.Namespace) -> int:
                 replace=args.replace or (),
                 round_bounds=args.round_bounds,
                 round_rates=args.round_rates,
+                parse_text=args.parse_text,
             )
         except ValueError as exc:  # a name in --replace the file lacks
             raise CliError(str(exc)) from exc
 
+    _note_text(spec_cls.spec)
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     writer = spec_cls.to_python if output.suffix.lower() == ".py" else spec_cls.to_yaml

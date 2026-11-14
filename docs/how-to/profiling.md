@@ -91,6 +91,7 @@ Each option is a keyword on both functions:
 | `sample` | all rows | Profile a random sample of this many rows |
 | `seed` | 0 | Seeds the sample and the fitting, so a profile is the same every run |
 | `round_bounds`, `round_rates` | exact | See [Rounding](#rounding) |
+| `parse_text` | off | Read text as the numbers, flags or dates it holds; see [Data read as text](#data-read-as-text) |
 
 ```python
 Lean = FrameSpec.from_dataframe(orders, name="Orders", weights=True, replace=["email"])
@@ -131,6 +132,50 @@ dtype holds, so the data a spec was inferred from still passes it. In Python
 the default is exact; `polspec schema infer` rounds `auto` unless told
 `--round-bounds exact`.
 
+## Data read as text
+
+A file too unclean to type on reading is often read with its types
+switched off, so every column arrives as text. Profiled as it is, a column
+of decimals is described as text. `parse_text=True` reads each text
+column as the type its values hold:
+
+```python
+raw = pl.DataFrame(
+    {
+        "loan_id": [str(i) for i in range(1, 101)],
+        "LGD": [f"0.{i:02d}" if i % 10 else "" for i in range(100)],
+        "opened": [f"2024-01-{1 + i % 28:02d}" for i in range(100)],
+    }
+)  # as `pl.read_csv(path, infer_schema=False)` would hand it back
+
+spec = polspec.profile(raw, parse_text=True)
+print(spec.schema())
+```
+
+```text
+Schema({'loan_id': Int64, 'LGD': Float64, 'opened': Date})
+```
+
+*Added in 1.2.*
+
+A column is read as the first of `Boolean` (`true` or `false`, in any
+case), `Int64`, `Float64`, `Date` and `Datetime` that every value parses as
+exactly; ISO dates only, so `31/01/2024` is not guessed at. Text is
+stripped first, and empty text is a null. A column stays text when any value
+is written with a leading zero (`007`), or is an integer too large for an
+`Int64`: those are codes, and parsing would lose the zero or round the
+number. A column in `replace` stays text too.
+
+Left off, a text column that would parse stays text, and its description
+says what it would parse as — so the spec file tells whoever reads it.
+`polspec schema infer` and `polspec synthesize` also say so on the terminal,
+and take `--parse-text`.
+
+The frame itself is still text, and a spec that declares `LGD` a `Float64`
+reports a text column as the wrong dtype. Read the frame with its types
+before validating it, or keep it as text and profile it without
+`parse_text`.
+
 ## From the command line
 
 ```bash
@@ -140,7 +185,8 @@ polspec schema infer orders.parquet -o orders.py --weights --keys --order
 
 `schema infer` takes the same options as flags: `--weights`, `--shape`,
 `--keys`, `--order`, `--no-bounds`, `--no-formats`, `--max-unique-enum`,
-`--replace`, `--sample`, `--round-bounds` and `--round-rates`. See
+`--replace`, `--sample`, `--round-bounds`, `--round-rates` and
+`--parse-text`. See
 [the command line](cli.md#schema-infer-profile-data-into-a-spec).
 
 ## Treat it as a draft

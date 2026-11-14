@@ -33,6 +33,7 @@ they can change in any release, so code outside polspec should use only
 | `frames` | The frame plumbing every verb shares: accepting a `DataFrame` or `LazyFrame`, and resolving `references=` to parent frames |
 | `_options` | One way to take options -- an options object, keywords, or neither -- shared by `validate`, `inspect` and `drift` |
 | `expr` | `col()`: a small predicate language that evaluates like Polars and survives a trip through a file |
+| `_text` | Text that holds another type: the type a text column's values all parse as, and the parsed values -- shared by profiling and validating |
 | `scalars` | The plain forms a spec file writes for the values YAML cannot hold -- a time, a duration -- shared by bounds, choices and predicate literals |
 | `formats` | Named string formats -- what each looks like, said once for generation and validation |
 | `hierarchy` | `Hierarchy` -- a self-referencing link table, declared |

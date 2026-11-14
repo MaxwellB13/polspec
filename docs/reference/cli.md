@@ -25,8 +25,8 @@ Profile a data file into a YAML schema.
 
 ```
 polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
-                            [--max-unique-enum N] [--no-formats] [--no-bounds]
-                            [--sample N] [--shape] [--keys] [--order]
+                            [--max-unique-enum N] [--no-formats] [--parse-text]
+                            [--no-bounds] [--sample N] [--shape] [--keys] [--order]
                             [--round-bounds STEP] [--round-rates STEP]
                             [--replace COL [COL ...]]
                             source
@@ -40,6 +40,7 @@ polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
 | `--weights` | Record each category's observed frequency |
 | `--max-unique-enum` `N` | Max distinct values for a string column to become an Enum, when they repeat (default: 50) |
 | `--no-formats` | Do not name the format a text column's values have (email, uuid4, ...) |
+| `--parse-text` | Read a text column as the number, flag or date every value holds (Boolean, Int64, Float64, Date, Datetime) |
 | `--no-bounds` | Skip computing numeric/temporal bounds and string lengths |
 | `--sample` `N` | Profile a random sample of N rows (seeded, so the same every run) |
 | `--shape` | Fit the distribution each numeric or temporal column follows |
@@ -139,7 +140,7 @@ Write a fake data file that looks like a real one.
 ```
 polspec synthesize [-h] -o OUTPUT [-n N] [--seed SEED]
                           [--replace COL [COL ...]] [--sample N] [--max-unique-enum N]
-                          [--no-formats] [--spec PATH] [--name NAME]
+                          [--no-formats] [--parse-text] [--spec PATH] [--name NAME]
                           source
 ```
 
@@ -153,6 +154,7 @@ polspec synthesize [-h] -o OUTPUT [-n N] [--seed SEED]
 | `--sample` `N` | Profile a random sample of N rows rather than every row |
 | `--max-unique-enum` `N` | Max distinct values for a text column to keep its values, when they repeat (default: 50) |
 | `--no-formats` | Do not name the format a text column's values have (email, uuid4, ...) |
+| `--parse-text` | Read a text column as the number, flag or date every value holds (Boolean, Int64, Float64, Date, Datetime) |
 | `--spec` `PATH` | Also write the spec the data was generated from (.yaml, or .py) |
 | `--name` `NAME` | The spec's class name (default: derived from source) |
 
