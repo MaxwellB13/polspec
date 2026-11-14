@@ -19,9 +19,10 @@ if TYPE_CHECKING:
     from polspec.spec import ColSpec
 
 
+from polspec._colspec.masks import in_values
 from polspec.expr import root_names
 from polspec.rules import rule_condition
-from polspec.validation.constraints._base import Constraint, as_strings, in_values
+from polspec.validation.constraints._base import Constraint, as_strings
 
 
 @dataclass(kw_only=True)

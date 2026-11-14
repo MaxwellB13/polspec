@@ -32,14 +32,18 @@ if TYPE_CHECKING:
     from polspec.spec import ColSpec
     from polspec.validation import ValidationOptions
 
+from polspec._colspec.masks import (
+    in_values,
+    measure_length,
+    out_of_bounds,
+    unholdable_mask,
+)
 from polspec.check import failure_mask
 from polspec.spec import element_of, entries_of, field_of
 from polspec.validation.constraints._base import (
     Constraint,
     as_strings,
-    in_values,
     sample_source,
-    unholdable,
 )
 from polspec.validation.constraints._rules import rule_constraints
 
@@ -417,7 +421,7 @@ def _value_constraints(
 
     # The dtype's claim, not the bounds' -- but a side a checked bound
     # closes is the bound's to report: see `_unholdable`.
-    unfit = unholdable(
+    unfit = unholdable_mask(
         column, dtype, actual_dtype, spec.bounds if options.bounds else None
     )
     if unfit is not None:
@@ -465,7 +469,7 @@ def _value_constraints(
         constraints.append(
             _Bounds(
                 key=f"{where}__bounds",
-                mask=valued & _out_of_bounds(measured, spec.bounds, measured_dtype),
+                mask=valued & out_of_bounds(measured, spec.bounds, measured_dtype),
                 sample_expr=column,
                 column=name,
                 where=where,
@@ -475,7 +479,7 @@ def _value_constraints(
         )
 
     if spec.string_length is not None:
-        measured = _measure_length(column, actual_dtype)
+        measured = measure_length(column, actual_dtype)
         if measured is not None:
             too_short = measured < spec.string_length.min
             too_long = measured > spec.string_length.max
@@ -688,33 +692,4 @@ def _allowed_values(spec: ColSpec) -> list[Any] | None:
         return categories
     if spec.choices is not None:
         return list(spec.choices)
-    return None
-
-
-def _out_of_bounds(
-    column: pl.Expr, bounds: Bound, actual_dtype: pl.DataType
-) -> pl.Expr:
-    """A mask for values outside `bounds`, testing only the constrained sides.
-
-    An open end is genuinely unconstrained here, unlike at generation time
-    where it falls back to a default (see `ColSpec.bounds`).
-    """
-
-    def limit(value: Any) -> Any:
-        return pl.lit(value).cast(actual_dtype) if actual_dtype.is_temporal() else value
-
-    violations = []
-    if bounds.min is not None:
-        violations.append(column < limit(bounds.min))
-    if bounds.max is not None:
-        violations.append(column > limit(bounds.max))
-    return violations[0] if len(violations) == 1 else violations[0] | violations[1]
-
-
-def _measure_length(column: pl.Expr, actual_dtype: pl.DataType) -> pl.Expr | None:
-    """Length of each value, for the dtypes where that is meaningful."""
-    if actual_dtype in (pl.String, pl.Utf8):
-        return column.str.len_chars()
-    if actual_dtype == pl.Binary:
-        return column.bin.size()
     return None

@@ -18,7 +18,8 @@ they can change in any release, so code outside polspec should use only
 | `constants` | Default generation ranges |
 | `dtypes` | What each dtype can actually hold |
 | `distributions` | The distributions available, and each one's parameter aliases |
-| `spec` | `ColSpec` — one column's declaration, and everything it validates about itself |
+| `spec` | `ColSpec` — one column's declaration: its fields, the order it checks itself in, and the helpers the rest of the package reads a column through |
+| `_colspec` | What a `ColSpec` checks about itself where it is declared, one module per concern: `basics` (names, dtype, tags, null and NaN rates, distribution, validators), `ranges` (bounds), `choices` (choices, weights, an `Enum`'s categories), `text` (format, extras, pattern), `nested` (lists, arrays, structs, maps), `defaults`; `common` holds what a declaration and its checks both read; `masks` the masks for a value outside its bounds, choices or lengths, or past what its dtype holds -- one definition, which validation builds its findings from and `claims_refused` holds a default or a pin to |
 | `rules` | `ColRule` — conditional values, declared |
 | `foreign_key` | `ForeignKey` — referential integrity, declared |
 | `_ffi` | The only module that imports the Rust extension (lazily), building plans and re-raising its errors as `GenerationError` |
