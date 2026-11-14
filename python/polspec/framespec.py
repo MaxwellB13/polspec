@@ -28,32 +28,25 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, Unpack, cast, overload
 
 import polars as pl
 
-from polspec import compare as drift_module
-from polspec import generation, reading, serialization, sizing, validation
 from polspec.catspec import CatSpec
 from polspec.check import Check
-from polspec.compare import DriftKeywords, DriftOptions, DriftReport
 from polspec.errors import SpecError
 from polspec.foreign_key import ForeignKey
-from polspec.frames import Method, References, sample_rows
 from polspec.hierarchy import Hierarchy
-from polspec.profiler import (
-    DESCRIBE_DEFAULTS,
-    ProfileKeywords,
-    ProfileOptions,
-    profile_options,
-    profiled_table,
-)
-from polspec.render import framespec_to_markdown, framespec_to_mermaid
 from polspec.rules import ColRule
 from polspec.spec import ColSpec, is_dtype
 from polspec.tablespec import ColumnNames, TableSpec, parse_unique_together
-from polspec.validation import ValidationKeywords, ValidationOptions
 
 if TYPE_CHECKING:
     import os
 
     from polars._typing import IpcCompression, ParquetCompression
+
+    from polspec import validation
+    from polspec.compare import DriftKeywords, DriftOptions, DriftReport
+    from polspec.frames import Method, References
+    from polspec.profiler import ProfileKeywords, ProfileOptions
+    from polspec.validation import ValidationKeywords, ValidationOptions
 
 
 def _is_declaration_value(value: Any) -> bool:
@@ -500,6 +493,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         the file is loaded automatically. An unknown key in the file is an
         error unless `strict=False`, which downgrades it to a warning.
         """
+        from polspec import serialization
+
         return cls.from_spec(
             serialization.from_yaml(source, categories=categories, strict=strict)
         )
@@ -530,6 +525,13 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         """
         if not isinstance(df, pl.DataFrame):
             raise TypeError(f"Expected pl.DataFrame, got {type(df).__name__}")
+        from polspec.frames import sample_rows
+        from polspec.profiler import (
+            DESCRIBE_DEFAULTS,
+            profile_options,
+            profiled_table,
+        )
+
         opts = profile_options(options, keywords, defaults=DESCRIBE_DEFAULTS)
         # The columns directly, not through `profile`: a frame with no rows
         # still describes its columns' dtypes, which `profile` refuses.
@@ -588,6 +590,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     def to_yaml(cls, path: str | Path | None = None) -> str | None:
         """This spec as human-readable YAML: written to the file `path`, or,
         with no `path`, returned as text."""
+        from polspec import serialization
+
         return serialization.to_yaml(cls.spec, path)
 
     @classmethod
@@ -595,6 +599,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         """This spec as an importable Python module defining a subclass:
         written to the file `path`, or, with no `path`, returned as
         text."""
+        from polspec import serialization
+
         return serialization.to_python(cls.spec, path)
 
     # ------------------------------------------------------------------
@@ -621,6 +627,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         `polspec.generation.generate` for the full contract. `scan()` is
         the lazy verb.
         """
+        from polspec import generation
+
         return generation.generate(
             cls.spec,
             n,
@@ -640,6 +648,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         See `TableSpec.estimated_size`. `generate()` warns when the estimate
         passes four gibibytes, and takes `max_bytes=` to refuse instead.
         """
+        from polspec import sizing
+
         return sizing.estimated_size(cls.spec, n)
 
     @classmethod
@@ -672,6 +682,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         rather than across `n`. Leaving `batch_size` unset lets polars ask
         for the size it wants; setting it pins the size.
         """
+        from polspec import generation
+
         return generation.scan(
             cls.spec,
             n,
@@ -697,6 +709,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         no pass rewrites holds, batch by batch, exactly the rows
         `generate(n, seed=seed)` would, whatever `batch_size` is.
         """
+        from polspec import generation
+
         return generation.generate_batches(
             cls.spec,
             n,
@@ -729,6 +743,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
 
         Extra keyword arguments go to `pl.LazyFrame.sink_parquet`.
         """
+        from polspec import generation
+
         generation.sink_parquet(
             cls.spec,
             path,
@@ -758,6 +774,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
 
         Extra keyword arguments go to `pl.LazyFrame.sink_csv`.
         """
+        from polspec import generation
+
         generation.sink_csv(
             cls.spec,
             path,
@@ -787,6 +805,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
 
         Extra keyword arguments go to `pl.LazyFrame.sink_ipc`.
         """
+        from polspec import generation
+
         generation.sink_ipc(
             cls.spec,
             path,
@@ -815,6 +835,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
 
         Extra keyword arguments go to `pl.LazyFrame.sink_ndjson`.
         """
+        from polspec import generation
+
         generation.sink_ndjson(
             cls.spec,
             path,
@@ -843,6 +865,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
 
         This spec is the *old* side. See `polspec.diff`.
         """
+        from polspec import compare as drift_module
+
         return drift_module.diff(
             cls.spec, other, renames=renames, options=options, **keywords
         )
@@ -858,6 +882,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         """How `df` has moved relative to this spec, as a `DriftReport`:
         `polspec.drift`, which takes every `DriftOptions` field as a keyword
         or `options=` as an object."""
+        from polspec import compare as drift_module
+
         return drift_module.drift(cls.spec, df, options=options, **keywords)
 
     # ------------------------------------------------------------------
@@ -869,6 +895,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         cls, path: str | Path | None = None, *, title: str | None = None
     ) -> str:
         """A Markdown data dictionary for this spec, written to `path` if given."""
+        from polspec.render import framespec_to_markdown
+
         return framespec_to_markdown(cls.spec, path, title=title)
 
     @classmethod
@@ -876,6 +904,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         cls, path: str | Path | None = None, *, title: str | None = None
     ) -> str:
         """A Mermaid entity-relationship diagram for this spec."""
+        from polspec.render import framespec_to_mermaid
+
         return framespec_to_mermaid(cls.spec, path, title=title)
 
     # ------------------------------------------------------------------
@@ -889,6 +919,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         declared date or time that arrived as text is parsed, and nothing else
         is cast.
         """
+        from polspec import reading
+
         return reading.read(cls.spec, path, **reader_options)
 
     # Every validation option is named here, for completion and so a typo is
@@ -914,6 +946,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         offending rows reachable lazily through `report.rows(finding)` or
         `report.failing_rows()`. Takes the same options as `validate`.
         """
+        from polspec import validation
+
         return validation.inspect(
             cls.spec,
             df,
@@ -983,6 +1017,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         `ValidationOptions` default; see that class for what every option
         means.
         """
+        from polspec import validation
+
         return validation.validate(
             cls.spec,
             df,

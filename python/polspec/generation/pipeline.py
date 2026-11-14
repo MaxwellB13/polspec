@@ -28,6 +28,7 @@ from polspec.frames import Method, References, to_eager
 from polspec.generation.engine import generate_cartesian, generate_random
 from polspec.generation.passes.foreign_keys import (
     apply_foreign_key,
+    parent_keys_of,
     unique_parent_shortfall,
 )
 from polspec.generation.passes.hierarchy import apply_hierarchy
@@ -435,12 +436,15 @@ def _window(
     cycles: int = 0,
     self_references: int = 0,
     pins: Mapping[str, pl.Series] | None = None,
+    parent_keys: Mapping[str, pl.DataFrame] | None = None,
 ) -> pl.DataFrame:
     """Rows `[row_offset, row_offset + n)` of the frame `frame_seed` describes,
     with the passes run over them.
 
     `pins` replace their columns after the draw and before the passes, so
-    a pass reading a pinned column reads the pin.
+    a pass reading a pinned column reads the pin. `parent_keys` are each
+    foreign key's parent keys, by the key's name, read once by a caller
+    drawing several windows from the same parents.
 
     The columns are a window onto one frame: the engine numbers its chunks
     from the offset, so the same rows come back whatever `n` the call asks
@@ -469,6 +473,7 @@ def _window(
         whole_seed=frame_seed,
         cycles=cycles,
         self_references=self_references,
+        parent_keys=parent_keys,
     )
 
 
@@ -483,6 +488,7 @@ def _run_passes(
     whole_seed: int | None = None,
     cycles: int = 0,
     self_references: int = 0,
+    parent_keys: Mapping[str, pl.DataFrame] | None = None,
 ) -> pl.DataFrame:
     """Applies every rule and foreign-key pass, in dependency order.
 
@@ -534,8 +540,9 @@ def _run_passes(
                     whole_seed if whole_seed is not None else frame_seed,
                     f"fk:{fk.name}",
                 )
+                keys = None if parent_keys is None else parent_keys.get(fk.name)
                 runners[f"fk:{fk.name}"] = (
-                    lambda frame, fk=fk, parent=parent, seed=seed, k=key_seed: (
+                    lambda frame, fk=fk, parent=parent, seed=seed, k=key_seed, keys=keys: (
                         apply_foreign_key(
                             frame,
                             columns,
@@ -544,6 +551,7 @@ def _run_passes(
                             seed,
                             row_offset=row_offset,
                             key_seed=k,
+                            parent_keys=keys,
                         )
                     )
                 )
@@ -603,6 +611,7 @@ def generate_batches(
     # batch's foreign-key pass -- once per batch rather than once per call,
     # which is the whole parent re-read however many batches there are.
     resolved = resolve_references(references, to_eager)
+    parent_keys: dict[str, pl.DataFrame] = {}
     if spec.foreign_keys:
         # Once per call, not once per batch: the parents are the same every
         # time round, so the batches below are handed only the keys a foreign
@@ -610,14 +619,19 @@ def generate_batches(
         _warn_unused_references(spec, resolved)
         targets = {fk.references for fk in spec.foreign_keys if fk.references != "self"}
         resolved = {k: v for k, v in resolved.items() if k in targets}
-        # A unique foreign key draws the whole frame's keys window by window,
-        # so a parent too small for all `n` rows is refused now, before the
-        # first batch -- not when a later one runs past it, halfway through a
-        # sink.
+        # Each key's parent keys are read once, here, rather than once per
+        # batch: they are the same every time round, and reading them hashes
+        # every parent row. A unique foreign key draws the whole frame's keys
+        # window by window, so a parent too small for all `n` rows is refused
+        # now, before the first batch -- not when a later one runs past it,
+        # halfway through a sink.
         for fk in spec.foreign_keys:
             parent = resolved.get(fk.references)
             if parent is not None:
-                shortfall = unique_parent_shortfall(fk, spec.columns, parent, n)
+                parent_keys[fk.name] = parent_keys_of(fk, parent)
+                shortfall = unique_parent_shortfall(
+                    fk, spec.columns, parent_keys[fk.name].height, n
+                )
                 if shortfall is not None:
                     raise GenerationError(shortfall)
     references = resolved or None
@@ -636,6 +650,7 @@ def generate_batches(
             frame_seed,
             method="cartesian",
             references=references,
+            parent_keys=parent_keys,
         )
         for offset in range(0, first.height, batch_size):
             yield first.slice(offset, batch_size)
@@ -650,5 +665,6 @@ def generate_batches(
             method="random",
             references=references,
             row_offset=produced,
+            parent_keys=parent_keys,
         )
         produced += current

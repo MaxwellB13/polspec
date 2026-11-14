@@ -90,6 +90,10 @@ def test_the_package_imports_without_the_extension(monkeypatch):
     # on the package for `from polspec import _polspec` to find.
     monkeypatch.setitem(sys.modules, "polspec._polspec", None)
     monkeypatch.delattr(polspec, "_polspec", raising=False)
+    # Importing the module again rebinds the package's `validation`
+    # attribute; restoring the original keeps every later test on the one
+    # module the rest of the package imports, its classes included.
+    monkeypatch.setattr(polspec, "validation", polspec.validation, raising=False)
     monkeypatch.delitem(sys.modules, "polspec.validation", raising=False)
 
     importlib.import_module("polspec.validation")  # no extension needed

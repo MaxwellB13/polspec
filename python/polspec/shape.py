@@ -63,6 +63,14 @@ class Fit:
     distance: float
 
 
+def _fewer_than_three(values: pl.Series) -> bool:
+    """Whether `values` hold fewer than three distinct values -- read off
+    their head when it shows three, rather than by counting them all."""
+    if values.head(1_000).n_unique() >= 3:
+        return False
+    return values.n_unique() < 3
+
+
 def fit(
     values: pl.Series,
     bounds: Bound,
@@ -78,7 +86,7 @@ def fit(
     candidates are drawn through a `ColSpec` of `dtype` with them.
     """
     observed = values.cast(pl.Float64).drop_nulls()
-    if observed.len() < 50 or observed.n_unique() < 3:
+    if observed.len() < 50 or _fewer_than_three(observed):
         return None  # too little to tell one shape from another
     if observed.len() > SAMPLE:
         observed = observed.sample(SAMPLE, seed=seed)

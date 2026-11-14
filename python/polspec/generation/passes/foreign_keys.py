@@ -27,16 +27,30 @@ def _as_u64(seed: int | None) -> int:
     return seed & 0xFFFF_FFFF_FFFF_FFFF
 
 
+def parent_keys_of(fk: ForeignKey, parent_df: pl.DataFrame) -> pl.DataFrame:
+    """The distinct non-null keys `parent_df` offers `fk`, in the order they
+    first occur: what the pass draws from.
+
+    Reading them means hashing every parent row, so a caller drawing
+    several windows from one parent -- `generate_batches`, a scan, a sink --
+    reads them once and hands them to each window.
+    """
+    return (
+        parent_df.select(frames.columns(list(fk.ref_columns)))
+        .drop_nulls()
+        .unique(maintain_order=True)
+    )
+
+
 def unique_parent_shortfall(
-    fk: ForeignKey, columns: Mapping[str, ColSpec], parent_df: pl.DataFrame, rows: int
+    fk: ForeignKey, columns: Mapping[str, ColSpec], distinct: int, rows: int
 ) -> str | None:
-    """Why a unique column `fk` fills cannot be filled for `rows` rows, or
-    None when it can -- or when the column is not unique."""
+    """Why a unique column `fk` fills cannot be filled for `rows` rows from a
+    parent of `distinct` keys, or None when it can -- or when the column is
+    not unique."""
     local_cols = list(fk.columns)
     if len(local_cols) != 1 or not columns[local_cols[0]].unique:
         return None
-    ref_cols = list(fk.ref_columns)
-    distinct = parent_df.select(frames.columns(ref_cols)).drop_nulls().unique().height
     if distinct >= rows:
         return None
     return (
@@ -56,6 +70,7 @@ def apply_foreign_key(
     *,
     row_offset: int = 0,
     key_seed: int | None = None,
+    parent_keys: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """Overwrites `fk`'s non-null local values with values drawn from `parent_df`,
     so generated data satisfies referential integrity by construction.
@@ -79,18 +94,16 @@ def apply_foreign_key(
 
     `parent_df` for a self-referencing key is the frame as it stands when
     this pass runs, so a key reading a column another key rewrote draws from
-    the values that column ended up with.
+    the values that column ended up with. `parent_keys`, when given, are
+    `parent_keys_of(fk, parent_df)` read once already.
     """
     if df.height == 0:
         return df
     local_cols = list(fk.columns)
     ref_cols = list(fk.ref_columns)
 
-    parent_keys = (
-        parent_df.select(frames.columns(ref_cols))
-        .drop_nulls()
-        .unique(maintain_order=True)
-    )
+    if parent_keys is None:
+        parent_keys = parent_keys_of(fk, parent_df)
     if parent_keys.height == 0:
         raise GenerationError(
             f"ForeignKey '{fk.name}' cannot generate values: the referenced "
@@ -100,7 +113,7 @@ def apply_foreign_key(
     wants_unique = len(local_cols) == 1 and columns[local_cols[0]].unique
     if wants_unique:
         shortfall = unique_parent_shortfall(
-            fk, columns, parent_df, row_offset + df.height
+            fk, columns, parent_keys.height, row_offset + df.height
         )
         if shortfall is not None:
             raise GenerationError(shortfall)

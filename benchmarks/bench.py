@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import functools
 import json
 import platform
 import statistics
@@ -60,6 +61,7 @@ from pathlib import Path
 from typing import Any
 
 import polars as pl
+import polspec
 from polspec import Bound, ColRule, ColSpec, ForeignKey, FrameSpec, Hierarchy, col
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -282,6 +284,64 @@ def _validate_cyclic_hierarchy(n: int) -> None:
     inspect_frame(Linked.spec, Linked.generate(n, seed=SEED, cycles=10))
 
 
+# The verbs around generation: a foreign key drawn from a large parent, in
+# one frame and in batches; profiling, of typed data and of the same data as
+# text; validation; and importing polspec at all. Each frame a case reads is
+# built once per process, by the warm-up, so it is not what is timed.
+
+
+class Account(FrameSpec):
+    account_id = ColSpec(pl.Int64, bounds=(1, 10_000_000), unique=True)
+
+
+class Payment(FrameSpec):
+    payment_id = ColSpec(pl.Int64, bounds=(1, 100_000_000), unique=True)
+    account_id = ColSpec(pl.Int64, bounds=(1, 10_000_000))
+    amount = ColSpec(pl.Float64, bounds=(0.0, 1_000.0))
+    __foreign_keys__ = [ForeignKey("account_id", references=Account)]
+
+
+@functools.cache
+def _accounts(n: int) -> pl.DataFrame:
+    return Account.generate(n, seed=SEED)
+
+
+def _foreign_key_parent(n: int) -> None:
+    Payment.generate(n, seed=SEED, references={Account: _accounts(1_000_000)})
+
+
+def _foreign_key_batches(n: int) -> None:
+    parent = {Account: _accounts(1_000_000)}
+    for _ in Payment.generate_batches(
+        n, batch_size=10_000, seed=SEED, references=parent
+    ):
+        pass
+
+
+@functools.cache
+def _profiled_frame(n: int, *, text: bool) -> pl.DataFrame:
+    frame = DataSource.generate(n, seed=SEED)
+    return frame.select(pl.all().cast(pl.String)) if text else frame
+
+
+def _profile(n: int) -> None:
+    polspec.profile(_profiled_frame(n, text=False))
+
+
+def _profile_text(n: int) -> None:
+    polspec.profile(_profiled_frame(n, text=True))
+
+
+def _validate(n: int) -> None:
+    DataSource.validate(_profiled_frame(n, text=False))
+
+
+def _import(_n: int) -> None:
+    """A fresh interpreter importing Polars and then polspec: Polars is
+    the larger share, and the same in every run, so a change is polspec's."""
+    subprocess.run([sys.executable, "-c", "import polars, polspec"], check=True)
+
+
 def _sink_parquet(n: int) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         DataSource.sink_parquet(Path(tmp) / "out.parquet", n, batch_size=100_000)
@@ -364,6 +424,13 @@ CASES: tuple[Case, ...] = (
     ),
     # Streaming to disk, which no other case exercises.
     Case("sink_parquet", "regression", (1_000_000,), _sink_parquet),
+    # Around generation.
+    Case("foreign_key_parent", "regression", (1_000,), _foreign_key_parent),
+    Case("foreign_key_batches", "regression", (1_000_000,), _foreign_key_batches),
+    Case("profile", "regression", (1_000_000,), _profile),
+    Case("profile_text", "regression", (1_000_000,), _profile_text),
+    Case("validate", "regression", (1_000_000,), _validate),
+    Case("import", "regression", (1,), _import),
 )
 
 BY_NAME = {case.name: case for case in CASES}

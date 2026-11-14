@@ -695,3 +695,20 @@ def test_a_bound_python_cannot_hold_stays_an_integer():
     spec = polspec.profile(frame)
     assert spec["late"].bounds.max == 86_399_999_999_999
     polspec.validate(spec, frame)
+
+
+def test_a_repeat_past_the_first_rows_still_makes_a_column_no_key():
+    """Keys are checked on the column's head first, so most columns that
+    are not keys are settled without hashing all of it; a repeat only past
+    that head is still found."""
+    values = [*range(10_000), 9_999]
+    profiled = polspec.profile(pl.DataFrame({"k": values}), detect_unique=True)["k"]
+    assert not profiled.unique
+    assert polspec.profile(pl.DataFrame({"k": values[:-1]}), detect_unique=True)[
+        "k"
+    ].unique
+
+
+def test_single_words_are_not_counted_as_hostnames_however_many():
+    words = [f"word{i}" for i in range(5_000)]
+    assert _described(pl.DataFrame({"c": words}))["c"].format is None

@@ -1,20 +1,15 @@
 from __future__ import annotations
 
-from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
-from importlib.metadata import version as _version
+from typing import TYPE_CHECKING, Any
 
+# The declarations load with the package: they are what every use of
+# polspec starts from, and cost little. Each verb -- generating,
+# validating, drift, profiling, spec files, rendering -- loads on first use,
+# through `__getattr__` below, so `import polspec` does not pay for what a
+# caller never asks for. A type checker reads the imports as written.
 from polspec.bound import Bound
 from polspec.catspec import CatSpec
 from polspec.check import Check
-from polspec.compare import (
-    DriftCode,
-    DriftFinding,
-    DriftOptions,
-    DriftReport,
-    Severity,
-    diff,
-    drift,
-)
 from polspec.errors import (
     GenerationError,
     MultiValidationError,
@@ -27,50 +22,132 @@ from polspec.errors import (
 from polspec.expr import Pred, col, lit
 from polspec.foreign_key import ForeignKey
 from polspec.framespec import FrameSpec
-from polspec.generation import (
-    generate,
-    generate_batches,
-    scan,
-    sink_csv,
-    sink_ipc,
-    sink_ndjson,
-    sink_parquet,
-)
 from polspec.hierarchy import Hierarchy
-from polspec.profiler import ProfileOptions
-from polspec.reading import read
-from polspec.registry import Registry
-from polspec.render import to_markdown, to_mermaid
 from polspec.rules import ColRule
-from polspec.serialization import (
-    FORMAT_VERSION,
-    from_dict,
-    from_yaml,
-    to_dict,
-    to_python,
-    to_yaml,
-)
-from polspec.sizing import estimated_size
 from polspec.spec import ColSpec
-from polspec.synthesis import profile, synthesize
 from polspec.tablespec import TableSpec
-from polspec.validation import (
-    FINDING_COLUMN,
-    Finding,
-    FindingCode,
-    ValidationOptions,
-    ValidationReport,
-    inspect,
-    validate,
-)
 
-try:
-    __version__ = _version("polspec")
-except _PackageNotFoundError:
-    # Run from a source checkout that was never installed -- the docs build
-    # imports it that way, to read the docstrings -- there is no version to
-    # report.
-    __version__ = "0+unknown"
+if TYPE_CHECKING:
+    from polspec.compare import (
+        DriftCode,
+        DriftFinding,
+        DriftOptions,
+        DriftReport,
+        Severity,
+        diff,
+        drift,
+    )
+    from polspec.generation import (
+        generate,
+        generate_batches,
+        scan,
+        sink_csv,
+        sink_ipc,
+        sink_ndjson,
+        sink_parquet,
+    )
+    from polspec.profiler import ProfileOptions
+    from polspec.reading import read
+    from polspec.registry import Registry
+    from polspec.render import to_markdown, to_mermaid
+    from polspec.serialization import (
+        FORMAT_VERSION,
+        from_dict,
+        from_yaml,
+        to_dict,
+        to_python,
+        to_yaml,
+    )
+    from polspec.sizing import estimated_size
+    from polspec.synthesis import profile, synthesize
+    from polspec.validation import (
+        FINDING_COLUMN,
+        Finding,
+        FindingCode,
+        ValidationOptions,
+        ValidationReport,
+        inspect,
+        validate,
+    )
+
+    __version__: str
+
+# Where each name that loads on first use lives.
+_LAZY: dict[str, str] = {
+    **dict.fromkeys(
+        ("DriftCode", "DriftFinding", "DriftOptions", "DriftReport", "Severity"),
+        "polspec.compare",
+    ),
+    "diff": "polspec.compare",
+    "drift": "polspec.compare",
+    **dict.fromkeys(
+        (
+            "generate",
+            "generate_batches",
+            "scan",
+            "sink_csv",
+            "sink_ipc",
+            "sink_ndjson",
+            "sink_parquet",
+        ),
+        "polspec.generation",
+    ),
+    "ProfileOptions": "polspec.profiler",
+    "read": "polspec.reading",
+    "Registry": "polspec.registry",
+    "to_markdown": "polspec.render",
+    "to_mermaid": "polspec.render",
+    **dict.fromkeys(
+        ("FORMAT_VERSION", "from_dict", "from_yaml", "to_dict", "to_python", "to_yaml"),
+        "polspec.serialization",
+    ),
+    "estimated_size": "polspec.sizing",
+    "profile": "polspec.synthesis",
+    "synthesize": "polspec.synthesis",
+    **dict.fromkeys(
+        (
+            "FINDING_COLUMN",
+            "Finding",
+            "FindingCode",
+            "ValidationOptions",
+            "ValidationReport",
+            "inspect",
+            "validate",
+        ),
+        "polspec.validation",
+    ),
+}
+
+
+def __getattr__(name: str) -> Any:
+    """A public name that loads on first use, imported once and kept."""
+    if name == "__version__":
+        value: Any = _version()
+    elif name in _LAZY:
+        from importlib import import_module
+
+        value = getattr(import_module(_LAZY[name]), name)
+    else:
+        raise AttributeError(f"module 'polspec' has no attribute {name!r}")
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), *_LAZY, "__version__"})
+
+
+def _version() -> str:
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("polspec")
+    except PackageNotFoundError:
+        # Run from a source checkout that was never installed -- the docs
+        # build imports it that way, to read the docstrings -- there is no
+        # version to report.
+        return "0+unknown"
+
 
 __all__ = [
     "FINDING_COLUMN",
