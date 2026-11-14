@@ -15,7 +15,17 @@ from decimal import Decimal
 import polars as pl
 import pytest
 from helpers import spec_for
-from polspec import ColSpec, FrameSpec, SpecError, ValidationError, drift
+from polspec import (
+    ColRule,
+    ColSpec,
+    FrameSpec,
+    SpecError,
+    TableSpec,
+    ValidationError,
+    col,
+    drift,
+    inspect,
+)
 
 # ---------------------------------------------------------------------------
 # Declaration
@@ -143,3 +153,20 @@ def test_from_dataframe_declares_a_decimal_with_its_extent():
     assert column.dtype == pl.Decimal(6, 2)
     assert column.bounds is not None
     assert (column.bounds.min, column.bounds.max) == (Decimal("1.25"), Decimal("9.50"))
+
+
+@pytest.mark.parametrize("value", [1e8, -1e8, 99_999_999.996])
+def test_a_number_too_large_for_a_decimal_with_choices_is_its_dtype_finding(value):
+    """Asking whether such a number is a choice cast it to the Decimal, and
+    Polars raises on a cast past a Decimal's precision, `strict=False` or
+    not: validation crashed. It is the range check's, as without choices.
+    Found by the arrival property on 2026-11-14."""
+    declared = pl.Decimal(10, 2)
+    for column in (
+        ColSpec(declared, choices=[Decimal("0.00")]),
+        ColSpec(
+            declared, rules=[ColRule(when=col("c") > 0, choices=[Decimal("1.00")])]
+        ),
+    ):
+        report = inspect(TableSpec("T", {"c": column}), pl.DataFrame({"c": [value]}))
+        assert [f.code for f in report.findings] == ["dtype"]

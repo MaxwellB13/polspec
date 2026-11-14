@@ -7,7 +7,6 @@ for the elements of a List, recursing as deeply as the dtype nests.
 from __future__ import annotations
 
 import dataclasses
-import decimal
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -19,7 +18,6 @@ from polspec.domain import is_textual
 from polspec.dtypes import (
     ARRAY_EVAL_ANY,
     ARRAY_EVAL_FILTERS,
-    dtype_value_limits,
     element_dtype,
     field_dtypes,
     map_entries,
@@ -41,6 +39,7 @@ from polspec.validation.constraints._base import (
     as_strings,
     in_values,
     sample_source,
+    unholdable,
 )
 from polspec.validation.constraints._rules import rule_constraints
 
@@ -418,7 +417,7 @@ def _value_constraints(
 
     # The dtype's claim, not the bounds' -- but a side a checked bound
     # closes is the bound's to report: see `_unholdable`.
-    unfit = _unholdable(
+    unfit = unholdable(
         column, dtype, actual_dtype, spec.bounds if options.bounds else None
     )
     if unfit is not None:
@@ -690,96 +689,6 @@ def _allowed_values(spec: ColSpec) -> list[Any] | None:
     if spec.choices is not None:
         return list(spec.choices)
     return None
-
-
-def _unholdable(
-    column: pl.Expr,
-    declared: pl.DataType,
-    actual: pl.DataType,
-    bounds: Bound | None = None,
-) -> tuple[pl.Expr, str] | None:
-    """A mask for the values `actual` holds and `declared` cannot, and the
-    range `declared` holds in words; None when every value fits.
-
-    Only a declared integer or `Decimal` has a range a compatible dtype can
-    exceed and a cast then refuse -- and a declared `Null`, which any dtype
-    stands in for and which holds no value at all. A float declared narrower
-    than it arrives is left alone: past its range a cast makes an infinity,
-    not an error. Each literal is typed as the column is, and each side is
-    tested only where `actual` reaches past it, so every literal is one
-    `actual` holds.
-
-    `bounds` are the declared bounds being checked, if they are. A bound
-    must fit its dtype to be declared, so a value past the dtype's range on
-    a bounded side is past the bound too and already a `bounds` finding:
-    that side is left to it. Most of the time -- a CSV's `Int64` for a
-    bounded `Int32` -- that is both sides, and the check costs nothing.
-    """
-    if declared == pl.Null:
-        return None if actual == pl.Null else (column.is_not_null(), "only nulls")
-    low: pl.Expr | None = None
-    high: pl.Expr | None = None
-
-    if declared.is_integer() and actual.is_integer():
-        declared_limits = dtype_value_limits(declared)
-        actual_limits = dtype_value_limits(actual)
-        if declared_limits is None or actual_limits is None:
-            return None
-        lo, hi = (int(v) for v in declared_limits)
-        holds = f"{lo}..{hi}"
-        if actual_limits[0] < lo:
-            low = column < pl.lit(lo, dtype=actual)
-        if actual_limits[1] > hi:
-            high = column > pl.lit(hi, dtype=actual)
-    elif isinstance(declared, pl.Decimal):
-        precision = declared.precision or 38
-        scale = declared.scale or 0
-        # A Decimal(p, s) holds magnitudes under 10**(p - s); a value is
-        # rounded to s places before that is asked, so half a unit below it
-        # is too many.
-        limit = 10 ** (precision - scale)
-        holds = f"magnitude under {limit}"
-        rounding = decimal.Decimal(5).scaleb(-(scale + 1))
-        if actual.is_float():
-            threshold = float(limit - rounding)
-            # A NaN compares greater than any number, so it is caught on the
-            # high side: a Decimal cannot hold one either.
-            low, high = column <= -threshold, column >= threshold
-        elif actual.is_integer():
-            actual_limits = dtype_value_limits(actual)
-            if actual_limits is None:
-                return None
-            if actual_limits[0] <= -limit:
-                low = column <= pl.lit(-limit, dtype=actual)
-            if actual_limits[1] >= limit:
-                high = column >= pl.lit(limit, dtype=actual)
-        elif isinstance(actual, pl.Decimal):
-            actual_scale = actual.scale or 0
-            if (actual.precision or 38) - actual_scale <= precision - scale:
-                return None
-            edge = decimal.Decimal(limit) - (rounding if actual_scale > scale else 0)
-            low = column <= pl.lit(-edge, dtype=actual)
-            high = column >= pl.lit(edge, dtype=actual)
-        else:
-            return None
-    else:
-        return None
-
-    if bounds is not None and bounds.min is not None:
-        low = None
-    if bounds is not None and bounds.max is not None:
-        high = None
-    return _either([side for side in (low, high) if side is not None], holds)
-
-
-def _either(sides: list[pl.Expr], holds: str) -> tuple[pl.Expr, str] | None:
-    """`sides` as one mask, with `holds`; None when there is no side to test."""
-    if not sides:
-        return None
-    mask = sides[0]
-    for side in sides[1:]:
-        mask = mask | side
-    return mask, holds
 
 
 def _out_of_bounds(
