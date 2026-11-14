@@ -171,10 +171,18 @@ says what it would parse as — so the spec file tells whoever reads it.
 `polspec schema infer` and `polspec synthesize` also say so on the terminal,
 and take `--parse-text`.
 
-The frame itself is still text, and a spec that declares `LGD` a `Float64`
-reports a text column as the wrong dtype. Read the frame with its types
-before validating it, or keep it as text and profile it without
-`parse_text`.
+The frame itself is still text, so validate it with `parse_text=True`
+too, which reads the text the same way before checking it — see
+[Data read as text](validating.md#data-read-as-text):
+
+```python
+typed = polspec.validate(spec, raw, parse_text=True)
+print(typed.schema)
+```
+
+```text
+Schema({'loan_id': Int64, 'LGD': Float64, 'opened': Date})
+```
 
 ## From the command line
 

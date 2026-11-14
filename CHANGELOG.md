@@ -21,6 +21,24 @@ page promises; before 1.0, a minor version could break any of them.
   `polspec synthesize` take `--parse-text`. Off by default: a text column
   that would parse stays text, and its description says what it would
   parse as, which the two commands also print.
+- **`validate(parse_text=True)`** reads each column that arrived as text,
+  where the spec declares a type text can hold, as that type before
+  checking anything, so a text frame validates against its own
+  `profile(parse_text=True)` and comes back typed. `inspect`,
+  `ValidationOptions`, `validate_all` and `inspect_all` take it. A column
+  with a value that does not parse stays text, and its `dtype` finding now
+  counts those values and gives some as samples; `polspec validate` always
+  reports them so.
+
+### Changed
+
+- **`read()` types numbers and booleans too.** A column the spec declares
+  as a `Boolean`, integer or float that arrived as text is parsed, as dates,
+  decimals and durations already were, so `read(spec, path,
+  infer_schema=False)` hands back a typed frame. A column of its own is
+  stripped first and empty text read as a null. A column with a value that
+  does not parse stays text, as before. `polspec validate` reads files the
+  same way.
 
 ### Fixed
 

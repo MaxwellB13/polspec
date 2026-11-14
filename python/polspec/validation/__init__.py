@@ -24,6 +24,7 @@ import polars.selectors as cs
 
 from polspec import frames
 from polspec._options import accepted_options, options_from
+from polspec._text import parse_series, text_parser
 from polspec.errors import ValidationError
 from polspec.frames import References, to_lazy
 from polspec.tablespec import (
@@ -84,6 +85,7 @@ class ValidationOptions:
     bounds: bool = True
     cast: bool = False
     fill_defaults: bool = False
+    parse_text: bool = False
     streaming: bool = False
 
     def __post_init__(self) -> None:
@@ -123,6 +125,7 @@ class ValidationKeywords(TypedDict, total=False):
     bounds: bool
     cast: bool
     fill_defaults: bool
+    parse_text: bool
     streaming: bool
 
 
@@ -175,6 +178,71 @@ def _filled(lf: pl.LazyFrame, columns: dict[str, Any], *, strict: bool) -> pl.La
     return lf.with_columns(fills) if fills else lf
 
 
+def _parsed_text(
+    lf: pl.LazyFrame, columns: dict[str, Any], collect_kwargs: dict[str, Any]
+) -> tuple[pl.LazyFrame, dict[str, pl.Series]]:
+    """`parse_text=True`: each column that arrived as text where its spec
+    declares a type text can hold -- a number, a flag, a date -- read as
+    that type, when every present value parses; and, for each column with
+    a value that does not, those values.
+
+    The text columns are read once, here, and parsed as `read()` parses a
+    file: stripped, with empty text a null. A column left as text is a
+    `dtype` finding, with the values that did not parse as its samples.
+    """
+    schema = lf.collect_schema()
+    candidates = [
+        name
+        for name, declared in columns.items()
+        if name in schema
+        and schema[name] == pl.String
+        and text_parser(declared.dtype) is not None
+    ]
+    if not candidates:
+        return lf, {}
+    texts = lf.select(frames.columns(candidates)).collect(**collect_kwargs)
+    parsed: list[pl.Series] = []
+    unparsed: dict[str, pl.Series] = {}
+    for name in candidates:
+        values, failed = parse_series(texts[name], columns[name].dtype)
+        if values is None:
+            unparsed[name] = failed
+        else:
+            parsed.append(values)
+    return (lf.with_columns(parsed) if parsed else lf), unparsed
+
+
+def _dtype_finding(
+    name: str, declared: pl.DataType, actual: pl.DataType, unparsed: pl.Series | None
+) -> Finding:
+    """A column of the wrong dtype -- with, for text `parse_text` could
+    not read, how many values did not parse and which."""
+    details: dict[str, Any] = {"expected": str(declared), "actual": str(actual)}
+    message = f"Column '{name}': expected dtype {declared}, got {actual}"
+    if unparsed is None:
+        return Finding(
+            code="dtype",
+            key=f"{name}__dtype",
+            message=message,
+            columns=(name,),
+            details=details,
+        )
+    samples = tuple(unparsed.unique(maintain_order=True).head(5).to_list())
+    details["unparsed"] = len(unparsed)
+    return Finding(
+        code="dtype",
+        key=f"{name}__dtype",
+        message=(
+            f"{message}: {len(unparsed):,} value(s) do not parse as {declared}, "
+            f"such as {list(samples)}"
+        ),
+        columns=(name,),
+        count=len(unparsed),
+        samples=samples,
+        details=details,
+    )
+
+
 def _resolve_foreign_keys(
     spec: TableSpec, references: References
 ) -> tuple[list[tuple[Any, pl.LazyFrame | None]], list[Finding]]:
@@ -224,6 +292,20 @@ def inspect(
     opts = _options_from(options, **option_kwargs)
     lf = to_lazy(df)
     columns = dict(spec.columns)
+
+    # The in-memory engine unless streaming is asked for. Polars 2.0.0 runs a
+    # lazy query on its streaming engine by default, and that engine panics
+    # on validation's aggregation over a list column -- `list.eval` beside a
+    # `filter` -- for some frames (scripts/deep/polars2_eval_chunks_repro.py).
+    # On Polars 1 this is the engine a lazy query already ran on.
+    collect_kwargs: dict[str, Any] = {
+        "engine": "streaming" if opts.streaming else "in-memory"
+    }
+
+    unparsed: dict[str, pl.Series] = {}
+    if opts.parse_text:
+        # Before filling, so a default fills what was empty text.
+        lf, unparsed = _parsed_text(lf, columns, collect_kwargs)
     if opts.fill_defaults:
         lf = _filled(lf, columns, strict=opts.strict_dtypes)
 
@@ -277,13 +359,7 @@ def inspect(
         compatible = compatible_with[name]
         if not compatible:
             findings.append(
-                Finding(
-                    code="dtype",
-                    key=f"{name}__dtype",
-                    message=f"Column '{name}': expected dtype {cs.dtype}, got {actual_dtype}",
-                    columns=(name,),
-                    details={"expected": str(cs.dtype), "actual": str(actual_dtype)},
-                )
+                _dtype_finding(name, cs.dtype, actual_dtype, unparsed.get(name))
             )
         constraints.extend(
             column_constraints(
@@ -306,15 +382,6 @@ def inspect(
             rows=spec.rows if opts.rows else None,
         )
     )
-
-    # The in-memory engine unless streaming is asked for. Polars 2.0.0 runs a
-    # lazy query on its streaming engine by default, and that engine panics
-    # on validation's aggregation over a list column -- `list.eval` beside a
-    # `filter` -- for some frames (scripts/deep/polars2_eval_chunks_repro.py).
-    # On Polars 1 this is the engine a lazy query already ran on.
-    collect_kwargs: dict[str, Any] = {
-        "engine": "streaming" if opts.streaming else "in-memory"
-    }
 
     if constraints:
         aggregations = [expr for c in constraints for expr in c.aggregations()]

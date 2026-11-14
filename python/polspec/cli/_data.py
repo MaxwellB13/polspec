@@ -75,6 +75,9 @@ def _validation_options(args: argparse.Namespace) -> dict[str, Any]:
         "missing_cols": "allow" if args.allow_missing else "raise",
         "strict_dtypes": args.strict_dtypes,
         "fill_defaults": args.fill_defaults,
+        # The file is read in the spec's terms already (`read()`); asking
+        # again names the values of a column that stayed text.
+        "parse_text": True,
         **_skipped(args),
     }
 
