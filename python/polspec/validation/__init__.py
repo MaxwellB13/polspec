@@ -273,6 +273,21 @@ def _resolve_foreign_keys(
     return resolved, findings
 
 
+@dataclass(frozen=True, slots=True)
+class _Recheck:
+    """Validates a frame again under the same spec, options and parents:
+    how `passing_rows()` settles a split, as a value so a report pickles."""
+
+    spec: TableSpec
+    options: ValidationOptions
+    references: References
+
+    def __call__(self, frame: pl.LazyFrame) -> ValidationReport:
+        return inspect(
+            self.spec, frame, options=self.options, references=self.references
+        )
+
+
 def inspect(
     spec: SpecLike,
     df: pl.DataFrame | pl.LazyFrame,
@@ -406,8 +421,7 @@ def inspect(
             )
         )
 
-    def recheck(frame: pl.LazyFrame) -> ValidationReport:
-        return inspect(spec, frame, options=opts, references=references)
+    recheck = _Recheck(spec, opts, references)
 
     # Only a claim relating rows to other rows -- an order, a key into the
     # frame's own rows -- can break in the rows left after the failing ones

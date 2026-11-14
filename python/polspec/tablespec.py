@@ -17,11 +17,11 @@ import dataclasses
 import warnings
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import KW_ONLY, dataclass, field
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import polars as pl
 
+from polspec._frozen import FrozenDict
 from polspec.bound import Bound, coerce_bound
 from polspec.check import Check
 from polspec.domain import Domain
@@ -236,7 +236,7 @@ class TableSpec:
             self,
             name: str,
             columns: Mapping[str, ColSpec | pl.DataType | type[pl.DataType]] = (
-                MappingProxyType({})
+                FrozenDict()
             ),
             *,
             description: str | None = None,
@@ -283,7 +283,7 @@ class TableSpec:
                     "conflicts with its key. The key already is the column name."
                 )
             columns[key] = value
-        object.__setattr__(self, "columns", MappingProxyType(columns))
+        object.__setattr__(self, "columns", FrozenDict(columns))
         object.__setattr__(self, "checks", _dedupe(tuple(self.checks), Check, "checks"))
         object.__setattr__(
             self, "unique_together", parse_unique_together(self.unique_together)
@@ -628,6 +628,12 @@ class TableSpec:
     def schema(self) -> pl.Schema:
         """The Polars schema this spec declares: column name to dtype."""
         return pl.Schema({name: spec.dtype for name, spec in self.columns.items()})
+
+    def __arrow_c_schema__(self) -> object:
+        """This spec's schema through the Arrow PyCapsule interface, so
+        `pl.Schema(spec)`, `pyarrow.schema(spec)` and any other reader of the
+        interface take a spec where they take a schema."""
+        return self.schema().__arrow_c_schema__()
 
     def tag(
         self,

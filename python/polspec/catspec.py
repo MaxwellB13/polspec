@@ -37,12 +37,12 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import polars as pl
 
 from polspec import frames
+from polspec._frozen import FrozenDict
 from polspec.dtypes import DtypeLike
 from polspec.errors import SpecError
 from polspec.spec import is_categorical_dtype
@@ -345,17 +345,17 @@ class CatSpec(metaclass=_CatSpecMeta):
     @property
     def enums(self) -> Mapping[str, list[str]]:
         """Every `Enum` entry: name to its ordered category list."""
-        return MappingProxyType(self._enums)
+        return FrozenDict(self._enums)
 
     @property
     def categoricals(self) -> Mapping[str, pl.Categories]:
         """Every `Categorical` entry: name to its shared `pl.Categories`."""
-        return MappingProxyType(self._categoricals)
+        return FrozenDict(self._categoricals)
 
     @property
     def choices(self) -> Mapping[str, list[Any]]:
         """Every recorded domain pool, keyed by entry name."""
-        return MappingProxyType(self._choices)
+        return FrozenDict(self._choices)
 
     # ------------------------------------------------------------------
     # Lookup: by name, matching case as `resolve_key` below does

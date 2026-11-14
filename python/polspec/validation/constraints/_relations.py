@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 
 from polspec import frames
-from polspec.validation.report import Finding, FindingCode
+from polspec.validation.report import Finding, FindingCode, RowsWhere
 
 if TYPE_CHECKING:
     from polspec.foreign_key import ForeignKey
@@ -24,6 +24,29 @@ from polspec.validation.constraints._base import MAX_SAMPLES, Constraint
 # ---------------------------------------------------------------------------
 # Foreign keys -- each needs its own join, so they cannot share the pass above
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Orphans:
+    """The rows of a frame whose key no parent row holds: a foreign key's
+    finding naming its rows, as a value so a report pickles."""
+
+    present: pl.Expr
+    parent_keys: pl.LazyFrame
+    local: tuple[str, ...]
+    keys: tuple[str, ...]
+
+    def __call__(self, frame: pl.LazyFrame) -> pl.LazyFrame:
+        renamed = [
+            frames.column(c).alias(k)
+            for c, k in zip(self.local, self.keys, strict=True)
+        ]
+        return (
+            frame.filter(self.present)
+            .with_columns(renamed)
+            .join(self.parent_keys, on=list(self.keys), how="anti")
+            .drop(list(self.keys))
+        )
 
 
 def foreign_key_findings(
@@ -103,18 +126,7 @@ def foreign_key_findings(
             ]
         ).unique()
 
-        def orphans_of(
-            frame: pl.LazyFrame, _p=present, _k=parent_keys, _l=local_cols, _keys=keys
-        ) -> pl.LazyFrame:
-            renamed = [
-                frames.column(c).alias(k) for c, k in zip(_l, _keys, strict=True)
-            ]
-            return (
-                frame.filter(_p)
-                .with_columns(renamed)
-                .join(_k, on=_keys, how="anti")
-                .drop(_keys)
-            )
+        orphans_of = Orphans(present, parent_keys, tuple(local_cols), tuple(keys))
 
         stats = orphans_of(lf.select(frames.columns(local_cols))).select(
             pl.len().alias("cnt"),
@@ -306,7 +318,7 @@ def hierarchy_findings(
                     "parent": parent,
                     "max_depth": hierarchy.max_depth,
                 },
-                _locate=lambda frame, _m=mask: frame.filter(_m),
+                _locate=RowsWhere(mask),
             )
         )
     return findings
