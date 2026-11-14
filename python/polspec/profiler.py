@@ -904,24 +904,39 @@ def _named_format(
         fmt = _lookup_format(name)
         if fmt.is_finite and not finite:
             continue
-        fits = fmt.check(frames.column(value))
+        # What the format accepts, and what counts as evidence of it. They
+        # differ for a hostname: a single word passes the check -- so a
+        # column of first names would be hostnames -- and so does a decimal,
+        # `0.45` being host `0` in domain `45`. Evidence is a dotted value
+        # whose last label is not all digits, as no real hostname's is (RFC
+        # 1123). A value that passes is no stand-in, though: the format
+        # accepts it, and `extra_values` may hold only what it does not.
+        fits = fmt.check(frames.column(value)).fill_null(False)
+        evidence = fits
         if name == "hostname":
-            fits = fits & frames.column(value).str.contains(".", literal=True)
-        misses = probe.select((~fits.fill_null(False)).sum()).item()
+            text = frames.column(value)
+            evidence = (
+                fits
+                & text.str.contains(".", literal=True)
+                & ~text.str.contains(r"\.[0-9]+$")
+            )
+        misses = probe.select((~fits).sum()).item()
         if misses > allowed_misses:
             continue
-        judged = counts.with_columns(fits.fill_null(False).alias("__polspec_fits"))
-        passing = judged.filter(pl.col("__polspec_fits"))
+        judged = counts.with_columns(
+            fits.alias("__polspec_fits"), evidence.alias("__polspec_evidence")
+        )
+        passing = judged.filter(pl.col("__polspec_evidence"))
         if passing.height < FORMAT_MIN_DISTINCT:
             continue
         passing_rows = int(passing[count].sum())
-        if passing_rows == total:
-            return name, {}
         # Most frequent first, then by value: `value_counts` keeps no order,
         # and a spec file should not change between runs on the same data.
         failing = judged.filter(~pl.col("__polspec_fits")).sort(
             [count, value], descending=[True, False]
         )
+        if failing.height == 0 and passing_rows >= FORMAT_MIN_SHARE * total:
+            return name, {}
         if (
             keep_values
             and passing_rows >= FORMAT_MIN_SHARE * total

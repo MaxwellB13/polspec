@@ -425,6 +425,42 @@ def test_a_hostname_needs_a_dot():
     assert _described(pl.DataFrame({"c": names}))["c"].format is None
 
 
+def test_a_hostname_without_a_dot_is_no_stand_in():
+    """A dot is what makes a column hostnames, but a word without one still
+    has the format -- so it is not an `extra_values` stand-in, which may
+    hold only what the format refuses. Asking for one refused the spec."""
+    hosts = _values_of("hostname", 200) * 5
+    values = hosts + ["0"] * 5 + ["localhost"] * 3 + ["N/A"] * 2
+    column = _described(pl.DataFrame({"c": values}))["c"]
+    assert column.format == "hostname"
+    assert dict(column.extra_values) == {"N/A": pytest.approx(2 / len(values))}
+    spec = TableSpec("T", {"c": column})
+    assert not inspect(spec, pl.DataFrame({"c": values}))
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        [f"0.{i:04d}" for i in range(0, 10_000, 7)] + ["0", "1"] * 3,
+        [f"{i}.{i % 97}" for i in range(2_000)],
+    ],
+    ids=["fractions", "decimals"],
+)
+def test_decimals_held_as_text_are_not_hostnames(values):
+    """`0.45` passes the hostname check -- host `0`, domain `45` -- but no
+    real hostname ends in an all-digit label, so numbers read as text are
+    text, not a format."""
+    column = _described(pl.DataFrame({"c": values}))["c"]
+    assert (column.dtype, column.format) == (pl.String, None)
+
+
+def test_hostnames_with_a_few_words_and_nothing_else_have_no_stand_ins():
+    hosts = _values_of("hostname", 200) * 5
+    values = hosts + ["localhost"] * 3
+    column = _described(pl.DataFrame({"c": values}))["c"]
+    assert (column.format, column.extra_values) == ("hostname", None)
+
+
 def _near_miss(stand_ins: int, repeats: int) -> list[str]:
     countries = _values_of("iso_country", 2_000)[:1_000]
     extra = [f"stand-in {i}" for i in range(stand_ins) for _ in range(repeats)]

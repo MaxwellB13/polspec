@@ -9,6 +9,22 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`profile()` could refuse its own hostname column.** A dot is what makes
+  a column hostnames to the profiler, so a dotless value such as
+  `localhost` or `0` was kept as an `extra_values` stand-in. But the
+  hostname format accepts those, and `ColSpec` refuses a stand-in its format
+  already accepts, so `profile()`, `synthesize()` and `polspec schema infer`
+  raised `SpecError` on the column. Stand-ins are now only values the format
+  refuses.
+- **`profile()` took decimals held as text for hostnames.** `0.45` passes
+  the hostname check, as host `0` in domain `45`, so a numeric column read
+  as text (a CSV read with `infer_schema=False`) was profiled with
+  `format: hostname`. A value ending in an all-digit label is no longer
+  evidence of a hostname, since no real one ends that way; validating a
+  declared `format="hostname"` is unchanged.
+
 ## [1.1.0] - 2026-11-08
 
 **A spec says more.** A table or column can say what it means, how many
