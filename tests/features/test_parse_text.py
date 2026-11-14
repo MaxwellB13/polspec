@@ -7,6 +7,7 @@ import random
 import polars as pl
 import polspec
 import pytest
+from cases import COLUMN_CASES
 from polspec import FrameSpec
 from polspec.cli import main
 
@@ -182,3 +183,123 @@ def test_synthesize_on_the_command_line_takes_parse_text(tmp_path):
     command = ["synthesize", str(data), "-o", str(fake), "--seed", "1", "--parse-text"]
     assert main(command) == 0
     assert pl.read_parquet(fake).schema == pl.Schema({"when": pl.Date})
+
+
+# ---------------------------------------------------------------------------
+# Validating text: `validate(parse_text=True)` and `read()`
+# ---------------------------------------------------------------------------
+
+
+def _loans_csv(tmp_path, *, rows: int = 300, bad: str | None = None):
+    rng = random.Random(1)
+    lines = ["loan_id,LGD,opened,flag"]
+    for i in range(1, rows + 1):
+        lgd = rng.choice([f"{rng.random():.4f}", "0", ""])
+        if bad is not None and i == 5:
+            lgd = bad
+        flag = rng.choice(["true", "FALSE"])
+        lines.append(f"{i},{lgd},2024-01-{1 + i % 28:02d},{flag}")
+    path = tmp_path / "loans.csv"
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+TYPED = pl.Schema(
+    {"loan_id": pl.Int64, "LGD": pl.Float64, "opened": pl.Date, "flag": pl.Boolean}
+)
+
+
+def test_a_text_frame_validates_against_its_own_profile(tmp_path):
+    raw = pl.read_csv(_loans_csv(tmp_path), infer_schema=False)
+    spec = polspec.profile(raw, parse_text=True)
+    assert polspec.validate(spec, raw, parse_text=True).schema == TYPED
+    lazy = polspec.validate(spec, raw.lazy(), parse_text=True)
+    assert lazy.collect().schema == TYPED
+
+
+def test_without_parse_text_text_is_still_the_wrong_dtype(tmp_path):
+    raw = pl.read_csv(_loans_csv(tmp_path), infer_schema=False)
+    spec = polspec.profile(raw, parse_text=True)
+    report = polspec.inspect(spec, raw)
+    assert [f.code for f in report.findings] == ["dtype"] * 4
+
+
+def test_a_value_that_does_not_parse_is_a_dtype_finding_naming_it(tmp_path):
+    raw = pl.read_csv(_loans_csv(tmp_path, bad="N/A"), infer_schema=False)
+    spec = polspec.TableSpec(
+        "Loans", {"LGD": polspec.ColSpec(pl.Float64, nullable=True)}
+    )
+    (finding,) = polspec.inspect(spec, raw.select("LGD"), parse_text=True).findings
+    assert finding.code == "dtype"
+    assert (finding.count, finding.samples) == (1, ("N/A",))
+    assert finding.details["unparsed"] == 1
+    assert "do not parse as Float64" in finding.message
+
+
+def test_a_declared_narrow_integer_is_judged_by_its_width():
+    """Text is read as an Int64, so a value past an Int8 is the dtype's
+    range, as for any wider integer standing in -- not a parse failure."""
+    spec = polspec.TableSpec("T", {"n": polspec.ColSpec(pl.Int8)})
+    report = polspec.inspect(spec, pl.DataFrame({"n": ["1", "300"]}), parse_text=True)
+    assert [f.code for f in report.findings] == ["dtype"]
+    assert report.findings[0].samples == (300,)
+
+
+def test_a_declared_type_parses_a_leading_zero():
+    """The leading-zero rule is the profiler guessing; a declared integer
+    says the column is numbers."""
+    spec = polspec.TableSpec("T", {"n": polspec.ColSpec(pl.Int64)})
+    out = polspec.validate(spec, pl.DataFrame({"n": ["007", "10"]}), parse_text=True)
+    assert out["n"].to_list() == [7, 10]
+
+
+def test_empty_text_is_filled_by_a_default():
+    spec = polspec.TableSpec("T", {"n": polspec.ColSpec(pl.Int64, default=0)})
+    out = polspec.validate(
+        spec, pl.DataFrame({"n": ["1", " ", ""]}), parse_text=True, fill_defaults=True
+    )
+    assert out["n"].to_list() == [1, 0, 0]
+
+
+def test_read_types_a_file_read_as_text(tmp_path):
+    path = _loans_csv(tmp_path)
+    spec = polspec.profile(pl.read_csv(path, infer_schema=False), parse_text=True)
+    assert polspec.read(spec, path, infer_schema=False).schema == TYPED
+
+
+def test_validate_on_the_command_line_names_what_does_not_parse(tmp_path, capsys):
+    path = _loans_csv(tmp_path, bad="N/A")
+    spec_path = tmp_path / "loans.yaml"
+    polspec.to_yaml(
+        polspec.TableSpec("Loans", {"LGD": polspec.ColSpec(pl.Float64, nullable=True)}),
+        spec_path,
+    )
+    assert main(["validate", str(spec_path), str(path), "--allow-extra"]) == 1
+    assert "such as ['N/A']" in capsys.readouterr().out
+
+
+SCALARS = {
+    name: column
+    for name, column in COLUMN_CASES.items()
+    if column.dtype in (pl.Boolean, pl.Date, pl.Time)
+    or column.dtype.is_numeric()
+    or isinstance(column.dtype, pl.Datetime)
+}
+
+
+@pytest.mark.parametrize("name", sorted(SCALARS))
+def test_generated_data_written_as_text_validates_with_parse_text(name):
+    """What `generate()` makes, written out as text, is read back as what
+    it was by the one parser `read()` and `validate()` share."""
+    spec = polspec.TableSpec("T", {"c": SCALARS[name]})  # validators read "c"
+    data = polspec.generate(spec, 200, seed=1)
+    column = pl.col("c")
+    # Polars casts a Time to text without its fraction of a second.
+    written = (
+        column.dt.to_string("%H:%M:%S%.f")
+        if data.schema["c"] == pl.Time
+        else column.cast(pl.String)
+    )
+    text = data.select(written)
+    out = polspec.validate(spec, text, parse_text=True, cast=True)
+    assert out.equals(data)

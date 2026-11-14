@@ -2,8 +2,8 @@
 
 A file someone hands you is read loosely -- Polars' own inference, nothing
 forced -- and then only one thing is done in the spec's name: a column it
-declares as a date, a time, a decimal or a duration that arrived as text is
-parsed as what it declares. A CSV or JSON file has no such types -- Polars
+declares as a number, a flag, a date, a time, a decimal or a duration that
+arrived as text is parsed as what it declares (`polspec._text`). A CSV or JSON file has no such types -- Polars
 itself writes a `Decimal` to JSON as `"1.25"` and a `Duration` as
 `"PT3600S"` -- so without that the column is `String`, validation reports its
 dtype and checks nothing else about it. Everything else is left for
@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 
 from polspec import frames
+from polspec._text import parse_series, parsed_dtype, text_parser
 from polspec.dtypes import element_dtype
 from polspec.tablespec import as_table_spec
 
@@ -108,10 +109,13 @@ def read(
     -------
     pl.DataFrame
         The file as Polars reads it, with one change: each column the spec
-        declares as a `Date`, `Datetime`, `Time`, `Decimal` or `Duration`
-        that arrived as text -- itself, or as the elements of a list or the
-        fields of a struct -- is parsed as what it declares, when every value
-        in it parses exactly. A `Decimal` is parsed from its digits, with no
+        declares as a `Boolean`, integer, float, `Date`, `Datetime`, `Time`,
+        `Decimal` or `Duration` that arrived as text -- itself, or as the
+        elements of a list or the fields of a struct -- is parsed as what it
+        declares, when every value in it parses exactly. A column of its own
+        is stripped first, with empty text a null, so a file read with
+        `infer_schema=False` comes back typed; an integer comes back as an
+        `Int64`, and a float as a `Float64`. A `Decimal` is parsed from its digits, with no
         more decimal places than its scale; a `Duration` from the ISO 8601
         text Polars writes (`"PT3600S"`, `"-PT0.5S"`, `"P0D"`). A column
         holding a value that does not parse stays text, so validation reports
@@ -144,12 +148,12 @@ def parse_declared_text(df: pl.DataFrame, spec: TableSpec) -> pl.DataFrame:
         if name not in df.columns:
             continue
         arrived = df.schema[name]
-        if arrived == pl.String and isinstance(
-            column.dtype, (pl.Date, pl.Datetime, pl.Time)
-        ):
-            values = _parse_temporal(df[name], column.dtype)
-        else:
-            values = _parse_nested(df, name, column.dtype, arrived)
+        if arrived == pl.String:
+            values, _ = parse_series(df[name], column.dtype)
+            if values is not None:
+                parsed.append(values)
+            continue
+        values = _parse_nested(df, name, column.dtype, arrived)
         if values is not None and _nulls(frames.plain(values)) == _nulls(
             frames.plain(df[name])
         ):
@@ -198,10 +202,10 @@ def _arrival(
     if arrived == pl.Null:
         return expr.cast(declared), declared
     if arrived == pl.String:
-        for kind, parser in _TEXT_PARSERS:
-            if declared == kind:
-                return parser(expr, declared), declared
-        return None
+        parse = text_parser(declared)
+        if parse is None:
+            return None
+        return parse(expr), parsed_dtype(declared)
     if isinstance(declared, pl.List) and isinstance(arrived, pl.List):
         inner = _arrival(pl.element(), element_dtype(declared), element_dtype(arrived))
         if inner is None:
@@ -249,88 +253,4 @@ def _instance(dtype: DtypeLike) -> pl.DataType:
     """A struct field's dtype as an instance: polars types it as either."""
     return dtype() if isinstance(dtype, type) else dtype
 
-
-def _parse_date(text: pl.Expr, _dtype: pl.DataType) -> pl.Expr:
-    return text.str.to_date(strict=False)
-
-
-def _parse_time(text: pl.Expr, _dtype: pl.DataType) -> pl.Expr:
-    return text.str.to_time(strict=False)
-
-
-def _parse_datetime(text: pl.Expr, dtype: pl.DataType) -> pl.Expr:
-    declared = dtype if isinstance(dtype, pl.Datetime) else pl.Datetime()
-    return text.str.to_datetime(
-        time_unit=declared.time_unit, time_zone=declared.time_zone, strict=False
-    )
-
-
-def _parse_decimal(text: pl.Expr, dtype: pl.Decimal) -> pl.Expr:
-    """`text` as `dtype`, exactly: digits with no more decimal places than the
-    scale, which is how Polars writes one. Anything else -- `1.255` for a
-    scale of 2, which a cast would round -- is a null."""
-    exact = text.str.contains(rf"^[+-]?\d+(\.\d{{0,{dtype.scale or 0}}})?$")
-    return pl.when(exact).then(text).cast(dtype, strict=False)
-
-
-# Digits of a second in each time unit.
-_SUBSECOND_DIGITS = {"ms": 3, "us": 6, "ns": 9}
-
-
-def _parse_duration(text: pl.Expr, dtype: pl.Duration) -> pl.Expr:
-    """`text` as `dtype` from the ISO 8601 form Polars writes: a sign, whole
-    seconds and a fraction (`-PT8612.164256S`), or `P0D` for zero. A finer
-    fraction than the unit holds, any other form, or a value past the range
-    of the unit is a null. Integer arithmetic throughout, so nothing is
-    rounded through a float."""
-    digits = _SUBSECOND_DIGITS[dtype.time_unit or "us"]
-    pattern = rf"^(-?)P(?:0D|T(\d+)(?:\.(\d{{1,{digits}}}))?S)$"
-    parts = text.str.extract_groups(pattern)
-    whole = parts.struct.field("2").fill_null("0").cast(pl.Int128, strict=False)
-    fraction = (
-        parts.struct.field("3")
-        .fill_null("")
-        .str.pad_end(digits, "0")
-        .cast(pl.Int128, strict=False)
-    )
-    magnitude = whole * 10**digits + fraction
-    negative = pl.lit(0, dtype=pl.Int128) - magnitude  # Int128 has no negation
-    signed = pl.when(parts.struct.field("1") == "-").then(negative).otherwise(magnitude)
-    return (
-        pl.when(text.str.contains(pattern))
-        .then(signed)
-        .cast(pl.Int64, strict=False)
-        .cast(dtype)
-    )
-
-
-# What text each declared dtype is read from.
-_TEXT_PARSERS: tuple[tuple[Any, Callable[[pl.Expr, Any], pl.Expr]], ...] = (
-    (pl.Date, _parse_date),
-    (pl.Time, _parse_time),
-    (pl.Datetime, _parse_datetime),
-    (pl.Decimal, _parse_decimal),
-    (pl.Duration, _parse_duration),
-)
-
-
-def _parse_temporal(text: pl.Series, dtype: pl.DataType) -> pl.Series | None:
-    """`text` as `dtype`, with a value that does not parse as a null; None
-    for a dtype that is not a date or time, or text Polars cannot read as
-    one at all. Parsed as a Series rather than an expression, which is how
-    Polars allows an offset-aware value to be read into a naive column."""
-    try:
-        if dtype == pl.Date:
-            return text.str.to_date(strict=False)
-        if dtype == pl.Time:
-            return text.str.to_time(strict=False)
-        if dtype == pl.Datetime:
-            declared = dtype if isinstance(dtype, pl.Datetime) else pl.Datetime()
-            return text.str.to_datetime(
-                time_unit=declared.time_unit,
-                time_zone=declared.time_zone,
-                strict=False,
-            )
-    except pl.exceptions.PolarsError:
-        return None
     return None

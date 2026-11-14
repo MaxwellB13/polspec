@@ -188,6 +188,13 @@ gaps between a CSV and a spec take care of themselves — a `String` column
 is accepted where an `Enum` or `Categorical` is declared, an integer where a
 float or `Decimal` is, and the values are checked either way.
 
+A file too unclean to type on reading can be read with its types switched
+off, and `read()` types it in the spec's terms instead:
+`Customers.read("customers.csv", infer_schema=False)` hands back each
+column the spec declares as a number, a flag or a date parsed as one, when
+every value in it parses. Text is stripped and empty text is a null there,
+as in [Data read as text](#data-read-as-text). *Added in 1.2.*
+
 JSON has a few more gaps, and `read()` closes each the same way, only for
 what the spec declares and only when every value reads exactly. Polars
 writes a `Decimal` as text (`"1.25"`), read back from its digits — never
@@ -285,6 +292,7 @@ Orders.validate(
     strict_dtypes=False,
     cast=False,
     fill_defaults=False,
+    parse_text=False,
     streaming=False,
     references=None,
     rules=True,
@@ -367,6 +375,40 @@ A default must be a value its column accepts — its dtype, bounds, choices,
 format, pattern, lengths and validators — and one that is not is refused
 where it is declared. Filling is opt-in: a spec that gains a default changes
 nothing until asked, and without it a null is still a finding.
+
+### Data read as text
+
+`parse_text=True` (`polspec validate` always asks it) reads each column that
+arrived as text, where the spec declares a type text can hold, as that type
+before anything is checked: a `Boolean` from `true` or `false` in any case,
+an integer, a float, a `Date`, `Datetime` or `Time`, a `Decimal`, a
+`Duration`. It is for a frame read with its types switched off — the frame
+a [profile with `parse_text=True`](profiling.md#data-read-as-text) was made
+from validates against it this way. *Added in 1.2.*
+
+```python
+import polspec
+
+Loans = polspec.TableSpec("Loans", {"LGD": ColSpec(pl.Float64, nullable=True)})
+raw = pl.DataFrame({"LGD": ["0.45", "", "0.2"]})   # read as text
+
+polspec.validate(Loans, raw, parse_text=True)       # LGD as Float64: [0.45, None, 0.2]
+```
+
+Text is stripped and empty text is a null, so `fill_defaults=True` fills
+it. A column is parsed only when every present value parses. Otherwise it
+stays text, and its `dtype` finding counts the values that did not and
+gives some as its samples:
+
+<!-- docs: skip -->
+```text
+Column 'LGD': expected dtype Float64, got String: 1 value(s) do not parse as Float64, such as ['N/A']
+```
+
+An integer is read as an `Int64`, so a value past a narrower declared width
+is reported as any wider integer standing in is: see the next section. The
+frame comes back with the parsed columns; add `cast=True` for the declared
+widths.
 
 ### Dtype strictness
 

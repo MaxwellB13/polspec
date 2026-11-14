@@ -857,7 +857,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         **keywords
             The options one at a time, as `ValidationKeywords` lists them:
             `extra_cols`, `missing_cols`, `strict_dtypes`, `cast`,
-            `fill_defaults` and `streaming`, and each check switch by the
+            `fill_defaults`, `parse_text` and `streaming`, and each check
+            switch by the
             `ValidationOptions` field it sets (`unique`, `order`, ...).
 
         Notes
