@@ -39,9 +39,8 @@ from polspec.profiler import (
     DESCRIBE_DEFAULTS,
     ProfileKeywords,
     ProfileOptions,
-    detect_order,
-    profile_columns,
     profile_options,
+    profiled_table,
 )
 from polspec.render import framespec_to_markdown, framespec_to_mermaid
 from polspec.spec import ColSpec
@@ -419,12 +418,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         # The columns directly, not through `profile`: a frame with no rows
         # still describes its columns' dtypes, which `profile` refuses.
         frame = sample_rows(df, opts.sample, opts.seed)
-        columns = profile_columns(frame, opts)
-        order = detect_order(frame) if opts.detect_order else None
-        order_by, descending = order if order is not None else ((), False)
-        return cls.from_spec(
-            TableSpec(name, columns, order_by=order_by, descending=descending)
-        )
+        return cls.from_spec(profiled_table(frame, opts, name))
 
     # ------------------------------------------------------------------
     # Introspection

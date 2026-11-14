@@ -34,12 +34,14 @@ import polars as pl
 
 from polspec import frames
 from polspec._options import options_from
+from polspec._text import infer as infer_text
 from polspec.bound import Bound
 from polspec.constants import DEFAULT_NULL_PROBABILITY
 from polspec.dtypes import MAP, dtype_value_limits, field_dtypes, map_entries, map_parts
 from polspec.formats import lookup as _lookup_format
 from polspec.shape import fit, physical, with_fit
 from polspec.spec import ColSpec, is_categorical_dtype
+from polspec.tablespec import TableSpec
 
 # The fewest distinct values that make an all-distinct column a key. Ten
 # rows of distinct values are ten rows, not evidence of a key.
@@ -276,6 +278,15 @@ class ProfileOptions:
         0 stays 0. Category frequencies (`weights`) are written at the same
         precision, each to its nearest step and never to 0. None writes them
         exactly as observed.
+    parse_text : bool, default False
+        Read a text column as the type its values hold, for a frame whose
+        types were switched off (`pl.read_csv(..., infer_schema=False)`):
+        `Boolean`, `Int64`, `Float64`, `Date` or `Datetime`, the first that
+        every present value parses as exactly. Text is stripped and empty
+        text is a null. A column with a value written with a leading zero
+        (`007`) stays text, being a code, as does one in `replace`. Left
+        False, such a column stays text and its description says what it
+        would parse as. Validate the same frame with `parse_text=True` too.
 
     """
 
@@ -291,6 +302,7 @@ class ProfileOptions:
     detect_order: bool = True
     round_bounds: Rounding = None
     round_rates: Rounding = None
+    parse_text: bool = False
 
     def __post_init__(self) -> None:
         replace: object = self.replace
@@ -318,6 +330,7 @@ class SynthesizeKeywords(TypedDict, total=False):
     detect_order: bool
     round_bounds: Rounding
     round_rates: Rounding
+    parse_text: bool
 
 
 class ProfileKeywords(SynthesizeKeywords, total=False):
@@ -503,6 +516,57 @@ def profile_columns(
             stacklevel=2,
         )
     return columns
+
+
+# The start of the description a text column is given when it would parse:
+# what `polspec schema infer` looks for to say so on the terminal too.
+TEXT_NOTE = "Every value is text that parses as "
+
+
+def text_note(dtype: pl.DataType) -> str:
+    """The description of a text column that would parse as `dtype`."""
+    return (
+        f"{TEXT_NOTE}{type(dtype).__name__}; profile with parse_text=True "
+        "(--parse-text) to declare it as one."
+    )
+
+
+def typed_text(
+    frame: pl.DataFrame, opts: ProfileOptions
+) -> tuple[pl.DataFrame, dict[str, pl.DataType]]:
+    """`frame` with each text column read as the type its values hold,
+    under `parse_text`; and, without it, the type each would be read as.
+
+    A column in `replace` is left as text either way: its values are not
+    carried over, and a number's extremes would be.
+    """
+    parsed: list[pl.Series] = []
+    would: dict[str, pl.DataType] = {}
+    for name, dtype in frame.schema.items():
+        if dtype != pl.String or name in opts.replace:
+            continue
+        values = infer_text(frame[name])
+        if values is None:
+            continue
+        if opts.parse_text:
+            parsed.append(values)
+        else:
+            would[name] = values.dtype
+    return (frame.with_columns(parsed) if parsed else frame), would
+
+
+def profiled_table(frame: pl.DataFrame, opts: ProfileOptions, name: str) -> TableSpec:
+    """`frame` described as a `TableSpec`: its text read as `opts` says,
+    each column profiled, and the order its rows come in."""
+    frame, would = typed_text(frame, opts)
+    columns = profile_columns(frame, opts)
+    for column, dtype in would.items():
+        columns[column] = dataclasses.replace(
+            columns[column], description=text_note(dtype)
+        )
+    order = detect_order(frame) if opts.detect_order else None
+    order_by, descending = order if order is not None else ((), False)
+    return TableSpec(name, columns, order_by=order_by, descending=descending)
 
 
 @dataclass(frozen=True, slots=True)

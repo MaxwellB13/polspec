@@ -9,6 +9,19 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+### Added
+
+- **`profile(parse_text=True)`** reads a text column as the type its values
+  hold, for a frame read with its types switched off
+  (`pl.read_csv(..., infer_schema=False)`): `Boolean`, `Int64`, `Float64`,
+  `Date` or `Datetime`, the first every value parses as exactly. Empty
+  text is a null; a value written with a leading zero, or an integer past
+  `Int64`, keeps its column text. `synthesize`, `FrameSpec.from_dataframe`
+  and `ProfileOptions` take it, and `polspec schema infer` and
+  `polspec synthesize` take `--parse-text`. Off by default: a text column
+  that would parse stays text, and its description says what it would
+  parse as, which the two commands also print.
+
 ### Fixed
 
 - **`profile()` could refuse its own hostname column.** A dot is what makes

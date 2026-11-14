@@ -402,5 +402,5 @@ def test_the_cli_reference_is_current():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert (REFERENCE / "cli.md").read_text(encoding="utf-8") == module.build(), (
-        "docs/reference/cli.md is stale: run `uv run python scripts/generate_llms_txt.py`"
+        "docs/reference/cli.md is stale: run `uv run python scripts/generate_cli_reference.py`"
     )

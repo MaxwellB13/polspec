@@ -10,6 +10,7 @@ from polspec.cli._io import (
     _class_name_from,
     _existing,
     _maybe_format,
+    _note_text,
     _require_identifier,
     _warnings_printed,
     _write_data_file,
@@ -44,10 +45,12 @@ def _cmd_synthesize(args: argparse.Namespace) -> int:
                 sample=args.sample,
                 max_unique_enum=args.max_unique_enum,
                 formats=not args.no_formats,
+                parse_text=args.parse_text,
                 name=name,
             )
         except ValueError as exc:  # a name in --replace the file lacks, and the like
             raise CliError(str(exc)) from exc
+    _note_text(spec)
     _write_data_file(fake, output)
     print(f"Wrote {fake.height:,} synthesized row(s) like {source} to {output}")
 
@@ -117,6 +120,14 @@ def add_synthesize_parser(subparsers: argparse._SubParsersAction) -> None:
         "--no-formats",
         action="store_true",
         help="Do not name the format a text column's values have (email, uuid4, ...)",
+    )
+    synthesize.add_argument(
+        "--parse-text",
+        action="store_true",
+        help=(
+            "Read a text column as the number, flag or date every value holds "
+            "(Boolean, Int64, Float64, Date, Datetime)"
+        ),
     )
     synthesize.add_argument(
         "--spec",
