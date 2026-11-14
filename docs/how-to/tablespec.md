@@ -65,6 +65,22 @@ spec = TableSpec(
 Everything a class body validates at declaration is validated here too. A
 `TableSpec` that constructs is one that can be used.
 
+A spec of nothing but a schema's dtypes — the columns of a frame you
+already have, empty or not, or a `pyarrow` schema — comes from
+`TableSpec.from_schema`. Each column declares its dtype alone, so it is a
+starting point to add claims to, not a profile of data:
+
+```python
+starter = TableSpec.from_schema(pl.Schema({"order_id": pl.Int64, "total": pl.Float64}), name="Orders")
+starter                        # each column a ColSpec of its dtype, and nothing more
+```
+
+*Added in 1.2.*
+
+A spec prints as it was declared: each column on its own line, showing only
+what it claims beyond its dtype — `ColSpec(Int64, unique=True)` — and only
+the table claims that are not the default.
+
 To get the class-shaped API back, wrap it:
 
 ```python
@@ -139,6 +155,31 @@ because then no row of that side is repeated. `semi` and `anti` keep the
 left spec, but for `rows` and the order: Polars does not promise a join
 keeps its rows' order. Join keys of different dtypes are refused, as Polars
 refuses them.
+
+## Naming a column from code
+
+`names` gives each column's name as an attribute, so code that reads a
+column — a Polars expression, a rule, a pipeline — need not spell it as
+text, and a typo is an `AttributeError` naming the closest column:
+
+```python
+class Invoices(FrameSpec):
+    unit_price = ColSpec(pl.Float64, col_name="Unit Price")
+    quantity   = pl.Int64
+
+Invoices.names.unit_price      # "Unit Price" -- the name the data uses
+Invoices.names.quantity        # "quantity"
+list(Invoices.names)           # ["Unit Price", "quantity"]
+
+pl.col(Invoices.names.unit_price) * pl.col(Invoices.names.quantity)
+```
+
+A `TableSpec` has `names` too, each column under its own name. A column
+called `names` is reached the way any column named like a method is, with
+`Invoices.col("names")`. *Added in 1.2.*
+
+To change one field of a column, `replace` makes a new one, checked as a
+new declaration is: `Invoices.col("quantity").replace(nullable=True)`.
 
 ## Column names and method names
 

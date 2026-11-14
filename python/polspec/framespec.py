@@ -21,6 +21,7 @@ Internal: not part of the public API.
 from __future__ import annotations
 
 import difflib
+import inspect
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Unpack, cast, overload
@@ -46,7 +47,7 @@ from polspec.profiler import (
 from polspec.render import framespec_to_markdown, framespec_to_mermaid
 from polspec.rules import ColRule
 from polspec.spec import ColSpec, is_dtype
-from polspec.tablespec import TableSpec, parse_unique_together
+from polspec.tablespec import ColumnNames, TableSpec, parse_unique_together
 from polspec.validation import ValidationKeywords, ValidationOptions
 
 if TYPE_CHECKING:
@@ -384,6 +385,11 @@ class _FrameSpecMeta(type):
         hierarchy = _pop_hierarchy(ns)
         order = _pop_order(ns)
         description = _pop_description(ns)
+        doc = ns.get("__doc__")
+        if description is None and parents and isinstance(doc, str) and doc.strip():
+            # The class's own docstring says what the table holds, as
+            # `__description__` would; `__description__` wins over it.
+            description = inspect.cleandoc(doc)
         rows = ns.pop("__rows__", _INHERITED)
         _refuse_mistakes(name, ns)
         # A non-ColSpec value assigned over an inherited column attribute
@@ -414,6 +420,16 @@ class _FrameSpecMeta(type):
                 rows,
             )
         return cls
+
+    @property
+    def names(cls) -> ColumnNames:
+        """Each column's name, by the attribute it is declared as:
+        `Orders.names.unit_price` is `"Unit Price"` when that column says
+        `col_name="Unit Price"`, so code can name a column without spelling
+        it as text."""
+        return ColumnNames(
+            {column: column for column in cls.spec.columns} | cls._attr_to_col
+        )
 
     def __arrow_c_schema__(cls) -> object:
         """The spec's schema through the Arrow PyCapsule interface:

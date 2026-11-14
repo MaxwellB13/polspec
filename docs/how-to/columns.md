@@ -209,9 +209,16 @@ Weights need a domain to apply to, so they require `choices`, an `Enum` dtype,
 or `Boolean` (where they read `[p_false, p_true]`):
 
 ```python
-ColSpec(pl.Enum(["x", "y", "z"]), weights=[1.0, 2.0, 7.0])
+ColSpec(pl.Enum, choices={"x": 0.1, "y": 0.2, "z": 0.7})
 ColSpec(pl.Boolean, weights=[0.9, 0.1])   # 10% true
 ```
+
+A bare `pl.Enum` takes its categories from `choices`, in the order written,
+so each category sits beside its share: the first line is
+`ColSpec(pl.Enum(["x", "y", "z"]), weights=[0.1, 0.2, 0.7])`, and the two
+spellings are the same spec. It is how polspec writes a weighted `Enum` out
+as Python; an `Enum` without weights is written with its categories,
+`ColSpec(pl.Enum(["x", "y", "z"]))`. *Added in 1.2.*
 
 Choices are held in the column's own dtype, so a `datetime` choice on a
 `Datetime` column or a `bytes` choice on a `Binary` column stays what it is.

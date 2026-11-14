@@ -468,12 +468,9 @@ To loosen one column rather than all of them, validate against a spec with
 that column's bounds removed:
 
 ```python
-import dataclasses
 from polspec import validate
 
-loose = Orders.spec.with_columns(
-    total=dataclasses.replace(Orders.col("total"), bounds=None)
-)
+loose = Orders.spec.with_columns(total=Orders.col("total").replace(bounds=None))
 validate(loose, df)
 ```
 
