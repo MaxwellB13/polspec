@@ -12,13 +12,19 @@ The public API is `polspec.__all__`: everything public is imported from
 each name. Every module is internal, says so in its docstring, and may
 change in any release.
 
+Every value polspec takes as a declaration or hands back as a result — a
+spec, a column, a registry, a report — pickles and deep-copies equal to
+itself, within one release; a pickle is not a file format, so keep a spec
+across releases as a [spec file](../how-to/files.md).
+
 A public name is never renamed or removed in place. It is deprecated first:
 it keeps working, and each use warns with a `DeprecationWarning` naming what
 to use instead. In 1.x a deprecated name is removed only at the next major
 release, after at least two minor releases of warning.
 
 *Held by* `tests/contracts/test_boundary.py`, which holds the line between
-public and internal, and `tests/contracts/test_contract.py`, which holds the
+public and internal, `tests/contracts/test_pickling.py`, which pickles every
+case in the test catalogue, and `tests/contracts/test_contract.py`, which holds the
 public names to a golden list: an addition is a deliberate edit, and a
 removal fails until it has been through a deprecation.
 

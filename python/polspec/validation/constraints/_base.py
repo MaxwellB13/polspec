@@ -16,7 +16,7 @@ import polars as pl
 
 from polspec import frames
 from polspec.dtypes import element_dtype, field_dtypes, map_entries, typed_values
-from polspec.validation.report import Finding, FindingCode
+from polspec.validation.report import Finding, FindingCode, RowsWhere
 
 MAX_SAMPLES = 5
 
@@ -54,7 +54,6 @@ class Constraint:
         if not count:
             return None
         samples = self._samples(stats)
-        mask = self.mask
         return Finding(
             code=self.code,
             key=self.key,
@@ -63,7 +62,7 @@ class Constraint:
             count=int(count),
             samples=tuple(samples),
             details=self.details(stats),
-            _locate=lambda lf: lf.filter(mask),
+            _locate=RowsWhere(self.mask),
         )
 
     def _samples(self, stats: dict[str, list]) -> list:

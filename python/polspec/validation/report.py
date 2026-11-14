@@ -17,12 +17,12 @@ import decimal
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
 import polars as pl
 
 from polspec import frames
+from polspec._frozen import FrozenDict
 from polspec.constants import FILLED_IN
 from polspec.errors import ValidationError
 
@@ -91,6 +91,17 @@ def json_value(value: Any) -> Any:
     return repr(value)
 
 
+@dataclass(frozen=True, slots=True)
+class RowsWhere:
+    """The rows of a frame where `mask` holds: how a finding names its
+    rows, as a value -- so a report pickles, where a lambda would not."""
+
+    mask: pl.Expr
+
+    def __call__(self, frame: pl.LazyFrame) -> pl.LazyFrame:
+        return frame.filter(self.mask)
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Finding:
     """One violation of one claim the spec makes.
@@ -130,7 +141,7 @@ class Finding:
     def __post_init__(self) -> None:
         object.__setattr__(self, "columns", tuple(self.columns))
         object.__setattr__(self, "samples", tuple(self.samples))
-        object.__setattr__(self, "details", MappingProxyType(dict(self.details)))
+        object.__setattr__(self, "details", FrozenDict(self.details))
 
     @property
     def row_level(self) -> bool:

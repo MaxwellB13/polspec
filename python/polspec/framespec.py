@@ -415,6 +415,11 @@ class _FrameSpecMeta(type):
             )
         return cls
 
+    def __arrow_c_schema__(cls) -> object:
+        """The spec's schema through the Arrow PyCapsule interface:
+        `pl.Schema(Orders)` and `pyarrow.schema(Orders)` take the class."""
+        return cls.spec.__arrow_c_schema__()
+
     def __getattr__(cls, item: str) -> Any:
         # Reached only when ordinary lookup fails, so a method always wins
         # over a column of the same name.

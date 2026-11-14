@@ -33,6 +33,7 @@ they can change in any release, so code outside polspec should use only
 | `frames` | The frame plumbing every verb shares: accepting a `DataFrame` or `LazyFrame`, and resolving `references=` to parent frames |
 | `_options` | One way to take options -- an options object, keywords, or neither -- shared by `validate`, `inspect` and `drift` |
 | `expr` | `col()`: a small predicate language that evaluates like Polars and survives a trip through a file |
+| `_frozen` | `FrozenDict` -- the read-only mapping every spec and report holds, which pickles where `MappingProxyType` does not |
 | `_text` | Text that holds another type: the type a text column's values all parse as, and the parsed values -- shared by profiling and validating |
 | `scalars` | The plain forms a spec file writes for the values YAML cannot hold -- a time, a duration -- shared by bounds, choices and predicate literals |
 | `formats` | Named string formats -- what each looks like, said once for generation and validation |
@@ -180,7 +181,10 @@ feature: `test_roundtrip.py`, the property that anything `generate()`
 produces `validate()` accepts, across every dtype; `test_streaming.py`, the
 same property through `generate_batches()` and `scan()`, with what batching
 promises on top; `test_properties.py`, the same again over specs Hypothesis
-draws rather than ones anybody wrote; and `test_parity.py`,
+draws rather than ones anybody wrote; `test_pickling.py`, that every
+declaration and report survives `pickle` and `deepcopy` -- which is why a
+finding names its rows through a value (`RowsWhere`, `Orphans`), never a
+closure; and `test_parity.py`,
 which fails when a field is added without its serialization entry, its drift
 comparator, its typed constructor parameter or its place in the facade's
 signatures. Warnings are errors in the suite, so a warning is asserted where

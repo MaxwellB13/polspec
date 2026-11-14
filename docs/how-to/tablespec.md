@@ -191,3 +191,23 @@ Shipments.spec.foreign_keys[0].target                     # None -- nothing to c
 bound = Registry(Customers, Shipments).resolve()
 bound["Shipments"].foreign_keys[0].target                 # Customers.spec
 ```
+
+## Handing a spec to Polars, Arrow or another process
+
+A spec, or its class, reads as an Arrow schema, so anything that takes a
+schema through the Arrow interface takes it:
+
+```python
+pl.Schema(Orders)                       # the same as Orders.schema()
+pl.DataFrame(schema=pl.Schema(Orders))  # an empty frame with the spec's columns
+```
+
+`pyarrow.schema(Orders)` gives the Arrow schema in the same way.
+
+A spec, a registry, a report and a drift report each pickle and deep-copy,
+so they can go to another process — a `multiprocessing` pool, joblib,
+Dask, Ray. A report keeps the rows of each finding, and its
+`passing_rows()`, on the far side. A `FrameSpec` class pickles by
+reference, as any class does, so it has to be importable where it is
+unpickled; for a class built at runtime — `from_yaml`, `from_spec` —
+pickle its `.spec`. *Added in 1.2.*

@@ -13,12 +13,12 @@ import warnings
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import KW_ONLY, dataclass
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, TypeGuard
 
 import polars as pl
 
 from polspec import frames
+from polspec._frozen import FrozenDict
 from polspec.bound import Bound, coerce_bound, is_pair
 from polspec.check import Check, failure_mask
 from polspec.constants import (
@@ -763,7 +763,7 @@ class ColSpec:
             self, "list_length", coerce_bound(self.list_length, "list_length")
         )
         if self.fields is not None:
-            object.__setattr__(self, "fields", MappingProxyType(dict(self.fields)))
+            object.__setattr__(self, "fields", FrozenDict(self.fields))
         # One internal representation for "unconstrained", so every downstream
         # `if spec.bounds is not None` guard keeps meaning what it says.
         if self.bounds is not None and self.bounds.is_open_both:
@@ -1198,7 +1198,7 @@ class ColSpec:
                 "extra drawn on a share of the rows repeats. Drop the extras, "
                 "or the uniqueness."
             )
-        object.__setattr__(self, "extra_values", MappingProxyType(shares))
+        object.__setattr__(self, "extra_values", FrozenDict(shares))
 
     def _validate_pattern(self) -> None:
         """Refuses a pattern on a column it cannot describe, beside a format,

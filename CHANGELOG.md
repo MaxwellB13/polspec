@@ -37,6 +37,11 @@ page promises; before 1.0, a minor version could break any of them.
   `bounds=("2020-01-01", None)` on a `Date`, `Datetime` or `Time` column is
   read as the date it spells, where it is declared.
 
+- **Specs read as Arrow schemas.** A `TableSpec` and a `FrameSpec` class
+  implement `__arrow_c_schema__`, so `pl.Schema(Orders)`,
+  `pyarrow.schema(Orders)` and any other reader of the Arrow PyCapsule
+  interface take a spec where they take a schema.
+
 ### Changed
 
 - **`read()` types numbers and booleans too.** A column the spec declares
@@ -73,6 +78,13 @@ or silently declared less:
 
 An unknown dtype name in a spec file names the closest known one, or lists
 them.
+
+- **Specs and reports could not be pickled.** A `TableSpec`, a struct
+  column, a format's `extra_values`, a `Registry`, a `ValidationReport` and
+  a `DriftReport` each raised `cannot pickle 'mappingproxy' object` (or
+  failed on a closure), so none could go to another process or be
+  deep-copied. Each now pickles and deep-copies, and a report still names
+  its rows afterwards. Their read-only mappings print as dicts.
 
 - **`profile()` could refuse its own hostname column.** A dot is what makes
   a column hostnames to the profiler, so a dotless value such as

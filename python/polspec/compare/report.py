@@ -22,9 +22,9 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
+from polspec._frozen import FrozenDict
 from polspec.validation.report import json_value
 
 if TYPE_CHECKING:
@@ -99,7 +99,7 @@ class DriftFinding:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "columns", tuple(self.columns))
-        object.__setattr__(self, "details", MappingProxyType(dict(self.details)))
+        object.__setattr__(self, "details", FrozenDict(self.details))
 
     @property
     def breaking(self) -> bool:
