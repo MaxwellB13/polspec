@@ -60,6 +60,7 @@ nav = [
     { "Comparison" = "explanation/comparison.md" },
     { "Stability" = "explanation/stability.md" },
   ] },
+  { "Changelog" = "changelog.md" },
 ]
 
 [project.plugins.mkdocstrings.handlers.python]

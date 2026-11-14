@@ -59,8 +59,10 @@ class ForeignKey:
 
     Examples
     --------
+    >>> class CustomerSpec(FrameSpec):
+    ...     id = ColSpec(pl.Int64, bounds=(1, 1_000), unique=True)
     >>> class OrderSpec(FrameSpec):
-    ...     customer_id = ColSpec(pl.Int64)
+    ...     customer_id = ColSpec(pl.Int64, bounds=(1, 1_000))
     ...     __foreign_keys__ = [
     ...         ForeignKey("customer_id", references=CustomerSpec, ref_columns="id"),
     ...     ]

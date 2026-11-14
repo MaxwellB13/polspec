@@ -87,6 +87,16 @@ class DriftOptions:
         the same function: whether a `dtype_changed` is breaking.
     max_samples : int, default 10
         How many offending values a finding's `details` carry.
+
+    Examples
+    --------
+    >>> spec = TableSpec("Orders", {"note": ColSpec(pl.String, nullable=True, null_probability=0.1)})
+    >>> frame = pl.DataFrame({"note": ["a", None, None, None] * 250})  # 75% null, not 10%
+    >>> [f.code for f in drift(spec, frame).findings]
+    ['null_rate_moved']
+    >>> lenient = DriftOptions(null_rate_tolerance=0.7)  # a move of up to 70 points is fine
+    >>> [f.code for f in drift(spec, frame, options=lenient).findings]
+    []
     """
 
     significance: float = 0.001
@@ -187,6 +197,14 @@ def diff(
     `new`: a narrowed domain, a dropped nullability, a column added (a frame
     that lacks it fails `missing_cols="raise"`), a constraint added. A
     widened domain or a removed constraint is *compatible*.
+
+    Examples
+    --------
+    >>> old = TableSpec("Orders", {"total": ColSpec(pl.Float64, bounds=(0, 100))})
+    >>> new = TableSpec("Orders", {"total": ColSpec(pl.Float64, bounds=(0, 50))})
+    >>> report = diff(old, new)
+    >>> [(finding.code, finding.severity) for finding in report.findings]
+    [('domain_narrowed', 'breaking')]
     """
     old_spec, new_spec = as_table_spec(old), as_table_spec(new)
     opts = _options_from(options, **keywords)
@@ -284,6 +302,16 @@ def drift(
 
     Uniqueness, composite keys, foreign keys and checks are not measured
     here; they are pass/fail claims that `validate()` already reports.
+
+    Examples
+    --------
+    >>> spec = TableSpec("Orders", {"total": ColSpec(pl.Float64, bounds=(0, 100))})
+    >>> report = drift(spec, pl.DataFrame({"total": [10.0, 250.0]}))
+    >>> [(finding.code, finding.severity) for finding in report.findings]
+    [('bounds_exceeded', 'breaking')]
+    >>> print(report)
+    Drift: 1 breaking, 0 compatible, DataFrame against 'Orders'
+      - [breaking] Column 'total': values escape bounds [0, 100]: max found 250.0 by 150.0 above. Widen the bounds, or fix the source
     """
     table = as_table_spec(spec)
     require_columns(table)

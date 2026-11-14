@@ -721,6 +721,12 @@ def to_markdown(
     str
         The Markdown. A `|` or a newline in any name or value is escaped, so
         no name breaks the table.
+
+    Examples
+    --------
+    >>> spec = TableSpec("Orders", {"id": ColSpec(pl.Int64, unique=True)}, description="One row per order.")
+    >>> print(to_markdown(spec).splitlines()[0])
+    # Orders
     """
     return framespec_to_markdown(spec, path, title=title)
 
@@ -747,5 +753,15 @@ def to_mermaid(
     str
         The diagram. A name Mermaid cannot read is drawn as the nearest one
         it can, with its real name first in the note.
+
+    Examples
+    --------
+    >>> spec = TableSpec("Orders", {"id": ColSpec(pl.Int64, unique=True)})
+    >>> print(to_mermaid(spec))
+    erDiagram
+        Orders {
+            Int64 id PK
+        }
+    <BLANKLINE>
     """
     return framespec_to_mermaid(spec, path, title=title)

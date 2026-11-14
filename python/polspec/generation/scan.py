@@ -102,6 +102,16 @@ def scan(
     A scan is batched, so it has `generate_batches`' terms: a `unique=True`
     column is unique across the whole scan -- a foreign-keyed one too -- and
     a composite key only within each batch.
+
+    Examples
+    --------
+    >>> spec = TableSpec("Orders", {
+    ...     "id": ColSpec(pl.Int64, unique=True),
+    ...     "total": ColSpec(pl.Float64, bounds=(0, 100)),
+    ... })
+    >>> lazy = scan(spec, 50_000_000, seed=1)  # nothing generated yet
+    >>> lazy.select("total").head(3).collect().shape  # three rows of one column
+    (3, 1)
     """
     spec = as_table_spec(spec)
     require_columns(spec)

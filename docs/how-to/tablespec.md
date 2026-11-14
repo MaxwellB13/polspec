@@ -126,6 +126,8 @@ that join makes. Its columns, their order and their names are the ones the
 installed Polars gives: polspec runs the join on two empty frames and reads
 the result, so a suffixed clash or a coalesced key is named as it will be.
 
+*Added in 1.1.*
+
 ```python
 class Customers(FrameSpec):
     customer_id = ColSpec(pl.Int64, unique=True)

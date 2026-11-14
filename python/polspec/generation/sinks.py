@@ -74,6 +74,18 @@ def sink_parquet(
     """Generates `n` rows and streams them to a Parquet file in batches.
 
     Extra keyword arguments go to `pl.LazyFrame.sink_parquet`.
+
+    Examples
+    --------
+    >>> import pathlib, tempfile
+    >>> folder = pathlib.Path(tempfile.mkdtemp())
+    >>> spec = TableSpec("Orders", {
+    ...     "id": ColSpec(pl.Int64, unique=True),
+    ...     "total": ColSpec(pl.Float64, bounds=(0, 100)),
+    ... })
+    >>> sink_parquet(spec, folder / "orders.parquet", 250_000, seed=1)
+    >>> pl.scan_parquet(folder / "orders.parquet").select(pl.len()).collect().item()
+    250000
     """
     lf, target = _scan(spec, path, n, batch_size, method, seed, references)
     lf.sink_parquet(target, compression=compression, **kwargs)
@@ -94,6 +106,18 @@ def sink_ipc(
     """Generates `n` rows and streams them to an Arrow IPC / Feather file in batches.
 
     Extra keyword arguments go to `pl.LazyFrame.sink_ipc`.
+
+    Examples
+    --------
+    >>> import pathlib, tempfile
+    >>> folder = pathlib.Path(tempfile.mkdtemp())
+    >>> spec = TableSpec("Orders", {
+    ...     "id": ColSpec(pl.Int64, unique=True),
+    ...     "total": ColSpec(pl.Float64, bounds=(0, 100)),
+    ... })
+    >>> sink_ipc(spec, folder / "orders.arrow", 1_000, seed=1)
+    >>> pl.read_ipc(folder / "orders.arrow").shape
+    (1000, 2)
     """
     lf, target = _scan(spec, path, n, batch_size, method, seed, references)
     lf.sink_ipc(target, compression=compression, **kwargs)
@@ -114,6 +138,18 @@ def sink_csv(
     """Generates `n` rows and streams them to a CSV file in batches.
 
     Extra keyword arguments go to `pl.LazyFrame.sink_csv`.
+
+    Examples
+    --------
+    >>> import pathlib, tempfile
+    >>> folder = pathlib.Path(tempfile.mkdtemp())
+    >>> spec = TableSpec("Orders", {
+    ...     "id": ColSpec(pl.Int64, unique=True),
+    ...     "total": ColSpec(pl.Float64, bounds=(0, 100)),
+    ... })
+    >>> sink_csv(spec, folder / "orders.csv", 1_000, seed=1)
+    >>> pl.read_csv(folder / "orders.csv").shape
+    (1000, 2)
     """
     lf, target = _scan(spec, path, n, batch_size, method, seed, references)
     lf.sink_csv(target, include_header=include_header, **kwargs)
@@ -138,6 +174,18 @@ def sink_ndjson(
     anything is written, rather than panicking Polars' writer.
 
     Extra keyword arguments go to `pl.LazyFrame.sink_ndjson`.
+
+    Examples
+    --------
+    >>> import pathlib, tempfile
+    >>> folder = pathlib.Path(tempfile.mkdtemp())
+    >>> spec = TableSpec("Orders", {
+    ...     "id": ColSpec(pl.Int64, unique=True),
+    ...     "total": ColSpec(pl.Float64, bounds=(0, 100)),
+    ... })
+    >>> sink_ndjson(spec, folder / "orders.ndjson", 1_000, seed=1)
+    >>> pl.read_ndjson(folder / "orders.ndjson").shape
+    (1000, 2)
     """
     lf, target = _scan(spec, path, n, batch_size, method, seed, references)
     casts = json_casts(lf.collect_schema(), error=GenerationError)

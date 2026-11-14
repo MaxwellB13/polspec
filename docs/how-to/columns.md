@@ -500,6 +500,8 @@ duplicates. Each is refused at declaration rather than quietly ignored.
 
 ## Describing a column
 
+*Added in 1.1.*
+
 `description=` says what a column means, for a reader. `to_markdown()` shows
 it, spec files keep it, and neither generation nor validation reads it:
 
@@ -514,6 +516,8 @@ A table's own description is `__description__` on a `FrameSpec`, or
 ## Defaults and optional columns
 
 Two fields say what to do when a value, or a whole column, is missing.
+
+*Added in 1.1.*
 
 `default=` is the value that stands in for a missing one. It is used only
 when you ask: `validate(fill_defaults=True)` fills the column's nulls with

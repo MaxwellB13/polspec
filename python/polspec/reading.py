@@ -128,6 +128,15 @@ def read(
     ------
     ValueError
         For an extension polspec does not know.
+
+    Examples
+    --------
+    >>> import pathlib, tempfile
+    >>> folder = pathlib.Path(tempfile.mkdtemp())
+    >>> _ = (folder / "orders.csv").write_text("id,placed\\n1,2024-01-31\\n2,2024-02-01\\n")
+    >>> spec = TableSpec("Orders", {"id": pl.Int64, "placed": pl.Date})
+    >>> read(spec, folder / "orders.csv").schema  # the date parsed, as declared
+    Schema({'id': Int64, 'placed': Date})
     """
     path = Path(path)
     frame = _reader(path)(path, **reader_options)

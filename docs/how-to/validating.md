@@ -41,8 +41,15 @@ clean = Orders.validate(df)
 ```
 
 `validate()` accepts a `DataFrame` or a `LazyFrame` and returns the same kind,
-so it drops into a pipeline. On success the returned frame has its declared
-columns first, in declaration order.
+so it drops into a pipeline — `df.pipe(Orders.validate)` works as written. On
+success the returned frame has its declared columns first, in declaration
+order.
+
+A `LazyFrame` is validated by running its query, and collecting the frame
+`validate()` hands back runs it again; `report.failing_rows()` and
+`passing_rows()` run it once more each. That is the price of handing back a
+lazy frame. When the query is expensive to run — a large scan, a slow join —
+collect it once and validate the `DataFrame`.
 
 ## Collecting every problem at once
 

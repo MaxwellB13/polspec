@@ -293,6 +293,8 @@ rows are refused, since the bounds don't hold enough values. Leave out
 An empty file passes every claim about its rows, as there are none to break.
 `__rows__` says how many a table may hold, either end open.
 
+*Added in 1.1.*
+
 ```python
 class Orders(FrameSpec):
     __rows__ = (1, None)   # must not be empty

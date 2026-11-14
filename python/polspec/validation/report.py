@@ -125,6 +125,13 @@ class Finding:
     details : Mapping
         Code-specific facts: the expected and actual dtype, the observed
         extremes, the foreign key's target.
+
+    Examples
+    --------
+    >>> spec = TableSpec("Orders", {"total": ColSpec(pl.Float64, bounds=(0, 100))})
+    >>> finding = inspect(spec, pl.DataFrame({"total": [250.0]})).findings[0]
+    >>> finding.code, finding.columns, finding.count, finding.samples
+    ('bounds', ('total',), 1, (250.0,))
     """
 
     code: FindingCode
@@ -177,6 +184,15 @@ class ValidationReport:
     A collection of findings: `len()` counts them, iterating yields them, and
     like any collection it is falsy when empty -- so `if report:` means
     "something was found". `report.passed` says the opposite in words.
+
+    Examples
+    --------
+    >>> spec = TableSpec("Orders", {"total": ColSpec(pl.Float64, bounds=(0, 100))})
+    >>> report = inspect(spec, pl.DataFrame({"total": [10.0, 250.0]}))
+    >>> report.by_code("bounds")[0].count
+    1
+    >>> report.to_dict()["passed"]
+    False
     """
 
     spec_name: str

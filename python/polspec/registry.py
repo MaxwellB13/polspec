@@ -121,6 +121,18 @@ class Registry:
         When given, `resolve()` checks every `Enum`/`Categorical` column that
         binds to one of its entries against it, and the registry file carries
         it. When omitted, `catspec()` derives one from the specs themselves.
+
+    Examples
+    --------
+    >>> customers = TableSpec("Customers", {"id": ColSpec(pl.Int64, bounds=(1, 1_000), unique=True)})
+    >>> orders = TableSpec("Orders", {"customer_id": ColSpec(pl.Int64, bounds=(1, 1_000))},
+    ...     foreign_keys=[ForeignKey("customer_id", references="Customers", ref_columns="id")])
+    >>> registry = Registry(customers, orders)
+    >>> frames = registry.generate_all({"Customers": 100, "Orders": 500}, seed=1)
+    >>> {name: frame.height for name, frame in frames.items()}
+    {'Customers': 100, 'Orders': 500}
+    >>> sorted(registry.validate_all(frames))  # every frame passed
+    ['Customers', 'Orders']
     """
 
     def __init__(

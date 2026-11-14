@@ -70,6 +70,18 @@ class ColRule:
 
         ColRule(when=col("region") == "UK", choices=["RoyalMail"])
         ColRule(when=col("region").is_in(["US", "EU"]) & (col("qty") > 10), choices=["UPS"])
+
+    Examples
+    --------
+    >>> spec = TableSpec("Shipments", {
+    ...     "region": ColSpec(pl.Enum(["UK", "US"])),
+    ...     "carrier": ColSpec(pl.Enum(["RoyalMail", "UPS"]), rules=[
+    ...         ColRule(when=col("region") == "UK", choices=["RoyalMail"]),
+    ...     ]),
+    ... })
+    >>> frame = generate(spec, 1_000, seed=1)
+    >>> frame.filter(pl.col("region") == "UK")["carrier"].unique().to_list()
+    ['RoyalMail']
     """
 
     when: Pred
