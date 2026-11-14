@@ -37,6 +37,23 @@ page promises; before 1.0, a minor version could break any of them.
   `bounds=("2020-01-01", None)` on a `Date`, `Datetime` or `Time` column is
   read as the date it spells, where it is declared.
 
+- **A bare `pl.Enum` takes its categories from `choices`.**
+  `ColSpec(pl.Enum, choices={"A": 0.5, "B": 0.3, "C": 0.2})` declares
+  `pl.Enum(["A", "B", "C"])` with those weights, and is the same spec as
+  that spelling -- equal, the same seeded frame, the same file. `to_python`
+  writes a weighted `Enum` this way, each category beside its share; spec
+  files keep the `Enum: [...]` and `weights:` form 1.0 and 1.1 read, and
+  also read a bare `Enum` with `choices`. A bare `pl.Enum` with no choices
+  is refused, saying to list its categories.
+- **`TableSpec.from_schema(schema, name=)`**: a spec of a `pl.Schema`, a
+  mapping of column name to dtype, or an Arrow schema, each column
+  declaring only its dtype.
+- **`ColSpec.replace(**changes)`**, for a column with a field changed.
+- **`Orders.names.total`**: each column's name by the attribute it is
+  declared as, honouring `col_name`, so code can name a column without
+  spelling it as text; on `TableSpec` too.
+- **Reports show as Markdown in a notebook**, through `_repr_markdown_` on
+  `ValidationReport` and `DriftReport`.
 - **Specs read as Arrow schemas.** A `TableSpec` and a `FrameSpec` class
   implement `__arrow_c_schema__`, so `pl.Schema(Orders)`,
   `pyarrow.schema(Orders)` and any other reader of the Arrow PyCapsule
@@ -44,6 +61,18 @@ page promises; before 1.0, a minor version could break any of them.
 
 ### Changed
 
+- **A class's docstring is its description.** A `FrameSpec` with a
+  docstring and no `__description__` now has that docstring as its
+  `description`, which `to_markdown` shows and `to_yaml` writes as a
+  `description:` key -- one 1.1 reads, and 1.0 refuses by name.
+  `__description__` wins when a class has both. Not inherited.
+- **A spec prints as it was declared.** A `ColSpec` shows its dtype and the
+  fields that differ from their defaults, `ColSpec(Int64, bounds=(0, 10))`,
+  and a `TableSpec` one column to a line, where both used to print every
+  field.
+- **Choices that are an `Enum`'s categories, in its order, are dropped**
+  at declaration, so `pl.Enum(cats)` with `choices=` the same is the spec
+  `weights=` alone makes. They generated the same frame already.
 - **`read()` types numbers and booleans too.** A column the spec declares
   as a `Boolean`, integer or float that arrived as text is parsed, as dates,
   decimals and durations already were, so `read(spec, path,

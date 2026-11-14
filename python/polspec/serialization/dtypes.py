@@ -312,6 +312,9 @@ def dtype_from_data(value: Any, categories: CatSpec | None = None) -> DtypeLike:
         raise SerializationError(f"A dtype must be a name or a mapping, got {value!r}")
     if value == "Categorical":
         return pl.Categorical()
+    if value == "Enum":
+        # Its categories are the column's choices: `ColSpec` reads them.
+        return pl.Enum
     if value.startswith(("$categories.", "categories.")):
         dtype = _from_registry(_strip_registry_prefix(value), categories)
         if dtype is not None:

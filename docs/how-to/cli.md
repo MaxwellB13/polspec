@@ -54,7 +54,7 @@ from polspec import ColSpec, FrameSpec
 class Orders(FrameSpec):
     __columns__ = {
         "order_id": ColSpec(pl.Int64, bounds=(0, 13000)),
-        "status": ColSpec(pl.Enum(["NEW", "PAID", "SHIPPED"]), weights=[0.4, 0.3, 0.3]),
+        "status": ColSpec(pl.Enum, choices={"NEW": 0.4, "PAID": 0.3, "SHIPPED": 0.3}),
         "total": ColSpec(pl.Float64, bounds=(10.0, 500.0)),
     }
 ```

@@ -416,6 +416,23 @@ class ValidationReport:
         """This report as a JSON string. `indent=None` for one line."""
         return json.dumps(self.to_dict(), indent=indent)
 
+    def _repr_markdown_(self) -> str:
+        """The report as a table, which a notebook shows in place of `repr`."""
+        if self.passed:
+            return f"**{self.spec_name}**: no findings."
+        lines = [
+            f"**{self.spec_name}**: {len(self.findings)} finding(s)",
+            "",
+            "| Code | Columns | Rows | Message |",
+            "|:--|:--|--:|:--|",
+        ]
+        for f in self.findings:
+            columns = ", ".join(f"`{c}`" for c in f.columns) or "-"
+            rows = "-" if f.count is None else f"{f.count:,}"
+            message = f.message.replace("|", "\\|").replace("\n", " ")
+            lines.append(f"| `{f.code}` | {columns} | {rows} | {message} |")
+        return "\n".join(lines)
+
     def __str__(self) -> str:
         if self.passed:
             return f"Validation passed for DataFrame against '{self.spec_name}'"

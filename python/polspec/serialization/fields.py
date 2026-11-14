@@ -20,6 +20,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+import polars as pl
+
 from polspec.bound import Bound
 from polspec.check import Check
 from polspec.constants import DEFAULT_EXTRA_SHARE, DEFAULT_NULL_PROBABILITY
@@ -156,9 +158,21 @@ def decode(
         raise SpecError(f"{path}: {exc}") from exc
 
 
-def to_source(obj: Any, fields: Sequence[Field], ctor: str) -> str:
+def to_source(
+    obj: Any,
+    fields: Sequence[Field],
+    ctor: str,
+    written: Mapping[str, str | None] | None = None,
+) -> str:
+    """`obj` as the Python that declares it. `written` gives some fields'
+    source outright, in their usual place; None leaves one out."""
     args: list[str] = []
     for f in fields:
+        if written is not None and f.name in written:
+            source = written[f.name]
+            if source is not None:
+                args.append(source if f.positional else f"{f.name}={source}")
+            continue
         value = getattr(obj, f.attribute)
         if f.omit_if(value, obj):
             continue
@@ -479,6 +493,17 @@ def colspec_from_data(value: Any, ctx: Ctx, path: str) -> ColSpec:
 
 
 def colspec_to_source(spec: ColSpec) -> str:
+    """A column as Python. A weighted Enum is written with each category
+    beside its share -- `ColSpec(pl.Enum, choices={"A": 0.5, ...})` --
+    which declares the same spec as `pl.Enum([...])` and `weights=`."""
+    if (
+        isinstance(spec.dtype, pl.Enum)
+        and spec.weights is not None
+        and spec.choices is None
+    ):
+        shares = dict(zip(spec.dtype.categories.to_list(), spec.weights, strict=True))
+        written = {"dtype": "pl.Enum", "choices": repr(shares), "weights": None}
+        return to_source(spec, COLSPEC_FIELDS, "ColSpec", written)
     return to_source(spec, COLSPEC_FIELDS, "ColSpec")
 
 

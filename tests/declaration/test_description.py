@@ -54,13 +54,42 @@ def test_a_framespec_declares_its_description_in_the_class_body():
     assert Orders.spec.description == "One row per order."
 
 
-def test_a_docstring_is_not_a_description():
+def test_a_docstring_is_the_description():
+    """Added in 1.2: a class's docstring says what the table holds."""
+
     class Orders(FrameSpec):
-        """Kept in step with the billing export."""
+        """One row per order.
+
+        Kept in step with the billing export.
+        """
 
         id = ColSpec(pl.Int64)
 
-    assert Orders.spec.description is None
+    assert Orders.spec.description == (
+        "One row per order.\n\nKept in step with the billing export."
+    )
+
+
+def test_a_declared_description_wins_over_the_docstring():
+    class Orders(FrameSpec):
+        """Notes for whoever maintains this class."""
+
+        __description__ = "One row per order."
+        id = ColSpec(pl.Int64)
+
+    assert Orders.spec.description == "One row per order."
+
+
+def test_a_docstring_is_not_inherited_as_a_description():
+    class Base(FrameSpec):
+        """The base table."""
+
+        id = ColSpec(pl.Int64)
+
+    class Child(Base):
+        name = ColSpec(pl.String)
+
+    assert Child.spec.description is None
 
 
 def test_a_subclass_describes_another_table_but_keeps_its_columns_words():

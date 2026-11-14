@@ -191,6 +191,10 @@ class DriftReport:
 
         return drift_to_markdown(self, path)
 
+    def _repr_markdown_(self) -> str:
+        """The report as Markdown, which a notebook shows in place of `repr`."""
+        return self.to_markdown()
+
     def _headline(self) -> str:
         against = f"'{self.old}' and '{self.new}'"
         if self.kind == "drift":

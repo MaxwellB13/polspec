@@ -86,14 +86,16 @@ generated value and no validation.
 
 ```python
 class Described(FrameSpec):
-    __description__ = "One row per order, as placed."
+    """One row per order, as placed."""
 
     order_id = ColSpec(pl.Int64, unique=True, description="The order's number.")
 ```
 
-A class's docstring is not used, and a subclass does not inherit
-`__description__`, since it describes another table; its inherited columns keep
-theirs. A `TableSpec` takes `description=`, and `with_description()` makes a
+A class's docstring is its description, *added in 1.2*;
+`__description__` says it instead, and wins when a class has both — for a
+docstring written for whoever maintains the class rather than whoever reads
+the data. A subclass inherits neither, since it describes another table; its
+inherited columns keep their own. A `TableSpec` takes `description=`, and `with_description()` makes a
 copy.
 
 ## Entity-relationship diagram

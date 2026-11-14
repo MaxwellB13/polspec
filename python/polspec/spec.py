@@ -186,7 +186,10 @@ class ColSpec:
     Parameters
     ----------
     dtype : pl.DataType | type[pl.DataType]
-        The data type of the column.
+        The data type of the column. A bare `pl.Enum` takes its categories
+        from `choices`, in the order written: `ColSpec(pl.Enum,
+        choices={"A": 0.5, "B": 0.5})` is `pl.Enum(["A", "B"])` with those
+        weights.
     col_name : str | None, optional
         Overrides the column's name in the generated/validated DataFrame.
         Declaring columns as class attributes on a `FrameSpec` requires a
@@ -453,6 +456,32 @@ class ColSpec:
         self._validate_map()
         self._validate_optional()
         self._validate_default()
+
+    def __repr__(self) -> str:
+        """The column as declared: its dtype, then each field that differs
+        from its default -- `ColSpec(Int64, bounds=(0, 10))`."""
+        parts = [repr(self.dtype)]
+        for f in dataclasses.fields(self):
+            if f.name == "dtype" or not f.repr:
+                continue
+            value = getattr(self, f.name)
+            default = (
+                f.default_factory()
+                if f.default_factory is not dataclasses.MISSING
+                else f.default
+            )
+            if f.name == "null_probability" and not self.nullable:
+                continue  # a rate of nulls a column holds none of says nothing
+            if value == default:
+                continue
+            shown = (value.min, value.max) if isinstance(value, Bound) else value
+            parts.append(f"{f.name}={shown!r}")
+        return f"ColSpec({', '.join(parts)})"
+
+    def replace(self, **changes: Any) -> ColSpec:
+        """This column with `changes` made, checked as a new declaration is:
+        `Orders.col("total").replace(bounds=None)`."""
+        return dataclasses.replace(self, **changes)
 
     @property
     def value_dtype(self) -> pl.DataType:
@@ -916,6 +945,7 @@ class ColSpec:
 
         if self.choices is not None and not self.choices:
             raise SpecError("ColSpec.choices must not be empty")
+        self._enum_from_choices()
         if isinstance(self.value_dtype, pl.Decimal):
             self._read_decimal_choices()
         # Before the duplicate check, which reads the choices through the
@@ -923,6 +953,41 @@ class ColSpec:
         self._validate_choices_fit_dtype()
         if self.choices is not None:
             reject_duplicate_choices(self.choices, "ColSpec.choices", self.value_dtype)
+
+    def _enum_from_choices(self) -> None:
+        """A bare `pl.Enum` takes its categories from `choices`, in the order
+        written; and choices that are an Enum's categories, in its order,
+        are no narrower domain than the Enum's own, so they are dropped.
+
+        Either way the spec is the one `pl.Enum([...])` and `weights=` make,
+        so the spellings compare equal and write the same file -- and they
+        already generate the same frame, so no seed moves.
+        """
+        dtype: Any = self.dtype
+        bare = dtype is pl.Enum or (
+            isinstance(dtype, pl.Enum) and dtype.categories.len() == 0
+        )
+        if bare:
+            if self.choices is None:
+                raise SpecError(
+                    "A bare pl.Enum has no categories: list them, as "
+                    "pl.Enum(['a', 'b']), or give choices -- choices=['a', 'b'], "
+                    "or {'a': 0.7, 'b': 0.3} with weights -- to be its categories."
+                )
+            if not all(isinstance(c, str) for c in self.choices):
+                raise SpecError(
+                    f"ColSpec.choices {list(self.choices)!r} cannot be the "
+                    "categories of a pl.Enum: an Enum's categories are text."
+                )
+            reject_duplicate_choices(self.choices, "ColSpec.choices", pl.String())
+            object.__setattr__(self, "dtype", pl.Enum(list(self.choices)))
+        dtype = self.dtype
+        if (
+            isinstance(dtype, pl.Enum)
+            and self.choices is not None
+            and self.choices == tuple(dtype.categories.to_list())
+        ):
+            object.__setattr__(self, "choices", None)
 
     def _read_decimal_choices(self) -> None:
         """A `Decimal` column's text choices -- the column's and each

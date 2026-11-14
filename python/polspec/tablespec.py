@@ -14,9 +14,10 @@ Internal: not part of the public API.
 from __future__ import annotations
 
 import dataclasses
+import difflib
 import warnings
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from dataclasses import KW_ONLY, dataclass, field
+from dataclasses import KW_ONLY, MISSING, dataclass, field, fields
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import polars as pl
@@ -35,6 +36,43 @@ from polspec.spec import ColSpec, check_description, column_kind, is_dtype
 
 if TYPE_CHECKING:
     from polspec.catspec import CatSpec
+
+
+class ColumnNames:
+    """A spec's column names as attributes, read-only: `Orders.names.total`
+    is the name the data uses for the column declared as `total`."""
+
+    __slots__ = ("_names",)
+
+    _names: FrozenDict[str, str]
+
+    def __init__(self, names: Mapping[str, str]) -> None:
+        object.__setattr__(self, "_names", FrozenDict(names))
+
+    def __getattr__(self, item: str) -> str:
+        try:
+            return self._names[item]
+        except KeyError:
+            pass
+        close = difflib.get_close_matches(item, list(self._names), n=1)
+        hint = f"; did you mean {close[0]!r}?" if close else ""
+        raise AttributeError(f"No column {item!r}{hint}") from None
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        raise AttributeError("ColumnNames is read-only")
+
+    def __dir__(self) -> list[str]:
+        return list(self._names)
+
+    def __iter__(self) -> Iterator[str]:
+        """Each column's name once, in the spec's order."""
+        return iter(dict.fromkeys(self._names.values()))
+
+    def __repr__(self) -> str:
+        return f"ColumnNames({list(self)!r})"
+
+    def __reduce__(self) -> tuple[type[ColumnNames], tuple[dict[str, str]]]:
+        return type(self), (dict(self._names),)
 
 
 def _parse_rows(rows: Any) -> Bound[int] | None:
@@ -624,6 +662,51 @@ class TableSpec:
         Two equal specs agree on all three, which is all a hash must promise.
         """
         return hash((self.name, tuple(self.columns), self.unique_together))
+
+    def __repr__(self) -> str:
+        """The spec as declared: its columns one to a line, then each table
+        claim that differs from its default."""
+        columns = "".join(
+            f"\n    {name!r}: {column!r}," for name, column in self.columns.items()
+        )
+        parts = [repr(self.name), "{" + columns + ("\n}" if columns else "}")]
+        for f in fields(self):
+            if f.name in ("name", "columns"):
+                continue
+            value = getattr(self, f.name)
+            default = (
+                f.default_factory() if f.default_factory is not MISSING else f.default
+            )
+            if value == default or (f.name == "descending" and not any(value)):
+                continue
+            shown = (value.min, value.max) if isinstance(value, Bound) else value
+            parts.append(f"{f.name}={shown!r}")
+        return f"TableSpec({', '.join(parts)})"
+
+    @classmethod
+    def from_schema(cls, schema: Any, *, name: str = "Schema") -> TableSpec:
+        """A spec of `schema`'s columns, each declaring nothing but its dtype.
+
+        `schema` is a `pl.Schema`, a mapping of column name to dtype, or
+        anything with an Arrow schema (`__arrow_c_schema__`): a `pyarrow`
+        schema, another spec. Each column is `ColSpec(dtype)` -- not
+        nullable, so a frame with nulls fails until a column says it may
+        hold them. For a spec that says more, profile data: `profile()`.
+        """
+        if not isinstance(schema, Mapping):
+            if not hasattr(schema, "__arrow_c_schema__"):
+                raise SpecError(
+                    "TableSpec.from_schema takes a pl.Schema, a mapping of column "
+                    f"name to dtype, or an Arrow schema; got {type(schema).__name__}"
+                )
+            schema = pl.Schema(schema)
+        return cls(name, {str(column): dtype for column, dtype in schema.items()})
+
+    @property
+    def names(self) -> ColumnNames:
+        """Each column's name, as an attribute: `spec.names.total` is
+        `"total"`, so code can name a column without spelling it as text."""
+        return ColumnNames({column: column for column in self.columns})
 
     def schema(self) -> pl.Schema:
         """The Polars schema this spec declares: column name to dtype."""
