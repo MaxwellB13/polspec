@@ -17,7 +17,25 @@ ColSpec(pl.Int64, bounds=(1, None), unique=True, description="The order number."
 ## Types
 
 polspec generates every dtype below. A dtype passed as a class is instantiated
-for you, so `pl.Int64` and `pl.Int64()` mean the same thing.
+for you, so `pl.Int64` and `pl.Int64()` mean the same thing. It has to be a
+Polars dtype: `ColSpec(int)` or `ColSpec("Int64")` is refused, with the Polars
+spelling (`pl.Int64`) in the message.
+
+A column that claims nothing beyond its dtype can be declared as the dtype
+alone, in a class body, in `__columns__` or in a `TableSpec`; it is a
+`ColSpec` of that dtype. A spec file reads `id: Int64` the same way, and is
+still written in the long form, which earlier releases read too. *Added in
+1.2.*
+
+```python
+class Accounts(FrameSpec):
+    account_id = ColSpec(pl.Int64, unique=True)
+    holder     = pl.String                          # ColSpec(pl.String)
+    opened     = pl.Date
+```
+
+Since a dtype in a class body is a column, a class constant meant to hold
+a dtype has to live outside the class.
 
 | Family | Types |
 |:--|:--|
@@ -98,7 +116,10 @@ ColSpec(pl.Date, bounds=(date(2020, 1, 1), date(2024, 12, 31)))
 ```
 
 Temporal bounds accept real `date`, `datetime`, `time` and `timedelta` objects,
-or the physical integer the dtype stores.
+or the physical integer the dtype stores. A date, datetime or time may also
+be written as ISO text, read where it is declared, as a hand-written spec file
+holds it: `bounds=("2020-01-01", None)`. Text that is not one is refused
+there, as is text on any other column but a `Decimal`. *Added in 1.2.*
 
 ### Decimal bounds
 

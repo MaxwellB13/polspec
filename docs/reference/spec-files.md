@@ -36,7 +36,10 @@ every key still at its default.
 ### A column
 
 Each key is the `ColSpec` field of the same name; see
-[ColSpec fields](colspec-fields.md) for what each means.
+[ColSpec fields](colspec-fields.md) for what each means. A column with
+nothing but a dtype may be written as the dtype's name alone, `id: Int64`;
+polspec writes the long form, `id: {dtype: Int64}`, which 1.0 and 1.1 read
+too. *Added in 1.2.*
 
 | Key | Written as |
 |:--|:--|
@@ -45,7 +48,7 @@ Each key is the `ColSpec` field of the same name; see
 | `nullable` | `true` or `false` |
 | `optional` | `true` or `false` |
 | `default` | A value, written as a choice is |
-| `bounds` | `[min, max]`; either end may be `null`. A `Decimal`'s fractional ends are strings, such as `'1.50'`, so they read back exactly; a time or a duration is [tagged](#times-and-durations) |
+| `bounds` | `[min, max]`; either end may be `null`. A date, datetime or time may be ISO text, quoted or not. A `Decimal`'s fractional ends are strings, such as `'1.50'`, so they read back exactly; a time or a duration is [tagged](#times-and-durations) |
 | `tags` | A string, or a list of them |
 | `description` | A string |
 | `unique` | `true` or `false` |

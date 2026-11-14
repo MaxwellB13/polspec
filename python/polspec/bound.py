@@ -56,8 +56,19 @@ class Bound[T]:
         return f"[{self.min}, {self.max}]"
 
 
-def coerce_bound(value: Bound | tuple[Any, Any] | list[Any] | None) -> Bound | None:
+def coerce_bound(
+    value: Bound | tuple[Any, Any] | list[Any] | None, field: str = "bounds"
+) -> Bound | None:
+    """`value` as a `Bound`: one already, or a `(min, max)` pair. `field`
+    names it in the error for anything else."""
     if value is None or isinstance(value, Bound):
         return value
+    if not is_pair(value):
+        raise SpecError(f"ColSpec.{field} must be a (min, max) pair, got {value!r}")
     lo, hi = value
     return Bound(lo, hi)
+
+
+def is_pair(value: Any) -> bool:
+    """Whether `value` is a two-item tuple or list -- a range's shape."""
+    return isinstance(value, (tuple, list)) and len(value) == 2

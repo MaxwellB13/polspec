@@ -471,6 +471,8 @@ def colspec_to_data(spec: ColSpec) -> dict[str, Any]:
 
 
 def colspec_from_data(value: Any, ctx: Ctx, path: str) -> ColSpec:
+    if isinstance(value, str):  # `order_id: Int64`, a column of nothing but its dtype
+        value = {"dtype": value}
     if not isinstance(value, Mapping) or "dtype" not in value:
         raise SerializationError(f"{path}: a column needs a 'dtype' key, got {value!r}")
     return decode(ColSpec, value, COLSPEC_FIELDS, ctx, path)

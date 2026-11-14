@@ -20,6 +20,7 @@ Internal: not part of the public API.
 
 from __future__ import annotations
 
+import difflib
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Unpack, cast, overload
@@ -43,7 +44,8 @@ from polspec.profiler import (
     profiled_table,
 )
 from polspec.render import framespec_to_markdown, framespec_to_mermaid
-from polspec.spec import ColSpec
+from polspec.rules import ColRule
+from polspec.spec import ColSpec, is_dtype
 from polspec.tablespec import TableSpec, parse_unique_together
 from polspec.validation import ValidationKeywords, ValidationOptions
 
@@ -141,6 +143,92 @@ def _pop_unique_together(ns: dict[str, Any]) -> Any:
     return None
 
 
+# Every name a class body declares through, and what each declares.
+DECLARATION_DUNDERS = (
+    "__columns__",
+    "__checks__",
+    "__foreign_keys__",
+    "__unique_together__",
+    "__hierarchy__",
+    "__order_by__",
+    "__descending__",
+    "__description__",
+    "__rows__",
+)
+
+# The dunders Python itself puts in a class body's namespace, or that a
+# class may set for Python's sake, which no misspelling check may read.
+_PYTHON_DUNDERS = (
+    frozenset(dir(type))
+    | frozenset(dir(object))
+    | {
+        "__annotate__",
+        "__annotate_func__",
+        "__annotations__",
+        "__classcell__",
+        "__dict__",
+        "__doc__",
+        "__firstlineno__",
+        "__module__",
+        "__orig_bases__",
+        "__qualname__",
+        "__slots__",
+        "__static_attributes__",
+        "__type_params__",
+        "__weakref__",
+    }
+)
+
+# Where each kind of declaration belongs, for one found anywhere else.
+_BELONGS = (
+    (ColRule, "a ColSpec's rules=[...]"),
+    (Check, "__checks__"),
+    (ForeignKey, "__foreign_keys__"),
+    (Hierarchy, "__hierarchy__"),
+)
+
+
+def _refuse_mistakes(name: str, ns: Mapping[str, Any]) -> None:
+    """Refuses what is left of a class body that looks like a declaration
+    polspec would not read: once the declarations are popped, anything still
+    holding one was meant to be one, and dropping it silently would make a
+    spec that says less than its class body.
+
+    - a column in a tuple, as a trailing comma after `ColSpec(...)` makes;
+    - a rule, check, key or hierarchy under a name polspec does not read;
+    - a dunder spelt close to one polspec reads (`__unique_togther__`).
+    """
+    for attr, value in ns.items():
+        if callable(value) or isinstance(value, (classmethod, staticmethod, property)):
+            continue
+        if attr.startswith("__") and attr.endswith("__"):
+            if attr in _PYTHON_DUNDERS:
+                continue
+            close = difflib.get_close_matches(
+                attr, DECLARATION_DUNDERS, n=1, cutoff=0.8
+            )
+            if close:
+                raise SpecError(
+                    f"{name} declares {attr}, which polspec does not read: did you "
+                    f"mean {close[0]}?"
+                )
+            continue
+        if attr.startswith("_"):
+            continue
+        items = list(value) if isinstance(value, (tuple, list)) else [value]
+        if any(isinstance(item, ColSpec) for item in items):
+            raise SpecError(
+                f"{name}.{attr} is a {type(value).__name__} holding a ColSpec, not "
+                "a column: a trailing comma after ColSpec(...) makes one. Remove it."
+            )
+        for kind, home in _BELONGS:
+            if any(isinstance(item, kind) for item in items):
+                raise SpecError(
+                    f"{name}.{attr} holds a {kind.__name__}, which polspec reads "
+                    f"only from {home}: under {attr!r} it would declare nothing."
+                )
+
+
 def _build_table_spec(
     name: str,
     parents: Sequence[_FrameSpecMeta],
@@ -205,11 +293,13 @@ def _build_table_spec(
                 "__columns__ must be a mapping of column name to ColSpec, got "
                 f"{type(declared).__name__}"
             )
-        for raw_key, value in declared.items():
+        for raw_key, raw_value in declared.items():
             key = str(raw_key)
+            value = ColSpec(raw_value) if is_dtype(raw_value) else raw_value
             if not isinstance(value, ColSpec):
                 raise SpecError(
-                    f"__columns__[{key!r}] must be a ColSpec, got {type(value).__name__}"
+                    f"__columns__[{key!r}] must be a ColSpec or a dtype, got "
+                    f"{type(value).__name__}"
                 )
             if value.col_name is not None and value.col_name != key:
                 raise SpecError(
@@ -279,8 +369,12 @@ class _FrameSpecMeta(type):
 
         own_columns: dict[str, ColSpec] = {}
         for attr in list(ns):
-            if not attr.startswith("_") and isinstance(ns[attr], ColSpec):
+            if attr.startswith("_"):
+                continue
+            if isinstance(ns[attr], ColSpec):
                 own_columns[attr] = ns.pop(attr)
+            elif is_dtype(ns[attr]):  # `order_id = pl.Int64`: a column of it
+                own_columns[attr] = ColSpec(ns.pop(attr))
         declared = ns.pop("__columns__", None)
         checks = _pop_declaration(ns, ("__checks__", "checks"), Check)
         foreign_keys = _pop_declaration(
@@ -291,6 +385,7 @@ class _FrameSpecMeta(type):
         order = _pop_order(ns)
         description = _pop_description(ns)
         rows = ns.pop("__rows__", _INHERITED)
+        _refuse_mistakes(name, ns)
         # A non-ColSpec value assigned over an inherited column attribute
         # removes that column; the value itself stays an ordinary attribute.
         removed = {

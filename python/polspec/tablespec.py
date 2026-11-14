@@ -31,7 +31,7 @@ from polspec.expr import root_names
 from polspec.foreign_key import ForeignKey, default_fk_name
 from polspec.hierarchy import Hierarchy
 from polspec.pass_order import ordered_passes
-from polspec.spec import ColSpec, check_description, column_kind
+from polspec.spec import ColSpec, check_description, column_kind, is_dtype
 
 if TYPE_CHECKING:
     from polspec.catspec import CatSpec
@@ -178,8 +178,10 @@ class TableSpec:
     name : str
         What the table is called: the class name for a `FrameSpec`, the
         `name:` key for a file. Foreign keys refer to a spec by this name.
-    columns : Mapping[str, ColSpec]
-        Column name to declaration, in the order columns should appear.
+    columns : Mapping[str, ColSpec | DataType]
+        Column name to declaration, in the order columns should appear. A
+        bare dtype is a column of it: `{"id": pl.Int64}` is
+        `{"id": ColSpec(pl.Int64)}`.
     description : str | None
         What the table holds, for a reader: `to_markdown` shows it, and
         neither generation nor validation reads it.
@@ -233,7 +235,9 @@ class TableSpec:
         def __init__(
             self,
             name: str,
-            columns: Mapping[str, ColSpec] = MappingProxyType({}),
+            columns: Mapping[str, ColSpec | pl.DataType | type[pl.DataType]] = (
+                MappingProxyType({})
+            ),
             *,
             description: str | None = None,
             rows: Bound[int] | tuple[int | None, int | None] | None = None,
@@ -258,11 +262,13 @@ class TableSpec:
                 f"got {type(self.columns).__name__}"
             )
         columns: dict[str, ColSpec] = {}
-        for raw_key, value in self.columns.items():
+        for raw_key, raw_value in self.columns.items():
             key = str(raw_key)
+            value = ColSpec(raw_value) if is_dtype(raw_value) else raw_value
             if not isinstance(value, ColSpec):
                 raise SpecError(
-                    f"columns[{key!r}] must be a ColSpec, got {type(value).__name__}"
+                    f"columns[{key!r}] must be a ColSpec or a dtype, got "
+                    f"{type(value).__name__}"
                 )
             if "\x00" in key:
                 # Arrow's C interface, which carries every generated frame,
