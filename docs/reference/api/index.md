@@ -42,6 +42,8 @@ cannot describe a signature the code does not have.
 | [`Finding`][polspec.Finding] | [Validation](validation.md) |
 | [`FindingCode`][polspec.FindingCode] | [Validation](validation.md) |
 | [`FINDING_COLUMN`][polspec.FINDING_COLUMN] | [Validation](validation.md) |
+| [`assert_valid`][polspec.assert_valid] | [Testing](testing.md) |
+| [`check_pipeline`][polspec.check_pipeline] | [Testing](testing.md) |
 | [`DriftOptions`][polspec.DriftOptions] | [Drift](drift.md) |
 | [`DriftReport`][polspec.DriftReport] | [Drift](drift.md) |
 | [`diff`][polspec.diff] | [Drift](drift.md) |

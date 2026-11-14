@@ -28,6 +28,7 @@ from polspec.spec import ColSpec
 from polspec.tablespec import TableSpec
 
 if TYPE_CHECKING:
+    from polspec.asserting import assert_valid, check_pipeline
     from polspec.compare import (
         DriftCode,
         DriftFinding,
@@ -74,6 +75,8 @@ if TYPE_CHECKING:
 
 # Where each name that loads on first use lives.
 _LAZY: dict[str, str] = {
+    "assert_valid": "polspec.asserting",
+    "check_pipeline": "polspec.asserting",
     **dict.fromkeys(
         ("DriftCode", "DriftFinding", "DriftOptions", "DriftReport", "Severity"),
         "polspec.compare",
@@ -180,6 +183,8 @@ __all__ = [
     "ValidationError",
     "ValidationOptions",
     "ValidationReport",
+    "assert_valid",
+    "check_pipeline",
     "col",
     "diff",
     "drift",
