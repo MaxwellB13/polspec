@@ -155,6 +155,7 @@ exclude_type_checking_imports = true
 name = "A declaration is data: no verb, file format or engine behind it"
 type = "forbidden"
 source_modules = [
+    "polspec._colspec",
     "polspec.bound",
     "polspec.check",
     "polspec.domain",
