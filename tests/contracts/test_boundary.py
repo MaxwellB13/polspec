@@ -310,3 +310,40 @@ def test_every_exception_to_the_public_api_is_still_needed():
         if not any(name in names for names in used.values())
     ]
     assert not stale
+
+
+def test_importing_polspec_loads_only_the_declarations():
+    """`import polspec` loads what a spec is made of, and each verb --
+    generating, validating, drift, profiling, spec files, rendering -- on
+    first use: a command, a test collection or a notebook that never asks
+    for one does not pay for it. Run in a fresh interpreter, since this one
+    has loaded everything by now."""
+    import subprocess
+    import sys
+
+    verbs = [
+        "polspec.compare",
+        "polspec.generation",
+        "polspec.profiler",
+        "polspec.reading",
+        "polspec.registry",
+        "polspec.render",
+        "polspec.serialization",
+        "polspec.shape",
+        "polspec.synthesis",
+        "polspec.validation",
+        "yaml",
+        "importlib.metadata",
+    ]
+    # What polspec loads, after Polars: Polars 2 loads `importlib.metadata`
+    # itself.
+    probe = (
+        "import sys, polars; before = set(sys.modules); import polspec; "
+        f"print([m for m in {verbs!r} if m in set(sys.modules) - before]); "
+        "polspec.generate, polspec.validate, polspec.to_yaml, polspec.__version__"
+    )
+    loaded = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    assert loaded == "[]"
+    assert set(polspec.__all__) <= set(dir(polspec))

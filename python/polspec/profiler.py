@@ -739,6 +739,9 @@ def _list(c: _Column) -> ColSpec:
 
 
 def _text(c: _Column) -> ColSpec:
+    # Counted once, for the text profile and the key check both: hashing a
+    # million strings is most of what profiling one costs.
+    distinct = c.non_null.n_unique()
     described = _profile_textual(
         c.non_null,
         c.name,
@@ -749,8 +752,9 @@ def _text(c: _Column) -> ColSpec:
         calculate_bounds=c.options.calculate_bounds,
         formats=c.options.formats,
         keep_values=c.imitate,
+        distinct=distinct,
     )
-    return _as_key(described, c.non_null, c.options, c.top)
+    return _as_key(described, c.non_null, c.options, c.top, distinct=distinct)
 
 
 def _boolean(c: _Column) -> ColSpec:
@@ -867,20 +871,43 @@ _FAMILIES: tuple[
 
 
 def _as_key(
-    column: ColSpec, non_null: pl.Series, options: _Options, top: bool
+    column: ColSpec,
+    non_null: pl.Series,
+    options: _Options,
+    top: bool,
+    *,
+    distinct: int | None = None,
 ) -> ColSpec:
     """`column` declared unique, when asked to look for keys and every one
     of enough values is distinct. Only an integer or a text column: a float
-    or a timestamp is all distinct by nature, without being a key."""
+    or a timestamp is all distinct by nature, without being a key.
+    `distinct` is the values' distinct count, when the caller has it."""
     if (
         not options.detect_unique
         or not top
         or len(non_null) < KEY_MIN_ROWS
-        or non_null.n_unique() != len(non_null)
         or column.weights is not None
     ):
         return column
+    if distinct is None:
+        if _repeats_early(non_null):
+            return column
+        distinct = non_null.n_unique()
+    if distinct != len(non_null):
+        return column
     return dataclasses.replace(column, unique=True)
+
+
+# Values a check for repeats reads before the whole column: most columns
+# that are not keys repeat a value long before the end, and say so here.
+REPEAT_PROBE_ROWS = 4_096
+
+
+def _repeats_early(values: pl.Series) -> bool:
+    """Whether the first values already hold a repeat -- which settles that
+    `values` are not all distinct without hashing all of them."""
+    head = values.head(REPEAT_PROBE_ROWS)
+    return head.n_unique() != len(head)
 
 
 def _shaped(column: ColSpec, non_null: pl.Series, options: _Options) -> ColSpec:
@@ -903,9 +930,11 @@ def _profile_textual(
     calculate_bounds: bool,
     formats: bool = False,
     keep_values: bool = True,
+    distinct: int | None = None,
 ) -> ColSpec:
     """A String or Categorical column, narrowed to an Enum when it holds few
-    enough distinct values and they repeat.
+    enough distinct values and they repeat. `distinct` is the values'
+    distinct count, when the caller has it.
 
     A template format (an email, a UUID) is named before that: its values are
     identifiers, and an Enum of them would carry the source's own. A finite
@@ -913,7 +942,7 @@ def _profile_textual(
     an Enum of the codes it holds keeps their frequencies, which the format
     -- every code, evenly -- would throw away.
     """
-    n_unique = non_null.n_unique()
+    n_unique = non_null.n_unique() if distinct is None else distinct
     narrows = 0 < n_unique <= max_unique_enum and (
         n_unique * ENUM_MIN_REPEATS <= len(non_null)
     )
@@ -944,6 +973,19 @@ def _profile_textual(
     )
 
 
+# Rows the format probe reads its distinct values from.
+FORMAT_PROBE_ROWS = 20_000
+
+
+def _mostly_dotted(non_null: pl.Series, total: int) -> bool:
+    """Whether enough rows hold a dot for a hostname to be named at all: it
+    is named only when its dotted values cover `FORMAT_MIN_SHARE` of the
+    rows. Read without hashing a value, since a column of single words
+    passes the hostname check and would otherwise be counted whole."""
+    dotted = int(non_null.str.contains(".", literal=True).sum())
+    return dotted >= FORMAT_MIN_SHARE * total
+
+
 def _named_format(
     non_null: pl.Series, *, keep_values: bool, finite: bool = True
 ) -> tuple[str, dict[str, float]] | None:
@@ -956,14 +998,22 @@ def _named_format(
     its stand-ins are values of the source. A finite format is tried only
     with `finite`.
     """
-    counts = frames.value_counts(non_null)
     value, count = frames.PLAIN, frames.COUNT
     total = len(non_null)
     # A format tolerates at most FORMAT_MAX_EXTRAS distinct misses -- none,
     # without `keep_values` -- so a probe of any thousand distinct values
-    # holding more rules it out exactly, before free text is checked whole.
+    # holding more rules it out exactly, before free text is counted whole.
+    # The probe is the distinct values the column starts with, so free text
+    # is ruled out without counting a single value of it.
     allowed_misses = FORMAT_MAX_EXTRAS if keep_values else 0
-    probe = counts.head(1_000)
+    probe = (
+        non_null.head(FORMAT_PROBE_ROWS)
+        .unique(maintain_order=True)
+        .head(1_000)
+        .alias(value)
+        .to_frame()
+    )
+    counts: pl.DataFrame | None = None
     for name in FORMAT_ORDER:
         fmt = _lookup_format(name)
         if fmt.is_finite and not finite:
@@ -987,6 +1037,10 @@ def _named_format(
         misses = probe.select((~fits).sum()).item()
         if misses > allowed_misses:
             continue
+        if name == "hostname" and not _mostly_dotted(non_null, total):
+            continue  # single words: evidence of no format, however many
+        if counts is None:
+            counts = frames.value_counts(non_null)
         judged = counts.with_columns(
             fits.alias("__polspec_fits"), evidence.alias("__polspec_evidence")
         )

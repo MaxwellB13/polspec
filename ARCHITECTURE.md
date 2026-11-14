@@ -50,6 +50,12 @@ they can change in any release, so code outside polspec should use only
 | `render` | Rendering a spec, a registry, a category registry or a drift report as Markdown or Mermaid |
 | `cli` | The `polspec` command, one module per verb: `_schema` (infer, new), `_data` (validate, generate), `_drift` (diff, drift), `_test`; `_io` holds the readers, writers and spec loaders they share |
 
+`import polspec` loads the declarations and `FrameSpec`; every verb module
+-- generation, validation, compare, serialization, the profiler, render --
+loads on first use, through the package's `__getattr__`, and `FrameSpec`
+imports each inside the method that uses it. A test holds a bare import to
+that.
+
 The dependency direction is one-way. The declarations -- `spec`, `rules`,
 `check`, `foreign_key`, `hierarchy`, `tablespec` -- import none of
 `generation`, `validation`, `drift`, `serialization` or the Rust extension, so

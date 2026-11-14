@@ -68,19 +68,27 @@ def _boolean(values: pl.Series) -> pl.Series | None:
 
 
 def _integer(values: pl.Series) -> pl.Series | None:
+    # Cast first: text that is not integers fails it, in one pass, before
+    # any pattern is read.
+    parsed = values.cast(pl.Int64, strict=False)
+    if parsed.null_count() != values.null_count():
+        return None
     present = values.drop_nulls()
     if not _all(present, _INTEGER) or _any(present, _LEADING_ZERO):
         return None
-    return values.cast(pl.Int64, strict=True)
+    return parsed
 
 
 def _float(values: pl.Series) -> pl.Series | None:
+    parsed = values.cast(pl.Float64, strict=False)
+    if parsed.null_count() != values.null_count():
+        return None
     present = values.drop_nulls()
     # Every value an integer: an Int64 would have held them, so these are
     # past what it holds -- a code, which a float would round.
     if _any(present, _LEADING_ZERO) or _all(present, _INTEGER):
         return None
-    return values.cast(pl.Float64, strict=True)
+    return parsed
 
 
 def _date(values: pl.Series) -> pl.Series | None:

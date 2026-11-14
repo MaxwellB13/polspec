@@ -61,6 +61,18 @@ page promises; before 1.0, a minor version could break any of them.
 
 ### Changed
 
+- **Faster where it was slow,** measured with `benchmarks/bench.py`
+  against 1.1.0 on the same machine, with every other case unchanged:
+  - Batches, scans and sinks with a foreign key into a large parent: a
+    million rows in 10k batches from a 1M-row parent, 3.72 s to 0.36 s.
+    Each parent's keys are read once per call, not once per batch. Seeded
+    output is unchanged.
+  - `profile()`: 235 ms to 93 ms on a million rows, 411 ms to 243 ms on the
+    same rows as text. A column is no longer hashed again for each thing
+    asked of it. Every profile is the same as before.
+  - `import polspec`: 200 ms to under 60 ms on top of Polars. Generating,
+    validating, drift, profiling, spec files and rendering load on first
+    use.
 - **A class's docstring is its description.** A `FrameSpec` with a
   docstring and no `__description__` now has that docstring as its
   `description`, which `to_markdown` shows and `to_yaml` writes as a
