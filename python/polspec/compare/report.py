@@ -88,6 +88,14 @@ class DriftFinding:
     details : Mapping
         Code-specific facts: the old and new value, how far a bound was
         exceeded, which values were new.
+
+    Examples
+    --------
+    >>> old = TableSpec("Orders", {"total": ColSpec(pl.Float64, nullable=True)})
+    >>> new = TableSpec("Orders", {"total": ColSpec(pl.Float64)})
+    >>> finding = diff(old, new).findings[0]
+    >>> finding.code, finding.severity, finding.columns
+    ('nullability_changed', 'breaking', ('total',))
     """
 
     code: DriftCode
@@ -126,6 +134,14 @@ class DriftReport:
     data was called. Like any collection it is falsy when empty, so
     `if report:` means "something changed"; `report.unchanged` says the
     opposite in words.
+
+    Examples
+    --------
+    >>> old = TableSpec("Orders", {"total": ColSpec(pl.Float64, bounds=(0, 100))})
+    >>> new = TableSpec("Orders", {"total": ColSpec(pl.Float64, bounds=(0, 200))})
+    >>> report = diff(old, new)
+    >>> report.breaking, [f.code for f in report.compatible]
+    ((), ['domain_widened'])
     """
 
     kind: Kind

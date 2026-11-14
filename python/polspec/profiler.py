@@ -288,6 +288,13 @@ class ProfileOptions:
         False, such a column stays text and its description says what it
         would parse as. Validate the same frame with `parse_text=True` too.
 
+
+    Examples
+    --------
+    >>> house = ProfileOptions(round_bounds="auto", replace=["name"])
+    >>> frame = pl.DataFrame({"name": ["Ada", "Grace"] * 50, "total": [3.17, 9871.23] * 50})
+    >>> profile(frame, options=house)["total"].bounds
+    Bound(min=0.0, max=9900.0)
     """
 
     replace: Sequence[str] = ()

@@ -249,6 +249,18 @@ def generate(
     The whole frame is built before this returns. `scan()` is the lazy
     verb: it generates as the plan is collected, so only the columns and
     rows a plan asks for are made.
+
+    Examples
+    --------
+    >>> spec = TableSpec("Orders", {
+    ...     "id": ColSpec(pl.Int64, unique=True),
+    ...     "total": ColSpec(pl.Float64, bounds=(0, 100)),
+    ... })
+    >>> frame = generate(spec, 1_000, seed=1)
+    >>> frame.shape
+    (1000, 2)
+    >>> frame["id"].is_unique().all()
+    True
     """
     spec = as_table_spec(spec)
     require_columns(spec)
@@ -595,6 +607,12 @@ def generate_batches(
     group and a unique key into the spec's own rows are drawn afresh per
     batch, so they are distinct within a batch and collide across batches
     only by chance.
+
+    Examples
+    --------
+    >>> spec = TableSpec("Orders", {"id": ColSpec(pl.Int64, unique=True)})
+    >>> [batch.height for batch in generate_batches(spec, 25_000, batch_size=10_000, seed=1)]
+    [10000, 10000, 5000]
     """
     spec = as_table_spec(spec)
     require_columns(spec)

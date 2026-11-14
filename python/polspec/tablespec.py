@@ -249,6 +249,22 @@ class TableSpec:
     -----
     Everything a `FrameSpec` class body validates at declaration is validated
     here, so a `TableSpec` that constructs is one that can be used.
+
+    Examples
+    --------
+    >>> spec = TableSpec("Orders", {
+    ...     "id": ColSpec(pl.Int64, unique=True),
+    ...     "total": ColSpec(pl.Float64, bounds=(0, 100)),
+    ... })
+    >>> spec
+    TableSpec('Orders', {
+        'id': ColSpec(Int64, unique=True),
+        'total': ColSpec(Float64, bounds=(0, 100)),
+    })
+    >>> spec.select("total").schema()
+    Schema({'total': Float64})
+    >>> spec.names.total
+    'total'
     """
 
     name: str

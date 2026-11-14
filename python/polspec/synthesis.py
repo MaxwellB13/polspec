@@ -73,6 +73,17 @@ def profile(
     TableSpec
         Everything `FrameSpec.from_dataframe` records, plus each column's
         category frequencies, fitted distribution and uniqueness.
+
+    Examples
+    --------
+    >>> frame = pl.DataFrame({"id": range(1, 201), "status": ["NEW", "PAID"] * 100})
+    >>> spec = profile(frame, name="Orders")
+    >>> spec.schema()
+    Schema({'id': Int64, 'status': Enum(categories=['NEW', 'PAID'])})
+    >>> spec["id"].bounds, spec["id"].unique
+    (Bound(min=1, max=200), True)
+    >>> profile(pl.DataFrame({"lgd": ["0.45", "", "0.2"]}), parse_text=True).schema()
+    Schema({'lgd': Float64})
     """
     opts = profile_options(options, keywords)
     frame, _ = _load(source, opts.sample, opts.seed)
@@ -104,6 +115,13 @@ def synthesize(
     `seed` seeds the generation, and the sample and fitting behind it, so the
     same source and seed give the same frame. To look at, edit or keep the
     spec the frame came from, call `profile` and `generate` separately.
+
+    Examples
+    --------
+    >>> frame = pl.DataFrame({"id": range(1, 201), "status": ["NEW", "PAID"] * 100})
+    >>> fake = synthesize(frame, 50, seed=1)
+    >>> fake.shape, fake.schema == frame.schema
+    ((50, 2), True)
     """
     fake, _ = synthesized(source, n, seed=seed, options=options, **keywords)
     return fake

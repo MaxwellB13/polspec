@@ -67,12 +67,14 @@ Orders.validate(orders)                        # ~27 ms; raises on any breach
   offending rows a lazy filter away, and splits a frame into what passed and
   what to quarantine. Declared defaults can fill what is missing first.
 - **Learn from real data.** `profile()` turns a frame into a spec, finding
-  formats, frequencies, distributions and null rates; `synthesize()` makes a
-  stand-in with the same shape.
+  formats, frequencies, distributions and null rates — and, with
+  `parse_text=True`, the numbers, flags and dates in a file read as text;
+  `synthesize()` makes a stand-in with the same shape.
 - **Drift with statistics behind it.** A move is reported only when it is
   both significant and large, as breaking or compatible.
 - **Specs as files and docs.** Save and load specs as YAML or Python. Render
-  a Markdown data dictionary or a Mermaid ER diagram.
+  a Markdown data dictionary or a Mermaid ER diagram. A spec pickles, and
+  reads as an Arrow schema: `pl.Schema(Orders)`.
 - **A CLI for your pipeline.** `polspec validate`, `generate`, `drift` and
   `synthesize`, with exit codes for CI.
 - **Deterministic.** The same seed gives the same data on every Polars from

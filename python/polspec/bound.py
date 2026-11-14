@@ -18,6 +18,13 @@ class Bound[T]:
 
     Either endpoint may be None, meaning that side is unconstrained -- see
     `ColSpec.bounds`, the only field that accepts an open end.
+
+    Examples
+    --------
+    >>> ColSpec(pl.Int64, bounds=Bound(0, None)).bounds  # no upper end
+    Bound(min=0, max=None)
+    >>> ColSpec(pl.Int64, bounds=(0, None)).bounds == Bound(0, None)
+    True
     """
 
     min: T | None

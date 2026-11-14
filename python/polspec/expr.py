@@ -75,7 +75,16 @@ def _source(node: Pred) -> str:
 
 @dataclass(frozen=True, slots=True, eq=False, repr=False)
 class Pred:
-    """Base class of every predicate node. Build one with `col()`."""
+    """Base class of every predicate node. Build one with `col()`.
+
+    Examples
+    --------
+    >>> pred = col("total").is_between(0, 100)
+    >>> isinstance(pred, Pred), pred
+    (True, col('total').is_between(0, 100))
+    >>> Check(pred, name="in_range").name
+    'in_range'
+    """
 
     def to_expr(self) -> pl.Expr:
         """This predicate as the Polars expression that evaluates it."""
@@ -573,6 +582,15 @@ def col(name: str) -> Col:
     Exactly the column named `name`: unlike `pl.col`, `col("*")` is the
     column named `*`, not every column, and `col("^id$")` is not a regular
     expression.
+
+    Examples
+    --------
+    >>> pred = (col("total") > 0) & col("status").is_in(["NEW", "PAID"])
+    >>> pred
+    (col('total') > 0) & (col('status').is_in(['NEW', 'PAID']))
+    >>> frame = pl.DataFrame({"total": [5, -1], "status": ["NEW", "NEW"]})
+    >>> frame.filter(pred.to_expr())["total"].to_list()
+    [5]
     """
     if not isinstance(name, str) or not name:
         raise SpecError(f"col() takes a non-empty column name, got {name!r}")
@@ -580,7 +598,13 @@ def col(name: str) -> Col:
 
 
 def lit(value: Any) -> Pred:
-    """An explicit literal. Scalars beside an operator are wrapped automatically."""
+    """An explicit literal. Scalars beside an operator are wrapped automatically.
+
+    Examples
+    --------
+    >>> col("total") > lit(100)
+    col('total') > 100
+    """
     return _wrap(value)
 
 

@@ -9,6 +9,22 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-14
+
+**Quicker to write, quicker to run.** Data read as text profiles and
+validates as the types it holds. A spec is shorter to write: a bare dtype is
+a column, an `Enum`'s weights sit beside its categories, dates in bounds can
+be text, and a class's docstring is its description. Declarations that never
+worked now fail where they are written, saying why. Specs and reports
+pickle, a spec reads as an Arrow schema, and every public name's reference
+shows a runnable example. Batched foreign keys, profiling and `import
+polspec` are 1.7× to 10× faster. Everything is additive under the 1.0
+promises, and **no seeded output changes**; nothing is deprecated.
+
+The spec-file format stays at version 4, and polspec writes nothing 1.1
+cannot read. A spec whose class has a docstring now writes it as a
+`description:` key, which 1.0 refuses by name, as it does any 1.1 key.
+
 ### Added
 
 - **`profile(parse_text=True)`** reads a text column as the type its values
@@ -2970,7 +2986,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/MaxwellB13/polspec/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/MaxwellB13/polspec/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/MaxwellB13/polspec/compare/v0.23.0...v1.0.0
 [0.23.0]: https://github.com/MaxwellB13/polspec/compare/v0.22.0...v0.23.0

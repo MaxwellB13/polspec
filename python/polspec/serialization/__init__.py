@@ -184,7 +184,17 @@ def _path_to(data: Any, target: Any, path: str = "") -> str | None:
 
 
 def to_dict(spec: TableSpec) -> dict[str, Any]:
-    """The YAML-ready data form of `spec`, `version` first."""
+    """The YAML-ready data form of `spec`, `version` first.
+
+    Examples
+    --------
+    >>> spec = TableSpec("Orders", {"id": ColSpec(pl.Int64, unique=True)})
+    >>> data = to_dict(spec)
+    >>> data["columns"]
+    {'id': {'dtype': 'Int64', 'unique': True}}
+    >>> from_dict(data) == spec
+    True
+    """
     return {"version": FORMAT_VERSION, **tablespec_to_data(spec)}
 
 
@@ -201,6 +211,12 @@ def from_dict(
     `strict=False`, which downgrades it to a warning. `where` names the data
     at the front of any error -- a file's path, say -- as `from_yaml` names
     the file it read.
+
+    Examples
+    --------
+    >>> spec = from_dict({"name": "Orders", "columns": {"id": "Int64", "placed": "Date"}})
+    >>> spec.schema()
+    Schema({'id': Int64, 'placed': Date})
     """
     with _Located(where):
         current = migrate(data, "spec", where)
@@ -223,6 +239,18 @@ def to_yaml(spec: SpecLike, path: str | Path | None = None) -> str | None:
 
     Defaults are omitted so the file shows only what was declared. Checks and
     validators over raw expressions cannot be written and warn.
+
+    Examples
+    --------
+    >>> spec = TableSpec("Orders", {"id": ColSpec(pl.Int64, unique=True)})
+    >>> print(to_yaml(spec))
+    version: 4
+    name: Orders
+    columns:
+      id:
+        dtype: Int64
+        unique: true
+    <BLANKLINE>
     """
     spec = as_table_spec(spec)
     require_columns(spec)
@@ -269,6 +297,15 @@ def from_yaml(
     shared Enums and Categoricals; when omitted, a `categories:` key in the
     file is loaded automatically, relative to the file. A file from an older
     format version is migrated on the way in.
+
+    Examples
+    --------
+    >>> import pathlib, tempfile
+    >>> folder = pathlib.Path(tempfile.mkdtemp())
+    >>> spec = TableSpec("Orders", {"id": ColSpec(pl.Int64, unique=True)})
+    >>> to_yaml(spec, folder / "orders.yaml")
+    >>> from_yaml(folder / "orders.yaml") == spec
+    True
     """
     path = Path(source)
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -334,6 +371,17 @@ def to_python(spec: SpecLike, path: str | Path | None = None) -> str | None:
     not an identifier, or is a keyword, raises `SerializationError` before
     anything is written. Rename it with `spec.with_name(...)`, or write it
     with `to_yaml`, which keeps any name.
+
+    Examples
+    --------
+    >>> spec = TableSpec("Orders", {"id": ColSpec(pl.Int64, unique=True)})
+    >>> module = to_python(spec)  # docstring, imports, then the class
+    >>> print(module[module.index("class "):])
+    class Orders(FrameSpec):
+        __columns__ = {
+            'id': ColSpec(pl.Int64, unique=True),
+        }
+    <BLANKLINE>
     """
     spec = as_table_spec(spec)
     require_columns(spec)

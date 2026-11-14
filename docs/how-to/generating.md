@@ -88,6 +88,8 @@ the frame across polspec *versions* — see
 `fixed=` sets columns to values you give, and generates the rest: a scalar
 for every row, or a sequence or Series of exactly `n`.
 
+*Added in 1.1.*
+
 ```python
 df = Orders.generate(3, seed=1, fixed={"status": ["NEW", "PAID", "PAID"]})
 df["status"].to_list()   # ['NEW', 'PAID', 'PAID']

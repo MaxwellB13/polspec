@@ -68,6 +68,13 @@ class ValidationOptions:
 
     Grouped rather than passed as ten separate arguments, so adding a check
     does not widen every signature between here and `FrameSpec.validate`.
+
+    Examples
+    --------
+    >>> spec = TableSpec("Orders", {"total": ColSpec(pl.Float64, bounds=(0, 100))})
+    >>> lenient = ValidationOptions(extra_cols="drop", bounds=False)
+    >>> validate(spec, pl.DataFrame({"total": [250.0], "note": ["x"]}), options=lenient).columns
+    ['total']
     """
 
     extra_cols: Literal["drop", "allow", "raise"] = "raise"
@@ -301,6 +308,19 @@ def inspect(
     Never raises for a frame that fails: every violation is a `Finding` on
     the report, with `report.rows(finding)` and `report.failing_rows()`
     giving the offending rows back lazily. See `validate` for the options.
+
+    Examples
+    --------
+    >>> spec = TableSpec("Orders", {"total": ColSpec(pl.Float64, bounds=(0, 100))})
+    >>> report = inspect(spec, pl.DataFrame({"total": [10.0, 250.0, 30.0]}))
+    >>> report.passed
+    False
+    >>> [(finding.code, finding.count) for finding in report.findings]
+    [('bounds', 1)]
+    >>> report.failing_rows().collect()["total"].to_list()
+    [250.0]
+    >>> report.passing_rows().collect()["total"].to_list()
+    [10.0, 30.0]
     """
     spec = as_table_spec(spec)
     require_columns(spec)
@@ -502,6 +522,20 @@ def validate(
         For an option name this does not accept.
     ValueError
         For an accepted option given a value outside its choices.
+
+    Examples
+    --------
+    >>> spec = TableSpec("Orders", {"total": ColSpec(pl.Float64, bounds=(0, 100))})
+    >>> validate(spec, pl.DataFrame({"total": [10.0, 20.0]})).height
+    2
+    >>> try:
+    ...     validate(spec, pl.DataFrame({"total": [250.0]}))
+    ... except ValidationError as error:
+    ...     print([finding.code for finding in error.report.findings])
+    ...
+    ['bounds']
+    >>> validate(spec, pl.DataFrame({"total": ["10.5"]}), parse_text=True).schema
+    Schema({'total': Float64})
     """
     spec = as_table_spec(spec)
     report = inspect(spec, df, options=options, references=references, **option_kwargs)

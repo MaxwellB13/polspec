@@ -63,6 +63,15 @@ def estimated_size(spec: SpecLike, n: int) -> int:
     """Bytes `generate(spec, n)` is expected to hold, as whole bytes.
 
     See the module docstring for what this does and does not count.
+
+    Examples
+    --------
+    >>> spec = TableSpec("Orders", {
+    ...     "id": ColSpec(pl.Int64, unique=True),
+    ...     "total": ColSpec(pl.Float64, bounds=(0, 100)),
+    ... })
+    >>> estimated_size(spec, 1_000_000)
+    16000000
     """
     spec = as_table_spec(spec)
     if n < 0:

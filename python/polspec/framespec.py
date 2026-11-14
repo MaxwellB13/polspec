@@ -463,6 +463,23 @@ class FrameSpec(metaclass=_FrameSpecMeta):
 
         class Raw(FrameSpec):
             __columns__ = {"_id": ColSpec(pl.Int64), "Unit Price": ColSpec(pl.Float64)}
+
+    Examples
+    --------
+    >>> class Orders(FrameSpec):
+    ...     "One row per order."
+    ...
+    ...     id = ColSpec(pl.Int64, unique=True)
+    ...     status = ColSpec(pl.Enum, choices={"NEW": 0.7, "PAID": 0.3})
+    ...     total = ColSpec(pl.Float64, bounds=(0, 100))
+    ...
+    >>> frame = Orders.generate(1_000, seed=1)
+    >>> Orders.validate(frame).height
+    1000
+    >>> Orders.spec.description
+    'One row per order.'
+    >>> Orders.names.status
+    'status'
     """
 
     spec: ClassVar[TableSpec]

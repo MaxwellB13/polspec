@@ -347,8 +347,12 @@ class ColSpec:
 
     Examples
     --------
-    >>> ColSpec(pl.Int64, bounds=(1, 100), nullable=True, null_probability=0.1)
-    >>> ColSpec(pl.String, choices=["NEW", "PAID"], weights=[3.0, 1.0])
+    >>> ColSpec(pl.Int64, bounds=(1, 100), nullable=True, null_probability=0.2)
+    ColSpec(Int64, nullable=True, bounds=(1, 100), null_probability=0.2)
+    >>> ColSpec(pl.String, choices={"NEW": 0.75, "PAID": 0.25})
+    ColSpec(String, choices=('NEW', 'PAID'), weights=(0.75, 0.25))
+    >>> ColSpec(pl.Enum, choices={"NEW": 0.75, "PAID": 0.25}).dtype
+    Enum(categories=['NEW', 'PAID'])
     """
 
     # The fields are annotated with what a constructed ColSpec *holds*, after
