@@ -1440,6 +1440,21 @@ def test_synthesize_writes_values_of_the_sources_format(tmp_path):
     assert run_cli("validate", spec, fake) == 0
 
 
+@pytest.mark.parametrize("command", ["schema infer", "synthesize"])
+def test_no_patterns_writes_no_shape(tmp_path, command):
+    source = tmp_path / "orders.csv"
+    pl.DataFrame({"ref": [f"ORD-{i % 30:06d}" for i in range(40)]}).write_csv(source)
+    out, spec = tmp_path / "out.csv", tmp_path / "spec.yaml"
+    for flags, written in (((), True), (("--no-patterns",), False)):
+        if command == "synthesize":
+            args = ("synthesize", source, "-o", out, "--spec", spec, *flags)
+        else:
+            args = ("schema", "infer", source, "-o", spec, *flags)
+        assert run_cli(*args) == 0
+        text = spec.read_text(encoding="utf-8")
+        assert ("pattern: ^ORD-[0-9]{6}$" in text) is written
+
+
 # ---------------------------------------------------------------------------
 # Several sources: related tables
 # ---------------------------------------------------------------------------

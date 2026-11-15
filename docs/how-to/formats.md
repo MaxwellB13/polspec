@@ -65,6 +65,11 @@ Orders.validate(orders)
 
 *Generated from since 1.4.*
 
+`profile` writes a code-like column's pattern itself, from the shape its
+values share: see
+[Fake data from real data](synthesizing.md#how-close-the-fake-data-is).
+*Inferred since 1.5.*
+
 The values are drawn through the automaton Polars' own regex engine builds
 for the pattern, so generation and validation read it alike:
 

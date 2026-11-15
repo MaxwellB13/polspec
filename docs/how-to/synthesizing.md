@@ -131,10 +131,22 @@ A country or currency column of a few repeated codes stays an `Enum` of
 them, which keeps how often each occurs — the format would spread the fake
 values over every code; it is named once the column holds more distinct
 codes than `max_unique_enum`, or is `replace`d. `formats=False`, or
-`--no-formats`, turns it off. A shape polspec has no
-format for — a product code, a postcode — is still text of its lengths;
-declare a [`pattern`](formats.md#patterns) on the profiled spec, which then
-validates the shape and generates values that follow it.
+`--no-formats`, turns it off.
+
+A code polspec has no format for — an order reference, a SKU, a postcode —
+is profiled as the [`pattern`](formats.md#patterns) its values share, so
+the fake codes have the real ones' shape. Each run of digits, capitals or
+small letters becomes its class with the lengths seen, and a part every
+value shares stays as written: `ORD-004211` and `ORD-918200` give
+`^ORD-[0-9]{6}$`. It takes at least twenty distinct values, no format and
+no `Enum`, and every value in one of at most three shapes, each an
+alternative; a run of other characters longer than eight is prose, which
+stays text of its lengths. A column of distinct values, which may be a key,
+gets its pattern only when the pattern holds ten times as many values, so a
+larger fake set has room. Not for a `replace`d column, whose shared parts
+would be the source's text, nor for numbers, dates or booleans written as
+text, which [`parse_text`](profiling.md#data-read-as-text) reads as their type.
+`patterns=False`, or `--no-patterns`, turns it off.
 
 A float column's NaNs are carried over as a share: the profile records
 `nan_probability`, and the fake column holds NaN on as many of its present

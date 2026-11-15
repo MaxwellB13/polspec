@@ -123,8 +123,10 @@ them. See [String formats](../how-to/formats.md).
 its own, so every column of the fake frame looks like the source's and no
 relationship between columns survives: a correlation, a conditional mix, a
 foreign key. A text column's format is recognised only among the formats
-polspec knows, and from at least twenty distinct values; anything else —
-a product code, a postcode — becomes text of its lengths. See
+polspec knows, and from at least twenty distinct values; a code — an order
+reference, a postcode — is written as the pattern its values share when
+they have at most three shapes, and anything else, free text above all,
+becomes text of its lengths. See
 [Fake data from real data](../how-to/synthesizing.md#how-close-the-fake-data-is).
 
 ### A float's infinities are outside its profiled bounds

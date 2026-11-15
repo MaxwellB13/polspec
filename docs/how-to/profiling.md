@@ -86,6 +86,7 @@ Each option is a keyword on both functions:
 | `detect_order` | on / off | Declare `order_by` when the rows come sorted by a column |
 | `calculate_bounds` | on | Record extremes, and text and binary lengths |
 | `formats` | on | Name a text column's format |
+| `patterns` | on | Write the pattern a code-like text column's values share; see [How close the fake data is](synthesizing.md#how-close-the-fake-data-is) |
 | `max_unique_enum` | 50 | The most distinct values a text column may have to become an `Enum` |
 | `replace` | none | Columns whose values must not reach the spec, such as names or emails |
 | `sample` | all rows | Profile a random sample of this many rows |
@@ -192,9 +193,9 @@ polspec schema infer orders.parquet -o orders.py --weights --keys --order
 ```
 
 `schema infer` takes the same options as flags: `--weights`, `--shape`,
-`--keys`, `--order`, `--no-bounds`, `--no-formats`, `--max-unique-enum`,
-`--replace`, `--sample`, `--round-bounds`, `--round-rates` and
-`--parse-text`. See
+`--keys`, `--order`, `--no-bounds`, `--no-formats`, `--no-patterns`,
+`--max-unique-enum`, `--replace`, `--sample`, `--round-bounds`,
+`--round-rates` and `--parse-text`. See
 [the command line](cli.md#schema-infer-profile-data-into-a-spec).
 
 ## Treat it as a draft

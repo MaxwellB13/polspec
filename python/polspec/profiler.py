@@ -250,6 +250,17 @@ class ProfileOptions:
         `ipv6`, `mac`, `hostname`, `iso_country` or `iso_currency`, and
         every value does -- or 99% do, and the rest are at most five
         repeated stand-ins, which become its `extra_values`.
+    patterns : bool, default True
+        Write the `pattern` a code-like text column's values share -- an
+        order reference, a SKU, a postcode -- so its fake values have that
+        shape: each run of digits, capitals or small letters a class of the
+        lengths seen (`ORD-004211`, `ORD-918200` give `^ORD-[0-9]{6}$`), and
+        a part every value shares kept as written. Only for a column of at
+        least 20 distinct values that no format fits and that would not be
+        an `Enum`, when every value has one of at most three shapes; for one
+        of distinct values, which may be a key, only when the pattern holds
+        ten times as many. Not for a column in `replace`, whose shared parts
+        are real text, nor for numbers, dates or booleans written as text.
     weights : bool, default True
         Record each category's observed frequency, for categorical, enum and
         boolean columns.
@@ -306,6 +317,7 @@ class ProfileOptions:
     seed: int = 0
     max_unique_enum: int = 50
     formats: bool = True
+    patterns: bool = True
     weights: bool = True
     shape: bool = True
     detect_unique: bool = True
@@ -334,6 +346,7 @@ class SynthesizeKeywords(TypedDict, total=False):
     sample: int | None
     max_unique_enum: int
     formats: bool
+    patterns: bool
     weights: bool
     shape: bool
     detect_unique: bool
@@ -380,6 +393,7 @@ class _Options:
     shape: bool = False
     detect_unique: bool = False
     formats: bool = True
+    patterns: bool = False
     seed: int = 0
     # Bounds rounded outward and rates up, to a step or "auto"; None leaves
     # them exactly as observed (`Rounding`).
@@ -502,6 +516,7 @@ def profile_columns(
         shape=opts.shape and opts.calculate_bounds,
         detect_unique=opts.detect_unique,
         formats=opts.formats,
+        patterns=opts.patterns,
         seed=opts.seed,
         round_bounds=opts.round_bounds,
         round_rates=opts.round_rates,
@@ -762,6 +777,7 @@ def _text(c: _Column) -> ColSpec:
         max_unique_enum=c.options.max_unique_enum if c.imitate else 0,
         calculate_bounds=c.options.calculate_bounds,
         formats=c.options.formats,
+        patterns=c.options.patterns,
         keep_values=c.imitate,
         distinct=distinct,
     )
@@ -940,6 +956,7 @@ def _profile_textual(
     max_unique_enum: int,
     calculate_bounds: bool,
     formats: bool = False,
+    patterns: bool = False,
     keep_values: bool = True,
     distinct: int | None = None,
 ) -> ColSpec:
@@ -974,6 +991,22 @@ def _profile_textual(
     if is_categorical_dtype(dtype):
         return spec(dtype=pl.Categorical())
 
+    shaped = None
+    if (
+        patterns
+        and keep_values
+        and n_unique >= FORMAT_MIN_DISTINCT
+        # Numbers, dates or booleans written as text are no code: their
+        # description says what they parse as.
+        and infer_text(non_null.head(FORMAT_PROBE_ROWS)) is None
+    ):
+        found = shape_pattern(non_null)
+        # Values all distinct may be a key, which a larger stand-in needs
+        # more of: its shape must hold SHAPE_KEY_ROOM times as many.
+        if found is not None and (
+            n_unique < len(non_null) or found[1] >= SHAPE_KEY_ROOM * n_unique
+        ):
+            shaped = found[0]
     return spec(
         dtype=pl.String,
         string_length=_extent(
@@ -981,7 +1014,157 @@ def _profile_textual(
             int,
             calculate_bounds,
         ),
+        pattern=shaped,
     )
+
+
+# The shapes a code-like column's values may have between them, each an
+# alternative of its pattern. More is free text, or a column of mixed codes
+# a pattern would only list.
+SHAPE_MAX = 3
+
+# The longest run of other characters -- a separator, a prefix -- a shape
+# keeps. A longer one is prose.
+SHAPE_MAX_LITERAL = 8
+
+# A part of a shape every value of it shares is written as it is when at
+# least this many values share it, or when one value has the shape alone (a
+# stand-in, `N/A`). A part fewer share is chance, and written as its class.
+SHAPE_MIN_SHARED = 10
+
+# How many times its own count of values a key's shape must hold: room for a
+# stand-in up to ten times the size.
+SHAPE_KEY_ROOM = 10
+
+# Values read for their shapes before any more are.
+SHAPE_PROBE_ROWS = 1_000
+
+# How many characters each class holds.
+_CLASS_SIZES = {"[0-9]": 10, "[A-Z]": 26, "[a-z]": 26}
+
+# Each character class, and the mark a run of it leaves in a value's shape:
+# a control character, so no value's own text is read as one.
+_CLASSES = (("[0-9]", "\x01"), ("[A-Z]", "\x02"), ("[a-z]", "\x03"))
+_MARKS = r"[\x00-\x03]"
+
+# Characters a regular expression reads as syntax outside a class.
+_REGEX_SYNTAX = frozenset("\\.+*?()|[]{}^$")
+
+
+def shape_pattern(non_null: pl.Series) -> tuple[str, int] | None:
+    """The pattern `non_null`'s values share, when every one has one of at
+    most `SHAPE_MAX` shapes. A shape is a value's runs of digits, capitals,
+    small letters and other characters. Each run of a class is written as
+    the class with the lengths seen, or as it is when enough values share it
+    (`SHAPE_MIN_SHARED`); each run of other characters as it is. None when
+    the values have more shapes than that, or a run of other characters is
+    longer than `SHAPE_MAX_LITERAL`. Beside the pattern, how many values it
+    holds. Classes, literals and one alternation are always within the
+    generator's reach.
+
+    The shapes are read from the first values, and the pattern drawn from
+    them; only when a later value fails it are the lengths read from every
+    value. A value of no shape the first showed means more shapes.
+    """
+    # Most columns that are not codes show more shapes in their first values.
+    if _shapes(non_null.head(SHAPE_PROBE_ROWS)).n_unique() > SHAPE_MAX:
+        return None
+    head = non_null.head(FORMAT_PROBE_ROWS)
+    if head.str.contains(_MARKS).any():
+        return None  # a value holding a mark would be misread
+    shapes = _shapes(head).unique().sort()
+    if len(shapes) > SHAPE_MAX:
+        return None  # most columns that are not codes, at once
+    runs = [_shape_runs(shape) for shape in shapes]
+    if any(r is None for r in runs):
+        return None  # prose, not a code
+    shaped = [r for r in runs if r is not None]
+    drawn = _shape_drawn(shaped, head.unique())
+    if drawn is not None and (
+        len(head) == len(non_null) or non_null.str.contains(drawn[0]).all()
+    ):
+        return drawn
+    if non_null.str.contains(_MARKS).any():
+        return None
+    return _shape_drawn(shaped, non_null.unique(), every=True)
+
+
+def _shape_drawn(
+    shapes: list[list[str]], values: pl.Series, *, every: bool = False
+) -> tuple[str, int] | None:
+    """The pattern of `values`, each of one of `shapes` (its runs), and how
+    many values it holds. With `every`, None when a value has none of them."""
+    alternatives = []
+    for runs in shapes:
+        matcher = (
+            "^" + "".join(f"({r}+)" if r in _CLASS_SIZES else r for r in runs) + "$"
+        )
+        groups = values.str.extract_groups(matcher).struct.unnest().drop_nulls()
+        alternatives.append((runs, groups))
+    if every and sum(groups.height for _, groups in alternatives) != len(values):
+        return None  # a shape the first values did not show
+    # The commonest shape first; the shapes come sorted, which a tie keeps.
+    alternatives.sort(key=lambda a: -a[1].height)
+    written, holds = [], 0
+    for runs, groups in alternatives:
+        part, held = _shape_alternative(runs, groups)
+        written.append(part)
+        holds += held
+    body = written[0] if len(written) == 1 else f"(?:{'|'.join(written)})"
+    return f"^{body}$", holds
+
+
+def _shapes(values: pl.Series) -> pl.Series:
+    """Each value with every run of a class replaced by that class's mark."""
+    for cls, mark in _CLASSES:
+        values = values.str.replace_all(f"{cls}+", mark)
+    return values
+
+
+def _shape_runs(shape: str) -> list[str] | None:
+    """`shape`'s runs: each class, and each run of other characters escaped
+    as a regular expression; None when one of those is prose."""
+    classes = {mark: cls for cls, mark in _CLASSES}
+    runs: list[str] = []
+    literal = ""
+    for c in [*shape, None]:
+        if c is not None and c not in classes:
+            literal += c
+            continue
+        if len(literal) > SHAPE_MAX_LITERAL:
+            return None
+        if literal:
+            runs.append("".join(f"\\{x}" if x in _REGEX_SYNTAX else x for x in literal))
+            literal = ""
+        if c is not None:
+            runs.append(classes[c])
+    return runs
+
+
+def _shape_alternative(runs: list[str], groups: pl.DataFrame) -> tuple[str, int]:
+    """The pattern of the values of one shape, from its `runs` and each
+    class run's values (`groups`, a column per run in order), and how many
+    values it holds."""
+    shared_by_enough = groups.height == 1 or groups.height >= SHAPE_MIN_SHARED
+    captured = iter(groups.columns)
+    parts, holds = [], 1
+    for cls in runs:
+        if cls not in _CLASS_SIZES:
+            parts.append(cls)  # other characters, as they are
+            continue
+        run = groups[next(captured)]
+        lengths = run.str.len_chars()
+        low, high = int(lengths.min()), int(lengths.max())  # ty: ignore[invalid-argument-type]
+        first = run[0]
+        if shared_by_enough and high <= SHAPE_MAX_LITERAL and (run == first).all():
+            parts.append(first)  # letters or digits: nothing to escape
+            continue
+        holds *= sum(_CLASS_SIZES[cls] ** n for n in range(low, high + 1))
+        if low == high == 1:
+            parts.append(cls)
+        else:
+            parts.append(f"{cls}{{{low}}}" if low == high else f"{cls}{{{low},{high}}}")
+    return "".join(parts), holds
 
 
 # Rows the format probe reads its distinct values from.

@@ -532,7 +532,9 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         what each column is rather than a stand-in for the data. A string or
         categorical column with at most `max_unique_enum` distinct values,
         repeating, becomes an `Enum`; one whose values have a `format` -- an
-        email, a UUID, a country code -- names it, unless `formats=False`.
+        email, a UUID, a country code -- names it, unless `formats=False`;
+        one of codes writes the `pattern` they share, unless
+        `patterns=False`.
         `calculate_bounds` records observed `(min, max)` for numeric and
         temporal columns and `(min_len, max_len)` for strings and binary.
 

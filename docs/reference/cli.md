@@ -25,10 +25,10 @@ Profile a data file into a YAML schema.
 
 ```
 polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
-                            [--max-unique-enum N] [--no-formats] [--parse-text]
-                            [--no-bounds] [--sample N] [--shape] [--keys] [--order]
-                            [--round-bounds STEP] [--round-rates STEP]
-                            [--replace COL [COL ...]]
+                            [--max-unique-enum N] [--no-formats] [--no-patterns]
+                            [--parse-text] [--no-bounds] [--sample N] [--shape]
+                            [--keys] [--order] [--round-bounds STEP]
+                            [--round-rates STEP] [--replace COL [COL ...]]
                             [--foreign-key SPEC.COLUMN=SPEC.COLUMN]
                             [--no-foreign-keys]
                             source [source ...]
@@ -42,6 +42,7 @@ polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
 | `--weights` | Record each category's observed frequency |
 | `--max-unique-enum` `N` | Max distinct values for a string column to become an Enum, when they repeat (default: 50) |
 | `--no-formats` | Do not name the format a text column's values have (email, uuid4, ...) |
+| `--no-patterns` | Do not write the pattern a code-like text column's values share (ORD-[0-9]{6}, ...) |
 | `--parse-text` | Read a text column as the number, flag or date every value holds (Boolean, Int64, Float64, Date, Datetime) |
 | `--no-bounds` | Skip computing numeric/temporal bounds and string lengths |
 | `--sample` `N` | Profile a random sample of N rows (seeded, so the same every run) |
@@ -146,8 +147,8 @@ Write a fake data file that looks like a real one.
 polspec synthesize [-h] -o OUTPUT [-n N] [--scale X] [--seed SEED]
                           [--format EXT] [--foreign-key SPEC.COLUMN=SPEC.COLUMN]
                           [--no-foreign-keys] [--replace COL [COL ...]] [--sample N]
-                          [--max-unique-enum N] [--no-formats] [--parse-text]
-                          [--spec PATH] [--name NAME]
+                          [--max-unique-enum N] [--no-formats] [--no-patterns]
+                          [--parse-text] [--spec PATH] [--name NAME]
                           source [source ...]
 ```
 
@@ -165,6 +166,7 @@ polspec synthesize [-h] -o OUTPUT [-n N] [--scale X] [--seed SEED]
 | `--sample` `N` | Profile a random sample of N rows rather than every row |
 | `--max-unique-enum` `N` | Max distinct values for a text column to keep its values, when they repeat (default: 50) |
 | `--no-formats` | Do not name the format a text column's values have (email, uuid4, ...) |
+| `--no-patterns` | Do not write the pattern a code-like text column's values share (ORD-[0-9]{6}, ...) |
 | `--parse-text` | Read a text column as the number, flag or date every value holds (Boolean, Int64, Float64, Date, Datetime) |
 | `--spec` `PATH` | Also write the spec the data was generated from (.yaml, or .py); with several sources, the registry of them |
 | `--name` `NAME` | The spec's class name (default: derived from source) |
