@@ -35,7 +35,7 @@ polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
 | Argument | Meaning |
 |:--|:--|
 | `source` | Path to a CSV, Parquet, NDJSON or IPC file |
-| `-o`, `--output` `OUTPUT` | **Required.** File to write: .yaml/.yml, or .py for a FrameSpec subclass |
+| `-o`, `--output` `OUTPUT` | **Required.** File to write: .yaml/.yml, or .py for a FrameSpec subclass; '-' prints the YAML instead |
 | `--name` `NAME` | Spec class name (default: derived from source) |
 | `--weights` | Record each category's observed frequency |
 | `--max-unique-enum` `N` | Max distinct values for a string column to become an Enum, when they repeat (default: 50) |

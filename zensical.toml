@@ -13,6 +13,8 @@ nav = [
     { "Related tables" = "tutorial/related-tables.md" },
   ] },
   { "How-to guides" = [
+    { "Recipes" = "how-to/recipes.md" },
+    { "Coming from another tool" = "how-to/coming-from.md" },
     { "Declaring a spec" = [
       { "Declare columns" = "how-to/columns.md" },
       { "Infer a spec from data" = "how-to/profiling.md" },

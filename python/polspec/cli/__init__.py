@@ -9,6 +9,7 @@ parsing and templating, not new behaviour.
 
     polspec schema infer orders.parquet -o orders.yaml
     polspec schema infer orders.parquet -o orders.py
+    polspec schema infer orders.parquet -o -
     polspec schema new Orders -o orders.py
     polspec test orders.yaml -o test_orders.py
     polspec validate orders.yaml orders.parquet --references Customers=customers.parquet
@@ -86,7 +87,10 @@ def _add_schema_parser(subparsers: argparse._SubParsersAction) -> None:
         "-o",
         "--output",
         required=True,
-        help="File to write: .yaml/.yml, or .py for a FrameSpec subclass",
+        help=(
+            "File to write: .yaml/.yml, or .py for a FrameSpec subclass; "
+            "'-' prints the YAML instead"
+        ),
     )
     infer.add_argument("--name", help="Spec class name (default: derived from source)")
     infer.add_argument(
