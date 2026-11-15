@@ -25,6 +25,10 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.13"
+          # Each job outside the matrix installs a different set, so each
+          # keeps its own cache rather than racing a matrix leg on the same
+          # OS and Python to save one key.
+          cache-suffix: lint
 
       # The project itself is not installed: linting needs no Rust build.
       - name: Sync dev dependencies
@@ -148,6 +152,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.13"
+          cache-suffix: newest-polars
 
       - name: Upgrade polars within the declared bound
         run: uv lock --upgrade-package polars
@@ -183,6 +188,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
+          cache-suffix: lowest-direct
 
       - name: Resolve the lowest direct dependencies
         run: uv lock --resolution lowest-direct
