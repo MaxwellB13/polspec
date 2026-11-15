@@ -84,7 +84,8 @@
     "details": "object",
     "key": "string",
     "message": "string",
-    "samples": "array"
+    "samples": "array",
+    "share": "number"
    }
   ],
   "passed": "boolean",
@@ -110,7 +111,8 @@
       "details": "object",
       "key": "string",
       "message": "string",
-      "samples": "array"
+      "samples": "array",
+      "share": "number"
      }
     ],
     "passed": "boolean",

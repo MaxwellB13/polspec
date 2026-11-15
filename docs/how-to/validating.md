@@ -90,6 +90,7 @@ for finding in report:
                               # "point.lat__bounds" for a struct's field
     finding.columns           # ("total",)
     finding.count             # rows violating it (None for structural findings)
+    finding.share             # count as a fraction of the rows, 0 to 1 (added in 1.4)
     finding.samples           # up to five offending values
     finding.details           # {"bounds": [0.0, None], "min_found": -3.0, ...}
     finding.message           # the same text validate() would have raised
@@ -235,10 +236,10 @@ print(report)
 
 ```
 Validation failed for DataFrame against 'Customers' (4 error(s) found):
-  - Column 'id': unique column contains 2 duplicate value(s). Duplicate samples: [2]
-  - Column 'name': found 1 value(s) with string length outside [3, 20]. Invalid samples: ['Al']
-  - Column 'country': found 1 invalid value(s) not in allowed choices/categories ['UK', 'US', 'DE']. Invalid samples: ['FR']
-  - Column 'signed_up': found 1 value(s) out of bounds [2020-01-01, 2026-01-01] (min found: 2019-12-31, max found: 2022-01-01). Out of bounds samples: [datetime.date(2019, 12, 31)]
+  - Column 'id': unique column contains 2 duplicate value(s). Duplicate samples: [2] (66.7% of rows)
+  - Column 'name': found 1 value(s) with string length outside [3, 20]. Invalid samples: ['Al'] (33.3% of rows)
+  - Column 'country': found 1 invalid value(s) not in allowed choices/categories ['UK', 'US', 'DE']. Invalid samples: ['FR'] (33.3% of rows)
+  - Column 'signed_up': found 1 value(s) out of bounds [2020-01-01, 2026-01-01] (min found: 2019-12-31, max found: 2022-01-01). Out of bounds samples: [datetime.date(2019, 12, 31)] (33.3% of rows)
 ```
 
 `report.rows(finding)` is the offending rows, and `report.to_json()` is
@@ -450,6 +451,22 @@ so a String column that holds only valid enum members comes back as the `Enum`.
 
 `streaming=True` evaluates with the Polars streaming engine, for frames larger
 than memory.
+
+### The schema alone
+
+`schema_only=True` checks what a frame's schema says — missing, extra and
+optional columns, and each column's dtype — and reads no rows. On a
+`LazyFrame` the query is planned, never run, so a test can hold a lazy
+pipeline's output shape to its spec for free:
+
+```python
+source = pl.LazyFrame(schema=Orders.spec.schema())   # pl.scan_parquet(...) in practice
+pipeline = source.with_columns(pl.col("total") * 2)
+Orders.validate(pipeline, schema_only=True)   # planned, never collected
+```
+
+*Added in 1.4.* It does not combine with `parse_text=True`, which reads the
+values to decide their type.
 
 ### Turning checks off
 

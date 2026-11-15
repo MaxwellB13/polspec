@@ -179,6 +179,7 @@ def test_report_serialises_to_json():
         "message",
         "columns",
         "count",
+        "share",
         "samples",
         "details",
     }

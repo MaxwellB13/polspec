@@ -397,8 +397,8 @@ ColSpec(pl.String, format="uuid4", unique=True)
 ColSpec(pl.String, format="email", nullable=True)
 ```
 
-The set is `uuid4`, `email`, `ipv4`, `ipv6`, `mac`, `hostname`,
-`iso_country` and `iso_currency`. A format owns the column's domain, so it
+The set is `uuid4`, `uuid7`, `ulid`, `email`, `ipv4`, `ipv6`, `mac`,
+`hostname`, `url`, `iso_country`, `iso_country3` and `iso_currency`. A format owns the column's domain, so it
 cannot sit beside `choices` or `string_length`, and only a `String` column
 can carry one. See [String formats](formats.md) for what each generates,
 what each accepts, and what none of them promises.

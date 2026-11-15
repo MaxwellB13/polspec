@@ -16,6 +16,7 @@ Internal: not part of the public API.
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, overload
@@ -99,6 +100,7 @@ class ValidationOptions:
     fill_defaults: bool = False
     parse_text: bool = False
     streaming: bool = False
+    schema_only: bool = False
 
     def __post_init__(self) -> None:
         if self.extra_cols not in ("drop", "allow", "raise"):
@@ -108,6 +110,11 @@ class ValidationOptions:
         if self.missing_cols not in ("add", "allow", "raise"):
             raise ValueError(
                 f"missing_cols must be one of 'add', 'allow', 'raise'; got {self.missing_cols!r}"
+            )
+        if self.schema_only and self.parse_text:
+            raise ValueError(
+                "schema_only=True reads no values, and parse_text=True reads "
+                "them to decide each column's type; ask for one or the other"
             )
 
 
@@ -140,6 +147,7 @@ class ValidationKeywords(TypedDict, total=False):
     fill_defaults: bool
     parse_text: bool
     streaming: bool
+    schema_only: bool
 
 
 SWITCHES = (
@@ -353,12 +361,17 @@ def inspect(
     findings = _structural_findings(columns, df_schema.names(), opts)
     dtype_findings, constraints = _planned(spec, df_schema, opts, unparsed)
     findings.extend(dtype_findings)
-    findings.extend(_aggregated_findings(lf, constraints, collect_kwargs))
+    if opts.schema_only:
+        # The schema says everything above; the rest needs the rows.
+        return _report(spec, lf, findings, opts, references)
+    aggregated, rows = _aggregated_findings(lf, constraints, collect_kwargs)
+    findings.extend(aggregated)
     findings.extend(
         _cross_frame_findings(
             spec, lf, df_schema.names(), opts, references, collect_kwargs
         )
     )
+    findings = _with_shares(findings, lf, rows, collect_kwargs)
     return _report(spec, lf, findings, opts, references)
 
 
@@ -474,15 +487,41 @@ def _planned(
     return findings, constraints
 
 
+_ROWS = "__polspec_rows"
+
+
 def _aggregated_findings(
     lf: pl.LazyFrame, constraints: Sequence[Constraint], collect_kwargs: dict[str, Any]
-) -> list[Finding]:
-    """The constraints' findings, from one aggregation over the frame."""
+) -> tuple[list[Finding], int | None]:
+    """The constraints' findings, from one aggregation over the frame, and
+    the frame's row count, which the same aggregation counts."""
     if not constraints:
-        return []
+        return [], None
     aggregations = [expr for c in constraints for expr in c.aggregations()]
+    aggregations.append(pl.len().alias(_ROWS))
     stats = lf.select(aggregations).collect(**collect_kwargs).to_dict(as_series=False)
-    return [f for f in (c.failure(stats) for c in constraints) if f is not None]
+    found = [f for f in (c.failure(stats) for c in constraints) if f is not None]
+    return found, int(stats[_ROWS][0])
+
+
+def _with_shares(
+    findings: list[Finding],
+    lf: pl.LazyFrame,
+    rows: int | None,
+    collect_kwargs: dict[str, Any],
+) -> list[Finding]:
+    """Each counted finding with its share of the frame's rows. The rows are
+    counted once more only when no aggregation counted them already."""
+    if not any(f.count is not None for f in findings):
+        return findings
+    if rows is None:
+        rows = int(lf.select(pl.len()).collect(**collect_kwargs).item())
+    return [
+        dataclasses.replace(f, share=f.count / rows)
+        if f.count is not None and rows
+        else f
+        for f in findings
+    ]
 
 
 def _cross_frame_findings(
