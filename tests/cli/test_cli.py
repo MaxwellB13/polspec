@@ -367,6 +367,62 @@ def test_generated_test_skips_cross_spec_foreign_key(tmp_path):
     assert "1 skipped" in result.stdout
 
 
+def test_generated_test_generates_the_parents_a_spec_draws_from(tmp_path):
+    """A spec whose foreign keys reach specs loaded with it -- here two levels
+    up -- generates them first, so its test runs rather than being skipped."""
+    spec_path = tmp_path / "chain.py"
+    spec_path.write_text(
+        textwrap.dedent(
+            """
+            import polars as pl
+            from polspec import ColSpec, ForeignKey, FrameSpec
+
+            class Customers(FrameSpec):
+                id = ColSpec(pl.Int64, bounds=(1, 10_000), unique=True)
+
+            class Orders(FrameSpec):
+                order_id = ColSpec(pl.Int64, bounds=(1, 1_000_000), unique=True)
+                customer_id = ColSpec(pl.Int64, bounds=(1, 10_000))
+                __foreign_keys__ = [
+                    ForeignKey("customer_id", references=Customers, ref_columns="id")
+                ]
+
+            class Lines(FrameSpec):
+                order_id = ColSpec(pl.Int64, bounds=(1, 1_000_000))
+                __foreign_keys__ = [
+                    ForeignKey("order_id", references=Orders, ref_columns="order_id")
+                ]
+            """
+        ),
+        encoding="utf-8",
+    )
+    test_path = tmp_path / "test_chain.py"
+    assert run_cli("test", spec_path, "-o", test_path) == 0
+    content = test_path.read_text(encoding="utf-8")
+    assert "pytest.mark.skip" not in content
+    assert (
+        "parents[Orders] = polspec_frames(Orders, 500, references=parents)" in content
+    )
+    result = run_pytest_on(test_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "failed" not in result.stdout and "skipped" not in result.stdout
+
+
+def test_generated_test_draws_from_the_fixture_and_reruns_by_its_seed(
+    sample_data, tmp_path
+):
+    """Without --seed the frames are the fixture's: a failure names
+    --polspec-seed, and that is what reproduces it."""
+    yaml_path = tmp_path / "orders.yaml"
+    run_cli("schema", "infer", sample_data, "-o", yaml_path)
+    test_path = tmp_path / "test_orders.py"
+    run_cli("test", yaml_path, "-o", test_path, "--no-cartesian")
+    content = test_path.read_text(encoding="utf-8")
+    assert "polspec_frames(" in content
+    assert "assert_valid(" in content
+    assert "seed=" not in content
+
+
 def test_test_command_missing_file(tmp_path, capsys):
     assert run_cli("test", tmp_path / "nope.yaml", "-o", tmp_path / "t.py") == 1
     assert "no such file" in capsys.readouterr().err

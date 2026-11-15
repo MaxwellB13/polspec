@@ -112,19 +112,24 @@ polspec test SOURCE -o OUTPUT_test.py [options]
 subclasses (from `schema new`, filled in). The generated file asserts the
 property this project's own test suite is built around:
 
+<!-- docs: skip -->
 ```python
-def test_orders_roundtrip():
-    df = Orders.generate(500, seed=42)
-    Orders.validate(df)
+def test_orders_roundtrip(polspec_frames):
+    frame = polspec_frames(Orders, 500)
+    assert_valid(frame, Orders)
 
 
-def test_orders_cartesian_coverage():
-    df = Orders.generate(500, method="cartesian", seed=42)
-    Orders.validate(df)
+def test_orders_cartesian_coverage(polspec_frames):
+    frame = polspec_frames(Orders, 500, method="cartesian")
+    assert_valid(frame, Orders)
 ```
 
-Its options — `--rows`, `--seed`, `--no-cartesian`, `--class` — are in
-the [command-line reference](../reference/cli.md#polspec-test).
+The frames come from the [`polspec_frames` fixture](testing.md#a-frame-for-a-test-polspec_frames),
+seeded per test from `--polspec-seed`, and a failure says how to rerun it.
+`--seed N` pins every frame to one seed instead. The options — `--rows`,
+`--seed`, `--no-cartesian`, `--class` — are in the
+[command-line reference](../reference/cli.md#polspec-test). *Changed in 1.3:*
+the tests used to call `generate()` and `validate()` with seed 42.
 
 ### It will not hand you a test that fails on the spot
 
@@ -135,26 +140,39 @@ moment it runs, since generation cannot satisfy them, and one declaring
 `__rows__` a test of the wrong size. The generator checks for each and turns
 off the matching `validate()` switch, with a comment explaining why:
 
+<!-- docs: skip -->
 ```python
-def test_invoices_roundtrip():
+def test_invoices_roundtrip(polspec_frames):
     # __checks__ wraps arbitrary expressions that generation cannot be made
     # to satisfy
-    df = Invoices.generate(500, seed=42)
-    Invoices.validate(df, checks=False)
+    frame = polspec_frames(Invoices, 500)
+    assert_valid(frame, Invoices, checks=False)
 ```
 
-A spec with a foreign key referencing *another* spec needs that spec's data
-via `references=`, which the CLI cannot supply on its own — that test is
-marked `@pytest.mark.skip` with a reason, rather than guessed at:
+A spec with a foreign key into another spec declared in the same file
+generates that spec first, and its parents in turn:
+
+<!-- docs: skip -->
+```python
+def test_lines_roundtrip(polspec_frames):
+    parents = {}
+    parents[Customers] = polspec_frames(Customers, 500)
+    parents[Orders] = polspec_frames(Orders, 500, references=parents)
+    frame = polspec_frames(Lines, 500, references=parents)
+    assert_valid(frame, Lines, references=parents)
+```
+
+One whose parent is declared in another file — or left out by `--class` —
+is marked
+`@pytest.mark.skip` with a reason, rather than guessed at:
 
 <!-- docs: skip -->
 ```python
 @pytest.mark.skip(
     reason=(
-        "Child has foreign key(s) 'fk_parent_id__Parent' referencing another "
-        "FrameSpec. generate()/validate() need a parent DataFrame via "
-        "references={OtherSpec: parent_df} -- see "
-        "docs/how-to/constraints.md#referential-integrity-foreignkey."
+        "Child has foreign key(s) into Parent, which this file does not load. "
+        "Generate the test from a file declaring it too, or pass "
+        "its frame as references={Spec: frame} -- see docs/how-to/testing.md."
     )
 )
 def test_child_roundtrip():

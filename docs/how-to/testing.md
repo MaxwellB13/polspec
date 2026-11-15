@@ -1,17 +1,17 @@
 # Testing pipelines with polspec
 
-A spec is a schema and a data source at once, which makes it a natural fit
-for the tests around a data pipeline: declare what a stage of the pipeline
-expects, generate data that matches, and validate what it produces.
+A test of a pipeline stage does three things: make some input, run the
+stage, and check what comes out. A spec does the first and the last — it is
+a data source and a schema at once — and polspec names each step:
 
-## Why this fits hermetic tests
+- **`polspec_frames`**, a pytest fixture, makes seeded input;
+- **`assert_valid`** checks the output, failing as a test failure that says
+  what broke and shows the rows;
+- **`check_pipeline`** does all three in one call.
 
-A hermetic test doesn't reach outside itself — no network call, no shared
-fixture file that drifts, no "works on my machine" because someone's local
-`sample_data.csv` is newer than the one in CI. `FrameSpec.generate(n, seed=...)`
-is a pure function of its arguments: the same seed produces the same frame on
-any machine, in any process, with any number of threads. There's no file to
-check into the repo, and no file to go stale.
+*Added in 1.3.*
+
+The examples on this page test one pipeline:
 
 ```python
 from datetime import date
@@ -20,30 +20,13 @@ import polars as pl
 from polspec import ColSpec, ForeignKey, FrameSpec
 
 class Customers(FrameSpec):
-    customer_id = ColSpec(pl.Int64, bounds=(1, 10_000))
-    tier = ColSpec(pl.Enum(["free", "pro", "enterprise"]))
+    customer_id = ColSpec(pl.Int64, bounds=(1, 10_000), unique=True)
+    tier = pl.Enum(["free", "pro", "enterprise"])
     signed_up = ColSpec(pl.Date, bounds=(date(2020, 1, 1), None))
 
 
-def test_pipeline_handles_all_tiers():
-    df = Customers.generate(500, seed=42)
-    assert set(df["tier"].unique()) <= {"free", "pro", "enterprise"}
-```
-
-The spec is the fixture. When the pipeline's input schema changes, the type
-error is in the `ColSpec` declaration, not in a `.parquet` file nobody
-remembers generating.
-
-## Testing a full pipeline
-
-Declare the shape of each stage — including the *output* — and validate the
-real function against it. This catches two different kinds of drift: the
-pipeline producing the wrong shape, and the test's own expectations going
-stale.
-
-```python
 class Orders(FrameSpec):
-    order_id = ColSpec(pl.Int64, bounds=(1, None))
+    order_id = ColSpec(pl.Int64, bounds=(1, None), unique=True)
     customer_id = ColSpec(pl.Int64, bounds=(1, 10_000))
     amount = ColSpec(pl.Float64, bounds=(0.0, 500.0))
     __foreign_keys__ = [
@@ -52,52 +35,132 @@ class Orders(FrameSpec):
 
 
 class CustomerSpend(FrameSpec):
-    customer_id = ColSpec(pl.Int64, bounds=(1, 10_000))
-    tier = ColSpec(pl.Enum(["free", "pro", "enterprise"]))
+    customer_id = ColSpec(pl.Int64, unique=True)
+    tier = pl.Enum(["free", "pro", "enterprise"])
     total_spend = ColSpec(pl.Float64, bounds=(0.0, None))
-    order_count = ColSpec(pl.UInt32)
+    order_count = pl.UInt32
 
 
 def summarize_spend(customers: pl.DataFrame, orders: pl.DataFrame) -> pl.DataFrame:
     """The pipeline under test."""
     return (
         orders.group_by("customer_id")
-        .agg(
-            total_spend=pl.col("amount").sum(),
-            order_count=pl.len().cast(pl.UInt32),
-        )
-        .join(customers.select("customer_id", "tier"), on="customer_id", how="inner")
+        .agg(total_spend=pl.col("amount").sum(), order_count=pl.len().cast(pl.UInt32))
+        .join(customers.select("customer_id", "tier"), on="customer_id")
         .select("customer_id", "tier", "total_spend", "order_count")
     )
-
-
-def test_summarize_spend_matches_declared_output_shape():
-    customers = Customers.generate(200, seed=1)
-    orders = Orders.generate(2_000, seed=2, references={Customers: customers})
-    Orders.validate(orders, references={Customers: customers})
-
-    result = summarize_spend(customers, orders)
-    CustomerSpend.validate(result, extra_cols="allow", missing_cols="allow")
 ```
 
-`references={Customers: customers}` makes `orders.customer_id` referentially
-consistent with the generated `customers` frame, so the join in
-`summarize_spend` isn't silently testing against orphaned rows. Validating
-the *input* and the *output* against separate specs means a pipeline bug that
-drops a column, or a schema change nobody updated the test for, both surface
-as a specific, readable `ValidationError` rather than a downstream assertion
-failure three functions later.
+## Why this fits hermetic tests
 
-For a pipeline with more than two stages — raw events into a bronze table,
-bronze into a cleaned silver table, silver into an aggregated gold table — the
-same pattern repeats at each boundary: a `FrameSpec` per stage, a
-`ForeignKey` where one stage's identity flows into the next, `validate()`
-between every pair of stages the tests actually exercise.
+A hermetic test doesn't reach outside itself — no network call, no shared
+fixture file that drifts, no "works on my machine" because someone's local
+`sample_data.csv` is newer than the one in CI. A generated frame is a pure
+function of its spec, its row count and its seed: the same on any machine,
+in any process, with any number of threads. There is no file to check in,
+and none to go stale. When the pipeline's input schema changes, the change
+is in the spec, not in a `.parquet` file nobody remembers generating.
 
-## A fixture per spec
+## A frame for a test — `polspec_frames`
 
-Generated frames make ordinary pytest fixtures. A frame is never changed in
-place, so one generated per session is safe to share between tests:
+polspec installs a pytest plugin, and its `polspec_frames` fixture generates
+a frame for the test that asks for it:
+
+```python
+from polspec import assert_valid
+
+
+def test_summarize_spend_keeps_its_contract(polspec_frames):
+    customers = polspec_frames(Customers, 200)
+    orders = polspec_frames(Orders, 2_000, references={Customers: customers})
+    assert_valid(summarize_spend(customers, orders), CustomerSpend)
+```
+
+`polspec_frames(spec, n, ...)` is `generate()` with a seed of the test's own,
+so it takes everything `generate()` does — `references=`, `fixed=`,
+`method="cartesian"`. `references={Customers: customers}` draws each order's
+customer from the generated customers, so the join in `summarize_spend`
+isn't silently testing against orphaned rows.
+
+Each test's seed comes from the session's seed and the test's own name, and
+each frame's from that and its spec: so a test gets the same frames on every
+run and every machine, two tests never share theirs, and adding, removing or
+reordering tests changes no other test's frames. The session seed is 0:
+
+```bash
+pytest --polspec-seed=7        # every test's frames from another seed
+pytest --polspec-seed=random   # a new seed each run, named in the header
+```
+
+The report header names the seed, and a failing test that used polspec
+says how to rerun it on the same frames:
+
+```text
+---------------------------- polspec ----------------------------
+polspec seed 7 -- rerun with --polspec-seed=7
+```
+
+Pass `seed=` to pin one frame yourself. `-p no:polspec` turns the plugin off.
+
+## Checking what comes out — `assert_valid`
+
+`assert_valid(df, spec)` is `validate()` as an assertion. It returns the
+validated frame, so it chains, and takes `validate()`'s options. A failure
+is an `AssertionError` — a failed test in any runner, not an error — whose
+message names the spec, each finding, and the first rows that fail:
+
+```text
+CustomerSpend: 1 finding(s) in 187 row(s) (polspec seed 0 -- rerun with --polspec-seed=0)
+  - total_spend__bounds: Column 'total_spend': found 3 value(s) out of bounds [0.0, None] ...
+First failing rows:
+┌─────────────┬──────┬─────────────┬─────────────┬─────────────────────┐
+│ customer_id ┆ tier ┆ total_spend ┆ order_count ┆ __polspec_finding   │
+╞═════════════╪══════╪═════════════╪═════════════╪═════════════════════╡
+│ 4127        ┆ pro  ┆ -12.5       ┆ 3           ┆ total_spend__bounds │
+...
+```
+
+Validating each stage's output against its own spec catches two kinds of
+drift: the pipeline producing the wrong shape, and the test's own
+expectations going stale. A pipeline bug that drops a column, or a schema
+change nobody updated the test for, surfaces as a finding naming the
+column, not as an assertion three functions later.
+
+## A whole pipeline in one call — `check_pipeline`
+
+`check_pipeline` generates the inputs, calls the pipeline, and checks the
+result:
+
+```python
+from polspec import check_pipeline
+
+
+def test_summarize_spend_in_one_call():
+    result, inputs = check_pipeline(
+        summarize_spend,
+        inputs={"customers": Customers, "orders": Orders},
+        output=CustomerSpend,
+        n={"customers": 200, "orders": 2_000},
+    )
+    assert result.height <= inputs["customers"].height
+```
+
+Each input names one of the pipeline's arguments, and is a spec to generate
+or a frame to pass as it is. The specs are generated together, so the
+foreign key from `Orders` to `Customers` lines up without `references=`.
+Under pytest the inputs come from the test's seed, as the fixture's do; it
+returns the result and the inputs, for anything the spec cannot assert.
+
+For a pipeline of several stages — raw events into a bronze table, bronze
+into silver, silver into gold — the same pattern repeats at each boundary:
+a spec per stage, a `ForeignKey` where one stage's identity flows into the
+next, and a check between every pair of stages the tests exercise.
+
+## A frame shared by tests
+
+A frame is never changed in place, so one generated per session is safe to
+share — an ordinary pytest fixture over `generate()`, with a seed of its
+own:
 
 ```python
 import pytest
@@ -111,11 +174,6 @@ def customers() -> pl.DataFrame:
 @pytest.fixture(scope="session")
 def orders(customers: pl.DataFrame) -> pl.DataFrame:
     return Orders.generate(2_000, seed=2, references={Customers: customers})
-
-
-def test_every_customer_with_orders_is_summarised(customers, orders):
-    result = summarize_spend(customers, orders)
-    assert result["customer_id"].n_unique() == orders["customer_id"].n_unique()
 ```
 
 ## A stage that must reject bad rows
@@ -150,38 +208,33 @@ are also what a stage that quarantines bad rows should produce: see
 [Findings as data](validating.md#findings-as-data-inspect). The finding codes
 are listed in [Errors and findings](../reference/errors.md#finding-codes).
 
-## Large dataframes and files
+## Many frames — property tests with `strategy`
 
-Generating a realistic volume of data for a load or performance test doesn't
-need a large fixture file checked into version control. `generate_batches`
-streams rows without holding all of them in memory:
-
-```python
-def test_pipeline_handles_a_million_rows_without_holding_them_all():
-    total = 0
-    for batch in Customers.generate_batches(1_000_000, batch_size=100_000, seed=1):
-        total += process(batch).height
-    assert total == 1_000_000
-```
-
-For a pipeline stage that specifically reads from a file — a `scan_parquet`
-step, an ingestion job watching a directory — `sink_*` writes a large file to
-a `tmp_path`, which pytest cleans up automatically:
+A property is a claim about every frame a spec allows — "spend is never
+negative, whatever the orders". `polspec.strategy(spec)` gives
+[Hypothesis](https://hypothesis.readthedocs.io) frames of a spec to try it
+on:
 
 ```python
-def test_pipeline_reads_a_large_parquet_file(tmp_path):
-    path = tmp_path / "customers.parquet"
-    Customers.sink_parquet(path, 2_000_000, batch_size=200_000)
+from hypothesis import given, settings
+from polspec import strategy
 
-    result = pl.scan_parquet(path).select(pl.len()).collect().item()
-    assert result == 2_000_000
+CUSTOMERS = Customers.generate(200, seed=1)
+
+
+@settings(max_examples=50, deadline=None)
+@given(orders=strategy(Orders, max_rows=500, references={Customers: CUSTOMERS}))
+def test_spend_is_never_negative(orders):
+    assert (summarize_spend(CUSTOMERS, orders)["total_spend"] >= 0).all()
 ```
 
-Nothing here is committed to the repository, nothing needs cleaning up by
-hand, and the file is exactly as large as the test needs — a different test
-asking for 50,000,000 rows costs nothing to write.
+Each frame is `generate()` on a row count and a seed Hypothesis draws, so it
+meets its spec, follows its distributions, and costs what generating it
+costs. A failure shrinks to the fewest rows that still fail; the values come
+from the seed and do not shrink one by one. Hypothesis is not a dependency
+of polspec: install it to use `strategy`. *Added in 1.3.*
 
-## Edge-case testing
+## Edge cases
 
 ### Guaranteed coverage with `method="cartesian"`
 
@@ -201,9 +254,8 @@ def refund_flag(df: pl.DataFrame) -> pl.DataFrame:
     return df.with_columns(is_refund=pl.col("amount") < 0)
 
 
-def test_refund_flag_handles_every_sign_and_method_combination():
-    edge_cases = Payment.generate(50, method="cartesian", seed=1)
-    result = refund_flag(edge_cases)
+def test_refund_flag_handles_every_sign_and_method_combination(polspec_frames):
+    result = refund_flag(polspec_frames(Payment, 50, method="cartesian"))
     assert result.filter(pl.col("amount") < 0)["is_refund"].all()
     assert not result.filter(pl.col("amount") >= 0)["is_refund"].any()
 ```
@@ -222,8 +274,8 @@ exact scenario — "a wire transfer of exactly zero" — pin those columns with
 rows and hoping one matches:
 
 ```python
-def test_zero_amount_wire_transfer_is_not_a_refund():
-    df = Payment.generate(3, seed=1, fixed={"method": "wire", "amount": [0, -5, 7]})
+def test_zero_amount_wire_transfer_is_not_a_refund(polspec_frames):
+    df = polspec_frames(Payment, 3, fixed={"method": "wire", "amount": [0, -5, 7]})
     assert refund_flag(df)["is_refund"].to_list() == [False, True, False]
 ```
 
@@ -243,21 +295,41 @@ class PaymentWithForcedCase(FrameSpec):
         bounds=(-1000, 1000),
         rules=[ColRule(when=col("method") == "wire", choices=[0])],
     )
-
-
-def test_every_wire_transfer_is_zero_and_not_a_refund():
-    df = PaymentWithForcedCase.generate(20, seed=1)
-    result = refund_flag(df)
-    assert not result.filter(pl.col("method") == "wire")["is_refund"].any()
 ```
 
 Every `wire` row is forced to `amount = 0`, while `card` and `cash` still
 vary normally.
 
+## Large frames and files
+
+A load or performance test doesn't need a large fixture file checked into
+version control. `generate_batches` streams rows without holding all of
+them in memory, and a `sink_*` writes a large file to pytest's `tmp_path`,
+which pytest cleans up:
+
+<!-- docs: skip -->
+```python
+def test_pipeline_handles_a_million_rows_without_holding_them_all():
+    total = 0
+    for batch in Customers.generate_batches(1_000_000, batch_size=100_000, seed=1):
+        total += process(batch).height
+    assert total == 1_000_000
+
+
+def test_pipeline_reads_a_large_parquet_file(tmp_path):
+    path = tmp_path / "customers.parquet"
+    Customers.sink_parquet(path, 2_000_000, batch_size=200_000)
+    assert pl.scan_parquet(path).select(pl.len()).collect().item() == 2_000_000
+```
+
+The file is exactly as large as the test needs, and nothing is committed or
+left behind.
+
 ## Generating the test boilerplate
 
-The [`polspec test`](cli.md) command builds the round-trip skeleton for a
-schema automatically:
+The [`polspec test`](cli.md#test-a-round-trip-test-from-a-schema) command
+writes a round-trip test for a spec — `polspec_frames`, then `assert_valid` —
+generating any parent specs declared in the same file first:
 
 ```bash
 polspec test orders.yaml -o test_orders.py
