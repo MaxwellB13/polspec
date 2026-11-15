@@ -358,6 +358,15 @@ def _add_generate_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Parent data for a foreign key to another spec; repeat for several",
     )
     generate.add_argument(
+        "--fixed",
+        action="append",
+        metavar="COLUMN=VALUE",
+        help=(
+            "Pin a column to one value in every row, read as its dtype; repeat "
+            "for several (with --all, SPEC.COLUMN=VALUE)"
+        ),
+    )
+    generate.add_argument(
         "--class",
         dest="cls",
         metavar="NAME",

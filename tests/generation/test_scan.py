@@ -133,13 +133,13 @@ def _spy(monkeypatch) -> list[tuple[tuple[str, ...], int, int | None]]:
     generation = importlib.import_module("polspec.generation.scan")
 
     seen: list[tuple[tuple[str, ...], int, int | None]] = []
-    real = generation.generate_batches
+    real = generation.batch_stream
 
     def spy(spec, n, **kwargs):
         seen.append((tuple(spec.columns), n, kwargs.get("batch_size")))
         yield from real(spec, n, **kwargs)
 
-    monkeypatch.setattr(generation, "generate_batches", spy)
+    monkeypatch.setattr(generation, "batch_stream", spy)
     return seen
 
 

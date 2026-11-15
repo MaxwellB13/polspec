@@ -218,6 +218,7 @@ delete the parts you don't want. Nothing re-reads it.
 polspec generate orders.yaml -n 1000 -o orders.parquet --seed 1
 polspec generate specs.py --class Orders -n 500 -o orders.csv --references Customers=customers.parquet
 polspec generate orders.yaml -n 50 -o edge_cases.ndjson --method cartesian
+polspec generate orders.yaml -n 1000 -o paid.parquet --fixed status=PAID --fixed qty=1
 ```
 
 Generates `-n` rows and writes one file; the extension picks the format
@@ -226,7 +227,10 @@ Generates `-n` rows and writes one file; the extension picks the format
 `--seed` makes the file reproducible; `--method cartesian` guarantees
 coverage the way [`generate()`](generating.md#coverage-methodcartesian)
 does; `--references NAME=PATH` supplies parent data for a foreign key, as
-for `validate`.
+for `validate`. `--fixed COLUMN=VALUE` pins a column to one value in every
+row, as [`fixed=`](generating.md#pinning-columns-fixed) does: the value is
+read as the column's dtype, as `validate` reads text (`3`, `true`,
+`2026-01-02`), and empty text is a null. *`--fixed` added in 1.4.*
 
 The frame is built in memory and written once. For a file too large to hold,
 the streaming [`sink_*`](generating.md#writing-straight-to-a-file) functions
@@ -247,7 +251,7 @@ first with their keys threaded into their children** as
 [`Registry.generate_all`](registry.md#generating-a-related-set) does, and
 written as `<name>.<format>` (Parquet by default). No `--references` are
 needed for keys between the discovered specs; supply them for a parent
-outside the directory.
+outside the directory. A pin names its spec: `--fixed Orders.status=PAID`.
 
 ## `synthesize` — fake data from real data
 
