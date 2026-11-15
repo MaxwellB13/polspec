@@ -1515,6 +1515,20 @@ def test_schema_infer_profiles_several_files_into_a_registry(tmp_path, suffix):
         }
 
 
+def test_all_finds_a_file_by_the_spec_name_its_stem_gives(tmp_path):
+    """`schema infer` names `order_lines.csv`'s spec `OrderLines`, and `--all`
+    finds it by that name, whatever the file system's case rules."""
+    lines, items = tmp_path / "order_lines.csv", tmp_path / "items.csv"
+    pl.DataFrame({"line": range(1, 41)}).write_csv(lines)
+    pl.DataFrame({"x": range(40)}).write_csv(items)
+    spec = tmp_path / "shop.yaml"
+    assert run_cli("schema", "infer", lines, items, "-o", spec) == 0
+    assert run_cli("validate", "--all", spec, tmp_path) == 0
+    assert run_cli("drift", "--all", spec, tmp_path) == 0
+    pl.DataFrame({"line": range(1, 41)}).write_parquet(tmp_path / "OrderLines.parquet")
+    assert run_cli("validate", "--all", spec, tmp_path) == 1  # two files for one spec
+
+
 def test_schema_infer_prints_a_registry(tmp_path, capsys):
     customers, orders = _shop_files(tmp_path)
     assert run_cli("schema", "infer", customers, orders, "-o", "-") == 0
