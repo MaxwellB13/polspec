@@ -41,6 +41,8 @@ they can change in any release, so code outside polspec should use only
 | `hierarchy` | `Hierarchy` -- a self-referencing link table, declared |
 | `compare` | `diff` and `drift`: what changed between two specs, or between a spec and data. `fields.py` holds one comparator per `ColSpec` field, `data.py` measures a frame in the declaration's terms |
 | `asserting` | `assert_valid` and `check_pipeline`: `validate()` as an assertion whose message holds the findings and the first failing rows, and a pipeline test -- inputs generated together through a `Registry`, the call, the check -- in one call |
+| `_pytest` | The pytest plugin, registered under `pytest11`: the `polspec_frames` fixture and `--polspec-seed`, each test's seed derived from the session's and its node id, and a failing test's report naming the seed. The only module that imports pytest |
+| `_session` | The seed of the test the plugin is running now, which `assert_valid` names in a failure and `check_pipeline` generates from -- apart from both, so the plugin loads nothing heavy |
 | `sizing` | `estimated_size`: a frame's memory, read off the declaration |
 | `reading` | `read`: a data file in a spec's terms -- the reader chosen by extension, a declared type the file could not hold (a date, decimal or duration as text; an array as a list) read as declared. The CLI reads through the same table |
 | `catspec` | `CatSpec` — a shared registry of enums and categoricals, as a value, plus the metaclass that builds one from a class body (the same split as `tablespec`/`framespec`) |

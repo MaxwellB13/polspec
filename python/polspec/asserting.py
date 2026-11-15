@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Unpack, overload
 
 import polars as pl
 
+from polspec import _session
 from polspec.errors import ValidationError
 from polspec.tablespec import as_spec_name, as_table_spec
 from polspec.validation import validate
@@ -39,8 +40,11 @@ def _failure(report: ValidationReport) -> str:
     """A failed report as an assertion message: the spec and how many rows,
     each finding, and the first rows that fail."""
     rows = report.frame.select(pl.len()).collect().item()
+    run = _session.current()
+    seed = "" if run is None else f" ({run.rerun()})"
     lines = [
-        f"{report.spec_name}: {len(report.findings)} finding(s) in {rows:,} row(s)",
+        f"{report.spec_name}: {len(report.findings)} finding(s) in {rows:,} row(s)"
+        + seed,
         *(f"  - {finding.key}: {finding.message}" for finding in report.findings),
     ]
     failing = report.failing_rows(once=True).head(SHOWN_ROWS).collect()
@@ -119,7 +123,7 @@ def assert_valid(
     ...     assert_valid(pl.DataFrame({"total": [10.0, 250.0]}), spec)
     ... except AssertionError as failure:
     ...     print(failure)
-    Totals: 1 finding(s) in 2 row(s)
+    Totals: 1 finding(s) in 2 row(s)...
       - total__bounds: Column 'total': found 1 value(s) out of bounds [0, 100] ...
     First failing rows:
     ┌───────┬───────────────────┐
@@ -142,7 +146,7 @@ def check_pipeline(
     output: SpecLike,
     *,
     n: int | Mapping[str, int] = 1_000,
-    seed: int = 0,
+    seed: int | None = None,
     references: References = None,
     options: ValidationOptions | None = None,
     **keywords: Unpack[ValidationKeywords],
@@ -167,8 +171,10 @@ def check_pipeline(
         What `fn` must return.
     n : int or mapping of str to int, default 1,000
         Rows to generate: one count for every spec, or one per argument.
-    seed : int, default 0
+    seed : int, optional
         Seeds the inputs, so the same call is the same test every run.
+        Under pytest, each test's own seed, from `--polspec-seed` and the
+        test's name; elsewhere 0.
     references : mapping, optional
         Parent frames for foreign keys into specs that are not inputs.
     options : ValidationOptions, optional
@@ -206,6 +212,10 @@ def check_pipeline(
     (1000, True)
     """
     from polspec.registry import Registry
+
+    if seed is None:
+        run = _session.current()
+        seed = 0 if run is None else run.seed
 
     specs = {arg: value for arg, value in inputs.items() if not _is_frame(value)}
     given = {arg: value for arg, value in inputs.items() if _is_frame(value)}

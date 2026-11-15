@@ -22,6 +22,16 @@ page promises; before 1.0, a minor version could break any of them.
   from a seed that defaults to 0. It calls `fn` with them, checks the
   result against `output` with `assert_valid`, and returns the result and
   the inputs.
+- **A pytest plugin with a `polspec_frames` fixture.** It loads whenever
+  pytest runs with polspec installed (`-p no:polspec` turns it off).
+  `polspec_frames(Orders, 500)` is `generate()` with a seed of the test's
+  own, derived from the session seed and the test's id, so adding,
+  removing or reordering tests changes no other test's frames.
+  `--polspec-seed=N` sets the session seed, 0 by default, and
+  `--polspec-seed=random` draws one; the report header names it, and a
+  failing test that polspec took part in says how to rerun it.
+  `assert_valid` names the seed in its message, and `check_pipeline`
+  generates from the test's seed under pytest.
 
 ## [1.2.0] - 2026-11-14
 

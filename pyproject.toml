@@ -53,6 +53,11 @@ Changelog = "https://github.com/MaxwellB13/polspec/blob/main/CHANGELOG.md"
 [project.scripts]
 polspec = "polspec.cli:main"
 
+# The `polspec_frames` fixture and `--polspec-seed`, loaded whenever pytest
+# runs with polspec installed; `-p no:polspec` turns it off.
+[project.entry-points.pytest11]
+polspec = "polspec._pytest"
+
 [dependency-groups]
 bench = [
     "numpy>=2.5.2",
@@ -124,7 +129,8 @@ testpaths = ["tests"]
 # Test files are grouped in folders by what they cover, and two folders may
 # hold the same basename; importlib mode lets them. `helpers` is importable
 # from every folder.
-addopts = "--import-mode=importlib"
+# `pytester` tests the pytest plugin by running pytest on generated test files.
+addopts = "--import-mode=importlib -p pytester"
 pythonpath = ["tests"]
 # A warning is either expected -- and asserted with pytest.warns or a
 # `docs: warns` marker -- or a bug; none is printed and forgotten.
