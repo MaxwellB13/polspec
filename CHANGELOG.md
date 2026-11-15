@@ -48,6 +48,24 @@ page promises; before 1.0, a minor version could break any of them.
   is built. `polspec generate --fixed COLUMN=VALUE` pins from the shell,
   each value read as its column's dtype (`--fixed SPEC.COLUMN=VALUE` with
   `--all`).
+- **`inspect(frame, schema_only=True)`** -- and `validate` and
+  `assert_valid` -- checks what the schema says (missing, extra and
+  optional columns, each column's dtype) and reads no rows: a `LazyFrame`'s
+  query is planned, never run. It does not combine with `parse_text=True`.
+- **`Finding.share`:** a counted finding's `count` as a fraction of the
+  frame's rows, `None` where `count` is. The text report adds
+  `(2.5% of rows)` to each such finding, the Markdown report shows it beside
+  the count, and the JSON report has a `share` key (`schema_version` stays
+  1: a key added, none changed). The rows are counted in the aggregation
+  that already runs.
+- **Formats `uuid7`, `ulid`, `url` and `iso_country3`.** A version-7 UUID
+  and a ULID by their syntax (their timestamps are not read); an `http` or
+  `https` URL with a hostname, optional port, path, query and fragment;
+  and the ISO 3166-1 alpha-3 codes of the same 249 countries as
+  `iso_country`. Each is generated, validated and recognised by
+  `profile()`. A profile of data holding them names the format where it
+  named none before; three codes (`BTN`, `MKD`, `SLE`) are both countries
+  and currencies, too few for either format to be taken for the other.
 - **A warning for a pattern the generator cannot follow** -- a Unicode word
   boundary, an automaton over its size limit, no match within the declared
   `string_length` -- naming the column and the reason. The column is

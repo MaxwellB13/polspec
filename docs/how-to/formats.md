@@ -28,24 +28,26 @@ defined together, so the data it generates always passes its own check.
 | `format` | Generates | Validates |
 |:--|:--|:--|
 | `uuid4` | 32 hex digits in 8-4-4-4-12 groups, version nibble `4`, variant `8`–`b` | the same shape, either case |
+| `uuid7` | the same, version nibble `7`; *added in 1.4* | the same shape, either case; the timestamp is not read |
+| `ulid` | 26 characters of Crockford base 32, the first `0`–`7`; *added in 1.4* | the same, either case; the timestamp is not read |
 | `email` | a local part, `@`, a domain and a TLD from a small pool | one `@`, non-empty both sides, a dot in the domain |
 | `ipv4` | four dotted octets | four dotted decimals, each 0–255 |
 | `ipv6` | eight colon-separated four-digit hextets | eight colon-separated hextets of 1–4 hex digits, uncompressed |
 | `mac` | six colon-separated hex pairs | the same shape, either case |
 | `hostname` | two or three labels ending in a TLD | dot-separated RFC 1123 labels, at most 253 characters |
+| `url` | `https://`, a hostname, and a path or query from a small pool; *added in 1.4* | `http` or `https`, a hostname, an optional port, then anything without whitespace; at most 2,048 characters |
 | `iso_country` | one of the 249 ISO 3166-1 alpha-2 codes | membership in that list |
+| `iso_country3` | one of the same 249 countries' alpha-3 codes, such as `GBR`; *added in 1.4* | membership in that list |
 | `iso_currency` | one of the ISO 4217 alpha-3 codes of circulating currencies | membership in that list |
 
 A validator is deliberately wider than its sampler where real data is: an
 uppercase UUID from another system validates, even though polspec generates
 lowercase ones. It is never wider than the standard it names.
 
-The set is closed. A named format is a twenty-line sampler with an
-unambiguous test; generating from an arbitrary regex would need a
-regex-to-sampler compiler and has no answer for `.*`. Validation of an
-arbitrary regex is what [`pattern=`](columns.md#string-patterns) is for: it
-is checked like a format, but not generated, so a generated frame fills such
-a column with values you [pin](generating.md#pinning-columns-fixed).
+For any other shape, declare a [`pattern=`](columns.md#string-patterns):
+it is generated from and checked as a format is. A format names the shape
+and keeps its test exactly as wide as the standard; a pattern says the
+shape itself.
 
 ## What a format promises
 

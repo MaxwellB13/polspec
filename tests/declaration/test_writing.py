@@ -197,7 +197,7 @@ def test_reports_show_as_markdown_in_a_notebook():
     frame = pl.DataFrame({"a": [5, 0]})
     shown = polspec.inspect(spec, frame)._repr_markdown_()
     assert shown.startswith("**Orders**: 1 finding(s)")
-    assert "| `bounds` | `a` | 1 |" in shown
+    assert "| `bounds` | `a` | 1 (50.0%) |" in shown
     assert polspec.inspect(spec, frame.tail(1))._repr_markdown_() == (
         "**Orders**: no findings."
     )

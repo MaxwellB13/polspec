@@ -26,6 +26,8 @@ from polspec import (
     generate,
     generate_batches,
     inspect,
+    profile,
+    validate,
 )
 
 # ---------------------------------------------------------------------------
@@ -47,8 +49,8 @@ def test_the_documented_set_is_the_shipped_set():
     with pytest.raises(SpecError) as exc:
         ColSpec(pl.String, format="zzzz")
     assert (
-        "Known formats: uuid4, email, ipv4, ipv6, mac, hostname, iso_country, "
-        "iso_currency"
+        "Known formats: uuid4, uuid7, ulid, email, ipv4, ipv6, mac, hostname, url, "
+        "iso_country, iso_country3, iso_currency"
     ) in str(exc.value)
 
 
@@ -56,6 +58,7 @@ def test_the_documented_set_is_the_shipped_set():
     ("name", "width", "count", "some"),
     [
         ("iso_country", 2, 249, {"US", "GB", "DE", "JP"}),
+        ("iso_country3", 3, 249, {"USA", "GBR", "DEU", "JPN"}),
         ("iso_currency", 3, None, {"USD", "EUR", "GBP", "JPY"}),
     ],
 )
@@ -131,11 +134,11 @@ def test_null_is_neither_valid_nor_invalid():
 
 def test_an_unknown_format_names_the_nearest_one():
     with pytest.raises(SpecError) as exc:
-        ColSpec(pl.String, format="uuid")
+        ColSpec(pl.String, format="uid4")
     message = str(exc.value)
-    assert "'uuid' is not a known format" in message
+    assert "'uid4' is not a known format" in message
     assert "Did you mean 'uuid4'?" in message
-    assert "Known formats: uuid4, email, ipv4" in message
+    assert "Known formats: uuid4, uuid7, ulid" in message
 
 
 def test_an_unknown_format_with_no_near_miss_still_lists_them():
@@ -537,3 +540,54 @@ def test_retyping_away_from_string_drops_the_extras_with_the_format():
 def test_the_data_dictionary_names_the_extras():
     markdown = FrameSpec.from_spec(TableSpec("T", {"c": COUNTRY})).to_markdown()
     assert "plus UK (ISO), UK (ISLANDS)" in markdown
+
+
+# ---------------------------------------------------------------------------
+# uuid7, ulid, url and iso_country3 -- since 1.4
+# ---------------------------------------------------------------------------
+
+ACCEPTED_AND_REFUSED = {
+    "uuid7": (
+        [
+            "0190f1c4-7a2b-7c3d-8e4f-0123456789ab",
+            "0190F1C4-7A2B-7C3D-BE4F-0123456789AB",
+        ],
+        [
+            "0190f1c4-7a2b-4c3d-8e4f-0123456789ab",
+            "0190f1c4-7a2b-7c3d-ce4f-0123456789ab",
+        ],
+    ),
+    "ulid": (
+        ["01ARZ3NDEKTSV4RRFFQ69G5FAV", "7zzzzzzzzzzzzzzzzzzzzzzzzz"],
+        ["81ARZ3NDEKTSV4RRFFQ69G5FAV", "01ARZ3NDEKTSV4RRFFQ69G5FAI", "01ARZ3NDEK"],
+    ),
+    "url": (
+        ["https://example.com", "http://api.example.co.uk:8080/v1/items?q=a#top"],
+        ["ftp://example.com", "https://", "https://exa mple.com", "example.com"],
+    ),
+    "iso_country3": (["GBR", "USA", "DEU"], ["GB", "UK", "gbr", "XYZ"]),
+}
+
+
+@pytest.mark.parametrize("name", list(ACCEPTED_AND_REFUSED))
+def test_a_new_format_accepts_its_shape_and_refuses_others(name):
+    accepted, refused = ACCEPTED_AND_REFUSED[name]
+    validate(_formatted(name), pl.DataFrame({"v": accepted}))
+    for value in refused:
+        report = inspect(_formatted(name), pl.DataFrame({"v": [value]}))
+        assert [f.code for f in report] == ["format"], (name, value)
+
+
+@pytest.mark.parametrize("name", list(ACCEPTED_AND_REFUSED))
+def test_a_new_format_generates_what_it_validates_and_profiles_as_itself(name):
+    frame = generate(_formatted(name), 5_000, seed=2)
+    validate(_formatted(name), frame)
+    present = frame.drop_nulls()
+    assert profile(present, max_unique_enum=0).columns["v"].format == name
+
+
+def test_iso_country3_holds_the_same_countries_as_iso_country():
+    two = set(generate(_formatted("iso_country"), 50_000, seed=1)["v"].drop_nulls())
+    three = set(generate(_formatted("iso_country3"), 50_000, seed=1)["v"].drop_nulls())
+    assert len(two) == len(three) == 249
+    assert {"GBR", "FRA", "JPN", "BRA"} <= three

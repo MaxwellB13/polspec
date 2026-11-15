@@ -120,6 +120,9 @@ class Finding:
         The columns involved; empty for structural findings.
     count : int | None
         How many rows violate the claim; `None` for structural findings.
+    share : float | None
+        `count` as a fraction of the frame's rows, 0 to 1; `None` where
+        `count` is. *Added in 1.4.*
     samples : tuple
         Up to five offending values (or structs of values, for multi-column
         claims).
@@ -133,6 +136,8 @@ class Finding:
     >>> finding = inspect(spec, pl.DataFrame({"total": [250.0]})).findings[0]
     >>> finding.code, finding.columns, finding.count, finding.samples
     ('bounds', ('total',), 1, (250.0,))
+    >>> finding.share
+    1.0
     """
 
     code: FindingCode
@@ -140,6 +145,7 @@ class Finding:
     message: str
     columns: tuple[str, ...] = ()
     count: int | None = None
+    share: float | None = None
     samples: tuple[Any, ...] = ()
     details: Mapping[str, Any] = field(default_factory=dict)
     _locate: Callable[[pl.LazyFrame], pl.LazyFrame] | None = field(
@@ -173,9 +179,15 @@ class Finding:
             "message": self.message,
             "columns": list(self.columns),
             "count": self.count,
+            "share": self.share,
             "samples": json_value(list(self.samples)),
             "details": json_value(dict(self.details)),
         }
+
+
+def _share_note(finding: Finding) -> str:
+    """` (2.5% of rows)`, for a finding that counts rows."""
+    return "" if finding.share is None else f" ({finding.share:.1%} of rows)"
 
 
 @dataclass(frozen=True, slots=True)
@@ -446,6 +458,8 @@ class ValidationReport:
         for f in self.findings:
             columns = ", ".join(f"`{c}`" for c in f.columns) or "-"
             rows = "-" if f.count is None else f"{f.count:,}"
+            if f.share is not None:
+                rows += f" ({f.share:.1%})"
             message = f.message.replace("|", "\\|").replace("\n", " ")
             lines.append(f"| `{f.code}` | {columns} | {rows} | {message} |")
         return "\n".join(lines)
@@ -457,6 +471,6 @@ class ValidationReport:
             [
                 f"Validation failed for DataFrame against '{self.spec_name}' "
                 f"({len(self.findings)} error(s) found):",
-                *(f"  - {f.message}" for f in self.findings),
+                *(f"  - {f.message}{_share_note(f)}" for f in self.findings),
             ]
         )

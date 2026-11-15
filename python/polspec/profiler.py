@@ -63,10 +63,14 @@ FORMAT_MIN_DISTINCT = 20
 # their frequencies -- see `_profile_textual`.
 FORMAT_ORDER = (
     "uuid4",
+    "uuid7",
+    "ulid",
     "ipv6",
     "ipv4",
     "mac",
+    "url",
     "iso_country",
+    "iso_country3",
     "iso_currency",
     "email",
     "hostname",
