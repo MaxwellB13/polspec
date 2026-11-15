@@ -9,6 +9,25 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-15
+
+**Generate what you validate.** A `pattern` column is generated from its
+pattern, through the automaton Polars' own regex engine builds, so a spec
+with order references, postcodes or SKUs passes its own round trip with
+every check on; `unique=True` works on one. A column can be derived from
+others (`derive=col("qty") * col("price")`), computed by generation and
+held to its expression by validation. `fixed=` reaches every way of
+generating and the command line. `schema_only=True` checks a lazy frame's
+shape without running it, each finding carries its share of the rows, and
+`uuid7`, `ulid`, `url` and `iso_country3` join the formats.
+
+Everything is additive under the 1.0 promises, but for one change to
+seeded output the Stability page allows: a pattern column whose plain text
+broke its own pattern now draws from the pattern. A pattern every plain
+string passes, and one the generator cannot follow, keep their output
+exactly. Nothing is deprecated. The spec-file format stays at version 4: a
+`derive:` key is written only when used, and 1.3 refuses it by name.
+
 ### Added
 
 - **Strings from a `pattern`.** A `String` column with a `pattern` is
@@ -3155,7 +3174,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/MaxwellB13/polspec/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/MaxwellB13/polspec/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/MaxwellB13/polspec/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/MaxwellB13/polspec/compare/v1.0.0...v1.1.0
