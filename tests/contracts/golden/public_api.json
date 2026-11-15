@@ -43,6 +43,7 @@
   "inspect",
   "lit",
   "profile",
+  "profile_all",
   "read",
   "scan",
   "sink_csv",

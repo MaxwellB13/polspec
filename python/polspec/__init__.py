@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from polspec.profiler import ProfileOptions
     from polspec.reading import read
     from polspec.registry import Registry
+    from polspec.related import profile_all
     from polspec.render import to_markdown, to_mermaid
     from polspec.serialization import (
         FORMAT_VERSION,
@@ -98,6 +99,7 @@ _LAZY: dict[str, str] = {
     ),
     "ProfileOptions": "polspec.profiler",
     "read": "polspec.reading",
+    "profile_all": "polspec.related",
     "Registry": "polspec.registry",
     "to_markdown": "polspec.render",
     "to_mermaid": "polspec.render",
@@ -198,6 +200,7 @@ __all__ = [
     "inspect",
     "lit",
     "profile",
+    "profile_all",
     "read",
     "scan",
     "sink_csv",

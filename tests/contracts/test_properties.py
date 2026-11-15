@@ -45,6 +45,7 @@ from polspec import (
     ColSpec,
     ForeignKey,
     GenerationError,
+    Registry,
     SerializationError,
     SpecError,
     TableSpec,
@@ -55,6 +56,7 @@ from polspec import (
     generate_batches,
     inspect,
     profile,
+    profile_all,
     to_dict,
     to_markdown,
     to_mermaid,
@@ -1081,3 +1083,45 @@ def test_the_arrival_strategy_reaches_both_verdicts():
     record()
     assert all(count >= 20 for count in seen.values()), seen
     print(seen)
+
+
+_CUSTOMERS = TableSpec(
+    "Customers",
+    {
+        "id": ColSpec(pl.Int64, bounds=(1, None), unique=True),
+        "code": ColSpec(pl.String, string_length=(6, 10), unique=True),
+    },
+)
+_ORDERS = TableSpec(
+    "Orders",
+    {
+        "id": ColSpec(pl.Int32, bounds=(1, None), unique=True),
+        "customer_id": ColSpec(pl.Int64, nullable=True, null_probability=0.2),
+        "customer_code": ColSpec(pl.String),
+        "parent_id": ColSpec(pl.Int32, nullable=True, null_probability=0.5),
+        "qty": ColSpec(pl.Int64, bounds=(1, 20)),
+    },
+    foreign_keys=(
+        ForeignKey("customer_id", references=_CUSTOMERS, ref_columns="id"),
+        ForeignKey("customer_code", references=_CUSTOMERS, ref_columns="code"),
+        ForeignKey("parent_id", references="self", ref_columns="id"),
+    ),
+)
+
+
+@settings(SETTINGS, max_examples=_examples(40))
+@given(
+    seed=_SEEDS,
+    customers=st.integers(1, MAX_ROWS),
+    orders=st.integers(1, 2 * MAX_ROWS),
+)
+def test_related_frames_profile_into_a_registry_they_pass(seed, customers, orders):
+    """1.5's promise for `profile_all`: whatever keys it finds, the
+    registry it builds holds every source, as `profile`'s spec holds its."""
+    frames = Registry(_CUSTOMERS, _ORDERS).generate_all(
+        {"Customers": customers, "Orders": orders}, seed=seed
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        registry = profile_all(frames)
+    registry.validate_all(frames)

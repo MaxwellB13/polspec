@@ -9,6 +9,21 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+### Added
+
+- **`polspec.profile_all(frames)`** profiles a set of related tables into a
+  `Registry`, with the foreign keys between them found from their values.
+  A column becomes a key into a unique integer, text or date column -- of
+  another table or its own -- when every value it holds is one of the
+  parent's, in all the rows, and either the names link the two
+  (`customer_id` or `customer` into `Customers.id`, `parent_id` into its
+  own table's `id`) or it is text with at least 20 distinct values. A
+  child with orphans, or with two parents to choose between, gets no key;
+  the second warns. The key's column takes its parent's claims and keeps
+  its own null rate, so the registry validates its sources and generates
+  frames that pass. `keys=` declares keys instead, checked against the
+  data, and `keys=False` infers none.
+
 ## [1.4.0] - 2026-11-15
 
 **Generate what you validate.** A `pattern` column is generated from its
