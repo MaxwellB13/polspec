@@ -35,15 +35,51 @@ jobs:
             exit 1
           fi
 
-  # A tag publishes nothing unless the full test workflow is green.
-  test:
-    name: Test
+  # A tag publishes nothing unless the Test workflow passed on `main` for
+  # this commit: the full matrix, already run, rather than run again (1.2's
+  # release spent 50 minutes on that). A tag pushed straight after the merge
+  # finds the run still going, so this waits for it, up to two hours.
+  tested:
+    name: Test passed on main for this commit
     needs: check-version
-    uses: ./.github/workflows/test.yml
+    runs-on: ubuntu-latest
+    timeout-minutes: 130
+    permissions:
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Wait for the Test run on main
+        run: |
+          for attempt in $(seq 1 120); do
+            run="$(gh run list --workflow test.yml --branch main --event push               --commit "$GITHUB_SHA" --limit 1               --json databaseId,status,conclusion,url               --jq '.[0] // empty')"
+            if [ -z "$run" ]; then
+              echo "No Test run on main for $GITHUB_SHA yet."
+            else
+              status="$(jq -r .status <<<"$run")"
+              conclusion="$(jq -r .conclusion <<<"$run")"
+              url="$(jq -r .url <<<"$run")"
+              if [ "$status" = "completed" ]; then
+                if [ "$conclusion" = "success" ]; then
+                  echo "Test passed on main for $GITHUB_SHA: $url"
+                  exit 0
+                fi
+                echo "Test on main for $GITHUB_SHA ended '$conclusion': $url" >&2
+                echo "Fix main and tag the fix, or re-run the failed jobs and then this workflow." >&2
+                exit 1
+              fi
+              echo "Test on main for $GITHUB_SHA is $status: $url"
+            fi
+            sleep 60
+          done
+          echo "No finished Test run on main for $GITHUB_SHA after two hours." >&2
+          echo "Is the tag on a commit that was pushed to main?" >&2
+          exit 1
 
   build:
     name: Build wheel (${{ matrix.os }}, ${{ matrix.target }})
-    needs: [check-version, test]
+    needs: [check-version, tested]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -121,7 +157,7 @@ jobs:
 
   sdist:
     name: Build sdist
-    needs: [check-version, test]
+    needs: [check-version, tested]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
