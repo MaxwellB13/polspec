@@ -16,8 +16,9 @@ Internal: not part of the public API.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, TypedDict, Unpack, overload
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, overload
 
 import polars as pl
 import polars.selectors as cs
@@ -49,6 +50,9 @@ from polspec.validation.report import (
     FindingCode,
     ValidationReport,
 )
+
+if TYPE_CHECKING:
+    from polspec.spec import ColSpec
 
 __all__ = [
     "FINDING_COLUMN",
@@ -162,7 +166,9 @@ def _options_from(
     )
 
 
-def _filled(lf: pl.LazyFrame, columns: dict[str, Any], *, strict: bool) -> pl.LazyFrame:
+def _filled(
+    lf: pl.LazyFrame, columns: Mapping[str, ColSpec], *, strict: bool
+) -> pl.LazyFrame:
     """`fill_defaults=True`: each defaulted column's nulls filled with its
     default, and each absent one added holding it -- before any claim is
     checked, so a null in a column that allows none is judged filled.
@@ -186,7 +192,9 @@ def _filled(lf: pl.LazyFrame, columns: dict[str, Any], *, strict: bool) -> pl.La
 
 
 def _parsed_text(
-    lf: pl.LazyFrame, columns: dict[str, Any], collect_kwargs: dict[str, Any]
+    lf: pl.LazyFrame,
+    columns: Mapping[str, ColSpec],
+    collect_kwargs: dict[str, Any],
 ) -> tuple[pl.LazyFrame, dict[str, pl.Series]]:
     """`parse_text=True`: each column that arrived as text where its spec
     declares a type text can hold -- a number, a flag, a date -- read as
@@ -325,7 +333,6 @@ def inspect(
     spec = as_table_spec(spec)
     require_columns(spec)
     opts = _options_from(options, **option_kwargs)
-    lf = to_lazy(df)
     columns = dict(spec.columns)
 
     # The in-memory engine unless streaming is asked for. Polars 2.0.0 runs a
@@ -337,15 +344,46 @@ def inspect(
         "engine": "streaming" if opts.streaming else "in-memory"
     }
 
+    lf, unparsed = _prepared(to_lazy(df), columns, opts, collect_kwargs)
+    df_schema = lf.collect_schema()
+
+    findings = _structural_findings(columns, df_schema.names(), opts)
+    dtype_findings, constraints = _planned(spec, df_schema, opts, unparsed)
+    findings.extend(dtype_findings)
+    findings.extend(_aggregated_findings(lf, constraints, collect_kwargs))
+    findings.extend(
+        _cross_frame_findings(
+            spec, lf, df_schema.names(), opts, references, collect_kwargs
+        )
+    )
+    return _report(spec, lf, findings, opts, references)
+
+
+def _prepared(
+    lf: pl.LazyFrame,
+    columns: Mapping[str, ColSpec],
+    opts: ValidationOptions,
+    collect_kwargs: dict[str, Any],
+) -> tuple[pl.LazyFrame, dict[str, pl.Series]]:
+    """The frame as the checks see it: text read as its declared types, and
+    defaults filled, as the options ask. Also what text did not parse, by
+    column, for the `dtype` finding to show."""
     unparsed: dict[str, pl.Series] = {}
     if opts.parse_text:
         # Before filling, so a default fills what was empty text.
         lf, unparsed = _parsed_text(lf, columns, collect_kwargs)
     if opts.fill_defaults:
         lf = _filled(lf, columns, strict=opts.strict_dtypes)
+    return lf, unparsed
 
-    df_schema = lf.collect_schema()
-    df_col_names = df_schema.names()
+
+def _structural_findings(
+    columns: Mapping[str, ColSpec],
+    df_col_names: Sequence[str],
+    opts: ValidationOptions,
+) -> list[Finding]:
+    """Columns the frame has and the spec does not, and the other way round:
+    read from the schema alone."""
     extra = [col for col in df_col_names if col not in columns]
     # An optional column may be absent; one present is held to every claim.
     missing = [
@@ -373,7 +411,19 @@ def inspect(
                 details={"columns": missing},
             )
         )
+    return findings
 
+
+def _planned(
+    spec: TableSpec,
+    df_schema: pl.Schema,
+    opts: ValidationOptions,
+    unparsed: Mapping[str, pl.Series],
+) -> tuple[list[Finding], list[Constraint]]:
+    """Each present column's `dtype` finding, if its dtype is wrong, and every
+    claim that one aggregation over the frame can settle."""
+    columns = spec.columns
+    df_col_names = df_schema.names()
     present = [c for c in columns if c in df_col_names]
     compatible_with = {
         name: is_dtype_compatible(
@@ -387,6 +437,7 @@ def inspect(
     # as it refuses one naming a missing column. Each is skipped the same way.
     readable = [c for c in df_col_names if c not in columns or compatible_with[c]]
 
+    findings: list[Finding] = []
     constraints: list[Constraint] = []
     for name in present:
         cs = columns[name]
@@ -417,30 +468,53 @@ def inspect(
             rows=spec.rows if opts.rows else None,
         )
     )
+    return findings, constraints
 
-    if constraints:
-        aggregations = [expr for c in constraints for expr in c.aggregations()]
-        stats = (
-            lf.select(aggregations).collect(**collect_kwargs).to_dict(as_series=False)
-        )
-        findings.extend(
-            f for f in (c.failure(stats) for c in constraints) if f is not None
-        )
 
+def _aggregated_findings(
+    lf: pl.LazyFrame, constraints: Sequence[Constraint], collect_kwargs: dict[str, Any]
+) -> list[Finding]:
+    """The constraints' findings, from one aggregation over the frame."""
+    if not constraints:
+        return []
+    aggregations = [expr for c in constraints for expr in c.aggregations()]
+    stats = lf.select(aggregations).collect(**collect_kwargs).to_dict(as_series=False)
+    return [f for f in (c.failure(stats) for c in constraints) if f is not None]
+
+
+def _cross_frame_findings(
+    spec: TableSpec,
+    lf: pl.LazyFrame,
+    df_col_names: Sequence[str],
+    opts: ValidationOptions,
+    references: References,
+    collect_kwargs: dict[str, Any],
+) -> list[Finding]:
+    """What one aggregation cannot settle: foreign keys, which join to a
+    parent, and a hierarchy, which walks the frame's own rows."""
+    findings: list[Finding] = []
     if opts.foreign_keys and spec.foreign_keys:
         resolved, unresolved = _resolve_foreign_keys(spec, references)
         findings.extend(unresolved)
         findings.extend(
             foreign_key_findings(lf, spec.name, resolved, df_col_names, collect_kwargs)
         )
-
     if opts.hierarchy and spec.hierarchy is not None:
         findings.extend(
             hierarchy_findings(
                 lf, spec.name, spec.hierarchy, df_col_names, collect_kwargs
             )
         )
+    return findings
 
+
+def _report(
+    spec: TableSpec,
+    lf: pl.LazyFrame,
+    findings: Sequence[Finding],
+    opts: ValidationOptions,
+    references: References,
+) -> ValidationReport:
     recheck = _Recheck(spec, opts, references)
 
     # Only a claim relating rows to other rows -- an order, a key into the
