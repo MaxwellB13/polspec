@@ -78,6 +78,11 @@ def validate_struct_fields(spec: colspec_module.ColSpec) -> None:
                     "meaning on a struct field: it is a value, not a column "
                     "among columns."
                 )
+        if field.derive is not None:
+            raise SpecError(
+                f"ColSpec.fields[{name!r}] sets derive, which has no meaning "
+                "on a struct field: it is a value, not a column among columns."
+            )
 
 
 def validate_list_fields(spec: colspec_module.ColSpec) -> None:

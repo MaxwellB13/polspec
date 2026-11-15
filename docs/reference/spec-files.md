@@ -68,6 +68,7 @@ too. *Added in 1.2.*
 | `weights` | A list of numbers, one per choice |
 | `rules` | A list of rules |
 | `validators` | A list of checks, each over this column |
+| `derive` | An expression over other columns, written as a predicate is — see [Predicates](#predicates); *added in 1.4* |
 
 ### A rule
 

@@ -22,6 +22,22 @@ page promises; before 1.0, a minor version could break any of them.
   once: they are counted at each length, so an index decodes to one value,
   and the column is a keyed permutation of them like any other unique
   column. A million values take about 8 ms.
+- **Derived columns: `ColSpec(pl.Float64, derive=col("qty") * col("price"))`.**
+  A column computed from others with the `col()` expressions rules and
+  checks use. Generation computes it after every column it reads -- rules,
+  foreign keys, `fixed=` pins and other derived columns -- and casts it to
+  the column's dtype; validation holds the column to it, as a new
+  `derived` finding: equal, or for a float within a relative 1e-9, and
+  null exactly where the expression is. `derived=False` (and
+  `polspec validate --skip derived`) switches the check off. The
+  expression decides the values, so a derived column declares no bounds,
+  choices, rules, distribution, format, pattern, length, `unique` or
+  `default`, is nullable when an input is, and is written by nothing else;
+  a cycle of derived columns is refused. Spec files write it as a
+  `derive:` key, which 1.3 refuses by name; `diff` reports one added or
+  changed as breaking and one removed as compatible; `rename` rewrites
+  it, and `join` drops it, as it drops rules. The data dictionary and the
+  ER diagram show the expression.
 - **A warning for a pattern the generator cannot follow** -- a Unicode word
   boundary, an automaton over its size limit, no match within the declared
   `string_length` -- naming the column and the reason. The column is

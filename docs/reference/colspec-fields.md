@@ -39,6 +39,7 @@ and `null_probability` describe the cell itself.
 | `weights` | `weights` | `choices`, an `Enum`, or a `Boolean` | biases the draw | — (drift compares them to observed frequencies) |
 | `rules` | `rules` | scalar columns | rewrites the rows a rule's condition matches | a matched row outside the rule's choices is a `rule` finding |
 | `validators` | `validators` | every column | — (not read) | a row failing one is a `validator` finding |
+| `derive` | `derive` | a scalar column | computes it from the columns it reads, after them | a value not its expression's is a `derived` finding |
 
 A — in the generation column is a claim generation does not act on; the
 round trip still holds, except for `validators`, which are validation-only

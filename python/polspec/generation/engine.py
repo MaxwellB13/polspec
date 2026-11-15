@@ -955,6 +955,10 @@ def generate_cartesian(
         if spec.unique:
             unique_columns[name] = spec
             continue
+        if spec.derive is not None:
+            # Its inputs decide it: no dimension of its own to cover.
+            filler_columns[name] = spec
+            continue
         # Keyed by the column, so an inserted dimension leaves its
         # neighbours' representatives alone.
         values = _coverage_values(

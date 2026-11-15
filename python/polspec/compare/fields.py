@@ -768,6 +768,24 @@ def _compare_rules(pair: Pair) -> list[DriftFinding]:
     )
 
 
+def _compare_derive(pair: Pair) -> list[DriftFinding]:
+    """A derivation added or changed is breaking -- values that passed may
+    not equal the new expression -- and one removed is compatible. Matched
+    by the expression's text: `!=` on a `col()` expression builds one."""
+    if pair.mode == "drift":
+        return []
+    old = repr(pair.declared.derive) if pair.declared.derive is not None else None
+    new = repr(pair.new.derive) if pair.new.derive is not None else None
+    if old == new:
+        return []
+    findings = []
+    if old is not None:
+        findings.append(_member(pair, "derive", old, added=False))
+    if new is not None:
+        findings.append(_member(pair, "derive", new, added=True))
+    return findings
+
+
 def _compare_validators(pair: Pair) -> list[DriftFinding]:
     if pair.mode == "drift":
         return []
@@ -1018,6 +1036,7 @@ FIELD_COMPARATORS: dict[str, Comparator] = {
     "nan_probability": _compare_nans,
     "unique": _compare_unique,
     "rules": _compare_rules,
+    "derive": _compare_derive,
     "validators": _compare_validators,
     "tags": _compare_field("tags"),
     "description": _compare_field("description"),

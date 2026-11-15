@@ -45,6 +45,7 @@ from polspec.validation.constraints._base import (
     as_strings,
     sample_source,
 )
+from polspec.validation.constraints._derived import derived_constraint
 from polspec.validation.constraints._rules import rule_constraints
 
 
@@ -338,6 +339,9 @@ def column_constraints(
     if options.rules and spec.rules:
         constraints.extend(rule_constraints(name, spec, actual_dtype, df_col_names))
 
+    if options.derived and spec.derive is not None:
+        constraints.extend(derived_constraint(name, spec, actual_dtype, df_col_names))
+
     if options.validators and spec.validators:
         constraints.extend(
             _ColumnValidator(
@@ -444,7 +448,8 @@ def _value_constraints(
 
 
 def _nan_claim(value: _Value, *, nan_able: bool) -> Constraint | None:
-    if not nan_able or value.spec.nan_probability:
+    # A derived column's NaN is its expression's, which `derived` judges.
+    if not nan_able or value.spec.nan_probability or value.spec.derive is not None:
         return None
     return _NotANumber(
         key=f"{value.where}__nan",

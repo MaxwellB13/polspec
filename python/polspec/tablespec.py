@@ -353,6 +353,7 @@ class TableSpec:
 
         self._validate_seed_names()
         self._validate_rules()
+        self._validate_derived()
         self._validate_validators()
         self._validate_unique_together()
         self._validate_checks()
@@ -391,6 +392,48 @@ class TableSpec:
                             f"ColRule on column {col_name!r} references unknown "
                             f"column {ref_col!r}"
                         )
+
+    def _validate_derived(self) -> None:
+        """A derived column reads columns the spec declares, other than
+        itself; is nullable when one of them is, since its value is null
+        where theirs is; and is written by its expression alone -- not by a
+        foreign key, a composite key's repair or a hierarchy."""
+        keyed = {c for fk in self.foreign_keys for c in fk.columns}
+        grouped = {c for group in self.unique_together for c in group}
+        tree = set(self.hierarchy.columns) if self.hierarchy is not None else set()
+        for col_name, spec in self.columns.items():
+            if spec.derive is None:
+                continue
+            reads = root_names(spec.derive)
+            if col_name in reads:
+                raise SpecError(
+                    f"Column {col_name!r} is derived from itself: "
+                    f"derive={spec.derive!r}"
+                )
+            for ref_col in sorted(reads):
+                if ref_col not in self.columns:
+                    raise SpecError(
+                        f"Column {col_name!r} is derived from unknown column "
+                        f"{ref_col!r}: derive={spec.derive!r}"
+                    )
+            nullable_inputs = sorted(r for r in reads if self.columns[r].nullable)
+            if nullable_inputs and not spec.nullable:
+                raise SpecError(
+                    f"Column {col_name!r} is derived from nullable "
+                    f"{nullable_inputs}, so it is null where they are: declare "
+                    "it nullable=True"
+                )
+            for writers, what in (
+                (keyed, "a foreign key's column"),
+                (grouped, "part of a composite unique key"),
+                (tree, "a column of the hierarchy"),
+            ):
+                if col_name in writers:
+                    raise SpecError(
+                        f"Column {col_name!r} is derived and {what}, which would "
+                        "write it too. A derived column's values are its "
+                        "expression's alone."
+                    )
 
     def _validate_validators(self) -> None:
         for col_name, spec in self.columns.items():
@@ -915,6 +958,8 @@ class TableSpec:
                     dataclasses.replace(r, when=r.when.rename(mapping))
                     for r in spec.rules
                 )
+            if spec.derive is not None and root_names(spec.derive) & set(mapping):
+                updates["derive"] = spec.derive.rename(mapping)
             columns[new_name(key)] = (
                 dataclasses.replace(spec, **updates) if updates else spec
             )
@@ -1331,6 +1376,9 @@ def _joined_columns(
             seed_name=None,
             optional=False,
             rules=(),
+            # What it was derived from may not survive the join, or be renamed
+            # by its suffix; the column keeps the values, not the claim.
+            derive=None,
             nullable=spec.nullable or nullable,
             unique=spec.unique and unique,
         )

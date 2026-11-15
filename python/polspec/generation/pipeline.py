@@ -26,6 +26,7 @@ from polspec.dtypes import map_parts, unholdable
 from polspec.errors import GenerationError, SpecError
 from polspec.frames import Method, References, to_eager
 from polspec.generation.engine import generate_cartesian, generate_random
+from polspec.generation.passes.derived import apply_derived
 from polspec.generation.passes.foreign_keys import (
     apply_foreign_key,
     parent_keys_of,
@@ -525,6 +526,13 @@ def _run_passes(
         runners[f"rules:{name}"] = lambda frame, name=name, col=col, seed=seed: (
             apply_column_rules(frame, name, col, seed)
         )
+
+    for name, col in columns.items():
+        if col.derive is not None:
+            # Computed, not drawn: no seed.
+            runners[f"derive:{name}"] = lambda frame, name=name, col=col: apply_derived(
+                frame, name, col
+            )
 
     if (hierarchy := spec.hierarchy) is not None:
         seed = pass_seed(frame_seed, "hierarchy")

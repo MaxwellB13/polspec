@@ -85,6 +85,7 @@ class ValidationOptions:
     missing_cols: Literal["add", "allow", "raise"] = "raise"
     strict_dtypes: bool = False
     rules: bool = True
+    derived: bool = True
     validators: bool = True
     unique: bool = True
     checks: bool = True
@@ -125,6 +126,7 @@ class ValidationKeywords(TypedDict, total=False):
     missing_cols: Literal["add", "allow", "raise"]
     strict_dtypes: bool
     rules: bool
+    derived: bool
     validators: bool
     unique: bool
     checks: bool
@@ -142,6 +144,7 @@ class ValidationKeywords(TypedDict, total=False):
 
 SWITCHES = (
     "rules",
+    "derived",
     "validators",
     "unique",
     "checks",

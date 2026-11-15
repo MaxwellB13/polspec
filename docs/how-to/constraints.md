@@ -146,6 +146,48 @@ ColSpec(
 Referencing another column is rejected at declaration time — use `__checks__`
 for that.
 
+## Derived columns — `derive`
+
+A column computed from others is declared by its expression, written with
+[`col()`](#writing-conditions-col). Generation computes it, and validation
+holds the column to it:
+
+```python
+class Lines(FrameSpec):
+    qty      = ColSpec(pl.Int64, bounds=(1, 20))
+    price    = ColSpec(pl.Float64, bounds=(0.5, 100))
+    discount = ColSpec(pl.Float64, bounds=(0, 0.3), nullable=True)
+    total    = ColSpec(pl.Float64, derive=col("qty") * col("price"))
+    net      = ColSpec(pl.Float64, derive=col("total") * (1 - col("discount")), nullable=True)
+    large    = ColSpec(pl.Boolean, derive=col("total") > 1_000)
+
+lines = Lines.generate(1_000, seed=1)
+Lines.validate(lines)
+```
+
+*Added in 1.4.*
+
+- **Generation** computes a derived column after every column it reads:
+  rules, foreign keys and [`fixed=`](generating.md#pinning-columns-fixed)
+  pins included, and derived columns too, as `net` reads `total`. It casts
+  the result to the column's dtype, and refuses a value the dtype cannot
+  hold.
+- **Validation** checks each value against the expression, as a `derived`
+  finding. Integers, decimals, text and flags must be equal; a float may be
+  off by a relative 1e-9, so a pipeline that multiplies in another order,
+  or in SQL, still passes. A null is right exactly where the expression is
+  null, and NaN where it is NaN. `derived=False` switches the check off.
+- **The expression decides the values,** so a derived column declares no
+  `bounds`, `choices`, `rules`, `distribution`, `format`, `pattern`,
+  `string_length`, `unique` or `default`. It is `nullable` when an input is,
+  as `net` is, since its value is null where theirs is.
+- **Nothing else writes it:** `fixed=` cannot pin it, and it cannot be a
+  foreign key's column, part of a composite key, or a hierarchy column. Two
+  derived columns that read each other are refused.
+
+A rule a generator can follow is a `ColRule` or a derived column; any
+other is a check.
+
 ## Multi-column invariants — `__checks__`
 
 ```python

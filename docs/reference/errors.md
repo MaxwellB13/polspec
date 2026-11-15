@@ -78,6 +78,7 @@ through `report.rows(finding)`; structural ones describe the frame's shape.
 | `format` | row-level | a string value does not have the declared `format`; `details` name the format |
 | `pattern` | row-level | a string value does not match the declared `pattern`; `details` carry it |
 | `rule` | row-level | a row matched a `ColRule` but holds a value outside its choices |
+| `derived` | row-level | a derived column's value is not its `derive` expression's (a float, within a relative 1e-9); *added in 1.4* |
 | `validator` | row-level | a `ColSpec.validators` predicate is false |
 | `unique` | row-level | a `unique=True` column holds duplicates |
 | `unique_together` | row-level | a composite key holds duplicate combinations |
