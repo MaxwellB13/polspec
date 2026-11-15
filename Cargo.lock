@@ -2139,6 +2139,8 @@ dependencies = [
  "rand_distr",
  "rand_xoshiro",
  "rayon",
+ "regex-automata",
+ "regex-syntax",
 ]
 
 [[package]]

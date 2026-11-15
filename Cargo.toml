@@ -41,6 +41,11 @@ pyo3-polars = { version = "0.28.0", features = [
 rand = "0.10"
 rand_xoshiro = "0.8"
 rayon = "1.12.0"
+# Pattern generation compiles a `pattern` with the engine Polars validates it
+# with (`regex` is built on these two), so the two read it alike. Both are
+# already in the tree through Polars.
+regex-automata = "0.4.18"
+regex-syntax = "0.8.11"
 
 [dev-dependencies]
 # The samplers in `samplers.rs` are ported from rand_distr; a test runs both

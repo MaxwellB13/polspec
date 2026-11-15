@@ -3,6 +3,7 @@
 //!
 //! - `plan.rs` -- `ColumnPlan`, the typed instructions for one column.
 //! - `format.rs` -- `Template`, the shape of a string with a format.
+//! - `pattern.rs` -- strings from a `pattern`, walked through its DFA.
 //! - `dist.rs` -- the distributions and their canonical parameters.
 //! - `samplers.rs` -- drawing from them, the same on every platform
 //!   (`ziggurat_tables.rs` holds their constants).
@@ -17,6 +18,7 @@ mod dist;
 mod format;
 mod math;
 mod math_tables;
+mod pattern;
 mod permute;
 mod plan;
 mod sample;
@@ -114,6 +116,29 @@ fn distributions() -> Vec<String> {
     dist::names().into_iter().map(String::from).collect()
 }
 
+/// How a `pattern` column is generated: `"generate"` from the pattern,
+/// `"keep"` the plain text it drew before 1.4 (every value of which already
+/// passes the pattern, `plain_lengths` characters long), or `"unreachable"`
+/// with the reason the pattern cannot be generated from.
+#[pyfunction]
+#[pyo3(signature = (pattern, lengths, plain_lengths))]
+fn pattern_status(
+    py: Python<'_>,
+    pattern: &str,
+    lengths: Option<(usize, usize)>,
+    plain_lengths: (usize, usize),
+) -> (&'static str, Option<String>) {
+    py.detach(|| {
+        if pattern::plain_text_always_passes(pattern, plain_lengths.0, plain_lengths.1) {
+            return ("keep", None);
+        }
+        match pattern::sampler(pattern, lengths) {
+            Ok(_) => ("generate", None),
+            Err(reason) => ("unreachable", Some(reason)),
+        }
+    })
+}
+
 /// Every column kind a `ColumnPlan` accepts.
 #[pyfunction]
 fn kinds() -> Vec<String> {
@@ -127,6 +152,7 @@ fn _polspec(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(distribution_params, m)?)?;
     m.add_function(wrap_pyfunction!(distributions, m)?)?;
     m.add_function(wrap_pyfunction!(kinds, m)?)?;
+    m.add_function(wrap_pyfunction!(pattern_status, m)?)?;
     m.add_function(wrap_pyfunction!(permuted_indices, m)?)?;
     Ok(())
 }

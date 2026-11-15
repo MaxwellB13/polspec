@@ -668,17 +668,21 @@ def test_a_format_promises_syntax_not_existence(name, well_formed):
     spec_cls.validate(pl.DataFrame({"c": [well_formed]}))
 
 
-def test_a_pattern_is_validation_only():
-    """`pattern=` is the honest half of the split `format=` made: any regex
-    can be checked, only a curated set can be generated. So a String column
-    with a pattern is filled with ordinary random text, and the round trip
-    holds only with the check switched off -- exactly as for `validators`.
-    """
+def test_a_pattern_generates_what_it_validates():
+    """`pattern=` is generated from since 1.4: each value is a full match of
+    the pattern, walked through the automaton the validator's engine builds,
+    so the round trip holds with every check on."""
     spec_cls = _spec_for("patterned", ColSpec(pl.String, pattern=r"^[A-Z]{3}-\d{4}$"))
     df = spec_cls.generate(ROWS, seed=SEED)
-    spec_cls.validate(df, pattern=False)
-    with pytest.raises(Exception, match="not matching pattern"):
-        spec_cls.validate(df)
+    spec_cls.validate(df)
+
+
+def test_a_pattern_that_plain_text_always_passes_keeps_its_output():
+    """A seed's output changes only where it broke its own spec: a pattern
+    every plain string already passes keeps the plain strings, exactly."""
+    patterned = _spec_for("loose", ColSpec(pl.String, pattern=r"^[A-Za-z0-9]+$"))
+    plain = _spec_for("loose", ColSpec(pl.String))
+    assert patterned.generate(ROWS, seed=SEED).equals(plain.generate(ROWS, seed=SEED))
 
 
 def test_a_seed_name_survives_a_rename_and_an_insertion():

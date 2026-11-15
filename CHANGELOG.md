@@ -9,6 +9,28 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+### Added
+
+- **Strings from a `pattern`.** A `String` column with a `pattern` is
+  generated from it: each value is a full match, drawn by a walk through
+  the DFA that `regex-automata` -- the engine under the `regex` crate
+  Polars validates with -- builds for the pattern, so every value passes
+  validation. ASCII wherever the pattern allows it; within
+  `string_length` when declared; an unbounded repeat runs to 16 characters
+  past the shortest match. A list of strings with a pattern generates its
+  elements the same way. A million values take about 8 ms.
+
+### Changed
+
+- **Seeded output, for pattern columns only.** A pattern column used to be
+  filled with random alphanumeric text that its own pattern refused, and
+  a minor release may change output that broke its own spec: those
+  columns now draw from their pattern. A pattern that every such string
+  already passes (`^[A-Za-z0-9]+$`) is decided on its automaton and keeps
+  exactly the output it had. So does a pattern the generator cannot
+  follow: a Unicode word boundary, an automaton over its size limit, no
+  match within the declared lengths.
+
 ## [1.3.0] - 2026-11-15
 
 **Tests that say what broke.** `assert_valid` checks a frame at the end of a

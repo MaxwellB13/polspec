@@ -180,15 +180,18 @@ class ColSpec:
         value the format already accepts, a repeated one, and shares
         summing past 1 are refused, and so is `unique=True`.
     pattern : str | None, optional
-        A regular expression every value of a `String` column must match,
-        checked by validation only. Generation does not read it: a `String`
-        column with a pattern is filled with ordinary random text, and the
-        round trip that holds for every other field does not hold here --
-        the same boundary as `validators`. Prefer `format` for a shape
-        polspec can generate; use `pattern` for a shape it cannot. Cannot
-        be combined with `format`, which already is a pattern with a
-        sampler. Polars regex syntax; a pattern that does not compile is
-        refused at declaration.
+        A regular expression every value of a `String` column must match.
+        Generation fills the column with full matches of it, drawn through
+        the automaton Polars' own regex engine builds, so the values pass
+        validation; ASCII wherever the pattern allows, within
+        `string_length` when it is declared, and an unbounded repeat runs
+        to 16 characters past the pattern's shortest match. A pattern that
+        every plain random string already passes keeps those strings, and
+        one the generator cannot follow (a Unicode word boundary, an
+        automaton too large) is filled with them, as before 1.4. Cannot be
+        combined with `format`, which names a shape polspec knows. Polars
+        regex syntax; a pattern that does not compile is refused at
+        declaration. *Generated from since 1.4.*
     distribution : str | None, optional
         The name of the probability distribution for the column's values
         (e.g. `"uniform"`, `"normal"`).
