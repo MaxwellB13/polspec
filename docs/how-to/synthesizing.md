@@ -166,6 +166,70 @@ run:
 fake = polspec.synthesize("events.parquet", 5_000_000, sample=200_000, seed=1)
 ```
 
+## Related tables
+
+`synthesize` takes one table, so the keys between tables do not survive it:
+a fake order's `customer_id` is a number in the right range, not a fake
+customer's. `polspec.synthesize_all` takes a set of tables and keeps them:
+
+```python
+customers = pl.DataFrame({"id": range(1, 101), "tier": ["free", "paid"] * 50})
+orders = pl.DataFrame(
+    {"id": range(1, 401), "customer_id": [i % 37 + 1 for i in range(400)]}
+)
+real = {"Customers": customers, "Orders": orders}
+
+fake = polspec.synthesize_all(real, scale=0.1, seed=1)
+assert fake["Orders"]["customer_id"].is_in(fake["Customers"]["id"].implode()).all()
+```
+
+It profiles the set with `polspec.profile_all`, which returns the
+[`Registry`](registry.md), with the keys it found, that the fake frames come
+from. Each fake frame keeps its source's dtypes. *Added in 1.5.*
+
+**Sizes.** Each fake table is its source's height by default. `n` is a count
+for every table, or a mapping for some of them; `scale` multiplies every
+height, so `scale=0.1` takes a tenth and keeps the ratios between the
+tables. A larger set widens a parent's key range, and its children's with it,
+so its keys can fall outside the bounds profiled from the source.
+
+**How keys are found.** A column becomes a key into another table's column,
+or its own table's, when all of these hold:
+
+- **The parent is unique:** an integer, text or date column with no nulls,
+  every value distinct, over all the rows.
+- **The child is contained:** a column of the same kind, with at least two
+  distinct values, every one of them a parent's value.
+- **Something besides chance says so:** the names link them, as
+  `customer_id` or `customer` does to `Customers.id`, or `customer_id` to a
+  `Customers.customer_id`; or the column is text, with at least 20
+  distinct values. Within one table, only `parent_id` or `parent` points
+  back at `id`.
+
+A child with a value its parent lacks gets no key. A child that two parents
+would both fit gets none either, and a warning says which. A key that would
+close a cycle is dropped with a warning. The child column takes its parent's
+claims, its bounds and pattern, so the registry generates frames that pass.
+
+**Declaring keys.** `keys=` declares them instead, as a mapping from each
+child table to its keys. They are checked against the data, and found ones
+are not looked for. `keys=False` finds none:
+
+```python
+orders = orders.rename({"customer_id": "buyer"})  # a name no rule links
+keys = {"Orders": [ForeignKey("buyer", references="Customers", ref_columns="id")]}
+fake = polspec.synthesize_all(
+    {"Customers": customers, "Orders": orders}, keys=keys, seed=1
+)
+assert fake["Orders"]["buyer"].is_in(fake["Customers"]["id"].implode()).all()
+```
+
+`profile_all` takes the same `keys=`, for the registry alone. A key keeps
+every child value a parent's. It keeps nothing else between the tables:
+how many orders a customer has, or how an order's total relates to its
+customer, is generated afresh. See
+[Known limitations](../explanation/limitations.md#synthesized-data-is-related-only-by-its-keys).
+
 ## From the command line
 
 ```bash
@@ -178,3 +242,17 @@ reproduced — `polspec generate fake_customers.yaml -n 1000000 --seed 1`
 — and the spec reviewed. `polspec schema infer` takes the same profiling
 steps one at a time, as `--shape`, `--keys`, `--order` and `--replace`; see
 [Command line](cli.md).
+
+Several sources make a related set, written into a directory, one fake file
+per source:
+
+```bash
+polspec synthesize customers.csv orders.csv -o fake/ --scale 0.1 --seed 1
+polspec synthesize customers.csv orders.csv -o fake/ --format parquet \
+    --foreign-key Orders.buyer=Customers.id --spec fake/shop.yaml
+```
+
+Each spec is named after its file. `--foreign-key` declares a key,
+`--no-foreign-keys` finds none, and `--spec` writes the registry. The
+[tutorial on data you already have](../tutorial/existing-data.md) walks
+through it, from profiling to tests.

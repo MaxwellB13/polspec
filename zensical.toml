@@ -11,6 +11,7 @@ nav = [
   { "Tutorial" = [
     { "Getting started" = "tutorial/getting-started.md" },
     { "Related tables" = "tutorial/related-tables.md" },
+    { "A spec for data you already have" = "tutorial/existing-data.md" },
   ] },
   { "How-to guides" = [
     { "Recipes" = "how-to/recipes.md" },

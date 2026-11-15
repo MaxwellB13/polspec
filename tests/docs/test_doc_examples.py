@@ -18,6 +18,12 @@ which renders as nothing:
     <!-- docs: warns -->     demonstrates a warning, and must actually warn
     <!-- docs: polars2 -->   uses a Polars 2 dtype; runs only where it exists
 
+A shell block runs too when it says so, `<!-- docs: run -->` on the line
+above its ```bash fence: each line a `polspec` command, run by the CLI in
+the page's directory, in page order with the Python blocks. A command must
+exit 0, or the status its `# exits N` comment names. Every page's directory
+holds a copy of `docs/data/`, the sample files a tutorial reads.
+
 A marker is a claim about the block, so both are checked: `raises` fails the
 suite if the block stops raising, the same way `xfail(strict=True)` pins the
 known limitations.
@@ -34,6 +40,8 @@ from __future__ import annotations
 import contextlib
 import io
 import re
+import shlex
+import shutil
 from pathlib import Path
 
 import polars as pl
@@ -49,6 +57,16 @@ BLOCK = re.compile(
 )
 
 MARKERS = {"skip", "raises", "warns", "polars2"}
+
+# A ```bash fence marked to run: a page's command-line examples.
+RUN = re.compile(
+    r"^[ \t]*<!--[ \t]*docs:[ \t]*run[ \t]*-->[ \t]*\n^```bash\n(?P<code>.*?)^```",
+    re.S | re.M,
+)
+EXITS = re.compile(r"#\s*exits\s+(?P<code>\d+)")
+
+# The sample files a page's examples read, copied beside them.
+DATA = DOCS / "data"
 
 # `# SpecError: the message`, and the `# ...` lines that carry it on.
 CLAIM = re.compile(
@@ -93,7 +111,41 @@ from polspec import (
 
 
 def _pages() -> list[Path]:
-    return sorted(p for p in DOCS.rglob("*.md") if BLOCK.search(p.read_text("utf-8")))
+    return sorted(
+        p
+        for p in DOCS.rglob("*.md")
+        if BLOCK.search(text := p.read_text("utf-8")) or RUN.search(text)
+    )
+
+
+def _commands(page: Path) -> list[tuple[int, str]]:
+    """Every shell block on a page marked to run, as (line number, source)."""
+    text = page.read_text(encoding="utf-8")
+    return [
+        (text[: match.start()].count("\n") + 2, match.group("code"))
+        for match in RUN.finditer(text)
+    ]
+
+
+def _run_commands(code: str, where: str) -> None:
+    """Each `polspec` line of a shell block, through the CLI."""
+    from polspec.cli import main
+
+    for line in code.replace("\\\n", " ").splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        args = shlex.split(line, comments=True)
+        assert args[0] == "polspec", f"{where}: {line!r} is not a polspec command"
+        expected = EXITS.search(line)
+        wanted = int(expected.group("code")) if expected else 0
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()) as errors,
+        ):
+            status = main(args[1:])
+        assert status == wanted, (
+            f"{where}: {line!r} exited {status}, not {wanted}\n{errors.getvalue()}"
+        )
 
 
 def _blocks(page: Path) -> list[tuple[int, str | None, str]]:
@@ -157,10 +209,18 @@ def test_a_pages_examples_run(page: Path, tmp_path: Path, monkeypatch) -> None:
     # Pages write files (`Orders.to_yaml("orders.yaml")`), so give each its own
     # directory rather than the repository root.
     monkeypatch.chdir(tmp_path)
+    shutil.copytree(DATA, tmp_path, dirs_exist_ok=True)
     namespace: dict[str, object] = {"__name__": "docs_example"}
     exec(compile(PREAMBLE, "<preamble>", "exec"), namespace)
 
-    for line, marker, code, shown in _shown_blocks(page):
+    blocks = [
+        *_shown_blocks(page),
+        *((line, "run", code, None) for line, code in _commands(page)),
+    ]
+    for line, marker, code, shown in sorted(blocks, key=lambda block: block[0]):
+        if marker == "run":
+            _run_commands(code, f"{page.relative_to(DOCS).as_posix()}:{line}")
+            continue
         if marker == "skip" or (marker == "polars2" and not HAS_POLARS_2):
             continue
         where = f"{page.relative_to(DOCS).as_posix()}:{line}"
