@@ -1,0 +1,54 @@
+name: Install polspec
+description: >-
+  Installs polspec into the job's uv environment as an editable install,
+  compiling the Rust extension only when what it is built from changed.
+  Run it after `uv sync --no-install-project`; later steps use
+  `uv run --no-sync`, since a sync would build polspec again.
+
+# Compiling the extension is most of a test job: 5 minutes on Linux, 14 on
+# macOS, almost all of it the polspec crate itself (one codegen unit, thin
+# LTO), which rust-cache leaves out of what it saves. The Rust changes far
+# less often than the Python, so the build is cached on its inputs: the
+# compiled module, and the editable wheel that installs the package's
+# metadata and entry points (the pytest plugin, the CLI) around it.
+
+runs:
+  using: composite
+  steps:
+    # An abi3 module, so one per OS and architecture serves every Python.
+    # pyproject.toml is in the key because the wheel's version, metadata and
+    # entry points come from it, as do maturin's settings. No restore-keys:
+    # an extension built from other sources is never the right one.
+    - name: Restore the built extension
+      id: built
+      uses: actions/cache@v6
+      with:
+        path: |
+          python/polspec/_polspec*.so
+          python/polspec/_polspec*.pyd
+          .polspec-editable/
+        key: polspec-extension-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/**', 'Cargo.toml', 'Cargo.lock', 'pyproject.toml') }}
+
+    - name: Install Rust
+      if: steps.built.outputs.cache-hit != 'true'
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache Rust dependencies
+      if: steps.built.outputs.cache-hit != 'true'
+      uses: Swatinem/rust-cache@v2
+
+    # Compiles the module into python/polspec/, as an editable build does,
+    # and writes the wheel that points the environment at python/.
+    - name: Build the extension
+      if: steps.built.outputs.cache-hit != 'true'
+      shell: bash
+      run: uv run --no-sync maturin pep517 build-wheel --editable --out .polspec-editable
+
+    - name: Install polspec, editable
+      shell: bash
+      run: |
+        uv pip install --no-deps --reinstall .polspec-editable/*.whl
+        # The wheel's .pth names the checkout it was built in; point it at
+        # this one, in case a runner's workspace path ever differs.
+        uv run --no-sync python -c "import pathlib, sysconfig; pathlib.Path(sysconfig.get_paths()['purelib'], 'polspec.pth').write_text(str(pathlib.Path('python').resolve()))"
+        uv run --no-sync python -c "import polspec, polspec._polspec; print('polspec', polspec.__version__, 'from', polspec.__file__)"

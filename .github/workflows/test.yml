@@ -94,26 +94,23 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Sync dependencies
-        run: uv sync --all-extras
+        run: uv sync --all-extras --no-install-project
 
-      - name: Build extension (maturin develop)
-        run: uv run maturin develop --release
+      # Compiles the Rust extension only when its sources changed; see the
+      # action. Every later step is `uv run --no-sync`, as a sync would
+      # build polspec again.
+      - name: Install polspec
+        uses: ./.github/actions/install-polspec
 
       - name: Run tests
         if: ${{ !(matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12') }}
-        run: uv run pytest
+        run: uv run --no-sync pytest
 
       # One leg measures coverage, and fails under the floor set in
       # `[tool.coverage.report]`; the rest only run the suite. It is the
@@ -125,11 +122,11 @@ jobs:
       - name: Run tests with coverage
         if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' }}
         run: |
-          uv run coverage run -m pytest
-          uv run coverage report
+          uv run --no-sync coverage run -m pytest
+          uv run --no-sync coverage report
 
       - name: Run the worked example as a smoke test
-        run: uv run python examples/related_specs.py
+        run: uv run --no-sync python examples/related_specs.py
 
   polars-latest:
     # uv.lock pins the newest Polars 1.x; this job tests the newest release
@@ -142,12 +139,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -158,16 +149,19 @@ jobs:
         run: uv lock --upgrade-package polars
 
       - name: Sync dependencies
-        run: uv sync --all-extras
+        run: uv sync --all-extras --no-install-project
 
       - name: Report polars version
-        run: uv run python -c "import polars; print(polars.__version__)"
+        run: uv run --no-sync python -c "import polars; print(polars.__version__)"
 
-      - name: Build extension (maturin develop)
-        run: uv run maturin develop --release
+      # Compiles the Rust extension only when its sources changed; see the
+      # action. Every later step is `uv run --no-sync`, as a sync would
+      # build polspec again.
+      - name: Install polspec
+        uses: ./.github/actions/install-polspec
 
       - name: Run tests
-        run: uv run pytest
+        run: uv run --no-sync pytest
 
   lowest-direct:
     # The oldest release of every direct dependency the bounds allow:
@@ -177,12 +171,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -194,13 +182,16 @@ jobs:
         run: uv lock --resolution lowest-direct
 
       - name: Sync dependencies
-        run: uv sync --all-extras
+        run: uv sync --all-extras --no-install-project
 
       - name: Report versions
-        run: uv run python -c "import polars, yaml; print(polars.__version__, yaml.__version__)"
+        run: uv run --no-sync python -c "import polars, yaml; print(polars.__version__, yaml.__version__)"
 
-      - name: Build extension (maturin develop)
-        run: uv run maturin develop --release
+      # Compiles the Rust extension only when its sources changed; see the
+      # action. Every later step is `uv run --no-sync`, as a sync would
+      # build polspec again.
+      - name: Install polspec
+        uses: ./.github/actions/install-polspec
 
       - name: Run tests
-        run: uv run pytest
+        run: uv run --no-sync pytest
