@@ -1,9 +1,12 @@
 """`polspec test`: a pytest round-trip test from a spec.
 
 The one verb that writes code rather than data. What it emits is the
-round-trip `tests/test_roundtrip.py` pins for polspec itself, applied to the
-user's own spec -- with the checks generation cannot satisfy switched off and
-a comment saying why, rather than a test the CLI already knows will fail.
+round-trip `tests/contracts/test_roundtrip.py` pins for polspec itself,
+applied to the user's own spec: a frame from the `polspec_frames` fixture,
+checked with `assert_valid`, with the checks generation cannot satisfy
+switched off and a comment saying why. A spec with foreign keys into specs
+loaded with it generates those first; one into a spec not loaded is skipped,
+saying so.
 """
 
 from __future__ import annotations
@@ -69,28 +72,63 @@ def _skip_reasons(spec_cls: type[FrameSpec]) -> tuple[dict[str, bool], list[str]
     return flags, reasons
 
 
+def _parents_in_order(
+    spec_cls: type[FrameSpec], loaded: dict[str, tuple[str, type[FrameSpec]]]
+) -> list[str] | None:
+    """The specs `spec_cls`'s foreign keys reach, parents before children:
+    the class names to generate first. None when one of them was not loaded
+    with it, so the test has nothing to generate it from."""
+    order: list[str] = []
+    seen: set[str] = set()
+
+    def visit(cls: type[FrameSpec]) -> bool:
+        for fk in cls.spec.foreign_keys:
+            if fk.references == "self" or fk.references in seen:
+                continue
+            if fk.references not in loaded:
+                return False
+            seen.add(fk.references)
+            parent_name, parent_cls = loaded[fk.references]
+            if not visit(parent_cls):
+                return False
+            order.append(parent_name)
+        return True
+
+    return order if visit(spec_cls) else None
+
+
+def _has_parents(spec_cls: type[FrameSpec]) -> bool:
+    """Whether `spec_cls` has foreign keys into other specs."""
+    return any(fk.references != "self" for fk in spec_cls.spec.foreign_keys)
+
+
 def _render_test_case(
     class_name: str,
     spec_cls: type[FrameSpec],
     *,
     rows: int,
-    seed: int,
+    seed: int | None,
     cartesian: bool,
+    loaded: dict[str, tuple[str, type[FrameSpec]]],
 ) -> str:
     fn_name = _snake_case(class_name)
-    cross_spec_fks = [
-        fk for fk in spec_cls.spec.foreign_keys if fk.references != "self"
-    ]
+    parents = _parents_in_order(spec_cls, loaded)
 
-    if cross_spec_fks:
-        names = ", ".join(repr(fk.name) for fk in cross_spec_fks)
+    if parents is None:
+        missing = sorted(
+            {
+                fk.references
+                for fk in spec_cls.spec.foreign_keys
+                if fk.references != "self" and fk.references not in loaded
+            }
+        )
         return (
             f"@pytest.mark.skip(\n"
             f"    reason=(\n"
-            f'        "{class_name} has foreign key(s) {names} referencing another "\n'
-            f'        "FrameSpec. generate()/validate() need a parent DataFrame via "\n'
-            f'        "references={{OtherSpec: parent_df}} -- see "\n'
-            f'        "docs/how-to/constraints.md#referential-integrity-foreignkey."\n'
+            f'        "{class_name} has foreign key(s) into {", ".join(missing)}, "\n'
+            f'        "which this file does not load. Generate the test from a file "\n'
+            f'        "declaring it too, or pass its frame as "\n'
+            f'        "references={{Spec: frame}} -- see docs/how-to/testing.md."\n'
             f"    )\n"
             f")\n"
             f"def test_{fn_name}_roundtrip():\n"
@@ -100,21 +138,38 @@ def _render_test_case(
     flags, reasons = _skip_reasons(spec_cls)
     kwargs = "".join(f", {name}={value}" for name, value in flags.items())
     comment = "".join(f"    # {reason}\n" for reason in reasons)
+    seeded = "" if seed is None else f", seed={seed}"
+    referenced = ", references=parents" if parents else ""
+    by_class = dict(loaded.values())
+    setup = ""
+    if parents:
+        setup = "    parents = {}\n" + "".join(
+            f"    parents[{parent}] = polspec_frames({parent}, {rows}{seeded}"
+            + (", references=parents" if _has_parents(by_class[parent]) else "")
+            + ")\n"
+            for parent in parents
+        )
 
     lines = [
-        f"def test_{fn_name}_roundtrip():\n",
+        f"def test_{fn_name}_roundtrip(polspec_frames):\n",
         (
-            f"{comment}"
-            f"    df = {class_name}.generate({rows}, seed={seed})\n"
-            f"    {class_name}.validate(df{kwargs})\n"
+            f"{comment}{setup}"
+            f"    frame = polspec_frames({class_name}, {rows}{seeded}{referenced})\n"
+            f"    assert_valid(frame, {class_name}{referenced}{kwargs})\n"
         ),
     ]
-    if cartesian and _supports_cartesian(spec_cls):
+    if cartesian and not parents and _supports_cartesian(spec_cls):
         lines.append(
-            f"\n\ndef test_{fn_name}_cartesian_coverage():\n"
+            f"\n\ndef test_{fn_name}_cartesian_coverage(polspec_frames):\n"
             f"{comment}"
-            f'    df = {class_name}.generate({rows}, method="cartesian", seed={seed})\n'
-            f"    {class_name}.validate(df{kwargs})\n"
+            f'    frame = polspec_frames({class_name}, {rows}, method="cartesian"{seeded})\n'
+            f"    assert_valid(frame, {class_name}{kwargs})\n"
+        )
+    elif cartesian and parents:
+        lines.append(
+            f"\n\n# No cartesian-coverage test: the foreign keys of {class_name} draw from\n"
+            f"# their parents' rows, which a coverage set as large as its columns'\n"
+            f"# combinations may outgrow.\n"
         )
     elif cartesian:
         lines.append(
@@ -150,7 +205,7 @@ This file is only overwritten by running that command again -- edit freely.
 
 from pathlib import Path
 
-from polspec import FrameSpec
+from polspec import FrameSpec, assert_valid
 
 '''
 
@@ -182,11 +237,8 @@ def _cmd_test(args: argparse.Namespace) -> int:
     ]
     if source.suffix.lower() == ".py":
         parts.append(_PY_LOADER_HELPER)
-    if any(
-        fk.references != "self"
-        for _, spec_cls, _ in specs
-        for fk in spec_cls.spec.foreign_keys
-    ):
+    loaded = {spec_cls.spec.name: (name, spec_cls) for name, spec_cls, _ in specs}
+    if any(_parents_in_order(spec_cls, loaded) is None for _, spec_cls, _ in specs):
         parts.append("\nimport pytest\n")
 
     for class_name, spec_cls, loader_snippet in specs:
@@ -199,6 +251,7 @@ def _cmd_test(args: argparse.Namespace) -> int:
                 rows=args.rows,
                 seed=args.seed,
                 cartesian=not args.no_cartesian,
+                loaded=loaded,
             )
         )
 

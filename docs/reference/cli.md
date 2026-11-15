@@ -78,7 +78,7 @@ polspec test [-h] -o OUTPUT [--rows N] [--seed SEED] [--no-cartesian]
 | `source` | A .yaml/.yml spec, or a .py file defining one |
 | `-o`, `--output` `OUTPUT` | **Required.** Test file to write |
 | `--rows` `N` | Rows to generate (default: 500) |
-| `--seed` `SEED` | Generation seed (default: 42) |
+| `--seed` `SEED` | Pin every frame to this seed (default: none -- each test's own, from the polspec_frames fixture and --polspec-seed) |
 | `--no-cartesian` | Skip the coverage-guaranteeing cartesian test |
 | `--class` `NAME` | Generate a test for only this class (a .py source may define several) |
 

@@ -194,7 +194,12 @@ def _add_test_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Rows to generate (default: 500)",
     )
     test.add_argument(
-        "--seed", type=int, default=42, help="Generation seed (default: 42)"
+        "--seed",
+        type=int,
+        help=(
+            "Pin every frame to this seed (default: none -- each test's own, "
+            "from the polspec_frames fixture and --polspec-seed)"
+        ),
     )
     test.add_argument(
         "--no-cartesian",

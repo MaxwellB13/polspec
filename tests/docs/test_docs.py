@@ -99,7 +99,9 @@ def _slug(heading: str) -> str:
     broken anchor fails here rather than in CI.
     """
     text = re.sub(r"[^\w\s-]", "", heading.replace("—", " ").replace("--", " "))
-    return re.sub(r"[\s_]+", "-", text.strip().lower())
+    # An underscore is a word character, and stays: `polspec_frames` in a
+    # heading is `polspec_frames` in its anchor.
+    return re.sub(r"\s+", "-", text.strip().lower())
 
 
 def _anchors_of(page: Path) -> set[str]:

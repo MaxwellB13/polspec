@@ -68,6 +68,18 @@ every Polars it supported:
 | 0.12.0 | A `List`, `Array` or `Map` column's elements past the first batch (`generate()` did not change) |
 | 0.19.0 | `lognormal` and `beta` columns, where operating systems' maths libraries disagreed: the samplers' `exp`, `ln` and `pow` are polspec's own, so a seed gives the same values on every OS |
 
+### The pytest plugin
+
+The plugin polspec registers with pytest is named `polspec`, so
+`-p no:polspec` turns it off. Its fixture is `polspec_frames(spec, n,
+**options)`, taking what `generate()` takes, and its option is
+`--polspec-seed`, a number or `random`, 0 by default. A test's frames, for
+one session seed, are those of its name, its spec and the order of its
+calls, and stay the same in every later 1.x release, as seeded output does.
+
+*Held by* `tests/features/test_pytest_plugin.py`, which runs pytest on
+generated tests and holds the fixture, the option and the seeding to it.
+
 ### The command line
 
 The verbs, their flags and their exit codes:

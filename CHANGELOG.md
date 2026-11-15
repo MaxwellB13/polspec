@@ -40,6 +40,13 @@ page promises; before 1.0, a minor version could break any of them.
 
 ### Changed
 
+- **`polspec test` writes its tests with the new helpers.** Each test draws
+  from the `polspec_frames` fixture and checks with `assert_valid`, so a
+  failure shows the rows and the seed to rerun it with. A spec whose foreign
+  keys reach other specs in the same file generates those first, and its
+  test runs where it used to be skipped; one into a spec the file does not
+  declare is still skipped, saying which. `--seed` now pins every frame to
+  one seed, and is unset by default, where it was 42.
 - **CI measures coverage with `coverage run -m pytest`**, not
   `pytest --cov`. pytest loads polspec's own plugin at start-up, which
   imports the package before pytest-cov begins, so every module's top-level
