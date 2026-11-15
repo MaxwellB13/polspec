@@ -409,21 +409,44 @@ countries plus `UK (ISO)`, IPv4 or `NOT AVAILABLE` — with
 
 ## String patterns
 
-`pattern=` is a regular expression every value must match — **checked by
-validation only**. Generation does not read it: a column with a pattern is
-filled with ordinary random text, so generated data fails it. Either
-validate generated data with `pattern=False`, or pin the column to values
-that match with [`generate(fixed=)`](generating.md#pinning-columns-fixed).
-polspec can check any regex, but can only generate the shapes it has a
-`format` for.
+`pattern=` is a regular expression every value must match. Generation
+fills the column with full matches of it, so generated data passes:
 
 ```python
-ColSpec(pl.String, pattern=r"^[A-Z]{3}-\d{4}$")     # a SKU shape polspec cannot generate
+class Orders(FrameSpec):
+    order_ref = ColSpec(pl.String, pattern=r"^ORD-\d{6}$", unique=True)
+    postcode  = ColSpec(pl.String, pattern=r"^[A-Z]{1,2}\d[A-Z\d]? \d[A-Z]{2}$")
+
+orders = Orders.generate(1_000, seed=1)
+Orders.validate(orders)
 ```
 
-Reach for `format` when the shape is one polspec has; reach for `pattern`
-when it is not. The two cannot be combined — a format already *is* a
-pattern with a sampler. A pattern is compiled by Polars' regex engine at
+*Generated from since 1.4.*
+
+The values are drawn through the automaton Polars' own regex engine builds
+for the pattern, so generation and validation read it alike:
+
+- **Characters:** ASCII wherever the pattern allows it, so `\w` draws
+  `[A-Za-z0-9_]` and `.` printable ASCII; a pattern that needs `é` draws it.
+- **Lengths:** within `string_length` when declared, counted in characters
+  as validation counts them. An unbounded repeat (`+`, `*`, `{n,}`) runs to
+  16 characters past the pattern's shortest match.
+- **Unique:** `unique=True` draws each value of the pattern once, as for any
+  other unique column; a pattern with fewer values than rows is refused.
+
+Two kinds of pattern are filled with plain random text instead, as before
+1.4:
+
+- **One every plain string already passes**, such as `^[A-Za-z0-9]+$`. Its
+  output stays exactly what it was, as seeded output does across 1.x.
+- **One the generator cannot follow:** a Unicode word boundary (`\b`; the
+  ASCII `(?-u:\b)` works), an automaton too large to build, or no match
+  within the declared `string_length`. Generation warns, naming the
+  column and the reason; validate with `pattern=False`, or pin the column
+  with [`generate(fixed=)`](generating.md#pinning-columns-fixed).
+
+Reach for `format` when the shape is one polspec names (`email`, `uuid4`,
+...); reach for `pattern` for any other. The two cannot be combined. A pattern is compiled by Polars' regex engine at
 declaration, so one Polars cannot run (look-around, for instance) is refused
 with the engine's own message rather than failing on the first validation.
 

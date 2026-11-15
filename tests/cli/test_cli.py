@@ -423,6 +423,38 @@ def test_generated_test_generates_the_parents_a_spec_draws_from(tmp_path):
     assert "failed" not in result.stdout and "skipped" not in result.stdout
 
 
+def test_generated_test_validates_a_pattern_it_generates(tmp_path):
+    """A pattern is generated from since 1.4, so the test checks it; only a
+    pattern out of the generator's reach is switched off, saying why."""
+    spec_path = tmp_path / "coded.py"
+    spec_path.write_text(
+        textwrap.dedent(
+            r"""
+            import polars as pl
+            from polspec import ColSpec, FrameSpec
+
+            class Coded(FrameSpec):
+                ref = ColSpec(pl.String, pattern=r"^ORD-\d{6}$", unique=True)
+                post = ColSpec(pl.String, pattern=r"^[A-Z]{2}\d [0-9][A-Z]{2}$")
+
+            class Bounded(FrameSpec):
+                word = ColSpec(pl.String, pattern=r"\bword\b")
+            """
+        ),
+        encoding="utf-8",
+    )
+    test_path = tmp_path / "test_coded.py"
+    assert run_cli("test", spec_path, "-o", test_path) == 0
+    content = test_path.read_text(encoding="utf-8")
+    coded, bounded = content.split("def test_bounded")
+    assert "pattern=False" not in coded
+    assert "pattern=False" in bounded
+    assert "the pattern of 'word' is not generated from" in bounded
+    result = run_pytest_on(test_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "failed" not in result.stdout
+
+
 def test_generated_test_draws_from_the_fixture_and_reruns_by_its_seed(
     sample_data, tmp_path
 ):

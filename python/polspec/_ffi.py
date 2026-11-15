@@ -97,10 +97,15 @@ def kinds() -> list[str]:
 
 @functools.lru_cache(maxsize=256)
 def pattern_status(
-    pattern: str, lengths: tuple[int, int] | None, plain_lengths: tuple[int, int]
+    pattern: str,
+    lengths: tuple[int, int] | None,
+    plain_lengths: tuple[int, int],
+    unique: bool = False,
 ) -> tuple[str, str | None]:
     """How a column with `pattern` is generated: `"generate"`, from the
     pattern; `"keep"`, as the plain text it drew before 1.4, every value of
     which already passes it; or `"unreachable"`, with the reason. Asked once
-    per pattern and lengths: the automaton is built in Rust, and kept there."""
-    return _extension().pattern_status(pattern, lengths, plain_lengths)
+    per pattern and lengths: the automaton is built in Rust, and kept there.
+    A unique column numbers the pattern's values too, which a pattern can
+    have too many states and lengths for."""
+    return _extension().pattern_status(pattern, lengths, plain_lengths, unique)

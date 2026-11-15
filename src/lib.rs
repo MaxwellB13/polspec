@@ -121,19 +121,24 @@ fn distributions() -> Vec<String> {
 /// passes the pattern, `plain_lengths` characters long), or `"unreachable"`
 /// with the reason the pattern cannot be generated from.
 #[pyfunction]
-#[pyo3(signature = (pattern, lengths, plain_lengths))]
+#[pyo3(signature = (pattern, lengths, plain_lengths, unique=false))]
 fn pattern_status(
     py: Python<'_>,
     pattern: &str,
     lengths: Option<(usize, usize)>,
     plain_lengths: (usize, usize),
+    unique: bool,
 ) -> (&'static str, Option<String>) {
     py.detach(|| {
         if pattern::plain_text_always_passes(pattern, plain_lengths.0, plain_lengths.1) {
             return ("keep", None);
         }
-        match pattern::sampler(pattern, lengths) {
-            Ok(_) => ("generate", None),
+        let numbered = |sampler: &pattern::PatternSampler| match unique {
+            true => sampler.counts().map(|_| ()),
+            false => Ok(()),
+        };
+        match pattern::sampler(pattern, lengths).and_then(|s| numbered(&s)) {
+            Ok(()) => ("generate", None),
             Err(reason) => ("unreachable", Some(reason)),
         }
     })

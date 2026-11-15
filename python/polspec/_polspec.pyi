@@ -92,6 +92,7 @@ def pattern_status(
     pattern: str,
     lengths: tuple[int, int] | None,
     plain_lengths: tuple[int, int],
+    unique: bool = False,
 ) -> tuple[str, str | None]:
     """How a `pattern` column is generated: `("generate", None)` from the pattern; `("keep", None)` as plain text, every value of which already passes it at `plain_lengths` characters; or `("unreachable", reason)`."""
 

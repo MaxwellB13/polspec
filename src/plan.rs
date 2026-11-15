@@ -290,10 +290,12 @@ impl ColumnPlan {
             }
             (_, None) => None,
         };
-        if kind == Kind::Pattern && unique {
-            return Err(format!(
-                "Column '{name}' is unique, and a unique column is not yet generated from its pattern"
-            ));
+        if let Some(sampler) = &pattern
+            && unique
+        {
+            sampler.counts().map_err(|reason| {
+                format!("Column '{name}' cannot be generated from its pattern: {reason}")
+            })?;
         }
         match kind {
             Kind::Index => {

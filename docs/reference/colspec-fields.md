@@ -32,7 +32,7 @@ and `null_probability` describe the cell itself.
 | `fields` | `fields` | `Struct` values, and a `Map`'s `key`/`value` | draws each field from its own `ColSpec` | checks each field as a value, named `column.field` |
 | `format` | `format` | `String` values | fills each value from the format's template | a value not in the format is a `format` finding |
 | `extra_values` | `extra_values` | a `format` column | draws each extra on its share of the present rows — 1% each by default — and the format's own values on the rest | a value that is neither the format nor an extra is a `format` finding |
-| `pattern` | `pattern` | `String` values | — (not read; values are ordinary random text) | a value not matching is a `pattern` finding |
+| `pattern` | `pattern` | `String` values | fills each value with a full match of it | a value not matching is a `pattern` finding |
 | `distribution` | `distribution` | numeric and temporal values | shapes the draw | — |
 | `distribution_params` | `distribution_params` | a `distribution`, or a `Boolean`'s `p` | the distribution's parameters | — |
 | `choices` | `choices` | any scalar value | draws from them, as a finite domain | a value outside them is a `choices` finding |
@@ -41,8 +41,8 @@ and `null_probability` describe the cell itself.
 | `validators` | `validators` | every column | — (not read) | a row failing one is a `validator` finding |
 
 A — in the generation column is a claim generation does not act on; the
-round trip still holds, except for `pattern` and `validators`, which are
-validation-only by design. Validate generated data with `pattern=False` or
-`validators=False`, or [pin](../how-to/generating.md#pinning-columns-fixed)
-the column to values that pass — see
-[Known limitations](../explanation/limitations.md).
+round trip still holds, except for `validators`, which are validation-only
+by design, and a `pattern` the generator cannot follow. Validate generated
+data with `validators=False` or `pattern=False`, or
+[pin](../how-to/generating.md#pinning-columns-fixed) the column to values
+that pass — see [Known limitations](../explanation/limitations.md).

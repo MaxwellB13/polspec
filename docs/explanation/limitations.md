@@ -25,17 +25,24 @@ to be updated.
 
 ## Generation does not enforce these
 
-### `__checks__`, `ColSpec.validators` and `ColSpec.pattern` are validation-only
+### `__checks__` and `ColSpec.validators` are validation-only
 
 This one is by design, not a defect: checks and validators wrap arbitrary
-Polars expressions, and a pattern is an arbitrary regex; nothing can generate
-data satisfying an arbitrary predicate, and generating from an arbitrary
-regex has no answer for `.*`. Validate generated data with
-`checks=False`, `validators=False` or `pattern=False`, or pin the columns
-concerned to values that pass with
-[`generate(fixed=)`](../how-to/generating.md#pinning-columns-fixed). For a
-shape polspec *can* generate, declare a
-[`format`](../how-to/formats.md) instead of a pattern.
+Polars expressions, and nothing can generate data satisfying an arbitrary
+predicate. Validate generated data with `checks=False` or
+`validators=False`, or pin the columns concerned to values that pass with
+[`generate(fixed=)`](../how-to/generating.md#pinning-columns-fixed).
+
+### A pattern the generator cannot follow
+
+A `pattern` is generated from (*since 1.4*), except when its automaton
+cannot be walked: it uses a Unicode word boundary (`\b`; the ASCII
+`(?-u:\b)` works), its DFA is larger than the generator builds, or it has
+no match within the column's `string_length`. That column is filled with
+plain random text, as before 1.4, and generation warns, naming the column
+and the reason. A pattern that every plain string already passes is
+filled with plain text too, on purpose: its seeded output stays what it
+was. See [String patterns](../how-to/columns.md#string-patterns).
 
 ### `rows` does not limit `generate()`
 
