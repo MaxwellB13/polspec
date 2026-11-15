@@ -291,9 +291,13 @@ which is a placeholder.
    refuses a tag whose version has neither, so this is not a step that can be
    skipped and fixed later — v0.4.0 and v0.4.1 both were, and shipped
    claiming a released breaking change had not happened yet.
-3. Commit, then tag `vX.Y.Z` and push the tag.
+3. Commit, merge to `main`, then tag that commit `vX.Y.Z` and push the tag.
+   The tag can follow the merge straight away.
 4. The release workflow checks the tag against `pyproject.toml` and
-   `CHANGELOG.md`, builds wheels, publishes to PyPI, and *drafts* a GitHub
+   `CHANGELOG.md`, and waits for the Test workflow's run on `main` for the
+   tagged commit -- every Python on every OS -- refusing to build unless it
+   passed. It does not run the suite again. Then it builds wheels and
+   smoke-tests each, publishes to PyPI, and *drafts* a GitHub
    release with the wheels attached and notes generated from the merged
    pull requests, grouped by label as `.github/release.yml` says.
 5. Read the draft, edit the notes if they need it, and publish it from the

@@ -51,6 +51,12 @@ page promises; before 1.0, a minor version could break any of them.
 
 ### Changed
 
+- **CI waits less.** A pull request runs the oldest and newest Python on
+  each OS, with the floor and newest-Polars jobs: eight test jobs, where
+  it ran sixteen. `main` and a weekly run keep every Python on every OS,
+  and coverage is measured on Python 3.12, a leg every pull request runs.
+  A release no longer runs the matrix again: it waits for the Test run on
+  `main` for the tagged commit and builds only if it passed.
 - **`polspec test` writes its tests with the new helpers.** Each test draws
   from the `polspec_frames` fixture and checks with `assert_valid`, so a
   failure shows the rows and the seed to rerun it with. A spec whose foreign
