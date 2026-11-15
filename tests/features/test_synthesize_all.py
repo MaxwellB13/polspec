@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import polars as pl
 import polspec
 import pytest
 from polspec import ForeignKey, GenerationError
+
+DOCS_DATA = Path(__file__).resolve().parents[2] / "docs" / "data" / "shop"
 
 
 @pytest.fixture
@@ -113,3 +117,16 @@ def test_a_key_too_wide_for_its_child_is_refused():
 def test_bad_sizes(shop, kwargs, match):
     with pytest.raises(ValueError, match=match):
         polspec.synthesize_all(shop, **kwargs)
+
+
+@pytest.mark.parametrize("scale", [1, 0.1, 3])
+def test_the_tutorials_shop_synthesizes_to_frames_its_registry_accepts(scale):
+    """Every check on, foreign keys included; a larger set's keys outrun the
+    profiled bounds on purpose, to have room, so those are left out there."""
+    shop = {
+        name: pl.read_csv(DOCS_DATA / f"{name.lower()}.csv", try_parse_dates=True)
+        for name in ("Customers", "Orders", "Lines")
+    }
+    registry = polspec.profile_all(shop)
+    fake = polspec.synthesize_all(shop, scale=scale, seed=1)
+    registry.validate_all(fake, bounds=scale <= 1)

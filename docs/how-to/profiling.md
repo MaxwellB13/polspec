@@ -185,6 +185,28 @@ print(typed.schema)
 Schema({'loan_id': Int64, 'LGD': Float64, 'opened': Date})
 ```
 
+## Several tables
+
+`polspec.profile_all` profiles a set of related tables into a
+[`Registry`](registry.md), with the foreign keys between them found from
+their values:
+
+```python
+customers = pl.DataFrame({"id": range(1, 101)})
+purchases = pl.DataFrame({"id": range(1, 301), "customer_id": [1, 2, 3] * 100})
+registry = polspec.profile_all({"Customers": customers, "Orders": purchases})
+print(registry["Orders"].foreign_keys[0].references)
+```
+
+```text
+Customers
+```
+
+It takes every option `profile` does, applied to each table, and `keys=`
+to declare keys rather than find them. [Related
+tables](synthesizing.md#related-tables) says how a key is found.
+*Added in 1.5.*
+
 ## From the command line
 
 ```bash
@@ -197,6 +219,11 @@ polspec schema infer orders.parquet -o orders.py --weights --keys --order
 `--max-unique-enum`, `--replace`, `--sample`, `--round-bounds`,
 `--round-rates` and `--parse-text`. See
 [the command line](cli.md#schema-infer-profile-data-into-a-spec).
+Several files make a registry, each spec named after its file:
+
+```bash
+polspec schema infer customers.csv orders.csv -o shop.yaml
+```
 
 ## Treat it as a draft
 
@@ -205,9 +232,10 @@ rule. Before trusting the draft as a contract:
 
 - **Widen what will grow.** An ID's upper bound, a date range that ends
   today.
-- **Add what data cannot show.** [Rules, checks and foreign
-  keys](constraints.md) are relationships between columns and tables; a
-  profile reads each column on its own.
+- **Add what data cannot show.** [Rules and checks](constraints.md) are
+  relationships between columns, and a profile reads each column on its
+  own. `profile_all` finds single-column keys between tables; declare any
+  other.
 - **Check it against the data.** The source passes its own profile (any
   infinity aside, which is outside its bounds; see [Known
   limitations](../explanation/limitations.md#a-floats-infinities-are-outside-its-profiled-bounds)):

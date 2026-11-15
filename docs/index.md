@@ -86,7 +86,8 @@ production will reject.
     them together.
 
     [Infer a spec](how-to/profiling.md) · [Specs as files](how-to/files.md) ·
-    [Multiple specs](how-to/registry.md)
+    [Multiple specs](how-to/registry.md) ·
+    [A spec for data you already have](tutorial/existing-data.md)
 
 - **Fake data from real data**
 
@@ -145,7 +146,9 @@ Building from a checkout — which does need Rust and
 ## Where to go next
 
 Start with [Getting started](tutorial/getting-started.md) for the full loop — declare,
-generate, validate — in about five minutes. If you're weighing polspec
+generate, validate — in about five minutes. If you have the data and not
+yet a spec, [A spec for data you already have](tutorial/existing-data.md)
+profiles a set of files into one and makes a fake copy for tests. If you're weighing polspec
 against a hand-rolled fixture, Faker, or a data-quality framework, see
 [Comparison to other approaches](explanation/comparison.md) for where each one fits and
 the benchmark numbers behind the speed claim.

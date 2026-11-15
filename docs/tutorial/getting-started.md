@@ -138,6 +138,8 @@ options, and rounding.
 
 ## Next
 
+- [A spec for data you already have](existing-data.md) — profile a set of
+  files, then validate, watch for drift, and make fake data for tests
 - [Declaring columns](../how-to/columns.md) — everything a `ColSpec` accepts
 - [Constraints](../how-to/constraints.md) — rules, checks, uniqueness, foreign keys
 - [Generating data](../how-to/generating.md) — coverage, batching, writing to files

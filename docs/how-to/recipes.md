@@ -162,6 +162,36 @@ def orders(customers):
 
 See [Test pipelines](testing.md#a-frame-shared-by-tests).
 
+### A fake copy of related tables
+
+`synthesize_all` profiles the tables, finds the keys between them, and
+generates a fake set in which every key holds:
+
+```python
+real = {"Customers": customers, "Orders": orders}
+fake = polspec.synthesize_all(real, scale=0.1, seed=1)   # a tenth of each
+assert fake["Orders"]["customer_id"].is_in(fake["Customers"]["customer_id"].implode()).all()
+```
+
+*Added in 1.5.* From files, `polspec synthesize customers.csv orders.csv -o
+fake/`. See [Related tables](synthesizing.md#related-tables).
+
+### A key the profile missed
+
+A key is found only where the names link the tables, or the column is text
+of many values. Declare any other with `keys=`, and it is checked against
+the data:
+
+```python
+renamed = {"Customers": customers, "Orders": orders.rename({"customer_id": "buyer"})}
+keys = {"Orders": [ForeignKey("buyer", references="Customers", ref_columns="customer_id")]}
+registry = polspec.profile_all(renamed, keys=keys)
+```
+
+*Added in 1.5.* On the command line, `--foreign-key
+Orders.buyer=Customers.customer_id`. See
+[Related tables](synthesizing.md#related-tables).
+
 ## Validating
 
 ### Validate in a method chain

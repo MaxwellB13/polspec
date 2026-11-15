@@ -65,6 +65,17 @@ page promises; before 1.0, a minor version could break any of them.
   *Comparison* has the numbers: polspec is 1.3 to 2 times as fast, the
   gap between one aggregation and several passes. dataframely and pandera
   join the `bench` dependency group only.
+- **A third tutorial, *A spec for data you already have*:** three small
+  CSV files of a shop, in `docs/data/shop/`, profiled into a registry with
+  its keys, edited, validated, watched for drift and synthesized at a tenth
+  for tests. Its commands run in the docs tests, as its Python does: a
+  shell block marked `<!-- docs: run -->` runs each `polspec` line through
+  the CLI.
+- *Fake data from real data* gains *Related tables*: `synthesize_all`, its
+  sizes, how keys are found and how to declare them. *Infer a spec from
+  data* gains *Several tables*. *Known limitations* says what survives
+  between tables, and *Recipes* gains a fake copy of related tables and a
+  key the profile missed.
 
 ## [1.4.0] - 2026-11-15
 

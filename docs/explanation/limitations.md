@@ -117,12 +117,17 @@ either side, so `nobody@example.invalid` passes, `hostname` accepts
 identifiers is a `choices` list or a foreign key into the table that owns
 them. See [String formats](../how-to/formats.md).
 
-## Synthesized data is column by column
+## Synthesized data is related only by its keys
 
 `polspec.synthesize` profiles each column on its own and generates each on
 its own, so every column of the fake frame looks like the source's and no
-relationship between columns survives: a correlation, a conditional mix, a
-foreign key. A text column's format is recognised only among the formats
+relationship between columns survives: a correlation, a conditional mix.
+`polspec.synthesize_all` keeps the foreign keys between tables, found from
+the values or declared, so every fake child row has a fake parent. Nothing
+else between tables survives: how many children a parent has, or how a
+child's values follow its parent's. A key is looked for on single columns
+only: a composite key, or a hierarchy within a table, is never inferred.
+A text column's format is recognised only among the formats
 polspec knows, and from at least twenty distinct values; a code — an order
 reference, a postcode — is written as the pattern its values share when
 they have at most three shapes, and anything else, free text above all,
