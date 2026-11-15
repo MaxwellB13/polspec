@@ -104,10 +104,16 @@ jobs:
         run: uv run pytest
 
       # One leg measures coverage, and fails under the floor set in
-      # `[tool.coverage.report]`; the rest only run the suite.
+      # `[tool.coverage.report]`; the rest only run the suite. Coverage starts
+      # before pytest, not inside it as `pytest --cov` does: pytest loads
+      # polspec's own plugin (the `pytest11` entry point) at start-up, which
+      # imports the package before pytest-cov begins, so every module's
+      # top-level lines would count as missed.
       - name: Run tests with coverage
         if: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13' }}
-        run: uv run pytest --cov
+        run: |
+          uv run coverage run -m pytest
+          uv run coverage report
 
       - name: Run the worked example as a smoke test
         run: uv run python examples/related_specs.py

@@ -60,6 +60,7 @@ if TYPE_CHECKING:
         to_yaml,
     )
     from polspec.sizing import estimated_size
+    from polspec.strategies import strategy
     from polspec.synthesis import profile, synthesize
     from polspec.validation import (
         FINDING_COLUMN,
@@ -105,6 +106,7 @@ _LAZY: dict[str, str] = {
         "polspec.serialization",
     ),
     "estimated_size": "polspec.sizing",
+    "strategy": "polspec.strategies",
     "profile": "polspec.synthesis",
     "synthesize": "polspec.synthesis",
     **dict.fromkeys(
@@ -202,6 +204,7 @@ __all__ = [
     "sink_ipc",
     "sink_ndjson",
     "sink_parquet",
+    "strategy",
     "synthesize",
     "to_dict",
     "to_markdown",

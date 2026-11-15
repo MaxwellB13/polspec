@@ -32,6 +32,18 @@ page promises; before 1.0, a minor version could break any of them.
   failing test that polspec took part in says how to rerun it.
   `assert_valid` names the seed in its message, and `check_pipeline`
   generates from the test's seed under pytest.
+- **`strategy(spec, *, min_rows=, max_rows=)`**: frames a spec accepts, as a
+  Hypothesis strategy, for property tests. Each is `generate()` on a drawn
+  row count and seed, so it meets the spec by construction and follows its
+  distributions; a failure shrinks to the fewest rows that fail. Hypothesis
+  is not a dependency: it is imported when a strategy is asked for.
+
+### Changed
+
+- **CI measures coverage with `coverage run -m pytest`**, not
+  `pytest --cov`. pytest loads polspec's own plugin at start-up, which
+  imports the package before pytest-cov begins, so every module's top-level
+  lines counted as missed and coverage read 86% instead of 94%.
 
 ## [1.2.0] - 2026-11-14
 
