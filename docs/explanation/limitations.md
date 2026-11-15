@@ -42,7 +42,7 @@ no match within the column's `string_length`. That column is filled with
 plain random text, as before 1.4, and generation warns, naming the column
 and the reason. A pattern that every plain string already passes is
 filled with plain text too, on purpose: its seeded output stays what it
-was. See [String patterns](../how-to/columns.md#string-patterns).
+was. See [Patterns](../how-to/formats.md#patterns).
 
 ### `rows` does not limit `generate()`
 

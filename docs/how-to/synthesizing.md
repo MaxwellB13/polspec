@@ -133,7 +133,8 @@ values over every code; it is named once the column holds more distinct
 codes than `max_unique_enum`, or is `replace`d. `formats=False`, or
 `--no-formats`, turns it off. A shape polspec has no
 format for — a product code, a postcode — is still text of its lengths;
-declare a `pattern` on the profiled spec to validate it.
+declare a [`pattern`](formats.md#patterns) on the profiled spec, which then
+validates the shape and generates values that follow it.
 
 A float column's NaNs are carried over as a share: the profile records
 `nan_probability`, and the fake column holds NaN on as many of its present

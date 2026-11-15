@@ -44,10 +44,53 @@ A validator is deliberately wider than its sampler where real data is: an
 uppercase UUID from another system validates, even though polspec generates
 lowercase ones. It is never wider than the standard it names.
 
-For any other shape, declare a [`pattern=`](columns.md#string-patterns):
+For any other shape, declare a [`pattern=`](#patterns):
 it is generated from and checked as a format is. A format names the shape
 and keeps its test exactly as wide as the standard; a pattern says the
 shape itself.
+
+## Patterns
+
+`pattern=` is a regular expression every value must match. Generation
+fills the column with full matches of it, so generated data passes:
+
+```python
+class Orders(FrameSpec):
+    order_ref = ColSpec(pl.String, pattern=r"^ORD-\d{6}$", unique=True)
+    postcode  = ColSpec(pl.String, pattern=r"^[A-Z]{1,2}\d[A-Z\d]? \d[A-Z]{2}$")
+
+orders = Orders.generate(1_000, seed=1)
+Orders.validate(orders)
+```
+
+*Generated from since 1.4.*
+
+The values are drawn through the automaton Polars' own regex engine builds
+for the pattern, so generation and validation read it alike:
+
+- **Characters:** ASCII wherever the pattern allows it, so `\w` draws
+  `[A-Za-z0-9_]` and `.` printable ASCII; a pattern that needs `é` draws it.
+- **Lengths:** within `string_length` when declared, counted in characters
+  as validation counts them. An unbounded repeat (`+`, `*`, `{n,}`) runs to
+  16 characters past the pattern's shortest match.
+- **Unique:** `unique=True` draws each value of the pattern once, as for any
+  other unique column; a pattern with fewer values than rows is refused.
+
+Two kinds of pattern are filled with plain random text instead, as before
+1.4:
+
+- **One every plain string already passes**, such as `^[A-Za-z0-9]+$`. Its
+  output stays exactly what it was, as seeded output does across 1.x.
+- **One the generator cannot follow:** a Unicode word boundary (`\b`; the
+  ASCII `(?-u:\b)` works), an automaton too large to build, or no match
+  within the declared `string_length`. Generation warns, naming the
+  column and the reason; validate with `pattern=False`, or pin the column
+  with [`generate(fixed=)`](generating.md#pinning-columns-fixed).
+
+Reach for `format` when the shape is one polspec names (`email`, `uuid4`,
+...); reach for `pattern` for any other. The two cannot be combined. A pattern is compiled by Polars' regex engine at
+declaration, so one Polars cannot run (look-around, for instance) is refused
+with the engine's own message rather than failing on the first validation.
 
 ## What a format promises
 

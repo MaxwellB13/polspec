@@ -70,6 +70,37 @@ assert Events.generate(1_000, seed=0)["at"].is_sorted()
 `["user_id", "at"]` sorts within each user. `scan()` cannot produce an
 ordered frame; see [Row order](constraints.md#row-order-__order_by__).
 
+### An order reference, a postcode, a SKU
+
+A `pattern` is generated from, so a code with a shape needs nothing else,
+and `unique=True` draws each value once:
+
+```python
+class Parcels(FrameSpec):
+    ref      = ColSpec(pl.String, pattern=r"^PCL-\d{8}$", unique=True)
+    postcode = ColSpec(pl.String, pattern=r"^[A-Z]{1,2}\d[A-Z\d]? \d[A-Z]{2}$")
+
+Parcels.validate(Parcels.generate(1_000, seed=1))
+```
+
+*Added in 1.4.* See [Patterns](formats.md#patterns).
+
+### A total computed from other columns
+
+`derive=` declares the expression; generation computes it, and
+validation holds the column to it:
+
+```python
+class Lines(FrameSpec):
+    qty   = ColSpec(pl.Int64, bounds=(1, 20))
+    price = ColSpec(pl.Float64, bounds=(0.5, 100))
+    total = ColSpec(pl.Float64, derive=col("qty") * col("price"))
+
+Lines.validate(Lines.generate(1_000, seed=1))
+```
+
+*Added in 1.4.* See [Derived columns](constraints.md#derived-columns-derive).
+
 ### A nullable foreign key
 
 Declare the column nullable. A null references nothing, so it is neither
@@ -143,6 +174,15 @@ big_orders = (
     .filter(pl.col("total") > 400)
 )
 ```
+
+### Check a lazy pipeline's shape without running it
+
+```python
+pipeline = pl.LazyFrame(schema=Orders.spec.schema()).with_columns(pl.col("total") * 2)
+Orders.validate(pipeline, schema_only=True)   # columns and dtypes; no rows read
+```
+
+*Added in 1.4.* See [The schema alone](validating.md#the-schema-alone).
 
 ### Quarantine the bad rows
 

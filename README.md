@@ -56,11 +56,12 @@ Orders.validate(orders)                        # ~27 ms; raises on any breach
 - **Every Polars dtype.** Integers to 128 bits, `Decimal`, time-zoned
   `Datetime`, `Enum`, `Categorical`, and `List`, `Array` and `Struct` nested
   to any depth (plus `Map` on Polars 2). Bounds, choices with weights,
-  distributions, formats such as `email` and `uuid4`, uniqueness, nulls and
-  NaNs are all declared per column.
+  distributions, formats such as `email` and `uuid4`, regex patterns,
+  uniqueness, nulls and NaNs are all declared per column, and all of them
+  generate.
 - **Tables that relate.** Foreign keys within and across specs, conditional
-  rules, composite keys, row order and hierarchies are generated to hold, and
-  validated; a row count is validated. Joining two specs gives the spec of
+  rules, columns derived from others, composite keys, row order and
+  hierarchies are generated to hold, and validated; a row count is validated. Joining two specs gives the spec of
   the joined frame.
   Checks written as Polars expressions are enforced at validation.
 - **Validation as data.** `inspect()` returns every finding at once, with the

@@ -17,6 +17,7 @@ nav = [
     { "Coming from another tool" = "how-to/coming-from.md" },
     { "Declaring a spec" = [
       { "Declare columns" = "how-to/columns.md" },
+      { "Nested columns" = "how-to/nested.md" },
       { "Infer a spec from data" = "how-to/profiling.md" },
       { "String formats" = "how-to/formats.md" },
       { "Constraints" = "how-to/constraints.md" },
