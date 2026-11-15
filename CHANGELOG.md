@@ -57,6 +57,15 @@ page promises; before 1.0, a minor version could break any of them.
   An Enum inside a `List` or `Struct` keeps the dtype's own. Spec files are
   unchanged.
 
+### Documentation
+
+- **Validation is benchmarked.** `benchmarks/validation.py` validates the
+  same million orders and their customers with polspec, dataframely and
+  pandera, each written as its documentation writes it, eager and lazy.
+  *Comparison* has the numbers: polspec is 1.3 to 2 times as fast, the
+  gap between one aggregation and several passes. dataframely and pandera
+  join the `bench` dependency group only.
+
 ## [1.4.0] - 2026-11-15
 
 **Generate what you validate.** A `pattern` column is generated from its

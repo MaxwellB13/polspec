@@ -65,11 +65,47 @@ uv run --group bench python benchmarks/bench.py record   # before a change
 uv run --group bench python benchmarks/bench.py check    # after it
 ```
 
-Generation speed is only half the story — [validation](../how-to/validating.md)
-compiles every check across every column into a single Polars aggregation,
-so validating a fifty-column table costs about the same as validating a
-five-column one. That isn't benchmarked here, since there's no equivalent
-"validate this by hand" baseline to compare it against.
+### Validation
+
+[Validation](../how-to/validating.md) compiles every check across every
+column into one Polars aggregation. `benchmarks/validation.py` validates the
+same two valid frames with polspec, dataframely and pandera: orders, and the
+customers they belong to, one for every ten orders. The claims are the same
+for each tool: a unique id, a key into the customers (their own id unique),
+a nullable column of three values, a nullable bounded float, a pattern and
+a bounded integer.
+
+Each tool is written as its documentation writes it:
+
+- **polspec:** a `Registry` over two `FrameSpec`s.
+- **dataframely:** a `Collection` whose filter keeps the orders of known
+  customers. A collection needs a primary key its members share, so an
+  order's is its customer and its own id, and checking it is part of
+  dataframely's time.
+- **pandera:** two `DataFrameSchema`s, with the key as a custom check.
+
+A lazy run lasts until the validated frames are collected, since
+dataframely validates a lazy frame when it is collected; pandera's is asked
+to check the data as well as the schema. Every run was checked to fail on
+each claim broken. The times are the fastest of five runs, after one to
+warm up.
+
+| Orders      | polspec eager | polspec lazy | dataframely eager | dataframely lazy | pandera eager | pandera lazy |
+|------------:|--------------:|-------------:|------------------:|-----------------:|--------------:|-------------:|
+|   1,000,000 |       0.0338s |      0.0283s |           0.0444s |          0.0452s |       0.0563s |      0.0566s |
+|  10,000,000 |       0.7276s |      0.7279s |           1.0109s |          1.2887s |       1.3347s |      1.3171s |
+
+Measured 2026-11-15 with polspec 1.5 (before release), Polars 1.44.2,
+dataframely 3.1.2 and pandera 0.36.0, on the same machine as above. All
+three tools hand the work to Polars, so the gap is narrow: polspec is
+between 1.3 and 2 times as fast. It is the gap between one aggregation and
+several passes, not between Rust and Python. A different frame — more
+columns, more patterns, failures to report — will move it. Rerun it:
+
+```bash
+uv run --group bench python benchmarks/validation.py
+uv run --group bench python benchmarks/validation.py --rows 10000000
+```
 
 ## Compared to hand-written fixtures
 

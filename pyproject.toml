@@ -60,7 +60,9 @@ polspec = "polspec._pytest"
 
 [dependency-groups]
 bench = [
+    "dataframely>=3.1.2",
     "numpy>=2.5.2",
+    "pandera[polars]>=0.36.0",
 ]
 dev = [
     "pytest>=9.1.1",
