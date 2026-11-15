@@ -95,6 +95,14 @@ production will reject.
 
     [Fake data from real data](how-to/synthesizing.md)
 
+- **Tests that say what broke**
+
+    `assert_valid` fails a test with the findings, the failing rows and the
+    seed to rerun it with; a pytest fixture gives each test frames from a
+    seed of its own; `strategy` hands a spec to Hypothesis.
+
+    [Test pipelines](how-to/testing.md)
+
 - **What changed**
 
     Diff two versions of a spec, or a spec against data, into a report that

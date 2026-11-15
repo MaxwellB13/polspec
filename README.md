@@ -75,6 +75,10 @@ Orders.validate(orders)                        # ~27 ms; raises on any breach
 - **Specs as files and docs.** Save and load specs as YAML or Python. Render
   a Markdown data dictionary or a Mermaid ER diagram. A spec pickles, and
   reads as an Arrow schema: `pl.Schema(Orders)`.
+- **Tests that say what broke.** `assert_valid` fails a test with the
+  findings, the failing rows and the seed to rerun it with. A pytest fixture
+  gives each test frames from a seed of its own, and `strategy` hands a
+  spec to Hypothesis.
 - **A CLI for your pipeline.** `polspec validate`, `generate`, `drift` and
   `synthesize`, with exit codes for CI.
 - **Deterministic.** The same seed gives the same data on every Polars from

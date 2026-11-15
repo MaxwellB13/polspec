@@ -9,6 +9,22 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-15
+
+**Tests that say what broke.** `assert_valid` checks a frame at the end of a
+test and, when it fails, names each finding, shows the failing rows and the
+seed to rerun with. `check_pipeline` tests a whole pipeline in one call. A
+pytest plugin gives each test frames from a seed of its own, so adding a
+test changes no other test's data, and `strategy` hands a spec to
+Hypothesis. `polspec test` writes its tests with them. The docs gain
+*Recipes* and a page for readers coming from dataframely, pandera or
+Pointblank. Everything is additive under the 1.0 promises, and **no seeded
+output changes**; nothing is deprecated.
+
+The spec-file format stays at version 4, and 1.3 writes nothing 1.2 cannot
+read. The plugin loads whenever pytest runs with polspec installed;
+`-p no:polspec` turns it off.
+
 ### Added
 
 - **`assert_valid(df, spec, **options)`**: `validate()` as an assertion,
@@ -3052,7 +3068,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/MaxwellB13/polspec/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/MaxwellB13/polspec/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/MaxwellB13/polspec/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/MaxwellB13/polspec/compare/v0.23.0...v1.0.0
