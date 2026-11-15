@@ -60,6 +60,7 @@ def _cmd_synthesize(args: argparse.Namespace) -> int:
                 sample=args.sample,
                 max_unique_enum=args.max_unique_enum,
                 formats=not args.no_formats,
+                patterns=not args.no_patterns,
                 parse_text=args.parse_text,
                 name=name,
             )
@@ -118,6 +119,7 @@ def _synthesize_related(args: argparse.Namespace, sources: list[Path]) -> int:
                 sample=args.sample,
                 max_unique_enum=args.max_unique_enum,
                 formats=not args.no_formats,
+                patterns=not args.no_patterns,
                 parse_text=args.parse_text,
             )
         except ValueError as exc:
@@ -220,6 +222,11 @@ def add_synthesize_parser(subparsers: argparse._SubParsersAction) -> None:
         "--no-formats",
         action="store_true",
         help="Do not name the format a text column's values have (email, uuid4, ...)",
+    )
+    synthesize.add_argument(
+        "--no-patterns",
+        action="store_true",
+        help="Do not write the pattern a code-like text column's values share (ORD-[0-9]{6}, ...)",
     )
     synthesize.add_argument(
         "--parse-text",

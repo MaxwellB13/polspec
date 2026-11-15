@@ -225,7 +225,7 @@ class ColSpec:
     >>> ColSpec(pl.Int64, bounds=(1, 100), nullable=True, null_probability=0.2)
     ColSpec(Int64, nullable=True, bounds=(1, 100), null_probability=0.2)
     >>> ColSpec(pl.String, choices={"NEW": 0.75, "PAID": 0.25})
-    ColSpec(String, choices=('NEW', 'PAID'), weights=(0.75, 0.25))
+    ColSpec(String, choices={'NEW': 0.75, 'PAID': 0.25})
     >>> ColSpec(pl.Enum, choices={"NEW": 0.75, "PAID": 0.25}).dtype
     Enum(categories=['NEW', 'PAID'])
     """
@@ -341,10 +341,12 @@ class ColSpec:
 
     def __repr__(self) -> str:
         """The column as declared: its dtype, then each field that differs
-        from its default -- `ColSpec(Int64, bounds=(0, 10))`."""
-        parts = [repr(self.dtype)]
+        from its default -- `ColSpec(Int64, bounds=(0, 10))`. An Enum's
+        categories, and weighted choices, are written as `choices`, each
+        beside its weight: `ColSpec(Enum, choices={'A': 0.7, 'B': 0.3})`."""
+        parts, shown_as_choices = self._choices_repr()
         for f in dataclasses.fields(self):
-            if f.name == "dtype" or not f.repr:
+            if f.name == "dtype" or not f.repr or f.name in shown_as_choices:
                 continue
             value = getattr(self, f.name)
             default = (
@@ -362,6 +364,27 @@ class ColSpec:
             shown = (value.min, value.max) if isinstance(value, Bound) else value
             parts.append(f"{f.name}={shown!r}")
         return f"ColSpec({', '.join(parts)})"
+
+    def _choices_repr(self) -> tuple[list[str], frozenset[str]]:
+        """The `repr`'s opening parts -- the dtype, and the choices when
+        they are written with it -- and the fields those parts show."""
+        dtype, values, weights = self.dtype, self.choices, self.weights
+        if isinstance(dtype, pl.Enum) and values is None:
+            # Its categories are its choices: the spelling it accepts.
+            values = tuple(dtype.categories.to_list())
+            first = "Enum"
+        elif values is not None and weights is not None:
+            first = repr(dtype)
+        else:
+            return [repr(dtype)], frozenset()
+        if weights is None:
+            shown = f"choices={list(values)!r}"
+        else:
+            pairs = ", ".join(
+                f"{v!r}: {w!r}" for v, w in zip(values, weights, strict=True)
+            )
+            shown = f"choices={{{pairs}}}"
+        return [first, shown], frozenset({"choices", "weights"})
 
     def __eq__(self, other: object) -> bool:
         """Field by field, as a dataclass compares -- a `col()` expression

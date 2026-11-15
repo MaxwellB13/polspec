@@ -166,7 +166,21 @@ def test_a_tablespec_names_each_column_as_itself_and_names_are_read_only():
         ),
         (
             ColSpec(pl.Enum, choices={"A": 0.5, "B": 0.5}),
-            "ColSpec(Enum(categories=['A', 'B']), weights=(0.5, 0.5))",
+            "ColSpec(Enum, choices={'A': 0.5, 'B': 0.5})",
+        ),
+        (ColSpec(pl.Enum(["A", "B"])), "ColSpec(Enum, choices=['A', 'B'])"),
+        (
+            ColSpec(pl.String, choices={"NEW": 0.75, "PAID": 0.25}),
+            "ColSpec(String, choices={'NEW': 0.75, 'PAID': 0.25})",
+        ),
+        (ColSpec(pl.String, choices=["a", "b"]), "ColSpec(String, choices=('a', 'b'))"),
+        (
+            ColSpec(pl.Enum(["A", "B", "C"]), choices={"A": 0.5, "B": 0.5}),
+            "ColSpec(Enum(categories=['A', 'B', 'C']), choices={'A': 0.5, 'B': 0.5})",
+        ),
+        (
+            ColSpec(pl.List(pl.Enum(["a"]))),
+            "ColSpec(List(Enum(categories=['a'])))",
         ),
         (
             ColSpec(pl.Int8, rules=[ColRule(when=col("x") > 1, choices=[1])]),
@@ -176,6 +190,11 @@ def test_a_tablespec_names_each_column_as_itself_and_names_are_read_only():
 )
 def test_a_column_prints_only_what_it_declares(column, shown):
     assert repr(column) == shown
+    if "Enum" in shown:
+        # What it shows of an Enum is a spelling it accepts.
+        source = shown.replace("Enum(categories=", "pl.Enum(")
+        source = source.replace("(Enum,", "(pl.Enum,").replace("List(", "pl.List(")
+        assert eval(source, {"ColSpec": ColSpec, "pl": pl}) == column  # noqa: S307
 
 
 def test_a_spec_prints_one_column_to_a_line_and_its_table_claims():

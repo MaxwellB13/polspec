@@ -119,6 +119,11 @@ def _add_schema_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Do not name the format a text column's values have (email, uuid4, ...)",
     )
     infer.add_argument(
+        "--no-patterns",
+        action="store_true",
+        help="Do not write the pattern a code-like text column's values share (ORD-[0-9]{6}, ...)",
+    )
+    infer.add_argument(
         "--parse-text",
         action="store_true",
         help=(

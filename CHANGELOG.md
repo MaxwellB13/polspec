@@ -37,6 +37,25 @@ page promises; before 1.0, a minor version could break any of them.
   `--foreign-key Orders.buyer=Customers.id` declares a key and
   `--no-foreign-keys` finds none. `synthesize --scale X` sizes the output
   as a multiple of the source's, for one file too.
+- **`profile` writes a code's shape as its `pattern`.** A text column of at
+  least 20 distinct values that no format fits and that is not an `Enum`
+  -- an order reference, a SKU, a postcode -- gets the pattern its values
+  share when they have at most three shapes: each run of digits, capitals
+  or small letters becomes its class with the lengths seen, and a part
+  every value shares stays as written (`^ORD-[0-9]{6}$`). Every source
+  value matches, and the fake codes have the shape. Not for a `replace`d
+  column, for prose, or for numbers and dates written as text. A column of
+  distinct values gets one only when it holds ten times as many. `patterns=False`, or `--no-patterns`, turns it
+  off.
+
+### Changed
+
+- **A column's `repr` writes an Enum's categories, and weighted choices,
+  as `choices`:** `ColSpec(Enum, choices={'A': 0.5, 'B': 0.3, 'C': 0.2})`
+  rather than `ColSpec(Enum(categories=['A', 'B', 'C']), weights=(0.5, 0.3,
+  0.2))`, each category beside its share. It is a spelling `ColSpec` takes.
+  An Enum inside a `List` or `Struct` keeps the dtype's own. Spec files are
+  unchanged.
 
 ## [1.4.0] - 2026-11-15
 
