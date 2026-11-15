@@ -24,6 +24,7 @@ polspec synthesize orders.parquet -o fake_orders.parquet --replace customer_name
 ```bash
 polspec schema infer SOURCE -o OUTPUT.yaml [options]
 polspec schema infer SOURCE -o OUTPUT.py [options]
+polspec schema infer SOURCE -o - [options]
 ```
 
 `SOURCE` is a `.csv`, `.tsv`, `.parquet`, `.ndjson`/`.jsonl`, `.json`, or Arrow
@@ -35,6 +36,15 @@ reader and profiled with `FrameSpec.from_dataframe`, rounding what it writes;
 `FrameSpec.to_yaml`; `.py` writes a `FrameSpec` subclass via
 `FrameSpec.to_python` — a starting-point module you can edit like any other
 source file, rather than a data file `from_yaml` re-parses.
+
+`-o -` prints the YAML instead of writing a file, to read the spec before
+keeping it or to pipe it on. The summary line and any notes go to stderr,
+so redirecting stdout captures only the spec. *Added in 1.3.*
+
+```bash
+polspec schema infer orders.parquet -o - | less
+polspec schema infer orders.parquet -o - > orders.yaml
+```
 
 ```console
 $ polspec schema infer orders.parquet -o orders.yaml --weights

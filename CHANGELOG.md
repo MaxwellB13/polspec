@@ -37,6 +37,17 @@ page promises; before 1.0, a minor version could break any of them.
   row count and seed, so it meets the spec by construction and follows its
   distributions; a failure shrinks to the fewest rows that fail. Hypothesis
   is not a dependency: it is imported when a strategy is asked for.
+- **`polspec schema infer SOURCE -o -`** prints the YAML spec instead of
+  writing a file; the summary and any notes go to stderr, so redirecting
+  stdout captures only the spec.
+- **Docs: *Recipes*,** short answers to "how do I…" (a primary key, ids
+  `1..n`, sorted timestamps, an empty frame, quarantining bad rows, a drift
+  gate in CI, a nullable foreign key, a CSV read as text), each linking to
+  the page that covers it.
+- **Docs: *Coming from dataframely, pandera or Pointblank*,** a feature
+  table, a concept map and one schema translated from each, checked against
+  their documentation on 2026-11-15. *Comparison* names the three, and says
+  how polspec and Hypothesis now combine.
 
 ### Changed
 

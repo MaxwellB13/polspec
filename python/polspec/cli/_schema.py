@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from polspec import FrameSpec
@@ -15,6 +16,7 @@ from polspec.cli._io import (
     _warnings_printed,
 )
 from polspec.errors import CliError
+from polspec.serialization import to_yaml
 
 
 def _cmd_schema_infer(args: argparse.Namespace) -> int:
@@ -50,6 +52,18 @@ def _cmd_schema_infer(args: argparse.Namespace) -> int:
             raise CliError(str(exc)) from exc
 
     _note_text(spec_cls.spec)
+    summary = (
+        f"Inferred {len(spec_cls.spec.columns)} column(s) from "
+        f"{df.height:,} row(s) of {source}"
+    )
+    if args.output == "-":
+        # The spec is the output: YAML on stdout, everything else on stderr,
+        # so `polspec schema infer data.csv -o - > spec.yaml` holds only it.
+        with _warnings_printed():
+            text = to_yaml(spec_cls.spec)
+        sys.stdout.write(text)
+        print(summary, file=sys.stderr)
+        return 0
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     writer = spec_cls.to_python if output.suffix.lower() == ".py" else spec_cls.to_yaml
@@ -57,10 +71,7 @@ def _cmd_schema_infer(args: argparse.Namespace) -> int:
         writer(output)
     _maybe_format(output)
 
-    print(
-        f"Inferred {len(spec_cls.spec.columns)} column(s) from "
-        f"{df.height:,} row(s) of {source} -> {output}"
-    )
+    print(f"{summary} -> {output}")
     return 0
 
 

@@ -101,6 +101,21 @@ def test_schema_infer_produces_a_generatable_spec(sample_data, tmp_path):
     assert set(df.columns) == {"order_id", "status", "total"}
 
 
+def test_schema_infer_to_a_dash_prints_the_yaml_and_only_it(
+    sample_data, tmp_path, capsys
+):
+    out = tmp_path / "orders.yaml"
+    run_cli("schema", "infer", sample_data, "-o", out)
+    written = out.read_text(encoding="utf-8")
+    capsys.readouterr()
+
+    assert run_cli("schema", "infer", sample_data, "-o", "-") == 0
+    printed = capsys.readouterr()
+    assert printed.out == written
+    assert "Inferred 3 column(s)" in printed.err
+    assert not (tmp_path / "-").exists()
+
+
 def test_schema_infer_custom_name(sample_data, tmp_path):
     out = tmp_path / "orders.yaml"
     run_cli("schema", "infer", sample_data, "-o", out, "--name", "MyOrders")

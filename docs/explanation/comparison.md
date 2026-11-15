@@ -146,33 +146,48 @@ validates.
 
 ## Compared to property-based testing (Hypothesis)
 
-[Hypothesis](https://hypothesis.readthedocs.io/) solves a genuinely different
-problem well: given a strategy for producing values, explore the space of
-possible inputs, and when one fails, *shrink* it to the smallest failing
-case. polspec has no shrinking and makes no attempt at exhaustive space
-exploration — `method="cartesian"` is a fixed, deterministic set of
-known-important combinations (every enum value, every numeric sign, null),
-not an open-ended search.
+[Hypothesis](https://hypothesis.readthedocs.io/) explores the space of
+possible inputs and, when one fails, *shrinks* it to the smallest failing
+case. polspec does not search on its own: `method="cartesian"` is a fixed,
+deterministic set of known-important combinations (every enum value, every
+numeric sign, null), not an open-ended exploration.
 
-These are complementary rather than competing: a `FrameSpec.generate(n,
-seed=...)` call is a perfectly good data source *inside* a Hypothesis
-strategy or a `@given` test, if what you need is Hypothesis's shrinking on
-top of polspec's schema-shaped, Polars-native output.
+The two combine. [`polspec.strategy(Orders)`](../how-to/testing.md#many-frames-property-tests-with-strategy)
+is a Hypothesis strategy of frames the spec accepts: Hypothesis draws a row
+count and a seed, and shrinks a failure to the fewest rows that still fail.
+The values themselves come from the seed and do not shrink one by one.
 
-## Compared to data-quality frameworks (Great Expectations, pandera, ...)
+## Compared to dataframely, pandera and Pointblank
 
-These frameworks are built around a different center of gravity: validating,
+These are the nearest tools: each validates Polars frames, and dataframely
+and Pointblank generate data from a schema too. dataframely samples a frame
+that meets its schema and rules, and related tables as a collection.
+Pointblank generates realistic names and addresses for 100 countries, and
+strings from a regex, and reports validation with thresholds and actions.
+pandera's data synthesis is not yet available for Polars.
+
+polspec's ground among them is generation at volume, in Rust, with
+cross-table keys, lazy output and file sinks, and the spec's life after it
+is written: profiling it from data, and drift between it and the data or
+another version of it. It has no typed frames, does not generate from a
+regex, and leaves reporting to the caller.
+[Coming from another tool](../how-to/coming-from.md) has a feature table,
+a concept map and one schema translated from each; it was checked against
+their documentation on 2026-11-15.
+
+## Compared to data-quality platforms (Great Expectations, ...)
+
+These are built around a different center of gravity: validating,
 profiling, and monitoring data that already exists — often production
-tables, with drift detection and reporting as first-class concerns. That's a
-larger and more operational surface than polspec's `validate()`, which is
-schema-shaped correctness checking, not statistical monitoring.
+tables, with scheduling, history and dashboards. That is a larger and more
+operational surface than polspec's `validate()` and `drift()`, which answer
+when asked.
 
-The distinguishing feature runs the other way, too: most validation-first
-tools don't generate matching synthetic data for you. `FrameSpec` is meant to
-be small enough to declare once and use for both jobs in a test suite, not to
-replace a data-quality platform watching a production warehouse.
+`FrameSpec` is meant to be small enough to declare once and use for both
+jobs in a test suite, not to replace a data-quality platform watching a
+production warehouse.
 
-[Patito](https://github.com/JakobGM/patito) is the closest in spirit: a
+[Patito](https://github.com/JakobGM/patito) is close in spirit: a
 Polars frame declared as a Pydantic model, validated against it, and able to
 fill in example rows for a test from the values you give. polspec's
 declaration is not a Pydantic model, and its generation goes further — whole
@@ -192,9 +207,10 @@ Worth being direct about, in the same spirit as the
   against its declaration and says what moved, but there are no dashboards,
   no scheduling, no history kept between runs and no anomaly scoring —
   polspec answers when asked.
-- **Not a property-based shrinking engine.** No search, no shrinking —
-  `method="cartesian"` is a fixed set of known-important cases, not an
-  open-ended exploration.
+- **Not a property-based testing engine.** `method="cartesian"` is a fixed
+  set of known-important cases; for search and shrinking, hand
+  [`strategy`](../how-to/testing.md#many-frames-property-tests-with-strategy)
+  to Hypothesis.
 - **Not everything that validates generates.**
   `__checks__`/`ColSpec.validators`/`ColSpec.pattern` are validated but not
   generated, by design — see [Known limitations](limitations.md).
