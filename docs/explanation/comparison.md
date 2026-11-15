@@ -169,8 +169,8 @@ pandera's data synthesis is not yet available for Polars.
 polspec's ground among them is generation at volume, in Rust, with
 cross-table keys, lazy output and file sinks, and the spec's life after it
 is written: profiling it from data, and drift between it and the data or
-another version of it. It has no typed frames, does not generate from a
-regex, and leaves reporting to the caller.
+another version of it. It has no typed frames, and leaves reporting to
+the caller.
 [Coming from another tool](../how-to/coming-from.md) has a feature table,
 a concept map and one schema translated from each; it was checked against
 their documentation on 2026-11-15.
@@ -211,9 +211,9 @@ Worth being direct about, in the same spirit as the
   set of known-important cases; for search and shrinking, hand
   [`strategy`](../how-to/testing.md#many-frames-property-tests-with-strategy)
   to Hypothesis.
-- **Not everything that validates generates.**
-  `__checks__`/`ColSpec.validators`/`ColSpec.pattern` are validated but not
-  generated, by design — see [Known limitations](limitations.md).
+- **Not everything that validates generates.** `__checks__` and
+  `ColSpec.validators` are validated but not generated, by design — see
+  [Known limitations](limitations.md).
 
 ## Where it fits
 

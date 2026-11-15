@@ -117,6 +117,13 @@ class OnePattern(FrameSpec):
     c = ColSpec(pl.String, pattern=r"^[A-Z]{2}-\d{4,6}(-(EU|US|UK))?$")
 
 
+class UniquePattern(FrameSpec):
+    """A unique pattern: each value decoded from its index in the pattern's
+    numbering, through a keyed permutation."""
+
+    c = ColSpec(pl.String, pattern=r"^[A-Z]{2}-[0-9]{6}$", unique=True)
+
+
 class OneInt(FrameSpec):
     c = ColSpec(
         pl.Int64, bounds=Bound(INT_LO, INT_HI), nullable=True, null_probability=NULL_P
@@ -416,6 +423,7 @@ CASES: tuple[Case, ...] = (
         "unique_crowded", "regression", (1_000_000, 10_000_000), _polspec(UniqueCrowded)
     ),
     Case("unique_string", "regression", (1_000_000,), _polspec(UniqueString)),
+    Case("unique_pattern", "regression", (1_000_000,), _polspec(UniquePattern)),
     # The passes that rewrite a frame after the engine has filled it.
     Case(
         "cartesian", "regression", (1_000_000,), _polspec(Coverage, method="cartesian")

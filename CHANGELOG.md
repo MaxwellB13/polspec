@@ -18,7 +18,17 @@ page promises; before 1.0, a minor version could break any of them.
   validation. ASCII wherever the pattern allows it; within
   `string_length` when declared; an unbounded repeat runs to 16 characters
   past the shortest match. A list of strings with a pattern generates its
-  elements the same way. A million values take about 8 ms.
+  elements the same way. `unique=True` draws each of the pattern's values
+  once: they are counted at each length, so an index decodes to one value,
+  and the column is a keyed permutation of them like any other unique
+  column. A million values take about 8 ms.
+- **A warning for a pattern the generator cannot follow** -- a Unicode word
+  boundary, an automaton over its size limit, no match within the declared
+  `string_length` -- naming the column and the reason. The column is
+  filled with plain random text, as before.
+- **`polspec test` checks patterns.** A generated test no longer passes
+  `pattern=False`, except for a pattern the generator cannot follow, with
+  a comment naming it and why.
 
 ### Changed
 

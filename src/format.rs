@@ -20,6 +20,26 @@ use rand::Rng;
 use rand::distr::{Distribution as _, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
 
+/// A value space a unique string column can be a permutation of: numbered
+/// `[0, cardinality())`, each index decoding to a distinct value.
+pub trait Enumerable {
+    fn cardinality(&self) -> u128;
+    fn decode(&self, index: u128, out: &mut Vec<u8>);
+    fn max_bytes(&self) -> usize;
+}
+
+impl Enumerable for Template {
+    fn cardinality(&self) -> u128 {
+        Template::cardinality(self)
+    }
+    fn decode(&self, index: u128, out: &mut Vec<u8>) {
+        Template::decode(self, index, out);
+    }
+    fn max_bytes(&self) -> usize {
+        Template::max_bytes(self)
+    }
+}
+
 /// One piece of a templated string.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Part {

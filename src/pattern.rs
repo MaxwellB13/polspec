@@ -14,6 +14,12 @@
 //! and walks: at each step it chooses uniformly among the units that keep an
 //! accepting end in reach, so the walk never dead-ends and needs no retry.
 //!
+//! A unique column numbers the strings instead: for each state and length,
+//! how many unit strings end in a match from there, so an index in
+//! `[0, cardinality())` decodes to one string and distinct indices to
+//! distinct strings -- what a keyed permutation needs, as a format's
+//! template provides it.
+//!
 //! Lengths are counted in characters, as `string_length` and validation
 //! count them. A pattern out of reach -- an automaton too large, a Unicode
 //! word boundary, no match within the lengths allowed -- is an `Err` naming
@@ -21,6 +27,8 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, OnceLock};
+
+use crate::format::Enumerable;
 
 use rand::RngExt;
 use rand_xoshiro::Xoshiro256PlusPlus;
@@ -45,6 +53,8 @@ pub const UNBOUNDED_EXTRA: usize = 16;
 const MAX_EXTRA_UNITS: usize = 512;
 /// The most taken from any one range of a class.
 const PER_RANGE: u32 = 8;
+/// The most counts a unique pattern may keep: states times lengths.
+const MAX_COUNTS: usize = 4 << 20;
 
 /// The units leaving one state for the same next state.
 #[derive(Debug)]
@@ -66,6 +76,10 @@ pub struct PatternSampler {
     lengths: Vec<u32>,
     start: u32,
     max_bytes: usize,
+    /// For a unique column, computed when first asked for: `counts[k][s]`,
+    /// how many strings of exactly `k` units end in a match from state `s`,
+    /// saturating.
+    counts: OnceLock<Result<Vec<Vec<u128>>, String>>,
 }
 
 impl PatternSampler {
@@ -76,6 +90,46 @@ impl PatternSampler {
     /// An upper bound on one value's bytes.
     pub fn max_bytes(&self) -> usize {
         self.max_bytes
+    }
+
+    /// The counts behind `cardinality` and `decode`; an error when there
+    /// would be too many to keep.
+    pub fn counts(&self) -> Result<&Vec<Vec<u128>>, String> {
+        self.counts
+            .get_or_init(|| {
+                let longest = *self.lengths.last().expect("at least one length") as usize;
+                if self.groups.len().saturating_mul(longest + 1) > MAX_COUNTS {
+                    return Err(
+                        "it has too many states and lengths to number its values for \
+                         unique=True"
+                            .to_string(),
+                    );
+                }
+                let mut counts: Vec<Vec<u128>> = Vec::with_capacity(longest + 1);
+                counts.push(
+                    (0..self.groups.len() as u32)
+                        .map(|s| u128::from(self.viable(0, s)))
+                        .collect(),
+                );
+                for k in 1..=longest {
+                    let below = &counts[k - 1];
+                    let layer = self
+                        .groups
+                        .iter()
+                        .map(|groups| {
+                            groups.iter().fold(0u128, |total, g| {
+                                total.saturating_add(
+                                    (g.units.len() as u128).saturating_mul(below[g.next as usize]),
+                                )
+                            })
+                        })
+                        .collect();
+                    counts.push(layer);
+                }
+                Ok(counts)
+            })
+            .as_ref()
+            .map_err(Clone::clone)
     }
 
     /// Writes one value into `out`.
@@ -104,6 +158,60 @@ impl PatternSampler {
                 pick -= size;
             }
         }
+    }
+}
+
+impl Enumerable for PatternSampler {
+    /// How many distinct values the pattern has at its lengths, saturating.
+    /// Zero until `counts` has succeeded; a unique plan asks for it first.
+    fn cardinality(&self) -> u128 {
+        let Ok(counts) = self.counts() else {
+            return 0;
+        };
+        self.lengths.iter().fold(0u128, |total, &k| {
+            total.saturating_add(counts[k as usize][self.start as usize])
+        })
+    }
+
+    /// The value at `index`: its length by the counts of the shorter ones,
+    /// then each unit by the counts of what can follow it. Distinct indices
+    /// below `cardinality()` give distinct values; a saturated count reads
+    /// as the number it is, as a template's saturated radix does.
+    fn decode(&self, mut index: u128, out: &mut Vec<u8>) {
+        out.clear();
+        let counts = self.counts().expect("counted before decoding");
+        let mut length = *self.lengths.last().expect("at least one length") as usize;
+        for &k in &self.lengths {
+            let here = counts[k as usize][self.start as usize];
+            if index < here {
+                length = k as usize;
+                break;
+            }
+            index -= here;
+        }
+        let mut state = self.start;
+        for remaining in (0..length).rev() {
+            let below = &counts[remaining];
+            for group in &self.groups[state as usize] {
+                let each = below[group.next as usize];
+                if each == 0 {
+                    continue;
+                }
+                let block = (group.units.len() as u128).saturating_mul(each);
+                if index < block {
+                    let unit = (index / each) as usize;
+                    index %= each;
+                    out.extend_from_slice(self.units[group.units[unit] as usize].as_bytes());
+                    state = group.next;
+                    break;
+                }
+                index -= block;
+            }
+        }
+    }
+
+    fn max_bytes(&self) -> usize {
+        self.max_bytes
     }
 }
 
@@ -320,6 +428,7 @@ fn build_over(
         viable,
         lengths: fits,
         start,
+        counts: OnceLock::new(),
     })
 }
 
@@ -498,6 +607,52 @@ mod tests {
                 .unwrap_err()
                 .contains("does not compile")
         );
+    }
+
+    #[test]
+    fn a_pattern_numbers_its_values_one_to_one() {
+        let sampler = sampler(r"^[ab]{1,3}$", None).unwrap();
+        assert_eq!(sampler.cardinality(), 2 + 4 + 8);
+        let re = Regex::new(r"^[ab]{1,3}$").unwrap();
+        let mut seen = HashSet::new();
+        let mut out = Vec::new();
+        for index in 0..sampler.cardinality() {
+            sampler.decode(index, &mut out);
+            let value = String::from_utf8(out.clone()).unwrap();
+            assert!(re.is_match(&value), "{value:?}");
+            assert!(seen.insert(value), "index {index} repeated a value");
+        }
+    }
+
+    #[test]
+    fn numbering_reads_alternations_and_non_ascii() {
+        for pattern in [r"^(cat|dog)s?$", r"^é{1,2}x?$", r"^ORD-[0-9]{2}$"] {
+            let sampler = sampler(pattern, None).unwrap();
+            let re = Regex::new(pattern).unwrap();
+            let mut seen = HashSet::new();
+            let mut out = Vec::new();
+            for index in 0..sampler.cardinality() {
+                sampler.decode(index, &mut out);
+                let value = String::from_utf8(out.clone()).unwrap();
+                assert!(re.is_match(&value), "{pattern} decoded {value:?}");
+                assert!(seen.insert(value));
+            }
+        }
+        assert_eq!(sampler(r"^(cat|dog)s?$", None).unwrap().cardinality(), 4);
+        assert_eq!(sampler(r"^ORD-[0-9]{2}$", None).unwrap().cardinality(), 100);
+    }
+
+    #[test]
+    fn a_huge_space_saturates_and_still_decodes_distinctly() {
+        let sampler = sampler(r"^.{30}$", None).unwrap();
+        assert_eq!(sampler.cardinality(), u128::MAX);
+        let mut out = Vec::new();
+        let mut seen = HashSet::new();
+        for index in [0, 1, 2, u128::MAX / 2, u128::MAX - 1] {
+            sampler.decode(index, &mut out);
+            assert_eq!(out.len(), 30);
+            assert!(seen.insert(out.clone()));
+        }
     }
 
     #[test]

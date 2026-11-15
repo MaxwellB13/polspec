@@ -155,9 +155,9 @@ def test_retyping_to_a_registry_category_drops_the_pattern_with_a_warning():
     assert retyped.columns["c"].pattern is None
 
 
-def test_the_generated_test_knows_a_pattern_is_validation_only(tmp_path):
-    """`polspec test` disables the check with a comment saying why, the way
-    it does for validators, rather than emitting a test it knows fails."""
+def test_the_generated_test_checks_a_pattern_it_generates(tmp_path):
+    """`polspec test` leaves the check on: the pattern is generated from, so
+    the test it writes validates it like any other claim."""
     source = tmp_path / "specs.py"
     source.write_text(
         textwrap.dedent(
@@ -174,5 +174,4 @@ def test_the_generated_test_knows_a_pattern_is_validation_only(tmp_path):
     out = tmp_path / "test_skus.py"
     assert main(["test", str(source), "-o", str(out)]) == 0
     text = out.read_text(encoding="utf-8")
-    assert "pattern=False" in text
-    assert "checked by validation only" in text
+    assert "pattern=False" not in text

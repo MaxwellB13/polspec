@@ -10,6 +10,7 @@ import decimal
 import functools
 import random
 import struct
+import warnings
 from typing import TYPE_CHECKING
 
 import polars as pl
@@ -374,22 +375,41 @@ def plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None]
     # A pattern: each value a full match of it, walked through the DFA
     # validation's engine builds -- unless every free string below already
     # passes it, whose output a seed keeps, or it is out of the generator's
-    # reach, when the column is the free string it was before 1.4. A unique
-    # pattern column is a free string for now.
-    if spec.pattern is not None and not spec.unique:
-        declared = (
-            (int(shortest), int(longest)) if spec.string_length is not None else None
-        )
-        status, _reason = pattern_status(
-            spec.pattern, declared, (int(shortest), int(longest))
-        )
+    # reach, when the column is the free string it was before 1.4.
+    if spec.pattern is not None:
+        status, reason = pattern_generation(spec)
         if status == "generate":
-            if declared is not None:
-                options["str_min_len"], options["str_max_len"] = declared
+            if spec.string_length is not None:
+                options["str_min_len"], options["str_max_len"] = (
+                    int(shortest),
+                    int(longest),
+                )
             return column_plan(name, "pattern", pattern=spec.pattern, **options), None
+        if status == "unreachable":
+            warnings.warn(
+                f"Column {name!r} is not generated from its pattern "
+                f"{spec.pattern!r}: {reason}. It is filled with random text, as "
+                "before 1.4, which validation will not accept; validate with "
+                "pattern=False, or pin it with fixed=.",
+                stacklevel=2,
+            )
 
     options["str_min_len"], options["str_max_len"] = int(shortest), int(longest)
     return column_plan(name, "string", **options), None
+
+
+def pattern_generation(spec: ColSpec) -> tuple[str, str | None]:
+    """How a column with a `pattern` is generated: `("generate", None)` from
+    the pattern; `("keep", None)` as plain random text, every value of which
+    already passes it; or `("unreachable", reason)`, as plain text that may
+    not -- a Unicode word boundary, an automaton too large, no match within
+    the declared lengths."""
+    if spec.pattern is None:
+        raise ValueError("pattern_generation needs a column with a pattern")
+    length = spec.string_length or Bound(*DEFAULT_STRING_LEN)
+    shortest, longest = (int(v) for v in length.closed())
+    declared = (shortest, longest) if spec.string_length is not None else None
+    return pattern_status(spec.pattern, declared, (shortest, longest), spec.unique)
 
 
 _ENGINE_NATIVE: frozenset = frozenset(

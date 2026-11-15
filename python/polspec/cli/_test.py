@@ -23,6 +23,7 @@ from polspec.cli._io import (
     _snake_case,
 )
 from polspec.errors import CliError
+from polspec.generation.engine import pattern_generation
 
 
 def _skip_reasons(spec_cls: type[FrameSpec]) -> tuple[dict[str, bool], list[str]]:
@@ -34,8 +35,9 @@ def _skip_reasons(spec_cls: type[FrameSpec]) -> tuple[dict[str, bool], list[str]
     constraint needs is disabled with a comment explaining why, rather than
     emitting a test the CLI already knows will not pass.
 
-    `unique=True` and `__unique_together__` used to be on that list. They are
-    generated now, so the generated test validates them like anything else.
+    `unique=True`, `__unique_together__` and `pattern` used to be on that
+    list. They are generated now, so the generated test validates them like
+    anything else -- except a pattern the generator cannot follow.
     """
     flags: dict[str, bool] = {}
     reasons: list[str] = []
@@ -61,12 +63,20 @@ def _skip_reasons(spec_cls: type[FrameSpec]) -> tuple[dict[str, bool], list[str]
             "cannot be made to satisfy"
         )
 
-    if any(c.pattern is not None for c in spec_cls.spec.columns.values()):
+    # A pattern is generated from since 1.4; only one out of the generator's
+    # reach leaves text its validation refuses.
+    unreachable = {
+        name: reason
+        for name, column in spec_cls.spec.columns.items()
+        if column.pattern is not None
+        for status, reason in [pattern_generation(column)]
+        if status == "unreachable"
+    }
+    if unreachable:
         flags["pattern"] = False
-        reasons.append(
-            "ColSpec.pattern is checked by validation only; generation fills "
-            "the column with ordinary random text (use format= for a shape "
-            "polspec can generate)"
+        reasons.extend(
+            f"the pattern of {name!r} is not generated from: {reason}"
+            for name, reason in unreachable.items()
         )
 
     return flags, reasons

@@ -9,9 +9,20 @@ generator's reach is a plain string, as before.
 
 from __future__ import annotations
 
+import itertools
+import warnings
+
 import polars as pl
 import pytest
-from polspec import ColSpec, TableSpec, generate, generate_batches, scan, validate
+from polspec import (
+    ColSpec,
+    GenerationError,
+    TableSpec,
+    generate,
+    generate_batches,
+    scan,
+    validate,
+)
 
 PATTERNS = [
     r"^ORD-[0-9]{6}$",
@@ -105,18 +116,51 @@ def test_a_pattern_plain_strings_can_fail_is_generated_from():
 
 
 @pytest.mark.parametrize(
-    "column",
+    ("column", "why"),
     [
-        {"pattern": r"\bword\b"},  # a Unicode word boundary
-        {"pattern": r"^[0-9]{6}$", "string_length": (2, 3)},  # no match that long
+        ({"pattern": r"\bword\b"}, "Unicode word boundary"),
+        ({"pattern": r"^[0-9]{6}$", "string_length": (2, 3)}, "2 to 3 characters"),
     ],
 )
-def test_a_pattern_out_of_reach_is_a_plain_string(column):
+def test_a_pattern_out_of_reach_is_a_plain_string_and_says_why(column, why):
     plain = generate(_spec(string_length=column.get("string_length")), 300, seed=6)
-    assert generate(_spec(**column), 300, seed=6).equals(plain)
+    with pytest.warns(UserWarning, match=why) as warned:
+        frame = generate(_spec(**column), 300, seed=6)
+    assert frame.equals(plain)
+    assert "pattern=False" in str(warned[0].message)
 
 
-def test_a_unique_pattern_column_is_a_plain_string_for_now():
-    spec = _spec(pattern=r"^ID\d{8}$", unique=True)
-    plain = generate(_spec(unique=True), 300, seed=6)
-    assert generate(spec, 300, seed=6).equals(plain)
+def test_a_pattern_that_generates_does_not_warn():
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        generate(_spec(pattern=r"^ORD-\d{6}$"), 100, seed=1)
+
+
+@pytest.mark.parametrize(
+    ("pattern", "rows"),
+    [(r"^ID\d{8}$", 5_000), (r"^[A-C]{2}-(x|y|z)\d$", 270), (r"^é{1,3}[ab]?$", 9)],
+)
+def test_a_unique_pattern_column_draws_each_value_once(pattern, rows):
+    spec = _spec(pattern=pattern, unique=True)
+    frame = generate(spec, rows, seed=7)
+    assert frame["c"].is_unique().all()
+    validate(spec, frame)
+
+
+def test_a_unique_pattern_fills_its_whole_space_and_no_more():
+    spec = _spec(pattern=r"^[ab]{1,3}$", unique=True)
+    every = generate(spec, 14, seed=1)["c"].to_list()
+    expected = [
+        "".join(p) for k in (1, 2, 3) for p in itertools.product("ab", repeat=k)
+    ]
+    assert sorted(every) == sorted(expected)
+    with pytest.raises(GenerationError, match="14"):
+        generate(spec, 15, seed=1)
+
+
+def test_a_unique_pattern_column_is_a_window_in_batches():
+    spec = _spec(pattern=r"^K\d{7}$", unique=True)
+    whole = generate(spec, 150_000, seed=2)
+    batches = pl.concat(generate_batches(spec, 150_000, batch_size=40_000, seed=2))
+    assert batches.equals(whole)
+    assert whole["c"].is_unique().all()

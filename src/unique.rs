@@ -29,7 +29,7 @@ use polars_core::chunked_array::builder::StringChunkedBuilder;
 use rand::distr::Distribution as _;
 use rayon::prelude::*;
 
-use crate::format::Template;
+use crate::format::{Enumerable, Template};
 use crate::permute::Permutation;
 use crate::plan::{ColumnPlan, Kind};
 use crate::sample::{
@@ -253,7 +253,7 @@ fn unique_strings(
     plan: &ColumnPlan,
     n: usize,
     seed: ColumnSeed,
-    template: &Template,
+    template: &(dyn Enumerable + Sync),
 ) -> Result<StringChunked, String> {
     let name = PlSmallStr::from(plan.name.as_str());
     let first_row = seed.first_chunk * CHUNK_SIZE;
@@ -285,8 +285,9 @@ fn unique_strings(
                 }
                 let index = permutation.apply((first_row + start + row) as u128);
                 template.decode(index, &mut scratch);
-                // SAFETY: every template part is ASCII or a `String`, so the
-                // buffer is valid UTF-8 -- see `format::Template::compile`.
+                // SAFETY: a template's parts are ASCII or a `String`, and a
+                // pattern's units are each a `str`, so the buffer is valid
+                // UTF-8 -- see `format::Template::compile` and `pattern.rs`.
                 builder.append_value(unsafe { std::str::from_utf8_unchecked(&scratch) });
             }
             builder.finish()
@@ -333,12 +334,11 @@ pub fn generate_unique_series(
             })?;
             unique_strings(plan, n, seed, template)?.into_series()
         }
-        // Refused when the plan is built; see `ColumnPlan::build`.
         Kind::Pattern => {
-            return Err(format!(
-                "Column '{}' is unique, and a unique column is not yet generated from its pattern",
-                plan.name
-            ));
+            let pattern = plan.pattern.as_ref().ok_or_else(|| {
+                format!("Column '{}' has kind 'pattern' but no pattern", plan.name)
+            })?;
+            unique_strings(plan, n, seed, pattern.as_ref())?.into_series()
         }
     })
 }

@@ -17,7 +17,7 @@ that it cannot be done.
 | Generate data from the schema | yes, in Rust | yes, `sample` | not for Polars | yes, `generate_dataset` |
 | Rules kept when generating | yes, `ColRule` | yes, by filtering | — | not found |
 | Related tables generated together | yes, `ForeignKey` | yes, `Collection` | — | not found |
-| Strings from a regex | **no** | yes | — | yes |
+| Strings from a regex | yes, from 1.4 | yes | — | yes |
 | Realistic names and addresses | no | no | — | yes, 100 countries |
 | Lazy generation and file sinks | yes | not found | — | not found |
 | Bad rows split out | yes | yes, `filter` | `drop_invalid_rows` (pandas docs) | yes, `get_sundered_data` |
@@ -29,9 +29,8 @@ that it cannot be done.
 | pytest fixture | yes, `polspec_frames` | not found | not found | yes, `generate_dataset` |
 | Hypothesis strategy | yes, `strategy` | not found | pandas only | not found |
 
-Where polspec trails: strings from a regex (`pattern=` is validated, not
-generated; use [`format=`](formats.md) for the shapes it knows), typed
-frames, and Pointblank's reports and thresholds. Where it leads: generation
+Where polspec trails: typed frames, and Pointblank's reports and
+thresholds. Where it leads: generation
 speed, related tables, lazy output, profiling and drift. See
 [Comparison](../explanation/comparison.md) for the rest.
 
@@ -90,7 +89,7 @@ good, failures = Orders.filter(orders)
 | `dy.Enum([...])` | `ColSpec(pl.Enum([...]))`, or `choices={...}` with weights |
 | `primary_key=True` on one column | `unique=True` |
 | `primary_key=True` on several | `__unique_together__` |
-| `regex=` | `pattern=` (validated only) or `format=` |
+| `regex=` | `pattern=`, or `format=` for a shape polspec names |
 | `@dy.rule()` | `ColRule` when it picks values; `Check` otherwise |
 | `Orders.validate(df, cast=True)` | `Orders.validate(df, cast=True)` |
 | `Orders.filter(df)` | `report = Orders.inspect(df)`, then `report.passing_rows()` and `report.failing_rows(once=True)` |
@@ -192,7 +191,6 @@ fake = pb.generate_dataset(schema, n=1_000, seed=1)
 | `pb.Schema(...)` and `generate_dataset` | the same `Orders`, and `Orders.generate(n, seed=...)` |
 | `string_field(preset="name", country=...)` | none: pass [Faker's values as `choices`](../explanation/comparison.md#compared-to-faker-and-similar) |
 
-The one translation polspec cannot make is a regex Pointblank generates
-from, such as `string_field(pattern=r"SKU-[A-Z]{2}-[0-9]{5}")`: polspec
-validates `pattern=` but fills the column with ordinary text. See
-[Known limitations](../explanation/limitations.md).
+A regex Pointblank generates from, such as
+`string_field(pattern=r"SKU-[A-Z]{2}-[0-9]{5}")`, is a `pattern=` that
+polspec generates from too, from 1.4.
