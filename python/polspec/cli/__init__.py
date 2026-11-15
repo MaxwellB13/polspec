@@ -27,6 +27,7 @@ import sys
 
 from polspec.cli._data import _cmd_generate, _cmd_validate
 from polspec.cli._drift import _FAIL_ON, _cmd_diff, _cmd_drift
+from polspec.cli._io import _add_key_flags
 from polspec.cli._schema import _cmd_schema_infer, _cmd_schema_new
 from polspec.cli._synthesize import add_synthesize_parser
 from polspec.cli._test import _cmd_test
@@ -82,14 +83,21 @@ def _add_schema_parser(subparsers: argparse._SubParsersAction) -> None:
     infer = schema_sub.add_parser(
         "infer", help="Profile a data file into a YAML schema"
     )
-    infer.add_argument("source", help="Path to a CSV, Parquet, NDJSON or IPC file")
+    infer.add_argument(
+        "source",
+        nargs="+",
+        help=(
+            "Path to a CSV, Parquet, NDJSON or IPC file; several are related "
+            "tables, profiled into a registry with the foreign keys between them"
+        ),
+    )
     infer.add_argument(
         "-o",
         "--output",
         required=True,
         help=(
-            "File to write: .yaml/.yml, or .py for a FrameSpec subclass; "
-            "'-' prints the YAML instead"
+            "File to write: .yaml/.yml, or .py for a FrameSpec subclass (one per "
+            "source, and a Registry, with several); '-' prints the YAML instead"
         ),
     )
     infer.add_argument("--name", help="Spec class name (default: derived from source)")
@@ -175,6 +183,7 @@ def _add_schema_parser(subparsers: argparse._SubParsersAction) -> None:
         metavar="COL",
         help="Columns whose values must not be carried into the spec",
     )
+    _add_key_flags(infer)
     infer.set_defaults(func=_cmd_schema_infer)
 
     new = schema_sub.add_parser("new", help="Write a blank FrameSpec to edit by hand")

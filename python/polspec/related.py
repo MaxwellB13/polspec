@@ -12,29 +12,38 @@ Internal: not part of the public API.
 from __future__ import annotations
 
 import dataclasses
+import math
 import re
 import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal, Unpack
 
 import polars as pl
 
 from polspec.dtypes import dtype_value_limits
-from polspec.errors import SpecError
+from polspec.errors import GenerationError, SpecError
 from polspec.foreign_key import ForeignKey
 from polspec.profiler import (
     ProfileKeywords,
     ProfileOptions,
+    SynthesizeKeywords,
     profile_options,
     typed_text,
 )
 from polspec.registry import Registry
 from polspec.spec import ColSpec
-from polspec.synthesis import Source, load_source, profile
+from polspec.synthesis import (
+    Source,
+    as_source,
+    load_source,
+    profile,
+    room_for_keys,
+)
 from polspec.tablespec import TableSpec
 
-__all__ = ["profile_all"]
+__all__ = ["profile_all", "synthesize_all"]
 
 # Distinct values a text column needs before containment alone makes it a
 # key: the bar a format clears. Fewer, and a column of a handful of codes
@@ -47,6 +56,9 @@ ORPHANS_SHOWN = 5
 Family = Literal["integer", "text", "date"]
 
 Keys = Mapping[str, Sequence[ForeignKey]]
+
+# A warning names the caller's line, however deep in polspec it is raised.
+_POLSPEC = (str(Path(__file__).parent),)
 
 
 def profile_all(
@@ -111,6 +123,169 @@ def profile_all(
 
     *Added in 1.5.*
     """
+    specs, _ = profiled_tables(frames, keys, profile_options(options, keywords))
+    return Registry(*specs.values()).resolve()
+
+
+def synthesize_all(
+    frames: Mapping[str, Source],
+    n: int | Mapping[str, int] | None = None,
+    *,
+    scale: float | None = None,
+    seed: int | None = None,
+    keys: Keys | Literal[False] | None = None,
+    options: ProfileOptions | None = None,
+    **keywords: Unpack[SynthesizeKeywords],
+) -> dict[str, pl.DataFrame]:
+    """Fake frames that look like a set of related tables, with the keys
+    between them intact: `generate_all()` over `profile_all()`.
+
+    Each frame has its source's schema, and each column follows the
+    source's as `synthesize` makes it. Every foreign key `profile_all`
+    finds, or `keys` declares, holds in the fake set: a child row points
+    at a fake parent row, never at a real one. Within a table, columns are
+    generated independently, as `synthesize` generates them, and parents
+    are drawn uniformly, so how many children each parent has is not kept.
+
+    Parameters
+    ----------
+    frames : Mapping[str, DataFrame | LazyFrame | str | PathLike]
+        Each table, by name.
+    n : int | Mapping[str, int], optional
+        Rows for every table, or for those a mapping names. By default,
+        each source's own height.
+    scale : float, optional
+        Each table's height times `scale` instead -- `0.1` for a tenth of
+        each, keeping the ratios between them -- and at least one row.
+        Not with `n`.
+    seed : int, optional
+        Seeds the generation, and the sample and fitting behind it, so the
+        same sources and seed give the same frames.
+    keys : Mapping[str, Sequence[ForeignKey]] | False, optional
+        Keys to declare rather than infer, as `profile_all` takes them.
+    options : ProfileOptions, optional
+        How every table is profiled -- or pass its fields as keywords.
+
+    Returns
+    -------
+    dict[str, pl.DataFrame]
+        A fake frame per table, in the order of `frames`.
+
+    Examples
+    --------
+    >>> customers = pl.DataFrame({"id": range(1, 101)})
+    >>> orders = pl.DataFrame({"id": range(1, 301), "customer_id": [1, 2, 3] * 100})
+    >>> real = {"Customers": customers, "Orders": orders}
+    >>> fake = synthesize_all(real, scale=0.5, seed=1)
+    >>> {name: frame.height for name, frame in fake.items()}
+    {'Customers': 50, 'Orders': 150}
+    >>> fake["Orders"]["customer_id"].is_in(fake["Customers"]["id"].implode()).all()
+    True
+
+    *Added in 1.5.*
+    """
+    fake, _ = synthesized_all(
+        frames, n, scale=scale, seed=seed, keys=keys, options=options, **keywords
+    )
+    return fake
+
+
+def synthesized_all(
+    frames: Mapping[str, Source],
+    n: int | Mapping[str, int] | None = None,
+    *,
+    scale: float | None = None,
+    seed: int | None = None,
+    keys: Keys | Literal[False] | None = None,
+    options: ProfileOptions | None = None,
+    **keywords: Unpack[SynthesizeKeywords],
+) -> tuple[dict[str, pl.DataFrame], Registry]:
+    """`synthesize_all`, with the registry the frames were generated from --
+    one profile for both, where the command line writes the specs beside
+    the data."""
+    opts = profile_options(options, keywords)
+    if seed is not None:
+        # One seed for the stand-ins and for the profiles behind them.
+        opts = dataclasses.replace(opts, seed=seed)
+    specs, loaded = profiled_tables(frames, keys, opts)
+    rows = _sizes({name: frame.height for name, frame in loaded.items()}, n, scale)
+    registry = Registry(*_with_room(specs, rows).values()).resolve()
+    generated = registry.generate_all(rows, seed=seed)
+    fake = {name: as_source(generated[name], loaded[name].schema) for name in loaded}
+    return fake, registry
+
+
+def _sizes(
+    heights: Mapping[str, int],
+    n: int | Mapping[str, int] | None,
+    scale: float | None,
+) -> dict[str, int]:
+    """How many fake rows each table gets."""
+    if scale is not None:
+        if n is not None:
+            raise ValueError("pass n or scale, not both")
+        if (
+            isinstance(scale, bool)
+            or not isinstance(scale, (int, float))
+            or not math.isfinite(scale)
+            or scale <= 0
+        ):
+            raise ValueError(f"scale must be a positive number, got {scale!r}")
+        return {name: max(1, round(h * scale)) for name, h in heights.items()}
+    if n is None:
+        return dict(heights)
+    if isinstance(n, Mapping):
+        unknown = sorted(set(n) - set(heights))
+        if unknown:
+            raise ValueError(
+                f"n names {unknown}, which are not among the tables: {list(heights)}"
+            )
+        rows = {**heights, **n}
+    else:
+        rows = dict.fromkeys(heights, n)
+    for name, count in rows.items():
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise ValueError(f"n for {name!r} must be an integer >= 0, got {count!r}")
+    return rows
+
+
+def _with_room(
+    specs: Mapping[str, TableSpec], rows: Mapping[str, int]
+) -> dict[str, TableSpec]:
+    """`specs` with each integer key's range wide enough for its rows, and
+    each child of a widened key widened with it: the child took its
+    parent's claims, and generation fills it from the parent's new values."""
+    widened = {name: room_for_keys(spec, rows[name]) for name, spec in specs.items()}
+    out = {}
+    for name, spec in widened.items():
+        changes = {}
+        for fk in spec.foreign_keys:
+            parent = name if fk.references == "self" else fk.references
+            for column, ref in zip(fk.columns, fk.ref_columns, strict=True):
+                before = specs[parent].columns[ref].bounds
+                after = widened[parent].columns[ref].bounds
+                if after == before or after is None or after.max is None:
+                    continue
+                child = spec.columns[column]
+                limits = dtype_value_limits(child.dtype)
+                if limits is not None and after.max > limits[1]:
+                    raise GenerationError(
+                        f"Column '{name}.{column}' is a {child.dtype!r} key into "
+                        f"'{parent}.{ref}', whose {rows[parent]:,} rows need values "
+                        f"up to {after.max:,}. Generate fewer rows."
+                    )
+                changes[column] = dataclasses.replace(child, bounds=after)
+        out[name] = spec.with_columns(changes) if changes else spec
+    return out
+
+
+def profiled_tables(
+    frames: Mapping[str, Source],
+    keys: Keys | Literal[False] | None,
+    opts: ProfileOptions,
+) -> tuple[dict[str, TableSpec], dict[str, pl.DataFrame]]:
+    """`profile_all`'s specs, keyed but not yet resolved, and the frames
+    they describe, whole and as they arrived."""
     if not isinstance(frames, Mapping) or not frames:
         raise TypeError("frames must be a non-empty mapping of table name to data")
     if keys is not None and keys is not False and not isinstance(keys, Mapping):
@@ -118,7 +293,6 @@ def profile_all(
             "keys takes a mapping of table name to the ForeignKeys it holds, "
             f"or False, got {type(keys).__name__}"
         )
-    opts = profile_options(options, keywords)
     loaded = {}
     for name, source in frames.items():
         frame = load_source(source)
@@ -144,9 +318,10 @@ def profile_all(
     declared = _declared(keys or {}, typed)
     found = {} if keys is False else _inferred(typed, declared)
     chosen = _acyclic(typed, declared, found)
-    return Registry(
-        *(_keyed(specs, name, chosen[name], typed[name].schema) for name in typed)
-    ).resolve()
+    keyed = {
+        name: _keyed(specs, name, chosen[name], typed[name].schema) for name in typed
+    }
+    return keyed, loaded
 
 
 # ---------------------------------------------------------------------------
@@ -336,7 +511,7 @@ def _inferred(
                     f"{named}, so it is left without one. Declare the one it "
                     "is with keys=.",
                     UserWarning,
-                    stacklevel=3,
+                    skip_file_prefixes=_POLSPEC,
                 )
     return out
 
@@ -438,7 +613,7 @@ def _acyclic(
                     f"{key.table!r}, so it is left without one. Declare the "
                     "keys with keys=.",
                     UserWarning,
-                    stacklevel=3,
+                    skip_file_prefixes=_POLSPEC,
                 )
                 continue
             chosen[key.table].append(key)

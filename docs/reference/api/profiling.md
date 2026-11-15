@@ -12,6 +12,10 @@ workflow, and what carries over from the source.
 
 ::: polspec.profile
 
+## synthesize_all
+
+::: polspec.synthesize_all
+
 ## profile_all
 
 ::: polspec.profile_all

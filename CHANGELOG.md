@@ -23,6 +23,20 @@ page promises; before 1.0, a minor version could break any of them.
   its own null rate, so the registry validates its sources and generates
   frames that pass. `keys=` declares keys instead, checked against the
   data, and `keys=False` infers none.
+- **`polspec.synthesize_all(frames, n=, scale=)`** is `generate_all()` over
+  `profile_all()`: a fake frame for each table, in its source's dtypes,
+  every key between them held by a fake parent. `scale=0.1` takes a tenth
+  of each table, keeping the ratios between them; `n` is a count for every
+  table or a mapping. A parent's key range widens for a larger set, and its
+  children with it.
+- **`polspec schema infer` and `polspec synthesize` take several files.**
+  `schema infer a.csv b.csv -o shop.yaml` writes a registry (`.yaml`, or
+  `.py` with a `Registry` after the classes), and `synthesize a.csv b.csv
+  -o fake/` writes one fake file per source into a directory, in its own
+  format or `--format`'s. Each spec is named after its file.
+  `--foreign-key Orders.buyer=Customers.id` declares a key and
+  `--no-foreign-keys` finds none. `synthesize --scale X` sizes the output
+  as a multiple of the source's, for one file too.
 
 ## [1.4.0] - 2026-11-15
 

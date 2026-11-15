@@ -383,6 +383,11 @@ def _profile_all(n: int) -> None:
     polspec.profile_all(_related(n))
 
 
+def _synthesize_all(n: int) -> None:
+    """The same three tables profiled, then a tenth of each generated."""
+    polspec.synthesize_all(_related(n), scale=0.1, seed=SEED)
+
+
 def _validate(n: int) -> None:
     DataSource.validate(_profiled_frame(n, text=False))
 
@@ -484,6 +489,7 @@ CASES: tuple[Case, ...] = (
     Case("profile", "regression", (1_000_000,), _profile),
     Case("profile_text", "regression", (1_000_000,), _profile_text),
     Case("profile_all", "regression", (1_000_000,), _profile_all),
+    Case("synthesize_all", "regression", (1_000_000,), _synthesize_all),
     Case("validate", "regression", (1_000_000,), _validate),
     Case("import", "regression", (1,), _import),
 )
