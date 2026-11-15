@@ -1190,6 +1190,42 @@ def _joined(
     name: str | None,
 ) -> TableSpec:
     """`TableSpec.join`: see there for what survives."""
+    lkeys, rkeys = _join_keys(left, right, on, left_on, right_on, how)
+
+    if how in ("semi", "anti"):
+        # Fewer rows, so no count; and Polars promises no join keeps its
+        # rows' order unless asked, so no order either.
+        kept = dataclasses.replace(left, rows=None, order_by=(), descending=())
+        return kept if name is None else kept.with_name(name)
+
+    layout = _join_layout(
+        left,
+        right,
+        lkeys,
+        rkeys,
+        keyed_on=on is not None,
+        how=how,
+        suffix=suffix,
+        coalesce=coalesce,
+    )
+    columns, sources = _joined_columns(
+        left, right, lkeys, rkeys, layout, how=how, suffix=suffix
+    )
+    return TableSpec(
+        name or f"{left.name}_{right.name}", _with_validators_renamed(columns, sources)
+    )
+
+
+def _join_keys(
+    left: TableSpec,
+    right: TableSpec,
+    on: str | Sequence[str] | None,
+    left_on: str | Sequence[str] | None,
+    right_on: str | Sequence[str] | None,
+    how: str,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Each side's key columns, checked: a known `how`, keys given one way,
+    of the same length, naming columns that exist and share a dtype."""
     if how not in _HOWS:
         raise SpecError(f"join how= must be one of {', '.join(_HOWS)}; got {how!r}")
     if how == "cross":
@@ -1216,19 +1252,29 @@ def _joined(
                 f"({rdt!r}): join keys must share a dtype. Cast one side's "
                 "column first, with with_columns."
             )
+    return lkeys, rkeys
 
-    if how in ("semi", "anti"):
-        # Fewer rows, so no count; and Polars promises no join keeps its
-        # rows' order unless asked, so no order either.
-        kept = dataclasses.replace(left, rows=None, order_by=(), descending=())
-        return kept if name is None else kept.with_name(name)
 
-    paired = on is None and bool(lkeys)
+def _join_layout(
+    left: TableSpec,
+    right: TableSpec,
+    lkeys: tuple[str, ...],
+    rkeys: tuple[str, ...],
+    *,
+    keyed_on: bool,
+    how: str,
+    suffix: str,
+    coalesce: bool | None,
+) -> dict[str, str]:
+    """Each column of the joined frame, in order, and where it came from:
+    `"key"`, or `"L:<column>"` / `"R:<column>"`. Read from the installed
+    Polars, so a suffixed clash or a coalesced key is named as it will be."""
+    paired = not keyed_on and bool(lkeys)
 
     def run(a: pl.LazyFrame, b: pl.LazyFrame) -> pl.LazyFrame:
         return a.join(
             b,
-            on=list(lkeys) if on is not None else None,
+            on=list(lkeys) if keyed_on else None,
             left_on=list(lkeys) if paired else None,
             right_on=list(rkeys) if paired else None,
             how=cast("Any", how),
@@ -1236,9 +1282,9 @@ def _joined(
             coalesce=coalesce,
         )
 
-    # The names and their order, from the installed Polars: an empty join of
-    # the two schemas. Then where each came from: a one-row join in which
-    # every column is text naming its own origin, and every key one value.
+    # The names and their order: an empty join of the two schemas. Then
+    # where each came from: a one-row join in which every column is text
+    # naming its own origin, and every key one value.
     names = (
         run(pl.LazyFrame(schema=left.schema()), pl.LazyFrame(schema=right.schema()))
         .collect_schema()
@@ -1256,7 +1302,22 @@ def _joined(
         .row(0, named=True)
     )
     assert list(row) == names  # noqa: S101 - the two joins name alike
+    return row
 
+
+def _joined_columns(
+    left: TableSpec,
+    right: TableSpec,
+    lkeys: tuple[str, ...],
+    rkeys: tuple[str, ...],
+    layout: dict[str, str],
+    *,
+    how: str,
+    suffix: str,
+) -> tuple[dict[str, ColSpec], dict[str, str]]:
+    """What each joined column keeps of the column it came from, and that
+    column's name. A side whose rows may go unmatched makes its columns
+    nullable; a column stays unique only if the other side's key is."""
     left_open = how in ("right", "full")
     right_open = how in ("left", "full")
     cross = how == "cross"
@@ -1277,7 +1338,7 @@ def _joined(
     # A coalesced key is one column per pair: the right side's in a right
     # join, named as it names it, and the left side's otherwise. Uncoalesced,
     # the left key keeps its name and the right key its own, or the suffix.
-    key_outs = [out for out in names if row[out] == "key"]
+    key_outs = [out for out, origin in layout.items() if origin == "key"]
     coalesced = len(key_outs) == len(lkeys)
     seen_left: set[str] = set()
 
@@ -1294,8 +1355,7 @@ def _joined(
 
     columns: dict[str, ColSpec] = {}
     sources: dict[str, str] = {}
-    for out in names:
-        origin = row[out]
+    for out, origin in layout.items():
         if origin == "key":
             side, index = key_source(out)
             lspec = left.columns[lkeys[index]]
@@ -1331,9 +1391,14 @@ def _joined(
                 right.columns[source], nullable=right_open, unique=right_unique
             )
         sources[out] = source
+    return columns, sources
 
-    # A validator names its column; one whose column was renamed by the
-    # suffix is renamed with it, as `rename` would.
+
+def _with_validators_renamed(
+    columns: dict[str, ColSpec], sources: dict[str, str]
+) -> dict[str, ColSpec]:
+    """A validator names its column; one whose column was renamed by the
+    suffix is renamed with it, as `rename` would."""
     for out, spec in list(columns.items()):
         source = sources[out]
         if source != out and spec.validators:
@@ -1346,7 +1411,7 @@ def _joined(
                     for v in spec.validators
                 ),
             )
-    return TableSpec(name or f"{left.name}_{right.name}", columns)
+    return columns
 
 
 # What a verb takes where it takes a spec: the `TableSpec`, or a `FrameSpec`

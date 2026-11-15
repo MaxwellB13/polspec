@@ -388,6 +388,22 @@ def _value_tree(
     return _value_constraints(name, where, spec, actual_dtype, column, options)
 
 
+@dataclass(frozen=True, slots=True)
+class _Value:
+    """One scalar value a claim is made of: the column, where in it, as the
+    spec declares it and as the frame holds it, and its two masks."""
+
+    name: str
+    where: str
+    spec: ColSpec
+    actual_dtype: pl.DataType
+    column: pl.Expr
+    options: ValidationOptions
+    # Not null; and not null nor NaN, for the claims that read numbers.
+    present: pl.Expr
+    valued: pl.Expr
+
+
 def _value_constraints(
     name: str,
     where: str,
@@ -397,134 +413,165 @@ def _value_constraints(
     options: ValidationOptions,
 ) -> list[Constraint]:
     """The constraints on one scalar *value* -- its domain, bounds, length,
-    format, pattern -- with masks over `column`.
+    format, pattern -- with masks over `column`, one builder a claim, in the
+    order findings report them.
     """
     present = column.is_not_null()
-    dtype = spec.value_dtype
-    constraints: list[Constraint] = []
-
     # NaN is not a value of a float column in any sense `bounds` or `choices`
     # speak of -- it sits in no range and equals nothing -- so it is judged
     # once, by the NaN claim, and the value claims read the numbers alone.
-    nan_able = dtype.is_float() and actual_dtype.is_float()
-    valued = present & column.is_not_nan() if nan_able else present
-    if nan_able and not spec.nan_probability:
-        constraints.append(
-            _NotANumber(
-                key=f"{where}__nan",
-                mask=present & column.is_nan(),
-                sample_expr=None,
-                column=name,
-                where=where,
-            )
-        )
+    nan_able = spec.value_dtype.is_float() and actual_dtype.is_float()
+    value = _Value(
+        name=name,
+        where=where,
+        spec=spec,
+        actual_dtype=actual_dtype,
+        column=column,
+        options=options,
+        present=present,
+        valued=present & column.is_not_nan() if nan_able else present,
+    )
+    claims = (
+        _nan_claim(value, nan_able=nan_able),
+        _dtype_range_claim(value),
+        _choices_claim(value),
+        _bounds_claim(value),
+        _length_claim(value),
+        _format_claim(value),
+        _pattern_claim(value),
+    )
+    return [claim for claim in claims if claim is not None]
 
+
+def _nan_claim(value: _Value, *, nan_able: bool) -> Constraint | None:
+    if not nan_able or value.spec.nan_probability:
+        return None
+    return _NotANumber(
+        key=f"{value.where}__nan",
+        mask=value.present & value.column.is_nan(),
+        sample_expr=None,
+        column=value.name,
+        where=value.where,
+    )
+
+
+def _dtype_range_claim(value: _Value) -> Constraint | None:
     # The dtype's claim, not the bounds' -- but a side a checked bound
     # closes is the bound's to report: see `_unholdable`.
+    spec = value.spec
     unfit = unholdable_mask(
-        column, dtype, actual_dtype, spec.bounds if options.bounds else None
+        value.column,
+        spec.value_dtype,
+        value.actual_dtype,
+        spec.bounds if value.options.bounds else None,
     )
-    if unfit is not None:
-        mask, holds = unfit
-        constraints.append(
-            _Unholdable(
-                key=f"{where}__dtype_range",
-                mask=present & mask,
-                sample_expr=column,
-                column=name,
-                where=where,
-                declared=dtype,
-                holds=holds,
-            )
-        )
+    if unfit is None:
+        return None
+    mask, holds = unfit
+    return _Unholdable(
+        key=f"{value.where}__dtype_range",
+        mask=value.present & mask,
+        sample_expr=value.column,
+        column=value.name,
+        where=value.where,
+        declared=spec.value_dtype,
+        holds=holds,
+    )
 
-    allowed = _allowed_values(spec)
-    if allowed is not None:
-        if is_textual(actual_dtype):
-            in_domain = column.cast(pl.String).is_in(as_strings(allowed, dtype))
-            sample_expr = column.cast(pl.String)
-        else:
-            in_domain = in_values(column, allowed, dtype, actual_dtype)
-            sample_expr = column
-        constraints.append(
-            _AllowedValues(
-                key=f"{where}__choices",
-                mask=valued & ~in_domain,
-                sample_expr=sample_expr,
-                column=name,
-                where=where,
-                allowed=allowed,
-            )
-        )
 
-    if options.bounds and spec.bounds is not None and not spec.bounds.is_open_both:
-        # A temporal standing in for another is measured as `cast=True` would
-        # hand it back, as choices are (`in_values`): in its own unit or kind a
-        # bound can round -- a microsecond past midnight, on a `Date`, is that
-        # day -- and pass a value the cast then puts outside it. A number is
-        # measured as it is: a cast could only lose an out-of-range value.
-        measured, measured_dtype = column, actual_dtype
-        if actual_dtype.is_temporal() and actual_dtype != dtype:
-            measured, measured_dtype = column.cast(dtype, strict=False), dtype
-        constraints.append(
-            _Bounds(
-                key=f"{where}__bounds",
-                mask=valued & out_of_bounds(measured, spec.bounds, measured_dtype),
-                sample_expr=column,
-                column=name,
-                where=where,
-                bounds=spec.bounds,
-                values=measured,
-            )
-        )
+def _choices_claim(value: _Value) -> Constraint | None:
+    allowed = _allowed_values(value.spec)
+    if allowed is None:
+        return None
+    column, dtype = value.column, value.spec.value_dtype
+    if is_textual(value.actual_dtype):
+        in_domain = column.cast(pl.String).is_in(as_strings(allowed, dtype))
+        sample_expr = column.cast(pl.String)
+    else:
+        in_domain = in_values(column, allowed, dtype, value.actual_dtype)
+        sample_expr = column
+    return _AllowedValues(
+        key=f"{value.where}__choices",
+        mask=value.valued & ~in_domain,
+        sample_expr=sample_expr,
+        column=value.name,
+        where=value.where,
+        allowed=allowed,
+    )
 
-    if spec.string_length is not None:
-        measured = measure_length(column, actual_dtype)
-        if measured is not None:
-            too_short = measured < spec.string_length.min
-            too_long = measured > spec.string_length.max
-            constraints.append(
-                _StringLength(
-                    key=f"{where}__len",
-                    mask=present & (too_short | too_long),
-                    sample_expr=column,
-                    column=name,
-                    where=where,
-                    length=spec.string_length,
-                )
-            )
 
-    if spec.format is not None:
-        fmt = _lookup_format(spec.format)
-        extras = tuple(spec.extra_values or ())
-        accepted = fmt.check(column)
-        if extras:
-            accepted = accepted | column.is_in(list(extras))
-        constraints.append(
-            _Format(
-                key=f"{where}__format",
-                mask=present & ~accepted,
-                sample_expr=column,
-                column=name,
-                where=where,
-                format=fmt,
-                extras=extras,
-            )
-        )
+def _bounds_claim(value: _Value) -> Constraint | None:
+    bounds = value.spec.bounds
+    if not value.options.bounds or bounds is None or bounds.is_open_both:
+        return None
+    # A temporal standing in for another is measured as `cast=True` would
+    # hand it back, as choices are (`in_values`): in its own unit or kind a
+    # bound can round -- a microsecond past midnight, on a `Date`, is that
+    # day -- and pass a value the cast then puts outside it. A number is
+    # measured as it is: a cast could only lose an out-of-range value.
+    dtype = value.spec.value_dtype
+    measured, measured_dtype = value.column, value.actual_dtype
+    if value.actual_dtype.is_temporal() and value.actual_dtype != dtype:
+        measured, measured_dtype = value.column.cast(dtype, strict=False), dtype
+    return _Bounds(
+        key=f"{value.where}__bounds",
+        mask=value.valued & out_of_bounds(measured, bounds, measured_dtype),
+        sample_expr=value.column,
+        column=value.name,
+        where=value.where,
+        bounds=bounds,
+        values=measured,
+    )
 
-    if options.pattern and spec.pattern is not None:
-        constraints.append(
-            _Pattern(
-                key=f"{where}__pattern",
-                mask=present & ~column.str.contains(spec.pattern),
-                sample_expr=column,
-                column=name,
-                where=where,
-                pattern=spec.pattern,
-            )
-        )
 
-    return constraints
+def _length_claim(value: _Value) -> Constraint | None:
+    length = value.spec.string_length
+    if length is None:
+        return None
+    measured = measure_length(value.column, value.actual_dtype)
+    if measured is None:
+        return None
+    return _StringLength(
+        key=f"{value.where}__len",
+        mask=value.present & ((measured < length.min) | (measured > length.max)),
+        sample_expr=value.column,
+        column=value.name,
+        where=value.where,
+        length=length,
+    )
+
+
+def _format_claim(value: _Value) -> Constraint | None:
+    if value.spec.format is None:
+        return None
+    fmt = _lookup_format(value.spec.format)
+    extras = tuple(value.spec.extra_values or ())
+    accepted = fmt.check(value.column)
+    if extras:
+        accepted = accepted | value.column.is_in(list(extras))
+    return _Format(
+        key=f"{value.where}__format",
+        mask=value.present & ~accepted,
+        sample_expr=value.column,
+        column=value.name,
+        where=value.where,
+        format=fmt,
+        extras=extras,
+    )
+
+
+def _pattern_claim(value: _Value) -> Constraint | None:
+    pattern = value.spec.pattern
+    if not value.options.pattern or pattern is None:
+        return None
+    return _Pattern(
+        key=f"{value.where}__pattern",
+        mask=value.present & ~value.column.str.contains(pattern),
+        sample_expr=value.column,
+        column=value.name,
+        where=value.where,
+        pattern=pattern,
+    )
 
 
 def _struct_constraints(
