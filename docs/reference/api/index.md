@@ -54,6 +54,7 @@ cannot describe a signature the code does not have.
 | [`DriftFinding`][polspec.DriftFinding] | [Drift](drift.md) |
 | [`synthesize`][polspec.synthesize] | [Profiling](profiling.md) |
 | [`profile`][polspec.profile] | [Profiling](profiling.md) |
+| [`profile_all`][polspec.profile_all] | [Profiling](profiling.md) |
 | [`ProfileOptions`][polspec.ProfileOptions] | [Profiling](profiling.md) |
 | [`PolspecError`][polspec.PolspecError] | [Errors](errors.md) |
 | [`SpecError`][polspec.SpecError] | [Errors](errors.md) |

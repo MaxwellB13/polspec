@@ -175,6 +175,15 @@ def _parsed(source: pl.DataType, profiled: pl.DataType) -> bool:
 
 def _load(source: Source, sample: int | None, seed: int) -> tuple[pl.DataFrame, int]:
     """`source` as a frame to profile, and how many rows it has in all."""
+    frame = load_source(source)
+    if frame.height == 0:
+        raise ValueError("source has no rows to profile")
+    height = frame.height
+    return sample_rows(frame, sample, seed), height
+
+
+def load_source(source: Source) -> pl.DataFrame:
+    """`source`, whole, as a frame: collected, or read from its file."""
     if isinstance(source, pl.LazyFrame):
         frame = source.collect()
     elif isinstance(source, pl.DataFrame):
@@ -186,10 +195,7 @@ def _load(source: Source, sample: int | None, seed: int) -> tuple[pl.DataFrame, 
             "source must be a DataFrame, a LazyFrame or the path of a data file, "
             f"got {type(source).__name__}"
         )
-    if frame.height == 0:
-        raise ValueError("source has no rows to profile")
-    height = frame.height
-    return sample_rows(frame, sample, seed), height
+    return frame
 
 
 def _room_for_keys(spec: TableSpec, rows: int) -> TableSpec:

@@ -354,6 +354,35 @@ def _profile_text(n: int) -> None:
     polspec.profile(_profiled_frame(n, text=True))
 
 
+class Product(FrameSpec):
+    sku = ColSpec(pl.String, pattern=r"^SKU-[0-9]{6}$", unique=True)
+    price = ColSpec(pl.Float64, bounds=(0.5, 500.0))
+
+
+class Sale(FrameSpec):
+    sale_id = ColSpec(pl.Int64, bounds=(1, 100_000_000), unique=True)
+    account_id = ColSpec(pl.Int64, bounds=(1, 10_000_000), nullable=True)
+    product_sku = ColSpec(pl.String)
+    qty = ColSpec(pl.Int64, bounds=(1, 20))
+    __foreign_keys__ = [
+        ForeignKey("account_id", references=Account),
+        ForeignKey("product_sku", references=Product, ref_columns="sku"),
+    ]
+
+
+@functools.cache
+def _related(n: int) -> dict[str, pl.DataFrame]:
+    """Three tables: `n` sales of 10,000 products to 100,000 accounts."""
+    registry = polspec.Registry(Account, Product, Sale)
+    sizes = {"Account": 100_000, "Product": 10_000, "Sale": n}
+    return registry.generate_all(sizes, seed=SEED)
+
+
+def _profile_all(n: int) -> None:
+    """Profiling three tables, and the containment checks between them."""
+    polspec.profile_all(_related(n))
+
+
 def _validate(n: int) -> None:
     DataSource.validate(_profiled_frame(n, text=False))
 
@@ -454,6 +483,7 @@ CASES: tuple[Case, ...] = (
     Case("foreign_key_batches", "regression", (1_000_000,), _foreign_key_batches),
     Case("profile", "regression", (1_000_000,), _profile),
     Case("profile_text", "regression", (1_000_000,), _profile_text),
+    Case("profile_all", "regression", (1_000_000,), _profile_all),
     Case("validate", "regression", (1_000_000,), _validate),
     Case("import", "regression", (1,), _import),
 )

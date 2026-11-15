@@ -52,6 +52,7 @@ they can change in any release, so code outside polspec should use only
 | `profiler` | Inferring a spec from an existing DataFrame; opt-in, a column's fitted shape, whether it is a key, and which columns' values not to carry over |
 | `shape` | Fitting the distribution a numeric or temporal column follows: each candidate the engine draws is fitted by moments, drawn through `generate()` with the column's bounds, and scored by its Kolmogorov-Smirnov distance to the data |
 | `synthesis` | `profile` and `synthesize`: a spec, and a fake frame, from a `DataFrame`, a `LazyFrame` or a data file |
+| `related` | `profile_all`: a set of related tables profiled into a `Registry`, the foreign keys between them found by containment and named by their columns, each key's column given its parent's claims |
 | `render` | Rendering a spec, a registry, a category registry or a drift report as Markdown or Mermaid |
 | `cli` | The `polspec` command, one module per verb: `_schema` (infer, new), `_data` (validate, generate), `_drift` (diff, drift), `_test`; `_io` holds the readers, writers and spec loaders they share |
 
