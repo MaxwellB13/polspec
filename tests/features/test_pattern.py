@@ -1,9 +1,7 @@
-"""`pattern=`: a regular expression a String column must match, on validation only.
+"""`pattern=`: a regular expression a String column must match.
 
-The honest half of the split `format=` made: polspec can check any regex
-today and can generate a curated set. A pattern is checked like a format
-and generated like nothing at all, and that boundary is pinned in
-`test_roundtrip.py` beside the other validation-only claims.
+Checked like a format; generated from since 1.4, which
+`tests/generation/test_pattern_generation.py` covers.
 """
 
 from __future__ import annotations

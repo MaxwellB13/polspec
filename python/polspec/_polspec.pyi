@@ -40,6 +40,7 @@ class ColumnPlan:
         unique: bool = False,
         template: Sequence[tuple[str, Sequence[str], int, int]] | None = None,
         seed_name: str | None = None,
+        pattern: str | None = None,
     ) -> None: ...
     @property
     def name(self) -> str: ...
@@ -86,6 +87,13 @@ def distributions() -> list[str]:
 
 def kinds() -> list[str]:
     """Every column kind a `ColumnPlan` accepts."""
+
+def pattern_status(
+    pattern: str,
+    lengths: tuple[int, int] | None,
+    plain_lengths: tuple[int, int],
+) -> tuple[str, str | None]:
+    """How a `pattern` column is generated: `("generate", None)` from the pattern; `("keep", None)` as plain text, every value of which already passes it at `plain_lengths` characters; or `("unreachable", reason)`."""
 
 def permuted_indices(domain: int, seed: int, start: int, n: int) -> pl.Series:
     """Positions `start..start + n` of the permutation of `[0, domain)` that `seed` keys, as `UInt64` indices; any window is the whole range's slice. Raises `ValueError` for a window past the domain."""

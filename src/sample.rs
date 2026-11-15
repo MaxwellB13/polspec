@@ -567,6 +567,58 @@ fn gen_template_column(
     ))
 }
 
+/// A pattern column: each row a full match of the plan's pattern.
+///
+/// Chunked and collected the same way as `gen_string_column`; the values come
+/// from a walk through the pattern's automaton -- see `pattern.rs`.
+fn gen_pattern_column(
+    plan: &ColumnPlan,
+    n: usize,
+    seed: ColumnSeed,
+) -> Result<StringChunked, String> {
+    let name = PlSmallStr::from(plan.name.as_str());
+    if n == 0 {
+        return Ok(StringChunkedBuilder::new(name, 0).finish());
+    }
+    let sampler = plan
+        .pattern
+        .as_ref()
+        .ok_or_else(|| format!("Column '{}' has kind 'pattern' but no pattern", plan.name))?;
+    let bernoulli = draws_nulls(plan)
+        .then(|| null_bernoulli(plan))
+        .transpose()?;
+
+    let chunks: Vec<StringChunked> = (0..n.div_ceil(CHUNK_SIZE))
+        .into_par_iter()
+        .map(|i| {
+            let start = i * CHUNK_SIZE;
+            let len = (start + CHUNK_SIZE).min(n) - start;
+            let mut builder = StringChunkedBuilder::new(name.clone(), len);
+            let mut rng = chunk_rng(seed, i);
+            let mut value = String::with_capacity(sampler.max_bytes());
+            for _ in 0..len {
+                if bernoulli.as_ref().is_some_and(|b| b.sample(&mut rng)) {
+                    builder.append_null();
+                    continue;
+                }
+                sampler.fill(&mut rng, &mut value);
+                builder.append_value(&value);
+            }
+            builder.finish()
+        })
+        .collect();
+
+    Ok(StringChunked::from_chunk_iter(
+        name,
+        chunks.iter().map(|ca| {
+            ca.downcast_iter()
+                .next()
+                .expect("one chunk per part")
+                .clone()
+        }),
+    ))
+}
+
 /// Fills one column according to its plan.
 /// Rows `[row_offset, row_offset + n)` of the column `plan` describes.
 ///
@@ -613,6 +665,7 @@ fn generate_chunked(plan: &ColumnPlan, n: usize, seed: ColumnSeed) -> Result<Ser
         Kind::Bool => gen_bool_column(plan, n, seed)?.into_series(),
         Kind::String => gen_string_column(plan, n, seed)?.into_series(),
         Kind::Template => gen_template_column(plan, n, seed)?.into_series(),
+        Kind::Pattern => gen_pattern_column(plan, n, seed)?.into_series(),
         Kind::Index => gen_index_column(plan, n, seed)?.into_series(),
     })
 }

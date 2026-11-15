@@ -110,6 +110,13 @@ class OneString(FrameSpec):
     c = ColSpec(pl.String, string_length=(STR_MIN_LEN, STR_MAX_LEN))
 
 
+class OnePattern(FrameSpec):
+    """A pattern with classes, a repeat and an alternation: the walk through
+    its automaton, since 1.4."""
+
+    c = ColSpec(pl.String, pattern=r"^[A-Z]{2}-\d{4,6}(-(EU|US|UK))?$")
+
+
 class OneInt(FrameSpec):
     c = ColSpec(
         pl.Int64, bounds=Bound(INT_LO, INT_HI), nullable=True, null_probability=NULL_P
@@ -394,6 +401,7 @@ CASES: tuple[Case, ...] = (
     ),
     # One column at a time, so a regression names the kind that caused it.
     Case("string", "regression", (20_000_000,), _polspec(OneString)),
+    Case("pattern", "regression", (1_000_000,), _polspec(OnePattern)),
     Case("int64", "regression", (20_000_000,), _polspec(OneInt)),
     Case("float64", "regression", (20_000_000,), _polspec(OneFloat)),
     Case("enum", "regression", (20_000_000,), _polspec(OneEnum)),

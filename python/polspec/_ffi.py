@@ -16,6 +16,7 @@ Three things happen here and nowhere else:
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -92,3 +93,14 @@ def distributions() -> list[str]:
 def kinds() -> list[str]:
     """The column kinds a `ColumnPlan` accepts."""
     return _extension().kinds()
+
+
+@functools.lru_cache(maxsize=256)
+def pattern_status(
+    pattern: str, lengths: tuple[int, int] | None, plain_lengths: tuple[int, int]
+) -> tuple[str, str | None]:
+    """How a column with `pattern` is generated: `"generate"`, from the
+    pattern; `"keep"`, as the plain text it drew before 1.4, every value of
+    which already passes it; or `"unreachable"`, with the reason. Asked once
+    per pattern and lengths: the automaton is built in Rust, and kept there."""
+    return _extension().pattern_status(pattern, lengths, plain_lengths)

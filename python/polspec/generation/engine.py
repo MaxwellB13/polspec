@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 import polars as pl
 
 from polspec import frames
-from polspec._ffi import column_plan
+from polspec._ffi import column_plan, pattern_status
 from polspec._ffi import generate_dataframe as _generate_dataframe
 from polspec.bound import Bound
 from polspec.constants import (
@@ -370,6 +370,24 @@ def plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None]
     # Free strings: String, Binary, and a Categorical with no pinned domain.
     length = spec.string_length or Bound(*DEFAULT_STRING_LEN)
     shortest, longest = length.closed()
+
+    # A pattern: each value a full match of it, walked through the DFA
+    # validation's engine builds -- unless every free string below already
+    # passes it, whose output a seed keeps, or it is out of the generator's
+    # reach, when the column is the free string it was before 1.4. A unique
+    # pattern column is a free string for now.
+    if spec.pattern is not None and not spec.unique:
+        declared = (
+            (int(shortest), int(longest)) if spec.string_length is not None else None
+        )
+        status, _reason = pattern_status(
+            spec.pattern, declared, (int(shortest), int(longest))
+        )
+        if status == "generate":
+            if declared is not None:
+                options["str_min_len"], options["str_max_len"] = declared
+            return column_plan(name, "pattern", pattern=spec.pattern, **options), None
+
     options["str_min_len"], options["str_max_len"] = int(shortest), int(longest)
     return column_plan(name, "string", **options), None
 

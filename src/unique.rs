@@ -333,6 +333,13 @@ pub fn generate_unique_series(
             })?;
             unique_strings(plan, n, seed, template)?.into_series()
         }
+        // Refused when the plan is built; see `ColumnPlan::build`.
+        Kind::Pattern => {
+            return Err(format!(
+                "Column '{}' is unique, and a unique column is not yet generated from its pattern",
+                plan.name
+            ));
+        }
     })
 }
 

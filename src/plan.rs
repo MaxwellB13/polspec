@@ -11,7 +11,10 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 use crate::dist::Distribution;
+use std::sync::Arc;
+
 use crate::format::{RawPart, Template};
+use crate::pattern::PatternSampler;
 
 /// Declares `Kind` alongside the three views of it that have to stay in step:
 /// the list of names, the parse, and the reverse lookup. One list, so a new
@@ -63,13 +66,14 @@ declare_kinds! {
     String => "string",
     Index => "index",
     Template => "template",
+    Pattern => "pattern",
 }
 
 impl Kind {
     pub fn is_numeric(self) -> bool {
         !matches!(
             self,
-            Kind::Bool | Kind::String | Kind::Index | Kind::Template
+            Kind::Bool | Kind::String | Kind::Index | Kind::Template | Kind::Pattern
         )
     }
 }
@@ -138,6 +142,7 @@ pub struct PlanArgs<'a> {
     pub params: Option<&'a HashMap<String, f64>>,
     pub unique: bool,
     pub template: Option<&'a [RawPart]>,
+    pub pattern: Option<&'a str>,
 }
 
 /// One column's generation instructions.
@@ -182,6 +187,8 @@ pub struct ColumnPlan {
     pub unique: bool,
     /// The shape of a `Template` column's values. `None` for every other kind.
     pub template: Option<Template>,
+    /// A `Pattern` column's compiled pattern. `None` for every other kind.
+    pub pattern: Option<Arc<PatternSampler>>,
 }
 
 pub const DEFAULT_STR_MIN_LEN: usize = 5;
@@ -212,6 +219,7 @@ impl ColumnPlan {
             params,
             unique,
             template,
+            pattern,
         } = args;
 
         let kind = Kind::parse(kind).ok_or_else(|| {
@@ -260,6 +268,33 @@ impl ColumnPlan {
             }
             (_, None) => None,
         };
+        let pattern = match (kind, pattern) {
+            (Kind::Pattern, Some(text)) => {
+                // Lengths as declared, or the pattern's own when none are.
+                let lengths = match (str_min_len, str_max_len) {
+                    (Some(lo), Some(hi)) => Some((lo, hi)),
+                    _ => None,
+                };
+                Some(crate::pattern::sampler(text, lengths).map_err(|reason| {
+                    format!("Column '{name}' cannot be generated from its pattern: {reason}")
+                })?)
+            }
+            (Kind::Pattern, None) => {
+                return Err(format!("Column '{name}' has kind 'pattern' but no pattern"));
+            }
+            (_, Some(_)) => {
+                return Err(format!(
+                    "Column '{name}' carries a pattern but has kind '{}', not 'pattern'",
+                    kind.name()
+                ));
+            }
+            (_, None) => None,
+        };
+        if kind == Kind::Pattern && unique {
+            return Err(format!(
+                "Column '{name}' is unique, and a unique column is not yet generated from its pattern"
+            ));
+        }
         match kind {
             Kind::Index => {
                 let n = n_categories.ok_or_else(|| {
@@ -332,6 +367,7 @@ impl ColumnPlan {
             p_true,
             unique,
             template,
+            pattern,
         })
     }
 }
@@ -343,6 +379,7 @@ impl ColumnPlan {
         name, kind, *, nullable=false, null_probability=0.0, min=None, max=None,
         n_categories=None, weights=None, str_min_len=None, str_max_len=None,
         distribution=None, params=None, unique=false, template=None, seed_name=None,
+        pattern=None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -361,6 +398,7 @@ impl ColumnPlan {
         unique: bool,
         template: Option<Vec<RawPart>>,
         seed_name: Option<String>,
+        pattern: Option<&str>,
     ) -> PyResult<Self> {
         ColumnPlan::build(PlanArgs {
             name,
@@ -378,6 +416,7 @@ impl ColumnPlan {
             params: params.as_ref(),
             unique,
             template: template.as_deref(),
+            pattern,
         })
         .map_err(PyValueError::new_err)
     }
