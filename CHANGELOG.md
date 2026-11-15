@@ -9,6 +9,23 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-15
+
+**Real data in.** `profile_all` profiles a set of related tables into a
+`Registry`, with the foreign keys between them found from their values,
+and `synthesize_all` makes a fake copy of the set, a tenth of the size or
+three times it, with every key held by a fake parent. The command line
+takes several files for both. `profile` writes a code's shape as its
+`pattern`, so fake order references and SKUs look like the real ones, and
+a weighted `Enum` prints as `ColSpec(Enum, choices={'A': 0.5, ...})`.
+Validation is benchmarked beside dataframely and pandera, and a third
+tutorial starts from data you already have.
+
+Everything is additive under the 1.0 promises. Seeded generation is
+unchanged. Profiles change where a code now gets its pattern, which
+*Stability* leaves open, as it does a `repr`. Nothing is deprecated. The
+spec-file format stays at version 4.
+
 ### Added
 
 - **`polspec.profile_all(frames)`** profiles a set of related tables into a
@@ -45,8 +62,8 @@ page promises; before 1.0, a minor version could break any of them.
   every value shares stays as written (`^ORD-[0-9]{6}$`). Every source
   value matches, and the fake codes have the shape. Not for a `replace`d
   column, for prose, or for numbers and dates written as text. A column of
-  distinct values gets one only when it holds ten times as many. `patterns=False`, or `--no-patterns`, turns it
-  off.
+  distinct values gets one only when it holds ten times as many.
+  `patterns=False`, or `--no-patterns`, turns it off.
 
 ### Changed
 
@@ -56,6 +73,17 @@ page promises; before 1.0, a minor version could break any of them.
   0.2))`, each category beside its share. It is a spelling `ColSpec` takes.
   An Enum inside a `List` or `Struct` keeps the dtype's own. Spec files are
   unchanged.
+
+### Fixed
+
+- **`--all` finds a data file by the spec name its stem gives.**
+  `validate --all`, `drift --all` and the other `--all` verbs looked for
+  `<Spec>.<suffix>` and left the match to the file system, so `orders.csv`
+  was found for `Orders` on Windows and macOS but not on Linux. A file
+  matches when its stem is the spec's name or gives it, as several-source
+  `schema infer` names a spec after its file (`order_lines.csv` for
+  `OrderLines`), on every platform. Two files for one spec are refused, as
+  before.
 
 ### Documentation
 
@@ -3242,7 +3270,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/MaxwellB13/polspec/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/MaxwellB13/polspec/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/MaxwellB13/polspec/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/MaxwellB13/polspec/compare/v1.1.0...v1.2.0

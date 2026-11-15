@@ -111,13 +111,19 @@ def _registry_from(source: Path) -> Registry:
 
 
 def _data_file_for(directory: Path, name: str) -> Path | None:
-    """`directory/<name>.<suffix>` for the one suffix the readers know, or
-    None when the spec has no file there."""
-    found = [
-        candidate
-        for suffix in SUFFIXES
-        if (candidate := directory / f"{name}{suffix}").exists()
-    ]
+    """The one data file under `directory` named after the spec `name`, or
+    None when it has none there: `<name>.<suffix>` for a suffix the readers
+    know, or a file whose stem gives that spec name, as several-source
+    `schema infer` names a spec after its file (`order_lines.csv` for
+    `OrderLines`). Matched by name, not by the file system, so a directory
+    `synthesize` wrote is found on any platform."""
+    found = sorted(
+        path
+        for path in directory.iterdir()
+        if path.suffix in SUFFIXES
+        and path.is_file()
+        and name in (path.stem, _class_name_from(path.stem))
+    )
     if len(found) > 1:
         raise CliError(
             f"{name} has several data files under {directory}: "
