@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 
 from polspec import frames
-from polspec._colspec import basics, choices, defaults, nested, ranges, text
+from polspec._colspec import basics, choices, defaults, derived, nested, ranges, text
 
 # Defined beside the checks, which read them too, and imported from here by
 # the rest of the package: each `as` re-exports the name.
@@ -209,6 +209,16 @@ class ColSpec:
         boolean predicate (referencing only this column) or a `Check` (for a
         custom name, description or null handling). Unlike
         `FrameSpec.__checks__`, these travel with the column's own declaration.
+    derive : Pred | None, optional
+        A `col()` expression computing the column from others, such as
+        `col("qty") * col("price")`. Generation computes it after every
+        column it reads, and casts it to the column's dtype; validation holds
+        the column to it -- equal, or for a float within a relative 1e-9 --
+        as a `derived` finding. A derived value is null exactly where the
+        expression is. The expression decides the values, so a derived column
+        declares none of `bounds`, `choices`, `rules`, `distribution`,
+        `format`, `pattern`, `string_length`, `unique` or `default`, and is
+        `nullable` when an input is. *Added in 1.4.*
 
     Examples
     --------
@@ -256,6 +266,7 @@ class ColSpec:
     weights: tuple[float, ...] | None = None
     rules: tuple[ColRule, ...] = ()
     validators: tuple[Check, ...] = ()
+    derive: Pred | None = None
 
     if TYPE_CHECKING:
 
@@ -291,6 +302,7 @@ class ColSpec:
             | Pred
             | Sequence[Check | pl.Expr | Pred]
             | None = (),
+            derive: Pred | None = None,
         ) -> None: ...
 
     def __post_init__(self) -> None:
@@ -325,6 +337,7 @@ class ColSpec:
         nested.validate_map(self)
         defaults.validate_optional(self)
         defaults.validate_default(self)
+        derived.validate_derive(self)
 
     def __repr__(self) -> str:
         """The column as declared: its dtype, then each field that differs
@@ -341,11 +354,28 @@ class ColSpec:
             )
             if f.name == "null_probability" and not self.nullable:
                 continue  # a rate of nulls a column holds none of says nothing
+            if isinstance(value, Pred):
+                parts.append(f"{f.name}={value!r}")
+                continue  # `==` on a predicate builds one
             if value == default:
                 continue
             shown = (value.min, value.max) if isinstance(value, Bound) else value
             parts.append(f"{f.name}={shown!r}")
         return f"ColSpec({', '.join(parts)})"
+
+    def __eq__(self, other: object) -> bool:
+        """Field by field, as a dataclass compares -- a `col()` expression
+        structurally, since `==` on one builds a predicate."""
+        if other.__class__ is not self.__class__:
+            return NotImplemented
+        for f in dataclasses.fields(self):
+            mine, theirs = getattr(self, f.name), getattr(other, f.name)
+            if isinstance(mine, Pred) or isinstance(theirs, Pred):
+                if not (isinstance(mine, Pred) and mine.equals(theirs)):
+                    return False
+            elif mine != theirs:
+                return False
+        return True
 
     def replace(self, **changes: Any) -> ColSpec:
         """This column with `changes` made, checked as a new declaration is:

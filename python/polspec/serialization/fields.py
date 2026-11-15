@@ -477,6 +477,15 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
         ),
         since=2,
     ),
+    # An added optional key on version 4: a file without one claims nothing
+    # it did not before, and 1.3 refuses one by name.
+    Field(
+        "derive",
+        since=4,
+        to_data=lambda pred: pred.to_data(),
+        from_data=lambda v, ctx, path: pred_from_data(v),
+        to_source=lambda pred: pred.to_source(),
+    ),
 )
 
 

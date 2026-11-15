@@ -394,6 +394,7 @@ def to_python(spec: SpecLike, path: str | Path | None = None) -> str | None:
     persistable_checks = [c for c in spec.checks if c.pred is not None]
     has_validators = any("validators" in c for c in data["columns"].values())
     has_rules = any("rules" in c for c in data["columns"].values())
+    has_derived = any("derive" in c for c in data["columns"].values())
 
     imports = []
     if persistable_checks or has_validators:
@@ -405,7 +406,7 @@ def to_python(spec: SpecLike, path: str | Path | None = None) -> str | None:
         imports.append("ForeignKey")
     if spec.hierarchy is not None:
         imports.append("Hierarchy")
-    if has_rules or has_validators or persistable_checks:
+    if has_rules or has_validators or persistable_checks or has_derived:
         imports.append("col")
 
     body = [f"class {spec.name}(FrameSpec):"]

@@ -105,7 +105,7 @@ polspec validate [-h] [--all] [--references NAME=PATH] [--class NAME]
 | `--allow-missing` | Do not report declared columns the data lacks |
 | `--strict-dtypes` | Require exact dtypes rather than compatible ones |
 | `--fill-defaults` | Fill each defaulted column's nulls with its default, and add it when absent, before checking; --output writes the filled rows |
-| `--skip` `CHECK` | Turn off one kind of check, as CHECK=False does in Python; repeat for several. One of `rules`, `validators`, `unique`, `checks`, `foreign_keys`, `hierarchy`, `order`, `rows`, `pattern`, `bounds`. |
+| `--skip` `CHECK` | Turn off one kind of check, as CHECK=False does in Python; repeat for several. One of `rules`, `derived`, `validators`, `unique`, `checks`, `foreign_keys`, `hierarchy`, `order`, `rows`, `pattern`, `bounds`. |
 | `--json` | Print the report as JSON instead of text |
 | `--output` `PATH` | Write the rows that passed, typed as the spec declares, to PATH (the format by its extension) |
 | `--failing` `PATH` | Write the rows that failed, with the finding each broke, to PATH |

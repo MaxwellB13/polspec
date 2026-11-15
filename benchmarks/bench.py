@@ -124,6 +124,14 @@ class UniquePattern(FrameSpec):
     c = ColSpec(pl.String, pattern=r"^[A-Z]{2}-[0-9]{6}$", unique=True)
 
 
+class Derived(FrameSpec):
+    """Two columns and one computed from them: the derive pass, since 1.4."""
+
+    qty = ColSpec(pl.Int64, bounds=(1, 20))
+    price = ColSpec(pl.Float64, bounds=(0.5, 100))
+    total = ColSpec(pl.Float64, derive=col("qty") * col("price"))
+
+
 class OneInt(FrameSpec):
     c = ColSpec(
         pl.Int64, bounds=Bound(INT_LO, INT_HI), nullable=True, null_probability=NULL_P
@@ -429,6 +437,7 @@ CASES: tuple[Case, ...] = (
         "cartesian", "regression", (1_000_000,), _polspec(Coverage, method="cartesian")
     ),
     Case("rules", "regression", (1_000_000,), _polspec(Ruled)),
+    Case("derived", "regression", (1_000_000,), _polspec(Derived)),
     Case("foreign_key_self", "regression", (1_000_000,), _polspec(SelfKeyed)),
     Case("unique_together", "regression", (1_000_000,), _polspec(Composite)),
     Case("hierarchy", "regression", (100_000, 1_000_000), _polspec(Linked)),

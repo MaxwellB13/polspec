@@ -89,6 +89,21 @@ def passes_of(spec: TableSpec) -> list[Pass]:
                 overrides=frozenset({WEIGHTS, DISTRIBUTION, VALUES, NAN_RATE}),
             )
         )
+    for name, col in spec.columns.items():
+        if col.derive is None:
+            continue
+        passes.append(
+            Pass(
+                key=f"derive:{name}",
+                label=f"the derivation of {name!r}",
+                writes=frozenset({name}),
+                reads=frozenset(root_names(col.derive)),
+                # Its expression owns the column, nulls included.
+                overrides=frozenset(
+                    {WEIGHTS, DISTRIBUTION, VALUES, NULL_RATE, NAN_RATE}
+                ),
+            )
+        )
     for fk in spec.foreign_keys:
         # A key against another spec draws from that spec's frame, so it
         # reads nothing here; a self-referencing one reads this frame.

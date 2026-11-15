@@ -100,6 +100,8 @@ def _describe_domain(cs) -> str:
         if cs.list_length is not None:
             return f"{cs.list_length.min}..{cs.list_length.max} elements, {described}"
         return described
+    if cs.derive is not None:
+        return f"derived: {_code(repr(cs.derive))}"
     if cs.format is not None:
         extras = cs.extra_values or {}
         also = f", plus {', '.join(extras)}" if extras else ""
@@ -494,6 +496,8 @@ def _entity_lines(spec: TableSpec, entity_name: str) -> list[str]:
             comments.append(f"format: {cs.format}{also}")
         elif cs.pattern is not None:
             comments.append(f"pattern: {cs.pattern}")
+        elif cs.derive is not None:
+            comments.append(f"derived: {cs.derive!r}")
         if cs.tags:
             comments.append(f"tags: [{', '.join(cs.tags)}]")
         if cs.string_length is not None:

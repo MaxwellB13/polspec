@@ -47,6 +47,7 @@ FindingCode = Literal[
     "format",
     "pattern",
     "rule",
+    "derived",
     "validator",
     "unique",
     "unique_together",
