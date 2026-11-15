@@ -186,3 +186,6 @@ docs/llms-full.txt
 # The render check's parsers (scripts/deep/render), installed by npm.
 scripts/deep/render/node_modules/
 scripts/deep/render/package-lock.json
+
+# The editable wheel CI caches beside the built extension
+.polspec-editable/

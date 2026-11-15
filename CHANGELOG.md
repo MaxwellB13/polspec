@@ -73,6 +73,9 @@ read. The plugin loads whenever pytest runs with polspec installed;
   and coverage is measured on Python 3.12, a leg every pull request runs.
   A release no longer runs the matrix again: it waits for the Test run on
   `main` for the tagged commit and builds only if it passed.
+  A test job compiles the Rust extension only when its sources changed:
+  the built module is cached on them, one per OS, saving 5 to 14 minutes
+  a job.
 - **`polspec test` writes its tests with the new helpers.** Each test draws
   from the `polspec_frames` fixture and checks with `assert_valid`, so a
   failure shows the rows and the seed to rerun it with. A spec whose foreign
