@@ -68,6 +68,18 @@ every Polars it supported:
 | 0.12.0 | A `List`, `Array` or `Map` column's elements past the first batch (`generate()` did not change) |
 | 0.19.0 | `lognormal` and `beta` columns, where operating systems' maths libraries disagreed: the samplers' `exp`, `ln` and `pow` are polspec's own, so a seed gives the same values on every OS |
 
+Since 1.0, one release has changed what a seed produces, under the rule
+above:
+
+| Release | What a seed produced differently |
+|:--|:--|
+| 1.4.0 | A `pattern` column whose plain text broke its own pattern, now generated from the pattern. A pattern every plain string passes, and one the generator cannot follow, kept their output exactly |
+
+What 1.4 added is held to the promise from 1.4 on: a column generated from
+its pattern, a unique one, a derived column, and the `uuid7`, `ulid`,
+`url` and `iso_country3` formats are in the catalogue `test_seeded.py`
+checks.
+
 ### The pytest plugin
 
 The plugin polspec registers with pytest is named `polspec`, so

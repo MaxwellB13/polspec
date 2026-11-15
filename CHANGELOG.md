@@ -83,7 +83,15 @@ page promises; before 1.0, a minor version could break any of them.
   already passes (`^[A-Za-z0-9]+$`) is decided on its automaton and keeps
   exactly the output it had. So does a pattern the generator cannot
   follow: a Unicode word boundary, an automaton over its size limit, no
-  match within the declared lengths.
+  match within the declared lengths. *Stability* lists the change with
+  the pre-1.0 ones, and the seeded-output catalogue now holds a pattern
+  column, a unique one, one that keeps its plain text, a derived column
+  and the four new formats, so their output is promised from here on.
+- **Docs.** Nested types (`List`, `Array`, `Struct`, `Map`) have a page of
+  their own, *Nested columns*, out of *Declaring columns*; patterns moved
+  to *String formats*. *Recipes* gains an order reference or postcode, a
+  computed total, and a lazy pipeline's shape checked without running it.
+  Pages that called patterns validation-only no longer do.
 
 ## [1.3.0] - 2026-11-15
 

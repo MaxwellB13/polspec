@@ -351,11 +351,11 @@ order_lines = OrderLines.generate(30_000, seed=3, references={Orders: orders})
 ## What generation does not enforce
 
 Generation satisfies dtypes, nullability, bounds, string lengths, value
-domains, `format`s, weights, distributions, `unique=True`,
-`__unique_together__`, `ColRule`s, hierarchies and — when given parent data —
-foreign keys.
+domains, `format`s, `pattern`s, weights, distributions, `unique=True`,
+`__unique_together__`, `ColRule`s, derived columns, hierarchies and — when
+given parent data — foreign keys.
 
-It does **not** attempt `ColSpec.validators`, `__checks__` or
-`ColSpec.pattern`, by design: the first two hold arbitrary expressions and the
-third an arbitrary regex, and nothing can generate data to satisfy either in
-general. See [Known limitations](../explanation/limitations.md).
+It does **not** attempt `ColSpec.validators` or `__checks__`, by design:
+they hold arbitrary expressions, and nothing can generate data to satisfy
+one in general. A `pattern` the generator cannot follow is filled with
+plain text, and says so. See [Known limitations](../explanation/limitations.md).

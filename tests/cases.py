@@ -116,6 +116,14 @@ COLUMN_CASES: dict[str, ColSpec] = {
     "format_hostname": ColSpec(pl.String, format="hostname"),
     "format_iso_country": ColSpec(pl.String, format="iso_country"),
     "format_iso_currency": ColSpec(pl.String, format="iso_currency"),
+    "format_uuid7": ColSpec(pl.String, format="uuid7"),
+    "format_ulid": ColSpec(pl.String, format="ulid"),
+    "format_url": ColSpec(pl.String, format="url"),
+    "format_iso_country3": ColSpec(pl.String, format="iso_country3"),
+    # patterns: generated from since 1.4, and one that keeps its plain text
+    "pattern": ColSpec(pl.String, pattern=r"^[A-Z]{2}-\d{4,6}(-(EU|US))?$"),
+    "pattern_unique": ColSpec(pl.String, pattern=r"^ID\d{6}$", unique=True),
+    "pattern_kept": ColSpec(pl.String, pattern=r"^[A-Za-z0-9]+$"),
     "format_nullable": ColSpec(
         pl.String, format="email", nullable=True, null_probability=0.3
     ),

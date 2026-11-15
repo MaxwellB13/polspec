@@ -144,10 +144,10 @@ the tests used to call `generate()` and `validate()` with seed 42.
 ### It will not hand you a test that fails on the spot
 
 `generate()` does not attempt everything `validate()` checks — see
-[Known limitations](../explanation/limitations.md). A spec using `__checks__`,
-`ColSpec.validators` or `pattern` would otherwise get a test that fails the
-moment it runs, since generation cannot satisfy them, and one declaring
-`__rows__` a test of the wrong size. The generator checks for each and turns
+[Known limitations](../explanation/limitations.md). A spec using `__checks__`
+or `ColSpec.validators`, or a `pattern` the generator cannot follow, would
+otherwise get a test that fails the moment it runs, since generation cannot
+satisfy them, and one declaring `__rows__` a test of the wrong size. The generator checks for each and turns
 off the matching `validate()` switch, with a comment explaining why:
 
 <!-- docs: skip -->
@@ -325,9 +325,9 @@ dtype check. `--fill-defaults` fills each defaulted column's nulls, and adds
 it when absent, before checking, as
 [`fill_defaults=True`](validating.md#filling-defaults) does. `--skip CHECK`
 turns off one kind of check, as `CHECK=False` does in Python —
-`--skip bounds --skip checks` — and takes any of `rules`, `validators`,
-`unique`, `checks`, `foreign_keys`, `hierarchy`, `order`, `rows`, `pattern`
-and `bounds`.
+`--skip bounds --skip checks` — and takes any of `rules`, `derived`,
+`validators`, `unique`, `checks`, `foreign_keys`, `hierarchy`, `order`,
+`rows`, `pattern` and `bounds`.
 
 A CSV, TSV or JSON file has no date type, so a date arrives as text — and
 JSON holds a decimal or a duration as text too. The CLI reads each column

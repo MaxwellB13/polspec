@@ -106,6 +106,16 @@ def _cases() -> dict[str, Callable[[], pl.DataFrame]]:
             {"child": ColSpec(pl.String), "parent": ColSpec(pl.String)},
             hierarchy=Hierarchy(child="child", parent="parent", max_depth=4),
         ),
+        "derived": TableSpec(
+            "D",
+            {
+                "qty": ColSpec(pl.Int64, bounds=(1, 20)),
+                "price": ColSpec(pl.Float64, bounds=(0.5, 100), nullable=True),
+                "total": ColSpec(
+                    pl.Float64, derive=col("qty") * col("price"), nullable=True
+                ),
+            },
+        ),
         "unique_together": TableSpec(
             "U",
             {

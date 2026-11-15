@@ -44,15 +44,16 @@ production will reject.
     `Categorical`, and a `List`, `Array` or `Struct` of any of them, nested
     to any depth, and on Polars 2 a `Map` — plus nullability, bounds, string
     lengths, value domains, named string formats such as `uuid4` and
-    `email`, and regex patterns.
+    `email`, and regex patterns, which are generated from.
 
     [Declaring columns](how-to/columns.md) ·
+    [Nested columns](how-to/nested.md) ·
     [String formats](how-to/formats.md)
 
 - **Rules and invariants**
 
-    Conditional values, single-column validators, multi-column checks,
-    composite uniqueness, the order rows come in, how many rows a table
+    Conditional values, columns derived from others, single-column
+    validators, multi-column checks, composite uniqueness, the order rows come in, how many rows a table
     holds, foreign keys between specs, and parent/child hierarchies with a
     bounded depth.
 
