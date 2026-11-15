@@ -29,13 +29,15 @@ polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
                             [--no-bounds] [--sample N] [--shape] [--keys] [--order]
                             [--round-bounds STEP] [--round-rates STEP]
                             [--replace COL [COL ...]]
-                            source
+                            [--foreign-key SPEC.COLUMN=SPEC.COLUMN]
+                            [--no-foreign-keys]
+                            source [source ...]
 ```
 
 | Argument | Meaning |
 |:--|:--|
-| `source` | Path to a CSV, Parquet, NDJSON or IPC file |
-| `-o`, `--output` `OUTPUT` | **Required.** File to write: .yaml/.yml, or .py for a FrameSpec subclass; '-' prints the YAML instead |
+| `source` | Path to a CSV, Parquet, NDJSON or IPC file; several are related tables, profiled into a registry with the foreign keys between them |
+| `-o`, `--output` `OUTPUT` | **Required.** File to write: .yaml/.yml, or .py for a FrameSpec subclass (one per source, and a Registry, with several); '-' prints the YAML instead |
 | `--name` `NAME` | Spec class name (default: derived from source) |
 | `--weights` | Record each category's observed frequency |
 | `--max-unique-enum` `N` | Max distinct values for a string column to become an Enum, when they repeat (default: 50) |
@@ -49,6 +51,8 @@ polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
 | `--round-bounds` `STEP` | Round each numeric column's bounds outward to STEP (1000, 1k, 10k, 1M, 0.01), within its dtype, so the data stays inside; 'auto' keeps two significant figures of the span and whole seconds; 'exact' writes them as observed (default: auto) |
 | `--round-rates` `STEP` | Round each null and NaN rate up to STEP (0.01), and each --weights frequency to its nearest STEP; 'auto' keeps two significant figures; 'exact' writes them as observed. A rate of 0 stays 0 (default: auto) |
 | `--replace` `COL` | Columns whose values must not be carried into the spec |
+| `--foreign-key` `SPEC.COLUMN=SPEC.COLUMN` | With several sources, declare a foreign key, child then parent, each under its file's spec name: Orders.buyer=Customers.id |
+| `--no-foreign-keys` | With several sources, find no foreign keys between them |
 
 ## `polspec schema new`
 
@@ -139,24 +143,30 @@ polspec generate [-h] [--all] [--format EXT] -n N -o OUTPUT [--seed SEED]
 Write a fake data file that looks like a real one.
 
 ```
-polspec synthesize [-h] -o OUTPUT [-n N] [--seed SEED]
-                          [--replace COL [COL ...]] [--sample N] [--max-unique-enum N]
-                          [--no-formats] [--parse-text] [--spec PATH] [--name NAME]
-                          source
+polspec synthesize [-h] -o OUTPUT [-n N] [--scale X] [--seed SEED]
+                          [--format EXT] [--foreign-key SPEC.COLUMN=SPEC.COLUMN]
+                          [--no-foreign-keys] [--replace COL [COL ...]] [--sample N]
+                          [--max-unique-enum N] [--no-formats] [--parse-text]
+                          [--spec PATH] [--name NAME]
+                          source [source ...]
 ```
 
 | Argument | Meaning |
 |:--|:--|
-| `source` | Path to a CSV, TSV, Parquet, NDJSON, JSON or IPC file |
-| `-o`, `--output` `OUTPUT` | **Required.** File to write; the extension picks the format (.parquet, .csv, ...) |
+| `source` | Path to a CSV, TSV, Parquet, NDJSON, JSON or IPC file; several are related tables, synthesized with the foreign keys between them |
+| `-o`, `--output` `OUTPUT` | **Required.** File to write, whose extension picks the format (.parquet, .csv, ...); with several sources, a directory to write one file each in |
 | `-n`, `--rows` `N` | Rows to generate (default: as many as the source has) |
+| `--scale` `X` | Rows as a multiple of each source's: 0.1 for a tenth, keeping the ratios between related tables |
 | `--seed` `SEED` | Generation seed (default: random) |
+| `--format` `EXT` | With several sources, write each as EXT (parquet, csv, ...) (default: its own) |
+| `--foreign-key` `SPEC.COLUMN=SPEC.COLUMN` | With several sources, declare a foreign key, child then parent, each under its file's spec name: Orders.buyer=Customers.id |
+| `--no-foreign-keys` | With several sources, find no foreign keys between them |
 | `--replace` `COL` | Columns whose values must not be carried over: text in them is generated from its lengths, never from the values the source holds |
 | `--sample` `N` | Profile a random sample of N rows rather than every row |
 | `--max-unique-enum` `N` | Max distinct values for a text column to keep its values, when they repeat (default: 50) |
 | `--no-formats` | Do not name the format a text column's values have (email, uuid4, ...) |
 | `--parse-text` | Read a text column as the number, flag or date every value holds (Boolean, Int64, Float64, Date, Datetime) |
-| `--spec` `PATH` | Also write the spec the data was generated from (.yaml, or .py) |
+| `--spec` `PATH` | Also write the spec the data was generated from (.yaml, or .py); with several sources, the registry of them |
 | `--name` `NAME` | The spec's class name (default: derived from source) |
 
 ## `polspec diff`

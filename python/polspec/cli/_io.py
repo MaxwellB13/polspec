@@ -7,6 +7,7 @@ and `drift` read back; a suffix in one map and not the other is a red test.
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import os
 import re
@@ -16,16 +17,18 @@ import types
 import warnings
 from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import polars as pl
 
 from polspec import FrameSpec
 from polspec.errors import CliError
+from polspec.foreign_key import ForeignKey
 from polspec.frames import json_casts, sample_rows
 from polspec.profiler import TEXT_NOTE
 from polspec.reading import SUFFIXES, parse_declared_text, read_file
 from polspec.registry import Registry, load_module
+from polspec.serialization import registry_to_python
 
 if TYPE_CHECKING:
     from polspec.tablespec import TableSpec
@@ -183,6 +186,90 @@ def _class_name_from(text: str) -> str:
     words = re.findall(r"[A-Za-z0-9]+", text) or ["Spec"]
     name = "".join(w[:1].upper() + w[1:] for w in words)
     return name if name[0].isalpha() else f"Spec{name}"
+
+
+def _tables(paths: list[Path]) -> dict[str, pl.DataFrame]:
+    """Each data file, whole, under the spec name its stem gives it -- the
+    tables a several-source `schema infer` or `synthesize` profiles."""
+    named: dict[str, Path] = {}
+    for path in paths:
+        name = _class_name_from(path.stem)
+        if name in named:
+            raise CliError(
+                f"{named[name]} and {path} would both be the spec {name!r}; "
+                "rename one of the files"
+            )
+        named[name] = path
+    return {
+        name: _read_data_file(path, None, infer_dates=True)
+        for name, path in named.items()
+    }
+
+
+def _declared_keys(
+    args: argparse.Namespace,
+) -> dict[str, list[ForeignKey]] | Literal[False] | None:
+    """`--foreign-key`s as the `keys=` a profile of related tables takes:
+    None for none, False for `--no-foreign-keys`."""
+    if args.no_foreign_keys:
+        if args.foreign_key:
+            raise CliError("--foreign-key and --no-foreign-keys contradict each other")
+        return False
+    keys: dict[str, list[ForeignKey]] = {}
+    for text in args.foreign_key or ():
+        left, sep, right = text.partition("=")
+        table, _, column = left.partition(".")
+        parent, _, ref = right.partition(".")
+        if not (sep and table and column and parent and ref):
+            raise CliError(
+                "--foreign-key expects SPEC.COLUMN=SPEC.COLUMN, the child column "
+                f"then the parent column, each under its file's spec name; got {text!r}"
+            )
+        references = "self" if parent == table else parent
+        keys.setdefault(table, []).append(
+            ForeignKey(column, references=references, ref_columns=ref)
+        )
+    return keys or None
+
+
+def _add_key_flags(parser: argparse.ArgumentParser) -> None:
+    """`--foreign-key` and `--no-foreign-keys`, which `schema infer` and
+    `synthesize` take for several sources."""
+    parser.add_argument(
+        "--foreign-key",
+        action="append",
+        metavar="SPEC.COLUMN=SPEC.COLUMN",
+        help=(
+            "With several sources, declare a foreign key, child then parent, "
+            "each under its file's spec name: Orders.buyer=Customers.id"
+        ),
+    )
+    parser.add_argument(
+        "--no-foreign-keys",
+        action="store_true",
+        help="With several sources, find no foreign keys between them",
+    )
+
+
+def _refuse_related_flags(args: argparse.Namespace) -> None:
+    """The flags that only mean something across several sources."""
+    for flag, given in (
+        ("--foreign-key", args.foreign_key),
+        ("--no-foreign-keys", args.no_foreign_keys),
+    ):
+        if given:
+            raise CliError(f"{flag} is for two or more sources, related by keys")
+
+
+def _write_registry(registry: Registry, path: Path) -> None:
+    """`registry` as a spec file: Python for `.py`, YAML otherwise."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _warnings_printed():
+        if path.suffix.lower() == ".py":
+            registry_to_python(registry, path)
+        else:
+            registry.to_yaml(path)
+    _maybe_format(path)
 
 
 def _snake_case(name: str) -> str:

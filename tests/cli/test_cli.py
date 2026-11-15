@@ -14,7 +14,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 from helpers import spec_for
-from polspec import ColSpec, FrameSpec
+from polspec import ColSpec, FrameSpec, Registry
 from polspec.cli import main
 
 
@@ -1438,3 +1438,202 @@ def test_synthesize_writes_values_of_the_sources_format(tmp_path):
     assert run_cli("synthesize", source, "-o", fake, "--spec", spec, "--seed", "1") == 0
     assert "format: ipv4" in spec.read_text(encoding="utf-8")
     assert run_cli("validate", spec, fake) == 0
+
+
+# ---------------------------------------------------------------------------
+# Several sources: related tables
+# ---------------------------------------------------------------------------
+
+
+def _shop_files(tmp_path):
+    customers, orders = tmp_path / "customers.csv", tmp_path / "orders.parquet"
+    pl.DataFrame(
+        {"id": range(1, 101), "email": [f"c{i}@example.com" for i in range(100)]}
+    ).write_csv(customers)
+    pl.DataFrame(
+        {
+            "id": range(1, 301),
+            "customer_id": [i % 37 + 1 for i in range(300)],
+            "buyer": [i % 50 + 1 for i in range(300)],
+        }
+    ).write_parquet(orders)
+    return customers, orders
+
+
+def _keys(registry, name):
+    return {
+        (fk.columns[0], fk.references, fk.ref_columns[0])
+        for fk in registry[name].foreign_keys
+    }
+
+
+@pytest.mark.parametrize("suffix", [".yaml", ".py"])
+def test_schema_infer_profiles_several_files_into_a_registry(tmp_path, suffix):
+
+    customers, orders = _shop_files(tmp_path)
+    output = tmp_path / f"shop{suffix}"
+    code = run_cli(
+        "schema",
+        "infer",
+        customers,
+        orders,
+        "-o",
+        output,
+        "--foreign-key",
+        "Orders.buyer=Customers.id",
+    )
+    assert code == 0
+    if suffix == ".py":
+        assert "registry = Registry(Customers, Orders)" in output.read_text(
+            encoding="utf-8"
+        )
+        data = tmp_path / "data"
+        data.mkdir()
+        pl.read_csv(customers).write_csv(data / "Customers.csv")
+        pl.read_parquet(orders).write_parquet(data / "Orders.parquet")
+        assert run_cli("validate", "--all", output, data) == 0
+    else:
+        registry = Registry.from_yaml(output)
+        assert _keys(registry, "Orders") == {
+            ("customer_id", "Customers", "id"),
+            ("buyer", "Customers", "id"),
+        }
+
+
+def test_schema_infer_prints_a_registry(tmp_path, capsys):
+    customers, orders = _shop_files(tmp_path)
+    assert run_cli("schema", "infer", customers, orders, "-o", "-") == 0
+    out = capsys.readouterr()
+    assert out.out.startswith("version:") and "specs:" in out.out
+    assert "1 foreign key(s)" in out.err
+
+
+def test_synthesize_writes_a_related_fake_set(tmp_path, capsys):
+    customers, orders = _shop_files(tmp_path)
+    out_dir, spec = tmp_path / "fake", tmp_path / "fake.yaml"
+    code = run_cli(
+        "synthesize",
+        customers,
+        orders,
+        "-o",
+        out_dir,
+        "--scale",
+        "0.5",
+        "--seed",
+        "1",
+        "--spec",
+        spec,
+    )
+    assert code == 0
+    fake_customers = pl.read_csv(out_dir / "customers.csv")
+    fake_orders = pl.read_parquet(out_dir / "orders.parquet")
+    assert (fake_customers.height, fake_orders.height) == (50, 150)
+    assert fake_orders["customer_id"].is_in(fake_customers["id"].implode()).all()
+    assert "Kept 1 foreign key(s)" in capsys.readouterr().out
+    data = tmp_path / "data"
+    data.mkdir()
+    fake_customers.write_csv(data / "Customers.csv")
+    fake_orders.write_parquet(data / "Orders.parquet")
+    assert run_cli("validate", "--all", spec, data) == 0
+
+
+def test_synthesize_writes_a_set_in_one_format(tmp_path):
+    customers, orders = _shop_files(tmp_path)
+    out_dir = tmp_path / "fake"
+    code = run_cli(
+        "synthesize",
+        customers,
+        orders,
+        "-o",
+        out_dir,
+        "--format",
+        "csv",
+        "--no-foreign-keys",
+    )
+    assert code == 0
+    assert sorted(p.name for p in out_dir.iterdir()) == ["customers.csv", "orders.csv"]
+
+
+def test_synthesize_scales_one_file(tmp_path):
+    customers, _ = _shop_files(tmp_path)
+    output = tmp_path / "fake.csv"
+    assert run_cli("synthesize", customers, "-o", output, "--scale", "0.2") == 0
+    assert pl.read_csv(output).height == 20
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (
+            ["schema", "infer", "{c}", "-o", "-", "--foreign-key", "A.b=C.d"],
+            "two or more sources",
+        ),
+        (
+            ["schema", "infer", "{c}", "{o}", "-o", "-", "--name", "X"],
+            "--name names one spec",
+        ),
+        (
+            [
+                "schema",
+                "infer",
+                "{c}",
+                "{o}",
+                "-o",
+                "-",
+                "--foreign-key",
+                "Orders.buyer",
+            ],
+            "SPEC.COLUMN=SPEC.COLUMN",
+        ),
+        (
+            [
+                "schema",
+                "infer",
+                "{c}",
+                "{o}",
+                "-o",
+                "-",
+                "--foreign-key",
+                "A.b=C.d",
+                "--no-foreign-keys",
+            ],
+            "contradict",
+        ),
+        (
+            [
+                "schema",
+                "infer",
+                "{c}",
+                "{o}",
+                "-o",
+                "-",
+                "--foreign-key",
+                "Nope.b=Customers.id",
+            ],
+            "not one of the tables",
+        ),
+        (["synthesize", "{c}", "{o}", "-o", "{t}/x.csv"], "names a directory"),
+        (
+            ["synthesize", "{c}", "{o}", "-o", "{t}/d", "--format", "xls"],
+            "--format 'xls'",
+        ),
+        (
+            ["synthesize", "{c}", "-o", "{t}/x.csv", "--format", "csv"],
+            "--format is for two",
+        ),
+        (
+            ["synthesize", "{c}", "-o", "{t}/x.csv", "-n", "5", "--scale", "1"],
+            "not both",
+        ),
+        (["synthesize", "{c}", "-o", "{t}/x.csv", "--scale", "0"], "positive"),
+        (["synthesize", "{c}", "{c}", "-o", "{t}/d"], "would both be the spec"),
+    ],
+)
+def test_several_sources_refuse_what_they_cannot_do(tmp_path, capsys, args, message):
+    customers, orders = _shop_files(tmp_path)
+    filled = [
+        a.format(c=customers, o=orders, t=tmp_path) if isinstance(a, str) else a
+        for a in args
+    ]
+    assert run_cli(*filled) == 1
+    assert message in capsys.readouterr().err

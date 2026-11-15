@@ -9,20 +9,29 @@ from pathlib import Path
 from polspec import FrameSpec
 from polspec.cli._io import (
     _class_name_from,
+    _declared_keys,
+    _existing,
     _maybe_format,
     _note_text,
     _read_data_file,
+    _refuse_related_flags,
     _require_identifier,
+    _tables,
     _warnings_printed,
+    _write_registry,
 )
 from polspec.errors import CliError
-from polspec.serialization import to_yaml
+from polspec.profiler import ProfileOptions
+from polspec.related import profile_all
+from polspec.serialization import registry_to_yaml, to_yaml
 
 
 def _cmd_schema_infer(args: argparse.Namespace) -> int:
-    source = Path(args.source)
-    if not source.exists():
-        raise CliError(f"no such file: {source}")
+    sources = [_existing(text) for text in args.source]
+    if len(sources) > 1:
+        return _infer_related(args, sources)
+    _refuse_related_flags(args)
+    source = sources[0]
 
     df = _read_data_file(source, args.sample, infer_dates=True)
     if df.height == 0:
@@ -71,6 +80,52 @@ def _cmd_schema_infer(args: argparse.Namespace) -> int:
         writer(output)
     _maybe_format(output)
 
+    print(f"{summary} -> {output}")
+    return 0
+
+
+def _infer_related(args: argparse.Namespace, sources: list[Path]) -> int:
+    """`schema infer` over several files: a registry, keys found between them."""
+    if args.name:
+        raise CliError(
+            "--name names one spec; with several sources each is named after its file"
+        )
+    keys = _declared_keys(args)
+    tables = _tables(sources)
+    options = ProfileOptions(
+        sample=args.sample,
+        weights=args.weights,
+        max_unique_enum=args.max_unique_enum,
+        formats=not args.no_formats,
+        calculate_bounds=not args.no_bounds,
+        shape=args.shape,
+        detect_unique=args.keys,
+        detect_order=args.order,
+        replace=args.replace or (),
+        round_bounds=args.round_bounds,
+        round_rates=args.round_rates,
+        parse_text=args.parse_text,
+    )
+    with _warnings_printed():
+        try:
+            registry = profile_all(tables, keys=keys, options=options)
+        except ValueError as exc:  # a name in --replace no file has, an empty file
+            raise CliError(str(exc)) from exc
+    for name in registry:
+        _note_text(registry[name])
+    found = sum(len(registry[name].foreign_keys) for name in registry)
+    summary = (
+        f"Inferred {len(registry)} spec(s), with {found} foreign key(s) "
+        f"between them, from {', '.join(str(s) for s in sources)}"
+    )
+    if args.output == "-":
+        with _warnings_printed():
+            text = registry_to_yaml(registry)
+        sys.stdout.write(text)
+        print(summary, file=sys.stderr)
+        return 0
+    output = Path(args.output)
+    _write_registry(registry, output)
     print(f"{summary} -> {output}")
     return 0
 

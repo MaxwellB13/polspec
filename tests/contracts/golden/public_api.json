@@ -52,6 +52,7 @@
   "sink_parquet",
   "strategy",
   "synthesize",
+  "synthesize_all",
   "to_dict",
   "to_markdown",
   "to_mermaid",

@@ -19,6 +19,7 @@ Internal: not part of the public API.
 from __future__ import annotations
 
 import dataclasses
+import math
 import os
 from typing import Unpack
 
@@ -131,6 +132,7 @@ def synthesized(
     source: Source,
     n: int | None = None,
     *,
+    scale: float | None = None,
     seed: int | None = None,
     name: str = "Synthesized",
     options: ProfileOptions | None = None,
@@ -138,7 +140,8 @@ def synthesized(
 ) -> tuple[pl.DataFrame, TableSpec]:
     """`synthesize`, with the spec the frame was generated from -- one
     profile for both, where the command line writes the spec beside the
-    data."""
+    data. `scale` sizes it as a multiple of the source's rows instead of
+    `n`, at least one."""
     opts = profile_options(options, keywords)
     if seed is not None:
         # One seed for the stand-in and for the profile behind it.
@@ -147,20 +150,29 @@ def synthesized(
     # Profiled as read: the sample is already taken.
     spec = profile(frame, name=name, options=dataclasses.replace(opts, sample=None))
     rows = height if n is None else n
+    if scale is not None:
+        if not (math.isfinite(scale) and scale > 0):
+            raise ValueError(f"scale must be a positive number, got {scale!r}")
+        rows = max(1, round(height * scale))
     if rows < 0:
         raise ValueError(f"n must be >= 0, got {rows}")
-    spec = _room_for_keys(spec, rows)
-    fake = generate(spec, rows, seed=seed)
-    # The profile narrows a low-cardinality text column to an Enum of its
-    # values; a stand-in for the source has the source's own dtypes -- but
-    # for text `parse_text` read as what it holds, which stays parsed.
+    spec = room_for_keys(spec, rows)
+    return as_source(generate(spec, rows, seed=seed), frame.schema), spec
+
+
+def as_source(fake: pl.DataFrame, schema: pl.Schema) -> pl.DataFrame:
+    """`fake` in the dtypes of the source it stands in for.
+
+    The profile narrows a low-cardinality text column to an Enum of its
+    values; a stand-in for the source has the source's own dtypes -- but
+    for text `parse_text` read as what it holds, which stays parsed.
+    """
     # Column by column: `DataFrame.cast` skips a mapping's "" key.
-    fake = fake.with_columns(
+    return fake.with_columns(
         frames.column(c).cast(dtype)
-        for c, dtype in frame.schema.items()
+        for c, dtype in schema.items()
         if fake.schema[c] != dtype and not _parsed(dtype, fake.schema[c])
     )
-    return fake, spec
 
 
 def _parsed(source: pl.DataType, profiled: pl.DataType) -> bool:
@@ -198,7 +210,7 @@ def load_source(source: Source) -> pl.DataFrame:
     return frame
 
 
-def _room_for_keys(spec: TableSpec, rows: int) -> TableSpec:
+def room_for_keys(spec: TableSpec, rows: int) -> TableSpec:
     """`spec` with each unique integer key's range wide enough for `rows`.
 
     A key profiled from a thousand rows spans a thousand values; a stand-in

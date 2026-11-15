@@ -384,30 +384,67 @@ def to_python(spec: SpecLike, path: str | Path | None = None) -> str | None:
     <BLANKLINE>
     """
     spec = as_table_spec(spec)
-    require_columns(spec)
-    _require_class_name(spec.name)
     _warn_unserializable(
         spec, path if path is not None else f"spec {spec.name!r}", "python"
     )
+    imports, body = _python_class(spec)
+    return _written(_python_module(f"the {spec.name} schema", imports, body), path)
 
+
+# The order a module's `from polspec import` names come in.
+_POLSPEC_IMPORTS = (
+    "Check",
+    "ColRule",
+    "ColSpec",
+    "FrameSpec",
+    "ForeignKey",
+    "Hierarchy",
+    "Registry",
+    "col",
+)
+
+
+def _python_module(what: str, imports: set[str], body: list[str]) -> str:
+    """A module declaring `what`: its docstring, the imports `body`'s source
+    needs, then `body`."""
+    # The imports follow from the source written, not from a guess at which
+    # values will need them: a Decimal choice or a time literal in a rule is
+    # written wherever it is, and must be importable wherever that is. An
+    # import the text only appears to need (inside a string) costs nothing.
+    written = "\n".join(body)
+    lines = [f'"""Declares {what}."""', "", "import polars as pl"]
+    if "datetime." in written:
+        lines.append("import datetime")
+    if "Decimal(" in written:
+        lines.append("from decimal import Decimal")
+    names = [name for name in _POLSPEC_IMPORTS if name in imports]
+    lines.append(f"from polspec import {', '.join(names)}")
+    lines.extend(["", "", *body])
+    return "\n".join(lines) + "\n"
+
+
+def _python_class(spec: TableSpec) -> tuple[set[str], list[str]]:
+    """`spec` as a `FrameSpec` subclass's source, and the polspec names it
+    uses."""
+    require_columns(spec)
+    _require_class_name(spec.name)
     data = tablespec_to_data(spec)
     persistable_checks = [c for c in spec.checks if c.pred is not None]
     has_validators = any("validators" in c for c in data["columns"].values())
     has_rules = any("rules" in c for c in data["columns"].values())
     has_derived = any("derive" in c for c in data["columns"].values())
 
-    imports = []
+    imports = {"ColSpec", "FrameSpec"}
     if persistable_checks or has_validators:
-        imports.append("Check")
+        imports.add("Check")
     if has_rules:
-        imports.append("ColRule")
-    imports += ["ColSpec", "FrameSpec"]
+        imports.add("ColRule")
     if spec.foreign_keys:
-        imports.append("ForeignKey")
+        imports.add("ForeignKey")
     if spec.hierarchy is not None:
-        imports.append("Hierarchy")
+        imports.add("Hierarchy")
     if has_rules or has_validators or persistable_checks or has_derived:
-        imports.append("col")
+        imports.add("col")
 
     body = [f"class {spec.name}(FrameSpec):"]
     if spec.description is not None:
@@ -436,19 +473,7 @@ def to_python(spec: SpecLike, path: str | Path | None = None) -> str | None:
         checks = ", ".join(check_to_source(c) for c in persistable_checks)
         body.append(f"    __checks__ = [{checks}]")
 
-    # The imports follow from the source written, not from a guess at which
-    # values will need them: a Decimal choice or a time literal in a rule is
-    # written wherever it is, and must be importable wherever that is. An
-    # import the text only appears to need (inside a string) costs nothing.
-    written = "\n".join(body)
-    lines = [f'"""Declares the {spec.name} schema."""', "", "import polars as pl"]
-    if "datetime." in written:
-        lines.append("import datetime")
-    if "Decimal(" in written:
-        lines.append("from decimal import Decimal")
-    lines.append(f"from polspec import {', '.join(imports)}")
-    lines.extend(["", "", *body])
-    return _written("\n".join(lines) + "\n", path)
+    return imports, body
 
 
 # ---------------------------------------------------------------------------
@@ -629,6 +654,27 @@ def registry_to_yaml(registry: Registry, path: str | Path | None = None) -> str 
     for spec in registry.specs:
         _warn_unserializable(spec, label, "yaml")
     return _written(dump_yaml(registry_to_dict(registry), label), path)
+
+
+def registry_to_python(
+    registry: Registry, path: str | Path | None = None
+) -> str | None:
+    """`registry` as a Python module: one `FrameSpec` subclass per spec,
+    parents before children, then `registry = Registry(...)` over them --
+    written to `path`, or returned as text."""
+    imports, body = {"Registry"}, []
+    names = registry.order()
+    for name in names:
+        spec = registry[name]
+        _warn_unserializable(
+            spec, path if path is not None else f"spec {spec.name!r}", "python"
+        )
+        used, lines = _python_class(spec)
+        imports |= used
+        body += [*lines, "", ""]
+    body.append(f"registry = Registry({', '.join(names)})")
+    what = "the " + ", ".join(names) + " schemas"
+    return _written(_python_module(what, imports, body), path)
 
 
 def registry_from_yaml(source: str | Path, *, strict: bool = True) -> Registry:
