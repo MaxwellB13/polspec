@@ -12,11 +12,17 @@ from polspec import (
     FrameSpec,
     GenerationError,
     Hierarchy,
+    Registry,
+    RegistryError,
     TableSpec,
     col,
     generate,
+    generate_batches,
+    scan,
+    sink_parquet,
     validate,
 )
+from polspec.cli import main
 
 SPEC = TableSpec(
     "Orders",
@@ -167,7 +173,7 @@ def test_fixed_must_be_a_mapping():
         generate(SPEC, 2, fixed=["country"])  # type: ignore[arg-type]
 
 
-def test_a_pin_fills_a_pattern_column_generation_cannot():
+def test_a_pin_is_held_to_a_pattern():
     spec = TableSpec("T", {"code": ColSpec(pl.String, pattern=r"^[A-Z]{3}$")})
     frame = generate(spec, 2, seed=1, fixed={"code": ["ABC", "XYZ"]})
     assert validate(spec, frame).equals(frame)
@@ -181,3 +187,131 @@ def test_a_nan_is_refused_where_the_column_holds_none():
         generate(spec, 1, fixed={"x": float("nan")})
     allowed = TableSpec("T", {"x": ColSpec(pl.Float64, nan_probability=0.1)})
     assert generate(allowed, 1, fixed={"x": float("nan")})["x"].is_nan().all()
+
+
+# ---------------------------------------------------------------------------
+# Every way of generating, since 1.4
+# ---------------------------------------------------------------------------
+
+BATCHED = TableSpec(
+    "Orders",
+    {
+        "id": ColSpec(pl.Int64, unique=True),
+        "country": ColSpec(pl.String, choices=["UK", "FR", "DE"]),
+        "qty": ColSpec(pl.Int64, bounds=(1, 9), nullable=True),
+    },
+)
+
+
+@pytest.mark.parametrize(
+    "fixed",
+    [{"country": "FR"}, {"qty": [1, 2, 3, None] * 2_500, "country": "UK"}],
+    ids=["scalar", "sequence"],
+)
+def test_batches_and_scans_are_windows_onto_the_pinned_frame(fixed):
+    whole = generate(BATCHED, 10_000, seed=3, fixed=fixed)
+    batches = generate_batches(BATCHED, 10_000, batch_size=3_000, seed=3, fixed=fixed)
+    assert pl.concat(batches).equals(whole)
+    assert (
+        scan(BATCHED, 10_000, seed=3, batch_size=3_000, fixed=fixed)
+        .collect()
+        .equals(whole)
+    )
+    projected = scan(BATCHED, 10_000, seed=3, fixed=fixed).select("id").collect()
+    assert projected.equals(whole.select("id"))
+
+
+def test_a_scan_checks_its_pins_before_anything_is_collected():
+    with pytest.raises(GenerationError, match="does not declare"):
+        scan(BATCHED, 10, fixed={"nope": 1})
+    with pytest.raises(GenerationError, match="1 value"):
+        generate_batches(BATCHED, 10, fixed={"qty": [1]})
+    with pytest.raises(GenerationError, match="cartesian"):
+        generate_batches(BATCHED, 10, method="cartesian", fixed={"country": "UK"})
+
+
+def test_a_sink_writes_the_pinned_frame(tmp_path):
+    path = tmp_path / "orders.parquet"
+    sink_parquet(
+        BATCHED, path, 5_000, seed=4, batch_size=2_000, fixed={"country": "DE"}
+    )
+    assert pl.read_parquet(path).equals(
+        generate(BATCHED, 5_000, seed=4, fixed={"country": "DE"})
+    )
+
+
+def test_a_framespec_takes_it_everywhere(tmp_path):
+    Orders = FrameSpec.from_spec(BATCHED, name="Orders")
+    assert (
+        pl.concat(Orders.generate_batches(50, fixed={"qty": 4}))
+        .get_column("qty")
+        .eq(4)
+        .all()
+    )
+    assert Orders.scan(50, fixed={"qty": 4}).collect()["qty"].eq(4).all()
+    Orders.sink_csv(tmp_path / "o.csv", 50, fixed={"qty": 4})
+    assert pl.read_csv(tmp_path / "o.csv")["qty"].eq(4).all()
+
+
+def test_a_registry_pins_spec_by_spec_and_children_follow():
+    class Customers(FrameSpec):
+        id = ColSpec(pl.Int64, unique=True, bounds=(1, 1_000))
+        tier = ColSpec(pl.String, choices=["free", "pro"])
+
+    class Purchases(FrameSpec):
+        customer_id = ColSpec(pl.Int64)
+        channel = ColSpec(pl.String, choices=["web", "shop"])
+        __foreign_keys__ = [
+            ForeignKey("customer_id", references=Customers, ref_columns="id")
+        ]
+
+    registry = Registry(Customers, Purchases)
+    frames = registry.generate_all(
+        {Customers: 50, Purchases: 200},
+        seed=1,
+        fixed={Customers: {"tier": "pro"}, "Purchases": {"channel": "web"}},
+    )
+    assert frames["Customers"]["tier"].eq("pro").all()
+    assert frames["Purchases"]["channel"].eq("web").all()
+    registry.validate_all(frames)
+    related = registry.generate_related(
+        Purchases, 20, seed=1, fixed={Customers: {"tier": "free"}}
+    )
+    assert related["Customers"]["tier"].eq("free").all()
+    lazy = registry.scan_all(20, seed=1, fixed={Purchases: {"channel": "shop"}})
+    assert lazy["Purchases"].collect()["channel"].eq("shop").all()
+    with pytest.raises(RegistryError, match="Nope"):
+        registry.generate_all(10, fixed={"Nope": {"x": 1}})
+
+
+def test_the_command_line_pins_columns(tmp_path):
+    spec_file = tmp_path / "orders.yaml"
+    FrameSpec.from_spec(BATCHED, name="Orders").to_yaml(spec_file)
+    out = tmp_path / "orders.csv"
+    assert (
+        main(
+            [
+                "generate",
+                str(spec_file),
+                "-n",
+                "20",
+                "-o",
+                str(out),
+                "--seed",
+                "1",
+                "--fixed",
+                "country=UK",
+                "--fixed",
+                "qty=7",
+            ]
+        )
+        == 0
+    )
+    written = pl.read_csv(out)
+    assert written["country"].eq("UK").all() and written["qty"].eq(7).all()
+    assert (
+        main(
+            ["generate", str(spec_file), "-n", "2", "-o", str(out), "--fixed", "qty=x"]
+        )
+        == 1
+    )

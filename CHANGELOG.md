@@ -38,6 +38,16 @@ page promises; before 1.0, a minor version could break any of them.
   changed as breaking and one removed as compatible; `rename` rewrites
   it, and `join` drops it, as it drops rules. The data dictionary and the
   ER diagram show the expression.
+- **`fixed=` everywhere:** `generate_batches`, `scan`, every `sink_*`,
+  their `FrameSpec` forms, and a registry's `generate_all`,
+  `generate_related` and `scan_all`, which take pins spec by spec
+  (`{Customers: {"tier": "pro"}}`). The rules are `generate()`'s. A batch
+  is a window onto the pinned frame: a scalar fills every batch, a
+  sequence of all `n` values gives each batch its stretch, and the batches
+  are row for row what `generate()` makes. A scan checks its pins when it
+  is built. `polspec generate --fixed COLUMN=VALUE` pins from the shell,
+  each value read as its column's dtype (`--fixed SPEC.COLUMN=VALUE` with
+  `--all`).
 - **A warning for a pattern the generator cannot follow** -- a Unicode word
   boundary, an automaton over its size limit, no match within the declared
   `string_length` -- naming the column and the reason. The column is

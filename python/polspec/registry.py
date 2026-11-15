@@ -446,8 +446,10 @@ class Registry:
         seed: int | None,
         method: Literal["random", "cartesian"],
         references: Frames | None,
+        fixed: Mapping[Any, Mapping[str, Any]] | None = None,
     ) -> dict[str, pl.DataFrame]:
         counts = self._counts(n, names)
+        pins = self._pins(fixed, names)
         specs = self._bind(require_known=False)
         supplied = resolve_references(references, to_eager)
         for name in names:
@@ -471,8 +473,31 @@ class Registry:
                 method=method,
                 seed=spec_seed,
                 references={**supplied, **frames},
+                fixed=pins.get(name),
             )
         return frames
+
+    def _pins(
+        self, fixed: Mapping[Any, Mapping[str, Any]] | None, names: tuple[str, ...]
+    ) -> dict[str, Mapping[str, Any]]:
+        """`fixed=` by spec name: a spec, its class or its name, each to the
+        pins `generate` takes. A spec not generated here is refused by name."""
+        if not fixed:
+            return {}
+        if not isinstance(fixed, Mapping):
+            raise RegistryError(
+                "fixed= maps each spec (or its name) to the columns pinned in it, "
+                f"got {type(fixed).__name__}"
+            )
+        pins = {as_spec_name(key): value for key, value in fixed.items()}
+        for name in pins:
+            self[name]
+            if name not in names:
+                raise RegistryError(
+                    f"fixed= pins columns of {name!r}, which this call does not "
+                    "generate"
+                )
+        return pins
 
     def scan_all(
         self,
@@ -481,6 +506,7 @@ class Registry:
         seed: int | None = None,
         batch_size: int | None = None,
         references: Frames | None = None,
+        fixed: Mapping[Any, Mapping[str, Any]] | None = None,
     ) -> dict[str, pl.LazyFrame]:
         """One `LazyFrame` per spec, each generating as it is collected.
 
@@ -495,6 +521,7 @@ class Registry:
         """
         names = self.names
         counts = self._counts(n, names)
+        pins = self._pins(fixed, names)
         specs = self._bind(require_known=False)
         parents = {
             name for child in names for name in self.parents(child) if name != child
@@ -506,6 +533,7 @@ class Registry:
                 seed=seed,
                 method="random",
                 references=references,
+                fixed={p: pins[p] for p in pins if p in parents},
             )
             if parents
             else {}
@@ -518,6 +546,7 @@ class Registry:
                 seed=None if seed is None else stable_seed(str(seed), name),
                 batch_size=batch_size,
                 references={k: v for k, v in supplied.items() if k != name} or None,
+                fixed=pins.get(name),
             )
             for name in self.order()
             if name in names
@@ -530,6 +559,7 @@ class Registry:
         seed: int | None = None,
         method: Literal["random", "cartesian"] = "random",
         references: Frames | None = None,
+        fixed: Mapping[Any, Mapping[str, Any]] | None = None,
     ) -> dict[str, pl.DataFrame]:
         """One frame per spec, parents generated first and threaded into
         their children, so every foreign key is satisfied by construction.
@@ -539,9 +569,13 @@ class Registry:
         name, so adding a spec to the registry never changes the rows another
         one produces. A frame in `references` is used as-is in place of
         generating that spec, and also serves parents outside the registry.
+
+        `fixed` pins columns spec by spec, `{Orders: {"status": "PAID"}}`,
+        each as `generate()` takes it; a child's foreign key draws from its
+        pinned parent's rows. *Added in 1.4.*
         """
         return self._generate(
-            self.names, n, seed=seed, method=method, references=references
+            self.names, n, seed=seed, method=method, references=references, fixed=fixed
         )
 
     def generate_related(
@@ -552,6 +586,7 @@ class Registry:
         seed: int | None = None,
         method: Literal["random", "cartesian"] = "random",
         references: Frames | None = None,
+        fixed: Mapping[Any, Mapping[str, Any]] | None = None,
     ) -> dict[str, pl.DataFrame]:
         """`generate_all` restricted to one spec and everything it depends on."""
         root = as_spec_name(key)
@@ -562,7 +597,7 @@ class Registry:
             if name == root or name in self.ancestors(root)
         )
         return self._generate(
-            needed, n, seed=seed, method=method, references=references
+            needed, n, seed=seed, method=method, references=references, fixed=fixed
         )
 
     # ------------------------------------------------------------------

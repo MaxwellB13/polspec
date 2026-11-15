@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import functools
 import inspect
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from typing import TYPE_CHECKING, Any
 
 import polars as pl
@@ -40,9 +40,10 @@ import polars as pl
 from polspec import frames
 from polspec.frames import Method, References
 from polspec.generation.pipeline import (
+    batch_stream,
     check_counts,
     check_method,
-    generate_batches,
+    checked_pins,
     requires_whole_frame,
 )
 from polspec.pass_order import passes_of
@@ -92,6 +93,7 @@ def scan(
     batch_size: int | None = None,
     method: Method = "random",
     references: References = None,
+    fixed: Mapping[str, Any] | None = None,
 ) -> pl.LazyFrame:
     """A `LazyFrame` of `n` generated rows, produced as they are collected.
 
@@ -101,7 +103,8 @@ def scan(
 
     A scan is batched, so it has `generate_batches`' terms: a `unique=True`
     column is unique across the whole scan -- a foreign-keyed one too -- and
-    a composite key only within each batch.
+    a composite key only within each batch. `fixed` pins columns as
+    `generate_batches` takes it. *`fixed` added in 1.4.*
 
     Examples
     --------
@@ -118,6 +121,9 @@ def scan(
     requires_whole_frame(spec, "scan")
     check_counts(n, batch_size)
     check_method(method)
+    # Checked against the whole spec, now: a pin on a column the plan never
+    # reads is still a pin that has to make sense.
+    pins = checked_pins(spec, fixed, n, method) if fixed else None
 
     def io_source(
         with_columns: list[str] | None,
@@ -137,13 +143,14 @@ def scan(
         )
         rows = n if n_rows is None else min(n, n_rows)
         size = batch_size or polars_batch_size or DEFAULT_BATCH_SIZE
-        for batch in generate_batches(
+        for batch in batch_stream(
             source,
             rows,
             batch_size=size,
             method=method,
             seed=seed,
             references=references,
+            pins=pins.restricted(source.columns) if pins is not None else None,
         ):
             # A predicate filters rows that were drawn; it never narrows the
             # draw. `n` rows are generated and the matching ones kept, which

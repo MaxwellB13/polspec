@@ -117,7 +117,7 @@ Generate rows from a schema into a data file.
 ```
 polspec generate [-h] [--all] [--format EXT] -n N -o OUTPUT [--seed SEED]
                         [--method {random,cartesian}] [--references NAME=PATH]
-                        [--class NAME]
+                        [--fixed COLUMN=VALUE] [--class NAME]
                         spec
 ```
 
@@ -131,6 +131,7 @@ polspec generate [-h] [--all] [--format EXT] -n N -o OUTPUT [--seed SEED]
 | `--seed` `SEED` | Generation seed (default: random) |
 | `--method` `METHOD` | Sampling method (default: random) One of `random`, `cartesian`. |
 | `--references` `NAME=PATH` | Parent data for a foreign key to another spec; repeat for several |
+| `--fixed` `COLUMN=VALUE` | Pin a column to one value in every row, read as its dtype; repeat for several (with --all, SPEC.COLUMN=VALUE) |
 | `--class` `NAME` | Generate from only this class (a .py source may define several) |
 
 ## `polspec synthesize`

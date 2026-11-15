@@ -15,7 +15,8 @@ import dataclasses
 import difflib
 import random
 import warnings
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import polars as pl
@@ -269,7 +270,7 @@ def generate(
     _check_faults(spec, cycles, self_references)
     _check_size(spec, n, max_bytes)
     check_method(method)
-    pins = _pins(spec, fixed, n, method) if fixed else {}
+    pins = checked_pins(spec, fixed, n, method).window(0, n) if fixed else {}
     spec = room_for_open_keys(spec, n)
 
     frame = _window(
@@ -285,11 +286,41 @@ def generate(
     return ordered(frame, spec)
 
 
-def _pins(
+@dataclass(frozen=True)
+class Pins:
+    """`fixed=` checked: a scalar pin as its one value, a sequence as all `n`
+    of them, each the column's dtype. `window` hands any stretch of rows its
+    pins, so a batch costs a scalar pin nothing however large `n` is, and a
+    sequence pin's batches are the rows `generate` would give it."""
+
+    values: Mapping[str, pl.Series]
+    scalars: frozenset[str]
+
+    def window(self, offset: int, length: int) -> dict[str, pl.Series]:
+        return {
+            name: (
+                values.new_from_index(0, length)
+                if name in self.scalars
+                else values.slice(offset, length)
+            )
+            for name, values in self.values.items()
+        }
+
+    def restricted(self, columns: Iterable[str]) -> Pins:
+        """The pins of `columns` only: the rest are not drawn."""
+        keep = set(columns)
+        return Pins(
+            {k: v for k, v in self.values.items() if k in keep},
+            self.scalars & keep,
+        )
+
+
+def checked_pins(
     spec: TableSpec, fixed: Mapping[str, Any], n: int, method: Method
-) -> dict[str, pl.Series]:
-    """`fixed` as one Series per column, each the column's dtype and `n`
-    long, or a `GenerationError` naming the column that cannot be pinned.
+) -> Pins:
+    """`fixed` as one Series per column, each the column's dtype -- one value
+    for a scalar, `n` for a sequence -- or a `GenerationError` naming the
+    column that cannot be pinned.
 
     A pin is held to the promise `generate` makes, that its output
     validates: values the column refuses are refused here, and a column a
@@ -307,6 +338,7 @@ def _pins(
         )
     writers = {column: p.label for p in passes_of(spec) for column in sorted(p.writes)}
     pins: dict[str, pl.Series] = {}
+    scalars: set[str] = set()
     for name, given in fixed.items():
         if name not in spec.columns:
             close = difflib.get_close_matches(str(name), list(spec.columns), n=1)
@@ -330,7 +362,7 @@ def _pins(
                 f"fixed= cannot pin {name!r}: a {dtype!r} column cannot be "
                 "pinned yet. Pin a scalar column."
             )
-        values = _pin_values(name, given, n, dtype)
+        values, scalar = _pin_values(name, given, n, dtype)
         broken = claims_refused(declared, values)
         if broken:
             raise GenerationError(
@@ -339,12 +371,17 @@ def _pins(
                 "accepts, so a pin has to be one too."
             )
         pins[name] = values
-    return pins
+        if scalar:
+            scalars.add(name)
+    return Pins(pins, frozenset(scalars))
 
 
-def _pin_values(name: str, given: Any, n: int, dtype: pl.DataType) -> pl.Series:
-    """One pin as `n` values of `dtype`, cast strictly: a value the dtype
-    holds only as another -- `1.5` on an `Int64` -- is refused."""
+def _pin_values(
+    name: str, given: Any, n: int, dtype: pl.DataType
+) -> tuple[pl.Series, bool]:
+    """One pin as values of `dtype` -- its one value, for a scalar, and
+    whether it is one -- cast strictly: a value the dtype holds only as
+    another -- `1.5` on an `Int64` -- is refused."""
     scalar = isinstance(given, (str, bytes)) or not isinstance(
         given, (Sequence, pl.Series)
     )
@@ -367,7 +404,7 @@ def _pin_values(name: str, given: Any, n: int, dtype: pl.DataType) -> pl.Series:
             f"fixed= gives {name!r} {offending[:5]}, which {dtype!r} would hold "
             "only as different values."
         )
-    return series.new_from_index(0, n) if scalar else series
+    return series, scalar
 
 
 def ordered(frame: pl.DataFrame, spec: TableSpec) -> pl.DataFrame:
@@ -599,6 +636,7 @@ def generate_batches(
     method: Method = "random",
     seed: int | None = None,
     references: References = None,
+    fixed: Mapping[str, Any] | None = None,
 ) -> Iterator[pl.DataFrame]:
     """Yields chunks of generated rows without holding all `n` in memory.
 
@@ -616,6 +654,10 @@ def generate_batches(
     batch, so they are distinct within a batch and collide across batches
     only by chance.
 
+    `fixed` pins columns as `generate()` takes it: a scalar for every row, or
+    a sequence of all `n` values, which each batch takes its stretch of.
+    *Added in 1.4.*
+
     Examples
     --------
     >>> spec = TableSpec("Orders", {"id": ColSpec(pl.Int64, unique=True)})
@@ -627,6 +669,30 @@ def generate_batches(
     requires_whole_frame(spec, "generate_batches")
     check_counts(n, batch_size)
     check_method(method)
+    pins = checked_pins(spec, fixed, n, method) if fixed else None
+    return batch_stream(
+        spec,
+        n,
+        batch_size=batch_size,
+        method=method,
+        seed=seed,
+        references=references,
+        pins=pins,
+    )
+
+
+def batch_stream(
+    spec: TableSpec,
+    n: int,
+    *,
+    batch_size: int,
+    method: Method,
+    seed: int | None,
+    references: References,
+    pins: Pins | None,
+) -> Iterator[pl.DataFrame]:
+    """`generate_batches` once its arguments are checked, as a generator --
+    so the checks above run when it is called, not when it is first read."""
     if n == 0:
         return
     # The whole frame's `n`, so every batch draws from one key range.
@@ -692,5 +758,6 @@ def generate_batches(
             references=references,
             row_offset=produced,
             parent_keys=parent_keys,
+            pins=pins.window(produced, current) if pins is not None else None,
         )
         produced += current

@@ -106,16 +106,38 @@ validates:
 - Its values must be ones the column accepts — dtype, nullability, bounds,
   choices, format, pattern, lengths, `unique` and the column's validators.
   Values are cast strictly, so `1.5` on an `Int64` is refused rather than
-  rounded. This makes a pin the way to fill a `pattern` column, which
-  generation cannot.
+  rounded.
 - A column a pass writes — a rule's, a foreign key's, a hierarchy's, a
-  composite key's — cannot be pinned; the error names the pass. A column a
-  pass only reads can.
+  composite key's, a derived column — cannot be pinned; the error names the
+  pass. A column a pass only reads can, and a derived column reading it
+  follows the pin.
 
 Each refusal is a `GenerationError` naming the column. With `order_by`,
 pinned rows are sorted like any other. `method="cartesian"` takes no pins,
-since its row count is not `n`, and `generate_batches`, `scan`, the sinks
-and the command line do not take `fixed=` yet.
+since its row count is not `n`.
+
+### Pins in batches, scans, sinks and registries
+
+`generate_batches`, `scan`, every `sink_*`, and a registry's
+`generate_all`, `generate_related` and `scan_all` take `fixed=` too, with
+the same rules. *Added in 1.4.*
+
+```python
+batches = Orders.generate_batches(30_000, batch_size=10_000, seed=1, fixed={"status": "PAID"})
+lazy = Orders.scan(1_000_000, seed=1, fixed={"status": "PAID"})
+```
+
+A batch is a window onto the frame `generate()` makes, pins included: a
+scalar fills every batch, and a sequence of all `n` values gives each batch
+its own stretch of them. A scan checks its pins when it is built, before
+anything is collected, and a pin on a column the plan never reads is
+checked and then not drawn. A registry takes pins spec by spec —
+`{Customers: {"tier": "pro"}}`, keyed by the spec, its class or its name —
+and a child's foreign key draws from its pinned parent.
+
+The command line takes `--fixed COLUMN=VALUE`, repeated for several pins,
+each value read as its column's dtype: see
+[`generate`](cli.md#generate-data-from-a-schema).
 
 ## Lazy output — `scan()`
 

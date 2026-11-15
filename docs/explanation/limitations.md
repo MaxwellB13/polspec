@@ -51,12 +51,11 @@ a small frame from it is the normal use of `generate()`, so `n` wins: the rows
 asked for are made, and `validate()` reports `row_count` if they are outside
 `rows`. Validate such a frame with `rows=False`.
 
-### `fixed=` is `generate()` only
+### `fixed=` pins scalar columns, and not under `cartesian`
 
-`generate()` and `FrameSpec.generate()` take `fixed=`; `generate_batches`,
-`scan`, the `sink_*` functions, `Registry.generate_all` and the command line
-do not yet, and `method="cartesian"` refuses it. Only a scalar column can be
-pinned, and a column a pass writes cannot be.
+`method="cartesian"` refuses `fixed=`, since its row count is the coverage
+it needs rather than `n`. Only a scalar column can be pinned, and a column a
+pass writes — a rule's, a key's, a derived column — cannot be.
 
 ### A self-referencing foreign key is referential, not acyclic
 
