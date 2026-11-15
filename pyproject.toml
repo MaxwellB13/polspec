@@ -137,7 +137,7 @@ pythonpath = ["tests"]
 filterwarnings = ["error"]
 xfail_strict = true
 
-# `pytest --cov` in CI measures the suite on the locked Polars; the floor
+# `coverage run -m pytest` in CI measures the suite on the locked Polars; the floor
 # sits a little under what it reaches, so a change that lands untested code
 # fails rather than quietly lowering it.
 [tool.coverage.run]

@@ -53,7 +53,7 @@ Run everything CI runs before opening a pull request:
 
 ```bash
 uv run pytest                                # Python test suite
-uv run pytest --cov                          # with coverage; fails under the floor
+uv run coverage run -m pytest && uv run coverage report   # with coverage; fails under the floor
 uv run ruff check . && uv run ruff format --check .
 uv run ty check                              # type checker; nothing is suppressed
 uv run lint-imports                          # the package's layering, [tool.importlinter]

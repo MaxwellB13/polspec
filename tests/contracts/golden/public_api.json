@@ -49,6 +49,7 @@
   "sink_ipc",
   "sink_ndjson",
   "sink_parquet",
+  "strategy",
   "synthesize",
   "to_dict",
   "to_markdown",
