@@ -3,6 +3,7 @@
 import re
 
 import polars as pl
+import pytest
 from polspec import (
     Bound,
     CatSpec,
@@ -316,3 +317,83 @@ def test_a_column_of_choices_shows_each_beside_its_share_and_a_null_rate():
     assert "| `tier` | `String` | No | - | `free` 80%, `pro` 20% |" in md
     assert "| `total` | `Float64` | Yes (5%) |" in md
     assert "| `levels` | `List(Enum(categories=['a', 'b']))` |" in md
+
+
+# ---------------------------------------------------------------------------
+# choices=: how a long list of choices is shown
+# ---------------------------------------------------------------------------
+
+
+def _ratings() -> TableSpec:
+    """A weighted column of 45 choices, a short one, an unweighted long one,
+    and a long one inside a struct."""
+    grades = {f"G{index:02}": index for index in range(1, 46)}
+    return TableSpec(
+        "Bonds",
+        {
+            "grade": ColSpec(pl.Enum, choices=grades),
+            "seniority": ColSpec(pl.Enum, choices={"SEN": 3, "SUB": 1}),
+            "ccy": ColSpec(pl.Enum(["GBP", "USD", "EUR", "JPY", "CHF"])),
+            "terms": ColSpec(pl.Struct({"basis": pl.Enum(list("abcdef"))})),
+        },
+    )
+
+
+def test_by_default_a_long_list_shows_its_first_three_and_no_appendix():
+    md = to_markdown(_ratings())
+    assert md == to_markdown(_ratings(), choices="summary")
+    assert "`G01` 0.0966%, `G02` 0.193%, `G03` 0.29%, ... (45 total)" in md
+    assert "## Choices" not in md
+
+
+def test_the_appendix_lists_every_value_of_each_column_cut_short():
+    md = to_markdown(_ratings(), choices="appendix")
+    table, appendix = md.split("## Choices")
+    # The table is the summary's; the appendix comes last.
+    assert table.rstrip() == to_markdown(_ratings()).rstrip()
+    rows = appendix.strip().splitlines()
+    assert rows[:3] == [
+        "| Column | Value | Share |",
+        "|:---|:---|---:|",
+        "| `grade` | `G01` | 0.0966% |",
+    ]
+    assert "|  | `G45` | 4.35% |" in rows
+    # Every grade once, the column named on its first row only, then the
+    # unweighted list and the struct field by path; the short list is whole
+    # in its cell, so it is left out.
+    cells = [[c.strip() for c in row.strip("|").split("|")] for row in rows[2:]]
+    assert [value for _, value, _ in cells if re.fullmatch("`G[0-9]+`", value)] == [
+        f"`G{index:02}`" for index in range(1, 46)
+    ]
+    assert [column for column, _, _ in cells if column] == [
+        "`grade`",
+        "`ccy`",
+        "`terms.basis`",
+    ]
+    assert "| `ccy` | `GBP` | - |" in rows
+    assert "SEN" not in appendix
+
+
+def test_a_spec_with_no_long_list_has_no_appendix():
+    spec = TableSpec("Short", {"s": ColSpec(pl.Enum, choices={"SEN": 3, "SUB": 1})})
+    assert to_markdown(spec, choices="appendix") == to_markdown(spec)
+
+
+def test_full_lists_every_choice_in_its_cell():
+    md = to_markdown(_ratings(), choices="full")
+    assert "`G44` 4.25%, `G45` 4.35% |" in md
+    assert "| `ccy` | `Enum` | No | - | `GBP`, `USD`, `EUR`, `JPY`, `CHF` |" in md
+    assert "total)" not in md and "## Choices" not in md
+
+
+def test_the_facade_takes_choices_as_the_function_does():
+    class Ccy(FrameSpec):
+        ccy = ColSpec(pl.Enum(["GBP", "USD", "EUR", "JPY", "CHF"]))
+
+    for mode in ("summary", "appendix", "full"):
+        assert Ccy.to_markdown(choices=mode) == to_markdown(Ccy, choices=mode)
+
+
+def test_an_unknown_choices_mode_is_refused_by_name():
+    with pytest.raises(ValueError, match="'summary', 'appendix', 'full'"):
+        to_markdown(_ratings(), choices="all")  # type: ignore[arg-type]

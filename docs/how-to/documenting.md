@@ -61,9 +61,9 @@ foreign keys, conditional rules and column validators:
 |:---|:---|:---|:---|:---|:---|:---|:---|:---|
 | `order_id` | `Int64` | No | [1, 1000000] | - | - | - | - | Yes |
 | `customer_id` | `Int64` | No | [1, 10000] | - | - | - | - | No |
-| `status` | `Enum(['NEW', 'PAID', 'SHIPPED'])` | No | - | - | - | - | - | No |
+| `status` | `Enum` | No | - | `NEW`, `PAID`, `SHIPPED` | - | - | - | No |
 | `total` | `Float64` | No | [0.0, 5000.0] | - | - | - | - | No |
-| `internal_note` | `String` | Yes | - | - | [0, 40] | - | - | No |
+| `internal_note` | `String` | Yes (10%) | - | - | [0, 40] | - | - | No |
 
 ## Constraints & Invariants
 
@@ -71,11 +71,52 @@ foreign keys, conditional rules and column validators:
 - **`fk_customer_id__Customers`**: `['customer_id']` -> `Customers.['id']`
 ```
 
-Long category and choice lists are elided rather than blowing out the table,
-and an open-ended bound reads as `>= 0.0` rather than `[0.0, None]`. The
-*Nullable* cell also notes a column's `default` and whether it is
-`optional`. Pass `title=` to override the heading, which otherwise uses the
-class name.
+A column's choices, or an `Enum`'s categories, appear in its *Domain /
+Choices* cell, each beside its share when the column is weighted. An
+open-ended bound reads as `>= 0.0` rather than `[0.0, None]`. The
+*Nullable* cell shows how often a nullable column is null, and also notes a
+column's `default` and whether it is `optional`. Pass `title=` to override
+the heading, which otherwise uses the class name.
+
+### Long lists of choices
+
+A cell lists four choices whole; a longer list shows its first three and
+its count, so a wide table stays readable. `choices=` decides what happens
+to the rest, *added in 1.6.1*:
+
+```python
+class Bonds(FrameSpec):
+    rating = ColSpec(pl.Enum, choices={"AAA": 1, "AA": 2, "A": 4, "BBB": 5, "BB": 2, "B": 1})
+
+
+Bonds.to_markdown()                     # "summary": the first three and the count
+Bonds.to_markdown(choices="appendix")   # the same, then every value in a Choices section
+Bonds.to_markdown(choices="full")       # every choice in its cell
+```
+
+The table keeps its summary cell, and the appendix lists every value and
+share of each column it cut short, in declared order, in one table at the
+end of the document:
+
+```markdown
+| `rating` | `Enum` | No | - | `AAA` 6.67%, `AA` 13.3%, `A` 26.7%, ... (6 total) | - | - | - | No |
+
+## Choices
+
+| Column | Value | Share |
+|:---|:---|---:|
+| `rating` | `AAA` | 6.67% |
+|  | `AA` | 13.3% |
+|  | `A` | 26.7% |
+|  | `BBB` | 33.3% |
+|  | `BB` | 13.3% |
+|  | `B` | 6.67% |
+```
+
+A column whose choices fit its cell is already complete, so it is left out;
+an unweighted column's share is `-`, since its choices are what it allows,
+not how often. For a spec of many such columns, `"appendix"` keeps the table
+narrow; `"full"` suits a small one.
 
 ### Descriptions
 

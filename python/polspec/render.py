@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import polars as pl
 
@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from polspec.catspec import CatSpec
     from polspec.compare import DriftFinding, DriftReport
     from polspec.foreign_key import ForeignKey
+    from polspec.spec import ColSpec
 
 __all__ = [
     "catspec_to_markdown",
@@ -87,7 +88,23 @@ def _describe_dtype(dtype: pl.DataType) -> str:
     return str(dtype)
 
 
-def _describe_domain(cs) -> str:
+ChoicesMode = Literal["summary", "appendix", "full"]
+CHOICES_MODES = ("summary", "appendix", "full")
+# A Domain cell lists this many choices whole; a longer list shows the
+# first three and its count.
+_CELL_CHOICES = 4
+
+
+def _checked_choices_mode(choices: str) -> str:
+    if choices not in CHOICES_MODES:
+        raise ValueError(
+            f"choices must be one of {', '.join(map(repr, CHOICES_MODES))}, "
+            f"got {choices!r}"
+        )
+    return choices
+
+
+def _describe_domain(cs, full: bool = False) -> str:
     """The Domain column of the table: the choices, or the format."""
     value_dtype = cs.value_dtype
     if map_entries(cs.dtype) is not None:
@@ -109,10 +126,25 @@ def _describe_domain(cs) -> str:
         return f"pattern {_code(cs.pattern)}"
     if cs.list_length is not None:
         return f"{cs.list_length.min}..{cs.list_length.max} elements"
+    return _describe_choices(_domain_choices(cs), cs.weights, full=full)
+
+
+def _domain_choices(cs) -> tuple | None:
+    """The choices a Domain cell lists -- an `Enum`'s categories when it
+    declares none -- or None when the cell shows something else."""
+    if (
+        map_entries(cs.dtype) is not None
+        or isinstance(cs.value_dtype, pl.Struct)
+        or cs.derive is not None
+        or cs.format is not None
+        or cs.pattern is not None
+        or cs.list_length is not None
+    ):
+        return None
     choices = cs.choices
     if choices is None and isinstance(cs.dtype, pl.Enum):
         choices = tuple(cs.dtype.categories.to_list())
-    return _describe_choices(choices, cs.weights)
+    return choices
 
 
 def _describe_nullable(cs) -> str:
@@ -138,21 +170,26 @@ def _share(rate: float) -> str:
     return f"{rate * 100:.3g}%"
 
 
-def _describe_choices(choices, weights=None) -> str:
+def _shares(choices, weights) -> list[str]:
+    """Each choice's share of its weights, or `-` for each when unweighted:
+    then the choices are what a column allows, not how often."""
+    if not weights:
+        return ["-"] * len(choices)
+    total = sum(weights)
+    return [_share(weight / total) for weight in weights]
+
+
+def _describe_choices(choices, weights=None, *, full: bool = False) -> str:
     """The values a column takes, each beside its share when weighted --
-    `SEN` 60%, `SUB` 40% -- the first three of a longer list."""
+    `SEN` 60%, `SUB` 40% -- the first three of a longer list unless `full`."""
     if choices is None:
         return "-"
     values = list(choices)
-    if weights:
-        total = sum(weights)
-        shown = [
-            f"{_code(value)} {_share(weight / total)}"
-            for value, weight in zip(values, weights, strict=True)
-        ]
-    else:
-        shown = [_code(value) for value in values]
-    if len(shown) <= 4:
+    shown = [
+        _code(value) if share == "-" else f"{_code(value)} {share}"
+        for value, share in zip(values, _shares(values, weights), strict=True)
+    ]
+    if full or len(shown) <= _CELL_CHOICES:
         return ", ".join(shown)
     return f"{', '.join(shown[:3])}, ... ({len(values)} total)"
 
@@ -193,7 +230,7 @@ def _is_described(cs) -> bool:
     )
 
 
-def _columns_section(spec: TableSpec) -> list[str]:
+def _columns_section(spec: TableSpec, full: bool = False) -> list[str]:
     # The column appears only when it has something to show: most specs
     # describe nothing, and the table is wide enough already.
     described = any(_is_described(cs) for cs in spec.columns.values())
@@ -209,11 +246,11 @@ def _columns_section(spec: TableSpec) -> list[str]:
         "|:---" * (10 if described else 9) + "|",
     ]
     for name, cs in spec.columns.items():
-        lines.extend(_column_rows(name, cs, described))
+        lines.extend(_column_rows(name, cs, described, full))
     return lines
 
 
-def _column_rows(name: str, cs, described: bool) -> list[str]:
+def _column_rows(name: str, cs, described: bool, full: bool = False) -> list[str]:
     """A column's row, then a row per struct field beneath it, named by
     path (`point.lat`) and nested as deeply as the dtype does."""
     length = (
@@ -224,7 +261,7 @@ def _column_rows(name: str, cs, described: bool) -> list[str]:
         _code(_describe_dtype(cs.dtype)),
         _describe_nullable(cs),
         str(cs.bounds) if cs.bounds else "-",
-        _describe_domain(cs),
+        _describe_domain(cs, full),
         length,
         ", ".join(_code(t) for t in cs.tags) if cs.tags else "-",
         f"{len(cs.rules)} rule(s)" if cs.rules else "-",
@@ -238,10 +275,39 @@ def _column_rows(name: str, cs, described: bool) -> list[str]:
         for field in value_dtype.fields:
             rows.extend(
                 _column_rows(
-                    f"{name}.{field.name}", field_of(cs, field.name), described
+                    f"{name}.{field.name}", field_of(cs, field.name), described, full
                 )
             )
     return rows
+
+
+def _cut_short(name: str, cs: ColSpec) -> Iterable[tuple[str, ColSpec]]:
+    """Each column, or struct field beneath it by path, whose Domain cell
+    lists only some of its choices."""
+    choices = _domain_choices(cs)
+    if choices is not None and len(choices) > _CELL_CHOICES:
+        yield name, cs
+    value_dtype = cs.value_dtype
+    if isinstance(value_dtype, pl.Struct):
+        for field in value_dtype.fields:
+            yield from _cut_short(f"{name}.{field.name}", field_of(cs, field.name))
+
+
+def _choices_section(spec: TableSpec) -> list[str]:
+    """Every choice and its share for each column the table cut short, in
+    one table: the column named on its first row, its values in declared
+    order."""
+    cut = [found for n, cs in spec.columns.items() for found in _cut_short(n, cs)]
+    if not cut:
+        return []
+    lines = ["", "## Choices", "", "| Column | Value | Share |", "|:---|:---|---:|"]
+    for name, cs in cut:
+        choices = list(_domain_choices(cs) or ())
+        for index, (value, share) in enumerate(
+            zip(choices, _shares(choices, cs.weights), strict=True)
+        ):
+            lines.append(_row(_code(name) if index == 0 else "", _code(value), share))
+    return lines
 
 
 def _constraints_section(spec: TableSpec) -> list[str]:
@@ -309,6 +375,7 @@ def framespec_to_markdown(
     path: str | Path | None = None,
     *,
     title: str | None = None,
+    choices: ChoicesMode = "summary",
 ) -> str:
     """Generates a Markdown data dictionary document for this FrameSpec.
 
@@ -318,17 +385,21 @@ def framespec_to_markdown(
         If specified, writes the generated Markdown to this file path.
     title : str | None, optional
         Custom title for the data dictionary. Defaults to the FrameSpec class name.
+    choices : {"summary", "appendix", "full"}
+        How a long list of choices is shown; see `to_markdown`.
 
     Returns
     -------
     str
         The formatted Markdown string.
     """
+    mode = _checked_choices_mode(choices)
     spec = as_table_spec(cls)
     lines = [
         *_overview_section(spec, title or spec.name),
-        *_columns_section(spec),
+        *_columns_section(spec, full=mode == "full"),
         *_constraints_section(spec),
+        *(_choices_section(spec) if mode == "appendix" else []),
     ]
     return _write_if_asked("\n".join(lines) + "\n", path)
 
@@ -722,7 +793,11 @@ def catspec_to_mermaid(
 
 
 def to_markdown(
-    spec: TableSpec | type, path: str | Path | None = None, *, title: str | None = None
+    spec: TableSpec | type,
+    path: str | Path | None = None,
+    *,
+    title: str | None = None,
+    choices: ChoicesMode = "summary",
 ) -> str:
     """A Markdown data dictionary of `spec` -- a `TableSpec` or a `FrameSpec`
     class: an overview, a table of its columns, and its constraints.
@@ -735,6 +810,14 @@ def to_markdown(
         Also write the Markdown to this file.
     title : str, optional
         The document's title. Defaults to the spec's name.
+    choices : {"summary", "appendix", "full"}
+        How a column with more than four choices is shown. Each choice
+        appears beside its share when the column is weighted.
+
+        - `"summary"`: its cell lists the first three and the count.
+        - `"appendix"`: the same, then a Choices section listing every
+          value and share of each such column, in one table.
+        - `"full"`: its cell lists every choice.
 
     Returns
     -------
@@ -748,7 +831,7 @@ def to_markdown(
     >>> print(to_markdown(spec).splitlines()[0])
     # Orders
     """
-    return framespec_to_markdown(spec, path, title=title)
+    return framespec_to_markdown(spec, path, title=title, choices=choices)
 
 
 def to_mermaid(

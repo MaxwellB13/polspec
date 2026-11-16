@@ -9,6 +9,24 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-11-16
+
+**Every choice and its share, in the data dictionary.** `to_markdown` can
+now document a long list of choices whole, in an appendix or in its cell,
+for a table of many `Enum` columns whose weights the summary cut short.
+
+Additive under the 1.0 promises: the default writes exactly what 1.6.0
+wrote, no seeded output moves, and the spec-file format is unchanged.
+
+### Added
+
+- **`to_markdown(choices=)` shows every choice and its share.** A column of
+  more than four choices still shows its first three and its count;
+  `choices="appendix"` adds a Choices section listing every value and share
+  of each such column, in one table, and `choices="full"` lists them all in
+  the cell. The default, `"summary"`, writes what 1.6.0 wrote.
+  `FrameSpec.to_markdown` takes it too.
+
 ## [1.6.0] - 2026-11-16
 
 **Faster where it was slow, and dates as they are written.** Small batches,
@@ -3395,7 +3413,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v1.6.1...HEAD
+[1.6.1]: https://github.com/MaxwellB13/polspec/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/MaxwellB13/polspec/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/MaxwellB13/polspec/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/MaxwellB13/polspec/compare/v1.3.0...v1.4.0
