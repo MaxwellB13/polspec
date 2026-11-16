@@ -285,6 +285,21 @@ def _resolve_categories(
     )
 
 
+def _spec_text(source: str | Path, reader: str, text_reader: str = "from_dict") -> str:
+    """The text of the spec file at `source`, for `reader` to parse.
+
+    A string holding a line break is YAML text, not a path -- `to_yaml()`
+    with no path returns text, and passing it back is the natural mistake
+    -- so it is refused with the call that reads text, not as a missing
+    file with a name made of YAML."""
+    if isinstance(source, str) and "\n" in source:
+        raise SerializationError(
+            f"{reader} reads a file, and was given YAML text. For text, use "
+            f"{text_reader}(yaml.safe_load(text)), or write it to a file first."
+        )
+    return Path(source).read_text(encoding="utf-8")
+
+
 def from_yaml(
     source: str | Path,
     *,
@@ -308,7 +323,7 @@ def from_yaml(
     True
     """
     path = Path(source)
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw = yaml.safe_load(_spec_text(source, "from_yaml"))
     if raw is not None and not isinstance(raw, Mapping):
         raise SerializationError(
             f"{source}: expected a mapping at the top level, got {type(raw).__name__}"
@@ -552,10 +567,8 @@ def catspec_to_yaml(catspec: CatSpec, path: str | Path | None = None) -> str | N
 
 def catspec_from_yaml(source: str | Path, *, strict: bool = True) -> CatSpec:
     """The `CatSpec` a YAML file holds, as `catspec_to_yaml` writes it."""
-    path = Path(source)
-    if not path.exists():
-        raise FileNotFoundError(f"CatSpec file not found: {source}")
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    text = _spec_text(source, "CatSpec.from_yaml", "CatSpec.from_dict")
+    raw = yaml.safe_load(text)
     return catspec_from_dict(raw, strict=strict, where=str(source))
 
 
@@ -681,5 +694,5 @@ def registry_from_yaml(source: str | Path, *, strict: bool = True) -> Registry:
     """The `Registry` a YAML file holds, as `registry_to_yaml` writes it. A
     `categories:` path is read relative to the file."""
     path = Path(source)
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw = yaml.safe_load(_spec_text(source, "Registry.from_yaml", "Registry.from_dict"))
     return registry_from_dict(raw, strict=strict, where=str(source), base=path.parent)

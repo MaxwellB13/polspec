@@ -87,7 +87,9 @@ class ForeignKey:
     name: str = FILLED_IN
     # The spec the key points at, when it was declared against one or a
     # registry has resolved its name. Filled in, never passed.
-    target: TableSpec | None = field(default=None, init=False)
+    # Left out of the repr: it is the whole parent spec, and `references`
+    # already names it.
+    target: TableSpec | None = field(default=None, init=False, repr=False)
 
     if TYPE_CHECKING:
 

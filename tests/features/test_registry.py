@@ -554,3 +554,18 @@ def test_validate_all_reports_only_the_specs_that_failed():
     with pytest.raises(MultiValidationError) as exc_info:
         registry.validate_all(frames)
     assert list(exc_info.value.reports) == ["Alpha"]
+
+
+def test_replace_swaps_one_spec_in_place_and_leaves_the_registry_as_it_was():
+    first = TableSpec("First", {"a": ColSpec(pl.Int64)})
+    orders = TableSpec("Orders", {"qty": ColSpec(pl.Int64, bounds=(1, 5))})
+    last = TableSpec("Last", {"b": ColSpec(pl.Int64)})
+    cats = CatSpec(enums={"tier": ["free", "pro"]})
+    registry = Registry(first, orders, last, categories=cats)
+    wider = orders.with_columns({"qty": ColSpec(pl.Int64, bounds=(1, 20))})
+    replaced = registry.replace(wider)
+    assert replaced.names == ("First", "Orders", "Last")
+    assert replaced["Orders"] == wider and replaced.categories == registry.categories
+    assert registry["Orders"] == orders
+    with pytest.raises(RegistryError, match="no spec named 'Nope'"):
+        registry.replace(TableSpec("Nope", {"a": ColSpec(pl.Int64)}))

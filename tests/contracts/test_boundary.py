@@ -278,6 +278,23 @@ def _internal_imports(path: Path) -> list[str]:
             found += [
                 f"{node.module}.{a.name}" for a in node.names if a.name not in public
             ]
+        elif isinstance(node, ast.Call):
+            # The ways round an import statement: `importlib.import_module`
+            # of a module by its name, and `monkeypatch.setattr` of one.
+            func = node.func
+            called = (
+                func.attr
+                if isinstance(func, ast.Attribute)
+                else getattr(func, "id", "")
+            )
+            first = node.args[0] if node.args else None
+            if (
+                called in {"import_module", "setattr", "delattr"}
+                and isinstance(first, ast.Constant)
+                and isinstance(first.value, str)
+                and first.value.startswith("polspec.")
+            ):
+                found.append(first.value)
     return found
 
 

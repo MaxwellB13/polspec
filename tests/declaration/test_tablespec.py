@@ -480,3 +480,14 @@ def test_equality_reads_every_field():
     assert set(changed) == {f.name for f in dataclasses.fields(TableSpec)}
     for field, other in changed.items():
         assert base != other, field
+
+
+def test_select_and_drop_take_names_one_by_one_or_as_a_list():
+    spec = TableSpec(
+        "T", {"a": ColSpec(pl.Int64), "b": ColSpec(pl.String), "c": ColSpec(pl.Date)}
+    )
+    assert list(spec.select(["c", "a"]).names) == list(spec.select("c", "a").names)
+    assert list(spec.select(["c", "a"]).names) == ["c", "a"]
+    assert list(spec.drop(["b"]).names) == list(spec.drop("b").names) == ["a", "c"]
+    with pytest.raises(TypeError, match="strings or lists of them"):
+        spec.select(1)  # type: ignore[arg-type]

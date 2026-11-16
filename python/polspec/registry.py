@@ -161,6 +161,30 @@ class Registry:
         self._specs[table.name] = table
         return self
 
+    def replace(self, spec: TableSpec | type) -> Registry:
+        """A new registry with `spec` in place of the one of its name, in
+        the same place and with the same categories. This one is left as it
+        was. A name the registry does not hold is a `RegistryError`.
+
+        Examples
+        --------
+        >>> registry = Registry(TableSpec("Orders", {"qty": ColSpec(pl.Int64, bounds=(1, 5))}))
+        >>> wider = registry["Orders"].with_columns({"qty": ColSpec(pl.Int64, bounds=(1, 20))})
+        >>> registry.replace(wider)["Orders"]["qty"].bounds
+        Bound(min=1, max=20)
+
+        *Added in 1.6.*
+        """
+        table = as_table_spec(spec)
+        if table.name not in self._specs:
+            raise RegistryError(
+                f"The registry holds no spec named {table.name!r} to replace; "
+                f"it holds {', '.join(self._specs) or 'none'}. Add a new one "
+                "with add()."
+            )
+        specs = [table if name == table.name else s for name, s in self._specs.items()]
+        return Registry(*specs, categories=self._categories)
+
     @property
     def names(self) -> tuple[str, ...]:
         """Spec names in the order they were added."""

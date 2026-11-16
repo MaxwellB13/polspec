@@ -313,7 +313,7 @@ def test_the_data_dictionary_and_the_diagram_show_the_nan_share():
         )
     )
     markdown = spec.to_markdown()
-    assert "| `level` | `Float64` | Yes; NaN 5% |" in markdown
+    assert "| `level` | `Float64` | Yes (10%); NaN 5% |" in markdown
     assert "No (elements 10%); NaN 20%" in markdown
     assert "| `point.x` | `Float64` | No; NaN 30% |" in markdown
     assert 'Float64 level "nullable, NaN: 5%"' in spec.to_mermaid()

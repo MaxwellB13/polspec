@@ -214,7 +214,7 @@ AWKWARD = TableSpec(
 def test_markdown_escapes_what_would_split_a_cell():
     md = to_markdown(AWKWARD)
     assert _cells_per_row(md) == {10}
-    assert r"| `a\|b` | `Enum(['x\|y', 'new\nline'])` |" in md
+    assert r"| `a\|b` | `Enum` | No | - | `x\|y`, `new line` |" in md
     assert "| `new line` |" in md  # a newline would have ended the row
     assert r"`slash\\\|pipe`" in md  # the backslash cannot escape the escape
 
@@ -295,3 +295,24 @@ def test_the_top_level_renderers_match_the_framespec_methods():
     assert polspec.to_markdown(Orders, title="Orders table").startswith(
         "# Orders table"
     )
+
+
+def test_a_column_of_choices_shows_each_beside_its_share_and_a_null_rate():
+    """An Enum's categories are its choices, as its `repr` says, so the
+    Domain cell lists them; weighted ones each with its share."""
+    spec = TableSpec(
+        "Loans",
+        {
+            "seniority": ColSpec(pl.Enum, choices={"SEN": 0.6, "SUB": 0.4}),
+            "status": ColSpec(pl.Enum(["NEW", "PAID"])),
+            "tier": ColSpec(pl.String, choices={"free": 8, "pro": 2}),
+            "total": ColSpec(pl.Float64, nullable=True, null_probability=0.05),
+            "levels": ColSpec(pl.List(pl.Enum(["a", "b"]))),
+        },
+    )
+    md = to_markdown(spec)
+    assert "| `seniority` | `Enum` | No | - | `SEN` 60%, `SUB` 40% |" in md
+    assert "| `status` | `Enum` | No | - | `NEW`, `PAID` |" in md
+    assert "| `tier` | `String` | No | - | `free` 80%, `pro` 20% |" in md
+    assert "| `total` | `Float64` | Yes (5%) |" in md
+    assert "| `levels` | `List(Enum(categories=['a', 'b']))` |" in md

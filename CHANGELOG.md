@@ -40,8 +40,26 @@ page promises; before 1.0, a minor version could break any of them.
   would parse says in which format, and takes no shape pattern. Numbers
   with thousands separators or decimal commas are left to the caller to
   clean, and the docs show how.
+- **`Registry.replace(spec)`**: a new registry with one spec swapped for
+  the one of its name, in the same place and with the same categories.
+  Editing a profiled registry no longer means rebuilding it by hand.
 
 ### Changed
+
+- **`to_markdown` writes an `Enum` as its `repr` does:** `Enum` in the Type
+  column and its categories in Domain / Choices, each beside its share when
+  weighted (`SEN` 60%, `SUB` 40%); weighted choices on any column the same.
+  A nullable column shows its null rate, `Yes (5%)`. An `Enum` inside a
+  `List` or `Struct` keeps the dtype's own form.
+- **A `ForeignKey`'s `repr` names its target rather than printing it.** It
+  printed the whole parent spec, over 600 characters for one key of the
+  shop tutorial's registry.
+- **`TableSpec.select` and `drop` take a list,** as Polars' do, as well as
+  names one by one; a list raised `TypeError: unhashable type` before.
+- **`from_yaml` given YAML text says so.** `to_yaml()` with no path returns
+  text, and passing it back raised a raw `OSError`; `from_yaml`,
+  `Registry.from_yaml` and `CatSpec.from_yaml` now raise a
+  `SerializationError` naming the call that reads text.
 
 - **Batches, scans and sinks are faster where they were slow.** The engine
   fills a column in 65,536-row chunks, so a batch that started inside one
