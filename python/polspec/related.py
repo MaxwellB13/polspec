@@ -314,7 +314,7 @@ def profiled_tables(
         specs[name] = profile(frame, name=name, options=own)
         # Keys compare values as the profile read them: with `parse_text`,
         # a number as a number, and empty text as no value.
-        typed[name] = typed_text(frame, own)[0]
+        typed[name] = typed_text(frame, own, explain=False).frame
     declared = _declared(keys or {}, typed)
     found = {} if keys is False else _inferred(typed, declared)
     chosen = _acyclic(typed, declared, found)

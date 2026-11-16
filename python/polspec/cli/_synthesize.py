@@ -67,7 +67,7 @@ def _cmd_synthesize(args: argparse.Namespace) -> int:
         except ValueError as exc:  # a name in --replace the file lacks, and the like
             raise CliError(str(exc)) from exc
     _note_text(spec)
-    _write_data_file(fake, output)
+    _write_data_file(fake, output, spec)
     print(f"Wrote {fake.height:,} synthesized row(s) like {source} to {output}")
 
     if args.spec:
@@ -126,9 +126,9 @@ def _synthesize_related(args: argparse.Namespace, sources: list[Path]) -> int:
             raise CliError(str(exc)) from exc
     for name in registry:
         _note_text(registry[name])
-    for source, frame in zip(sources, fake.values(), strict=True):
+    for source, (name, frame) in zip(sources, fake.items(), strict=True):
         path = out_dir / f"{source.stem}{suffix or source.suffix.lower()}"
-        _write_data_file(frame, path)
+        _write_data_file(frame, path, registry[name])
         print(f"Wrote {frame.height:,} synthesized row(s) like {source} to {path}")
     found = sum(len(registry[name].foreign_keys) for name in registry)
     print(f"Kept {found} foreign key(s) between them")

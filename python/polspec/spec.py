@@ -267,6 +267,7 @@ class ColSpec:
     rules: tuple[ColRule, ...] = ()
     validators: tuple[Check, ...] = ()
     derive: Pred | None = None
+    text_format: str | None = None
 
     if TYPE_CHECKING:
 
@@ -303,6 +304,7 @@ class ColSpec:
             | Sequence[Check | pl.Expr | Pred]
             | None = (),
             derive: Pred | None = None,
+            text_format: str | None = None,
         ) -> None: ...
 
     def __post_init__(self) -> None:
@@ -327,6 +329,7 @@ class ColSpec:
         text.validate_format(self)
         text.validate_extra_values(self)
         text.validate_pattern(self)
+        text.validate_text_format(self)
         ranges.validate_bounds_dtype_support(self)
         ranges.validate_bounds_fit_dtype(self)
         choices.validate_weights(self)

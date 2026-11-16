@@ -1037,6 +1037,8 @@ FIELD_COMPARATORS: dict[str, Comparator] = {
     "unique": _compare_unique,
     "rules": _compare_rules,
     "derive": _compare_derive,
+    # How a date is written as text: which text parses, not which value passes.
+    "text_format": _compare_field("text_format"),
     "validators": _compare_validators,
     "tags": _compare_field("tags"),
     "description": _compare_field("description"),

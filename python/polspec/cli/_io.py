@@ -24,8 +24,8 @@ import polars as pl
 from polspec import FrameSpec
 from polspec.errors import CliError
 from polspec.foreign_key import ForeignKey
-from polspec.frames import json_casts, sample_rows
-from polspec.profiler import TEXT_NOTE
+from polspec.frames import json_casts, sample_rows, text_format_casts
+from polspec.profiler import STAYS_TEXT_NOTE, TEXT_NOTE
 from polspec.reading import SUFFIXES, parse_declared_text, read_file
 from polspec.registry import Registry, load_module
 from polspec.serialization import registry_to_python
@@ -86,13 +86,24 @@ def _read_data_file(
     return parse_declared_text(df, spec) if spec is not None else df
 
 
-def _write_data_file(df: pl.DataFrame, path: Path) -> None:
+# The suffixes whose files hold every value as text, where a column's
+# `text_format` says how a date is written.
+_TEXT_SUFFIXES = frozenset({".csv", ".tsv", *_JSON_SUFFIXES})
+
+
+def _write_data_file(
+    df: pl.DataFrame, path: Path, spec: TableSpec | None = None
+) -> None:
+    """`df` written to `path`, by its suffix; a text file writes `spec`'s
+    dates, datetimes and times as their `text_format` says."""
     writer = _DATA_WRITERS.get(path.suffix.lower())
     if writer is None:
         raise CliError(
             f"don't know how to write {path.suffix!r} files ({path}). "
             f"Supported: {', '.join(sorted(_DATA_WRITERS))}"
         )
+    if spec is not None and path.suffix.lower() in _TEXT_SUFFIXES:
+        df = df.with_columns(text_format_casts(spec.columns))
     if path.suffix.lower() in _JSON_SUFFIXES:
         df = df.with_columns(json_casts(df.schema, error=CliError))
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -319,7 +330,8 @@ def _warnings_printed() -> Iterator[None]:
 
 def _note_text(spec: TableSpec) -> None:
     """Says on stderr which text columns would parse as another type, which
-    their descriptions say too, and the flag that reads them so."""
+    their descriptions say too, and the flag that reads them so; and, under
+    --parse-text, why each column that nearly parsed stays text."""
     noted = [
         name
         for name, column in spec.columns.items()
@@ -332,6 +344,11 @@ def _note_text(spec: TableSpec) -> None:
             "types; their descriptions say which.",
             file=sys.stderr,
         )
+    for name, column in spec.columns.items():
+        description = column.description or ""
+        if description.startswith(STAYS_TEXT_NOTE):
+            reason = description.removeprefix(STAYS_TEXT_NOTE)
+            print(f"note: column {name!r} stays text: {reason}", file=sys.stderr)
 
 
 def _maybe_format(path: Path) -> None:

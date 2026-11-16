@@ -160,6 +160,18 @@ def out_of_order(columns: Sequence[str], descending: Sequence[bool]) -> pl.Expr:
     return later.fill_null(False)
 
 
+def text_format_casts(columns: Mapping[str, Any]) -> list[pl.Expr]:
+    """The casts that write each date, datetime or time with a
+    `text_format` as that text -- for `with_columns`, before a frame goes to
+    a text file (CSV, NDJSON) -- so the file holds them as its source did.
+    `columns` are a spec's, by name."""
+    return [
+        column(name).dt.strftime(spec.text_format).alias(name)
+        for name, spec in columns.items()
+        if getattr(spec, "text_format", None) is not None
+    ]
+
+
 def json_casts(schema: Mapping[str, Any], *, error: type[Exception]) -> list[pl.Expr]:
     """The casts that make a frame of `schema` one Polars' JSON writers can
     write -- for `with_columns` -- or `error` naming the column they cannot.

@@ -161,14 +161,89 @@ Schema({'loan_id': Int64, 'LGD': Float64, 'opened': Date})
 
 A column is read as the first of `Boolean` (`true` or `false`, in any
 case), `Int64`, `Float64`, `Date` and `Datetime` that every value parses as
-exactly; ISO dates only, so `31/01/2024` is not guessed at. Text is
-stripped first, and empty text is a null. A column stays text when any value
-is written with a leading zero (`007`), or is an integer too large for an
-`Int64`: those are codes, and parsing would lose the zero or round the
-number. A column in `replace` stays text too.
+exactly. Text is stripped first, and empty text is a null. A column stays
+text when any value is written with a leading zero (`007`), or is an
+integer too large for an `Int64`: those are codes, and parsing would lose
+the zero or round the number. A column in `replace` stays text too.
 
-Left off, a text column that would parse stays text, and its description
-says what it would parse as — so the spec file tells whoever reads it.
+### Dates written another way
+
+Dates, datetimes and times not in ISO form are read too, each with the
+format its values are written in, which the spec keeps as `text_format`:
+
+```python
+bonds = pl.DataFrame({"maturity": ["30 Sep 2031", "31 Dec 2049", "15 Mar 2027"]})
+print(polspec.profile(bonds, parse_text=True)["maturity"].text_format)
+```
+
+```text
+%d %b %Y
+```
+
+The formats tried are `30 Sep 2031`, `30 September 2031`, `30-Sep-2031`,
+`Sep 30, 2031`, `September 30, 2031`, `30/09/2031`, `09/30/2031`,
+`2031/09/30` and `30.09.2031`, each with its day and month unpadded too
+(`1 Jan 2030`); any of them with a time (`14:05`, `14:05:59`, `2:05 PM`);
+and a time alone. A format fits when every value parses with it and
+writes back as the text it came from, a month name in any case: so
+`30 Feb 2031` fits nothing. Digits alone, such as `20310930`, are a number.
+*Added in 1.6.*
+
+Two formats that both fit and read the values differently are no fit:
+`01/02/2031` is the first of February one way round and the second of
+January the other. The column stays text, and its description says which
+formats fit; one day past the twelfth anywhere in the column settles it.
+Declare the column with the format you know it to be:
+
+```python
+Settled = polspec.TableSpec(
+    "Trades", {"settle": ColSpec(pl.Date, text_format="%d/%m/%Y")}
+)
+trades = polspec.validate(
+    Settled, pl.DataFrame({"settle": ["01/02/2031", "03/04/2030"]}), parse_text=True
+)
+print(trades["settle"].to_list())
+```
+
+```text
+[datetime.date(2031, 2, 1), datetime.date(2030, 4, 3)]
+```
+
+`validate(parse_text=True)` and `read()` read such a column with its
+`text_format`, and a value written another way is a `dtype` finding that
+names the format. A CSV or NDJSON file polspec writes holds the column in
+it too: `synthesize` on the command line, the `sink_*` verbs and
+`polspec generate`. In memory, and in Parquet and Arrow IPC, a date is a
+date.
+
+### Why a column stays text
+
+With `parse_text=True`, a column that nearly parses as a number or a date,
+and stays text, says why in its description, and `schema infer` prints it:
+
+```python
+amounts = pl.DataFrame({"NOMINAL": ["1,500,000.00", "250.00", "0.000125"] * 10})
+print(polspec.profile(amounts, parse_text=True)["NOMINAL"].description)
+```
+
+```text
+Stays text: 10 value(s) do not parse as a number, such as ['1,500,000.00'].
+```
+
+The reasons are values that do not parse, as here; a value written with a
+leading zero; a whole number past an `Int64`; and two date formats that
+both fit. polspec reads no thousands separators or decimal commas: only you
+know which a comma is. Remove them first, when they are thousands:
+
+```python
+amounts = amounts.with_columns(pl.col("NOMINAL").str.replace_all(",", ""))
+```
+
+### Left as text
+
+Left off, `parse_text` reads nothing: a text column that would parse stays
+text, and its description says what it would parse as, and in which
+format — so the spec file tells whoever reads it.
 `polspec schema infer` and `polspec synthesize` also say so on the terminal,
 and take `--parse-text`.
 

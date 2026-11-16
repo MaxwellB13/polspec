@@ -413,6 +413,26 @@ gives some as its samples:
 Column 'LGD': expected dtype Float64, got String: 1 value(s) do not parse as Float64, such as ['N/A']
 ```
 
+A `Date`, `Datetime` or `Time` column with a `text_format` is read with
+it, and a value written another way is reported by name:
+
+```python
+Bonds = polspec.TableSpec(
+    "Bonds", {"maturity": ColSpec(pl.Date, text_format="%d %b %Y")}
+)
+report = polspec.inspect(
+    Bonds, pl.DataFrame({"maturity": ["30 Sep 2031", "2031-09-30"]}), parse_text=True
+)
+print(report.findings[0].message)
+```
+
+```text
+Column 'maturity': expected dtype Date, got String: 1 value(s) do not parse as Date written as '%d %b %Y', such as ['2031-09-30']
+```
+
+Without a `text_format`, a date, datetime or time is read in whatever form
+Polars recognises. *`text_format` added in 1.6.*
+
 An integer is read as an `Int64`, so a value past a narrower declared width
 is reported as any wider integer standing in is: see the next section. The
 frame comes back with the parsed columns; add `cast=True` for the declared

@@ -230,7 +230,9 @@ def _parsed_text(
     parsed: list[pl.Series] = []
     unparsed: dict[str, pl.Series] = {}
     for name in candidates:
-        values, failed = parse_series(texts[name], columns[name].dtype)
+        values, failed = parse_series(
+            texts[name], columns[name].dtype, columns[name].text_format
+        )
         if values is None:
             unparsed[name] = failed
         else:
@@ -239,7 +241,11 @@ def _parsed_text(
 
 
 def _dtype_finding(
-    name: str, declared: pl.DataType, actual: pl.DataType, unparsed: pl.Series | None
+    name: str,
+    declared: pl.DataType,
+    actual: pl.DataType,
+    unparsed: pl.Series | None,
+    text_format: str | None = None,
 ) -> Finding:
     """A column of the wrong dtype -- with, for text `parse_text` could
     not read, how many values did not parse and which."""
@@ -259,8 +265,9 @@ def _dtype_finding(
         code="dtype",
         key=f"{name}__dtype",
         message=(
-            f"{message}: {len(unparsed):,} value(s) do not parse as {declared}, "
-            f"such as {list(samples)}"
+            f"{message}: {len(unparsed):,} value(s) do not parse as {declared}"
+            + (f" written as '{text_format}'" if text_format is not None else "")
+            + f", such as {list(samples)}"
         ),
         columns=(name,),
         count=len(unparsed),
@@ -461,7 +468,9 @@ def _planned(
         compatible = compatible_with[name]
         if not compatible:
             findings.append(
-                _dtype_finding(name, cs.dtype, actual_dtype, unparsed.get(name))
+                _dtype_finding(
+                    name, cs.dtype, actual_dtype, unparsed.get(name), cs.text_format
+                )
             )
         constraints.extend(
             column_constraints(

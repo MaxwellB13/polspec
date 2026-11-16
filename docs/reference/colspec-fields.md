@@ -40,6 +40,7 @@ and `null_probability` describe the cell itself.
 | `rules` | `rules` | scalar columns | rewrites the rows a rule's condition matches | a matched row outside the rule's choices is a `rule` finding |
 | `validators` | `validators` | every column | — (not read) | a row failing one is a `validator` finding |
 | `derive` | `derive` | a scalar column | computes it from the columns it reads, after them | a value not its expression's is a `derived` finding |
+| `text_format` | `text_format` | a `Date`, `Datetime` or `Time` column | — in memory; a CSV or NDJSON file polspec writes holds the column as this text | with `parse_text=True`, and in `read()`, text is read with it; a value it does not read is a `dtype` finding |
 
 A — in the generation column is a claim generation does not act on; the
 round trip still holds, except for `validators`, which are validation-only

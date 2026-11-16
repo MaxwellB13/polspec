@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 
 from polspec.errors import GenerationError
-from polspec.frames import Method, References, json_casts
+from polspec.frames import Method, References, json_casts, text_format_casts
 from polspec.generation.pipeline import requires_whole_frame
 from polspec.generation.scan import scan
 from polspec.tablespec import SpecLike, as_table_spec, require_columns
@@ -158,6 +158,7 @@ def sink_csv(
     (1000, 2)
     """
     lf, target = _scan(spec, path, n, batch_size, method, seed, references, fixed)
+    lf = lf.with_columns(text_format_casts(as_table_spec(spec).columns))
     lf.sink_csv(target, include_header=include_header, **kwargs)
 
 
@@ -195,5 +196,6 @@ def sink_ndjson(
     (1000, 2)
     """
     lf, target = _scan(spec, path, n, batch_size, method, seed, references, fixed)
+    lf = lf.with_columns(text_format_casts(as_table_spec(spec).columns))
     casts = json_casts(lf.collect_schema(), error=GenerationError)
     lf.with_columns(casts).sink_ndjson(target, **kwargs)

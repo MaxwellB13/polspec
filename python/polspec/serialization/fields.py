@@ -486,6 +486,9 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
         from_data=lambda v, ctx, path: pred_from_data(v),
         to_source=lambda pred: pred.to_source(),
     ),
+    # Added in 1.6 on version 4, as `derive` was in 1.4: written only when
+    # set, and refused by name by a release that does not know it.
+    Field("text_format", since=4),
 )
 
 

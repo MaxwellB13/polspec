@@ -9,6 +9,38 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+### Added
+
+- **Dates, datetimes and times written as text are read in the form they
+  are written.** `profile(parse_text=True)` reads `30 Sep 2031`,
+  `30 September 2031`, `30-Sep-2031`, `Sep 30, 2031`, `30/09/2031`,
+  `09/30/2031`, `2031/09/30` and `30.09.2031`, unpadded too, any of them
+  with a time, and a time alone (`14:05`, `2:05 PM`), where only ISO was
+  read before. A format fits when every value parses with it and writes
+  back as itself, so `30 Feb 2031` fits nothing. When two formats fit and
+  read the values differently, as day-first and month-first do for
+  `01/02/2031`, the column stays text and says which: polspec does not
+  guess.
+- **`ColSpec(text_format=...)`**: how a `Date`, `Datetime` or `Time` column
+  is written as text, as a strftime string (`"%d %b %Y"`). Profiling
+  writes it for a column read that way; `validate(parse_text=True)` and
+  `read()` read the column with it, and a value written otherwise is a
+  `dtype` finding that names it; a CSV or NDJSON file polspec writes holds
+  the column in it, from the `sink_*` verbs and from `polspec generate`,
+  `synthesize` and `validate --output`. In memory, and in Parquet and IPC,
+  a date stays a date. A directive the column cannot be written with is
+  refused where it is declared. A new optional key on spec-file version 4,
+  written only when set; 1.5 refuses a file that uses it by name.
+- **A column that nearly parses says why it stays text.** With
+  `parse_text=True`, a column of nearly numbers or nearly dates is
+  described as `Stays text: ...`: the values that do not parse
+  (`'1,500,000.00'`, `'N/A'`), a value written with a leading zero, a
+  whole number past an `Int64`, or the two date formats that both fit.
+  `schema infer` prints the same line. Without `parse_text`, a column that
+  would parse says in which format, and takes no shape pattern. Numbers
+  with thousands separators or decimal commas are left to the caller to
+  clean, and the docs show how.
+
 ### Changed
 
 - **Batches, scans and sinks are faster where they were slow.** The engine
