@@ -9,6 +9,27 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-16
+
+**Faster where it was slow, and dates as they are written.** Small batches,
+scans and sinks stop paying for a whole engine chunk each: a million rows in
+batches of 1,000 take 12 ms, not 897 ms. `List`, `Map` and `Decimal`
+columns are built in the engine, a unique parent is read as it stands,
+validation skips a check an `Enum` cannot fail, and profiling runs its
+columns at once. `profile(parse_text=True)` reads dates written as
+`30 Sep 2031` or `30/09/2031`, keeps the format as `text_format`, and
+writes fake files in it; a column that nearly parses says why it stays text.
+`to_markdown` shows an `Enum`'s choices and shares, and `Registry.replace`
+swaps one spec.
+
+Everything is additive under the 1.0 promises. No seeded output moves:
+batched and generated frames hold exactly the values they held in 1.5,
+checked case by case across chunk boundaries. Profiles change where a
+column of dates written as text is now read, or now says why it stays text,
+which *Stability* leaves open, as it does a `repr` and a rendered document.
+Nothing is deprecated. The spec-file format stays at version 4: a
+`text_format` key is written only when used, and 1.5 refuses it by name.
+
 ### Added
 
 - **Dates, datetimes and times written as text are read in the form they
@@ -3374,7 +3395,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/MaxwellB13/polspec/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/MaxwellB13/polspec/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/MaxwellB13/polspec/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/MaxwellB13/polspec/compare/v1.2.0...v1.3.0
