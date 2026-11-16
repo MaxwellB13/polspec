@@ -35,11 +35,22 @@ def parent_keys_of(fk: ForeignKey, parent_df: pl.DataFrame) -> pl.DataFrame:
     several windows from one parent -- `generate_batches`, a scan, a sink --
     reads them once and hands them to each window.
     """
-    return (
-        parent_df.select(frames.columns(list(fk.ref_columns)))
-        .drop_nulls()
-        .unique(maintain_order=True)
-    )
+    keys = parent_df.select(frames.columns(list(fk.ref_columns)))
+    # A parent's key is usually unique already -- it is what a key points
+    # at. Then every row is its own first occurrence, and the keys are the
+    # column as it stands: one count of distinct values says so, at a
+    # fraction of what an ordered `unique` costs.
+    if keys.width == 1:
+        column = keys.to_series()
+        distinct = column.null_count() == 0 and column.n_unique() == column.len()
+    else:
+        distinct = (
+            keys.null_count().sum_horizontal().item() == 0
+            and keys.n_unique() == keys.height
+        )
+    if distinct:
+        return keys
+    return keys.drop_nulls().unique(maintain_order=True)
 
 
 def unique_parent_shortfall(

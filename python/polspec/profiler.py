@@ -23,8 +23,10 @@ Internal: not part of the public API.
 from __future__ import annotations
 
 import dataclasses
+import os
 import warnings
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_EVEN, Decimal, localcontext
 from types import MappingProxyType
@@ -521,18 +523,28 @@ def profile_columns(
         round_bounds=opts.round_bounds,
         round_rates=opts.round_rates,
     )
-    columns = {
-        name: _profile_column(
+
+    def profiled(name: str) -> tuple[ColSpec, list[tuple[str, int]]]:
+        # Each column notes its infinities in a list of its own, so columns
+        # profiled at once share nothing, and the notes come out in column
+        # order whichever finished first.
+        own = dataclasses.replace(options, infinite=[])
+        column = _profile_column(
             df[name],
             name,
             total_rows=df.height,
-            options=options,
+            options=own,
             imitate=name not in replaced,
             top=True,
         )
-        for name in df.columns
+        return column, own.infinite
+
+    results = _for_each_column(profiled, df)
+    columns = {
+        name: column for name, (column, _) in zip(df.columns, results, strict=True)
     }
-    for where, infinities in options.infinite:
+    infinite = [note for _, notes in results for note in notes]
+    for where, infinities in infinite:
         warnings.warn(
             f"Column '{where}' holds {infinities:,} infinite value(s), which "
             "its bounds -- its finite values' -- leave out, so validating this "
@@ -542,6 +554,22 @@ def profile_columns(
             stacklevel=2,
         )
     return columns
+
+
+# Rows a frame needs before its columns are profiled at once: below it, a
+# thread costs more than the column it would profile.
+PARALLEL_MIN_ROWS = 50_000
+
+
+def _for_each_column(profile_one: Callable[[str], Any], df: pl.DataFrame) -> list[Any]:
+    """`profile_one` over every column of `df`, in column order: on a pool
+    of threads for a frame large enough to gain, since Polars releases the
+    GIL while it works, and one after another otherwise."""
+    names = df.columns
+    if len(names) < 2 or df.height < PARALLEL_MIN_ROWS:
+        return [profile_one(name) for name in names]
+    with ThreadPoolExecutor(max_workers=min(len(names), os.cpu_count() or 1)) as pool:
+        return list(pool.map(profile_one, names))
 
 
 # The start of the description a text column is given when it would parse:
@@ -976,7 +1004,9 @@ def _profile_textual(
     )
 
     if formats and dtype in (pl.String, pl.Utf8) and n_unique >= FORMAT_MIN_DISTINCT:
-        named = _named_format(non_null, keep_values=keep_values, finite=not narrows)
+        named = _named_format(
+            non_null, keep_values=keep_values, finite=not narrows, distinct=n_unique
+        )
         if named is not None:
             fmt, extras = named
             return spec(dtype=pl.String, format=fmt, extra_values=extras or None)
@@ -1181,7 +1211,7 @@ def _mostly_dotted(non_null: pl.Series, total: int) -> bool:
 
 
 def _named_format(
-    non_null: pl.Series, *, keep_values: bool, finite: bool = True
+    non_null: pl.Series, *, keep_values: bool, finite: bool = True, distinct: int
 ) -> tuple[str, dict[str, float]] | None:
     """The format `non_null`'s values have, and the stand-ins beside it with
     their shares; None when no format fits.
@@ -1190,7 +1220,7 @@ def _named_format(
     the check validation uses -- so a spec that names a format accepts the
     data it was named from. A near miss is kept only with `keep_values`:
     its stand-ins are values of the source. A finite format is tried only
-    with `finite`.
+    with `finite`. `distinct` is how many distinct values `non_null` holds.
     """
     value, count = frames.PLAIN, frames.COUNT
     total = len(non_null)
@@ -1231,6 +1261,17 @@ def _named_format(
         misses = probe.select((~fits).sum()).item()
         if misses > allowed_misses:
             continue
+        if (
+            misses == 0
+            and name != "hostname"
+            and distinct >= FORMAT_MIN_DISTINCT
+            and non_null.alias(value).to_frame().select(fits.all()).item()
+        ):
+            # Every value fits: the column is the format, with no stand-in,
+            # which is what counting every distinct value would conclude.
+            # One pass over the column, not a count of it. A hostname needs
+            # evidence beyond fitting, so it is counted.
+            return name, {}
         if name == "hostname" and not _mostly_dotted(non_null, total):
             continue  # single words: evidence of no format, however many
         if counts is None:

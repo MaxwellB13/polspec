@@ -712,3 +712,28 @@ def test_a_repeat_past_the_first_rows_still_makes_a_column_no_key():
 def test_single_words_are_not_counted_as_hostnames_however_many():
     words = [f"word{i}" for i in range(5_000)]
     assert _described(pl.DataFrame({"c": words}))["c"].format is None
+
+
+def test_a_large_frame_profiles_as_its_columns_do_one_at_a_time():
+    """A frame this size has its columns profiled at once. Each column's
+    claims are its own, and a warning about each comes in column order."""
+    n = 60_000
+    frame = pl.DataFrame(
+        {
+            "b": [float("inf") if i % 1_000 == 0 else i / 7 for i in range(n)],
+            "id": range(n),
+            "email": [f"user{i}@example.com" for i in range(n)],
+            "status": ["NEW", "PAID", "SHIPPED"] * (n // 3),
+            "a": [-float("inf") if i % 500 == 0 else i / 3 for i in range(n)],
+        }
+    )
+    with warnings.catch_warnings(record=True) as whole:
+        warnings.simplefilter("always")
+        spec = polspec.profile(frame)
+    one_by_one = {}
+    for name in frame.columns:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            one_by_one[name] = polspec.profile(frame.select(name))[name]
+    assert dict(spec.columns) == one_by_one
+    assert [str(w.message)[:11] for w in whole] == ["Column 'b' ", "Column 'a' "]
