@@ -166,6 +166,12 @@ back, so a `datetime` or a `bytes` choice never passes through a string.
 Bounds cross as a `Limit`: an `i64`, a `u64` or an `f64`, whichever holds the
 Python value exactly, so `Int64` and `UInt64` bounds keep every bit.
 
+Two columns are put together in Rust from parts Python drew (`src/assemble.rs`),
+because Polars' Python API has no cheap way to: a `List` from each cell's
+length and the flat elements, as offsets over the elements' own array, and a
+`Decimal` from its physical integers. Neither touches a value, so neither moves
+a seed.
+
 Distribution parameter *aliases* live only in `polspec/distributions.py` and
 are resolved when a column is declared; `src/dist.rs` reads canonical keys and
 exports its table as `distribution_params()`, which a test compares with the

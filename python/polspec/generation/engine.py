@@ -16,7 +16,12 @@ from typing import TYPE_CHECKING
 import polars as pl
 
 from polspec import frames
-from polspec._ffi import column_plan, pattern_status
+from polspec._ffi import (
+    column_plan,
+    decimal_from_physical,
+    list_from_lengths,
+    pattern_status,
+)
 from polspec._ffi import generate_dataframe as _generate_dataframe
 from polspec.bound import Bound
 from polspec.constants import (
@@ -461,12 +466,11 @@ def _decimal_from_physical(raw: pl.Series, dtype: pl.Decimal) -> pl.Series:
     """An integer column as the Decimal it is the physical form of.
 
     Polars casts an integer to a Decimal *value*, not to its physical, so
-    the scale is applied as a division in the widest Decimal and the result
-    narrowed to the declared precision.
+    the engine builds it: the integer `v` is the decimal `v / 10**scale`,
+    with nothing divided.
     """
-    one = pl.lit(10**dtype.scale).cast(pl.Decimal(38, dtype.scale))
-    scaled = pl.select(pl.lit(raw).cast(pl.Decimal(38, 0)).truediv(one)).to_series()
-    return scaled.cast(dtype).alias(raw.name)
+    precision = dtype.precision if dtype.precision is not None else 38
+    return decimal_from_physical(raw, precision, dtype.scale or 0).alias(raw.name)
 
 
 def _finish(raw: pl.Series, spec: ColSpec, domain: pl.Series | None) -> pl.Series:
@@ -827,29 +831,15 @@ def _wrap_list(
     name: str, spec: ColSpec, lengths: pl.Series, elements: pl.Series
 ) -> pl.Series:
     """The `List` (or `Array`) column `_list_parts` describes: the flat
-    elements, cut into cells by the lengths; a null length is a null cell."""
-    n = len(lengths)
-    row_of_element = _row_of_element(lengths)
-    row = frames.fresh("__polspec_row", [name])
-    grouped = (
-        pl.DataFrame({row: row_of_element, name: elements})
-        .group_by(row, maintain_order=True)
-        .agg(frames.column(name))
-    )
-    cells = (
-        pl.DataFrame({row: pl.int_range(0, n, eager=True)})
-        .join(grouped, on=row, how="left", maintain_order="left")
-        .with_columns(
-            pl.when(pl.lit(lengths).is_null())
-            .then(None)
-            .otherwise(
-                frames.column(name).fill_null(
-                    pl.lit([], dtype=pl.List(spec.value_dtype))
-                )
-            )
-            .alias(name)
-        )[name]
-    )
+    elements, cut into cells by the lengths; a null length is a null cell.
+    Built from the lengths as offsets, by the engine, with no element
+    copied."""
+    cells = list_from_lengths(name, lengths, elements)
+    if cells.dtype != pl.List(elements.dtype):
+        # A dtype the engine's Polars does not know -- Polars 2's `Map` --
+        # reaches it as its physical form, the list of entries it is, and
+        # comes back so. The values are the same; the dtype is put back.
+        cells = cells.cast(pl.List(elements.dtype))
     if isinstance(spec.dtype, pl.Array):
         return cells.list.to_array(spec.dtype.size)
     return cells

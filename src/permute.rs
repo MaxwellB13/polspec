@@ -61,6 +61,37 @@ impl Permutation {
             "{index} is outside [0, {})",
             self.domain
         );
+        if self.half <= 32 {
+            return self.apply_narrow(index as u64) as u128;
+        }
+        self.apply_wide(index)
+    }
+
+    /// `apply` for a domain of at most 2^64, whose halves are at most 32
+    /// bits: the same network in 64-bit arithmetic, so the same outputs at
+    /// a fraction of the cost. `last` rather than the domain, which 2^64
+    /// itself would overflow.
+    #[inline]
+    fn apply_narrow(&self, index: u64) -> u64 {
+        let last = (self.domain - 1) as u64;
+        let (half, mask) = (self.half, self.mask as u64);
+        let mut x = index;
+        loop {
+            let mut left = (x >> half) & mask;
+            let mut right = x & mask;
+            for key in &self.keys {
+                let round = mix(right ^ key) & mask;
+                (left, right) = (right, left ^ round);
+            }
+            x = (left << half) | right;
+            if x <= last {
+                return x;
+            }
+        }
+    }
+
+    #[inline]
+    fn apply_wide(&self, index: u128) -> u128 {
         let mut x = index;
         loop {
             x = self.network(x);
@@ -200,6 +231,39 @@ mod tests {
             "{err}"
         );
         assert!(window(0, 1, 0, 0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_narrow_path_is_the_wide_one_bit_for_bit() {
+        // Every domain width up to 2^64, each edge of it, several seeds: the
+        // 64-bit network must give exactly what the 128-bit one gives, or a
+        // unique column's seeded values would move.
+        let mut domains: Vec<u128> = (1..=64)
+            .flat_map(|b| {
+                let p = 1u128 << b;
+                [p - 1, p, p + 1]
+            })
+            .filter(|d| *d <= 1u128 << 64)
+            .collect();
+        domains.extend([1, 2, 3, 1_000, 65_537, 100_000_000]);
+        for domain in domains {
+            for seed in [0, 7, u64::MAX] {
+                let p = Permutation::new(domain, seed);
+                assert!(p.half <= 32, "domain {domain} takes the narrow path");
+                let step = (domain / 997).max(1);
+                let mut i = 0u128;
+                while i < domain.min(5_000 * step) {
+                    assert_eq!(
+                        p.apply_narrow(i as u64) as u128,
+                        p.apply_wide(i),
+                        "domain {domain}, seed {seed}, index {i}"
+                    );
+                    i += step;
+                }
+                let last = domain - 1;
+                assert_eq!(p.apply_narrow(last as u64) as u128, p.apply_wide(last));
+            }
+        }
     }
 
     #[test]

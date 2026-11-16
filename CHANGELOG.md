@@ -21,6 +21,14 @@ page promises; before 1.0, a minor version could break any of them.
   faster, and batches with a foreign key five times. Seeded output is
   unchanged: a batch holds the rows it held. A `List`, `Array` or `Map`
   column is still drawn batch by batch.
+- **`List`, `Array`, `Map` and `Decimal` columns generate several times
+  faster.** A list's cells are built in the engine from each cell's length
+  and the flat elements, where a group-by over every element built them
+  before: a million rows of `List(Int64)` take 5 ms, not 105 ms, and of
+  `List(String)` 20 ms, not 140 ms. A `Decimal` is built from its physical
+  integers, not divided into: 5 ms a million, not 20 ms. A unique column's
+  permutation runs in 64-bit arithmetic where its domain fits, a tenth
+  faster. Seeded output is unchanged.
 
 ## [1.5.0] - 2026-11-15
 
