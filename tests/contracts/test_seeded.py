@@ -146,6 +146,50 @@ def _cases() -> dict[str, Callable[[], pl.DataFrame]]:
     cases["table/cartesian"] = lambda: generate(
         cartesian, 30, method="cartesian", seed=17
     )
+
+    # Batches and a scan across the engine's first chunk boundary, at 65,536
+    # rows: the column cases above stay inside one chunk. One column of
+    # every kind a window draws, a list among them, with a rule, a derived
+    # column and a foreign key, so the passes run on every window too.
+    parent = TableSpec("P", {"id": ColSpec(pl.Int64, bounds=(1, 500), unique=True)})
+    streamed = TableSpec(
+        "S",
+        {
+            "id": ColSpec(pl.Int64, bounds=(1, 10**8), unique=True),
+            "ref": ColSpec(pl.String, pattern=r"^ORD-[0-9]{6}$"),
+            "status": ColSpec(pl.String, choices={"NEW": 0.2, "PAID": 0.8}),
+            "region": ColSpec(pl.Enum(["UK", "US"])),
+            "carrier": ColSpec(
+                pl.Enum(["RM", "UPS"]),
+                rules=[ColRule(when=col("region") == "UK", choices=["RM"])],
+            ),
+            "qty": ColSpec(pl.Int64, bounds=(1, 20)),
+            "price": ColSpec(pl.Float64, bounds=(0.5, 100), nullable=True),
+            "total": ColSpec(
+                pl.Float64, derive=col("qty") * col("price"), nullable=True
+            ),
+            "placed": ColSpec(
+                pl.Date, bounds=(dt.date(2025, 1, 1), dt.date(2026, 1, 1))
+            ),
+            "email": ColSpec(pl.String, format="email"),
+            "tags": ColSpec(pl.List(pl.String), nullable=True),
+            "pair": ColSpec(pl.Struct({"a": pl.Int32, "b": pl.Boolean}), nullable=True),
+            "account": ColSpec(pl.Int64, bounds=(1, 500)),
+        },
+        foreign_keys=[ForeignKey("account", references="P", ref_columns="id")],
+    )
+    references = {"P": generate(parent, 500, seed=19)}
+    for batch_size in (30_000, 1_000):
+        cases[f"stream/batches/{batch_size}"] = lambda b=batch_size: pl.concat(
+            list(
+                generate_batches(
+                    streamed, 70_000, batch_size=b, seed=23, references=references
+                )
+            )
+        )
+    cases["stream/scan"] = lambda: scan(
+        streamed, 70_000, seed=29, batch_size=20_000, references=references
+    ).collect()
     return cases
 
 

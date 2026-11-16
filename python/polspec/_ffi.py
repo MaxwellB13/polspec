@@ -80,6 +80,14 @@ def permuted_indices(domain: int, seed: int, start: int, n: int) -> pl.Series:
         raise GenerationError(str(exc)) from exc
 
 
+@functools.cache
+def chunk_size() -> int:
+    """The rows in one chunk of an engine column. A window that starts on a
+    multiple of it draws exactly the rows it keeps; one that starts inside a
+    chunk draws the chunk from its start and drops the head."""
+    return _extension().chunk_size()
+
+
 def distribution_params(name: str) -> list[tuple[str, float, bool]]:
     """The engine's `(name, default, must_be_positive)` for one distribution."""
     return _extension().distribution_params(name)

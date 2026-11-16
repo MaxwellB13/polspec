@@ -295,6 +295,42 @@ def test_batches_are_windows_onto_the_whole_frame(batch_size):
     assert parts["tags"].list.len().equals(whole["tags"].list.len())
 
 
+def test_a_wide_frame_in_batches_is_still_the_whole_frame():
+    """A frame this wide holds a chunk of rows in tens of megabytes, so a
+    stream of it draws one chunk at a time: these windows straddle chunks,
+    and one is drawn across two draws. Each is still the whole frame's
+    rows."""
+    wide = TableSpec(
+        "Wide", {f"c{i}": ColSpec(pl.Float64, bounds=(0, 1)) for i in range(100)}
+    )
+    n = 140_000
+    whole = generate(wide, n, seed=7)
+    for batch_size in (50_000, 65_537):
+        parts = pl.concat(
+            list(generate_batches(wide, n, batch_size=batch_size, seed=7))
+        )
+        assert parts.equals(whole)
+
+
+def test_a_batch_keeps_its_columns_order_and_names_beside_a_list():
+    """A list column is drawn per batch and the rest a block at a time; the
+    batch is put back together in declaration order, under every name --
+    the empty one, which Polars renames, included."""
+    spec = TableSpec(
+        "Named",
+        {
+            "z": ColSpec(pl.Int64),
+            "tags": ColSpec(pl.List(pl.Int64)),
+            "": ColSpec(pl.Float64),
+        },
+    )
+    whole = generate(spec, 2_500, seed=3)
+    for batch in generate_batches(spec, 2_500, batch_size=1_000, seed=3):
+        assert batch.columns == ["z", "tags", ""]
+    parts = pl.concat(list(generate_batches(spec, 2_500, batch_size=1_000, seed=3)))
+    assert parts.select("z", "").equals(whole.select("z", ""))
+
+
 def test_what_is_drawn_per_batch_is_deterministic_but_not_the_whole_frames():
     """Rules, foreign keys and composite keys are passes over a batch, so a
     batch's draws for them are its own -- the same every run, and distinct

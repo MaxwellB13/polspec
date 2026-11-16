@@ -258,10 +258,12 @@ batch drawing its elements from a seed of its own. A `unique=True` column is a w
 too: its values are a permutation of its value space, unique across every
 batch.
 
-A batch smaller than 65,536 rows — the engine's chunk — costs up to one
-chunk of extra draws per batch, because a window that starts mid-chunk fills
-the chunk from its start and slices the head off. Batches of a chunk or
-more cost nothing extra.
+A small batch costs little. The columns a window draws are filled many
+batches at a time, up to about 64 MiB, in parallel, and each batch is a
+slice of that: a million rows in batches of 1,000 take about twice as long
+as one `generate()` of them. A `List`, `Array` or `Map` column is the
+exception, drawn batch by batch, so many small batches of a spec with one
+cost more. *Faster since 1.6.*
 
 ## Writing straight to a file
 

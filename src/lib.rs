@@ -150,9 +150,17 @@ fn kinds() -> Vec<String> {
     plan::Kind::NAMES.iter().map(|s| s.to_string()).collect()
 }
 
+/// The rows in one chunk of a column: each is filled from its own seed, so a
+/// window that starts on a multiple of this draws no row it does not keep.
+#[pyfunction]
+fn chunk_size() -> usize {
+    sample::CHUNK_SIZE
+}
+
 #[pymodule]
 fn _polspec(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ColumnPlan>()?;
+    m.add_function(wrap_pyfunction!(chunk_size, m)?)?;
     m.add_function(wrap_pyfunction!(generate_dataframe, m)?)?;
     m.add_function(wrap_pyfunction!(distribution_params, m)?)?;
     m.add_function(wrap_pyfunction!(distributions, m)?)?;

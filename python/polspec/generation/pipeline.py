@@ -22,8 +22,9 @@ from typing import Any
 import polars as pl
 
 from polspec import frames
+from polspec._ffi import chunk_size
 from polspec.constants import DEFAULT_WIDE_INT_BOUND, LARGE_FRAME_BYTES
-from polspec.dtypes import map_parts, unholdable
+from polspec.dtypes import MAP, field_dtypes, map_parts, unholdable
 from polspec.errors import GenerationError, SpecError
 from polspec.frames import Method, References, to_eager
 from polspec.generation.engine import generate_cartesian, generate_random
@@ -487,9 +488,11 @@ def _window(
     self_references: int = 0,
     pins: Mapping[str, pl.Series] | None = None,
     parent_keys: Mapping[str, pl.DataFrame] | None = None,
+    drawn: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """Rows `[row_offset, row_offset + n)` of the frame `frame_seed` describes,
-    with the passes run over them.
+    with the passes run over them. `drawn` is those rows' columns as the
+    engine fills them, when a caller drew them already (`_Blocks`).
 
     `pins` replace their columns after the draw and before the passes, so
     a pass reading a pinned column reads the pin. `parent_keys` are each
@@ -504,7 +507,9 @@ def _window(
     window takes the keys the whole frame takes there.
     """
     columns = dict(spec.columns)
-    if method == "cartesian":
+    if drawn is not None:
+        df = drawn
+    elif method == "cartesian":
         df = generate_cartesian(columns, n, frame_seed)
     else:
         df = generate_random(columns, n, frame_seed, row_offset)
@@ -748,6 +753,7 @@ def batch_stream(
             yield first.slice(offset, batch_size)
         produced = first.height
 
+    blocks = _Blocks(dict(spec.columns), frame_seed, n, batch_size)
     while produced < n:
         current = min(n - produced, batch_size)
         yield _window(
@@ -759,5 +765,85 @@ def batch_stream(
             row_offset=produced,
             parent_keys=parent_keys,
             pins=pins.window(produced, current) if pins is not None else None,
+            drawn=blocks.window(produced, current),
         )
         produced += current
+
+
+# The most a block of batch rows holds, in bytes, by `estimated_size`: enough
+# whole chunks to fill every core for a narrow spec, few enough to bound the
+# memory of a wide one.
+BLOCK_BYTES = 64 * 1024**2
+
+
+def _holds_list(dtype: pl.DataType) -> bool:
+    """Whether a column of `dtype` holds a `List`, `Array` or `Map` anywhere:
+    a list's elements are drawn per window, not as a window onto the frame."""
+    if isinstance(dtype, (pl.List, pl.Array)) or (
+        MAP is not None and isinstance(dtype, MAP)
+    ):
+        return True
+    if isinstance(dtype, pl.Struct):
+        return any(_holds_list(field) for field in field_dtypes(dtype).values())
+    return False
+
+
+class _Blocks:
+    """A stream's engine columns, drawn a block of whole chunks at a time.
+
+    The engine seeds each chunk of a column by its index, so a window that
+    starts inside a chunk fills the chunk from its start and drops the head,
+    and a window of one chunk fills it on one thread. A block starts on a
+    chunk and spans many, filled in parallel, and each window is a slice of
+    it: the rows the window would have drawn itself, without the waste. A
+    column holding a list is drawn per window, as before, since its
+    elements are seeded by the window.
+    """
+
+    def __init__(
+        self, columns: dict[str, ColSpec], seed: int, n: int, batch_size: int
+    ) -> None:
+        self._columns, self._seed, self._n = columns, seed, n
+        self._blocked = {k: c for k, c in columns.items() if not _holds_list(c.dtype)}
+        self._apart = {k: c for k, c in columns.items() if k not in self._blocked}
+        chunk = self._chunk = chunk_size()
+        rows = chunk
+        if self._blocked:
+            per_chunk = estimated_size(TableSpec("block", self._blocked), chunk)
+            rows = max(chunk, BLOCK_BYTES // max(per_chunk, 1) * chunk)
+        # Never fewer rows than a window, so a window is one slice of one block.
+        self._rows = max(rows, -(-batch_size // chunk) * chunk)
+        self._block: pl.DataFrame | None = None
+        self._start = 0
+
+    def window(self, offset: int, n: int) -> pl.DataFrame:
+        """Rows `[offset, offset + n)`'s engine columns, in declaration order."""
+        if not self._blocked:
+            return generate_random(self._apart, n, self._seed, offset)
+        end = offset + n
+        block = self._block
+        if block is None or offset < self._start or end > self._start + block.height:
+            start = offset - offset % self._chunk
+            stop = min(
+                self._n, max(start + self._rows, -(-end // self._chunk) * self._chunk)
+            )
+            block = self._block = generate_random(
+                self._blocked, stop - start, self._seed, start
+            )
+            self._start = start
+        rows = block.slice(offset - self._start, n)
+        if not self._apart:
+            return rows  # every column, already in declaration order
+        # Gathered as series, not by a `select`: a query per window costs
+        # more than a small window does.
+        listed = generate_random(self._apart, n, self._seed, offset)
+        names = list(self._columns)
+        frame = pl.DataFrame(
+            [
+                (rows if name in self._blocked else listed).get_column(name)
+                for name in names
+            ]
+        )
+        if frame.columns != names:
+            frame.columns = names  # Polars renames a series called ""
+        return frame
