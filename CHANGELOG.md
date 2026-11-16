@@ -9,6 +9,19 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+### Changed
+
+- **Batches, scans and sinks are faster where they were slow.** The engine
+  fills a column in 65,536-row chunks, so a batch that started inside one
+  filled it from its start and dropped the head, and a batch of one chunk
+  filled it on one thread. A stream now draws its columns many chunks at a
+  time, up to about 64 MiB, in parallel, and slices each batch from them.
+  A million rows of four columns in batches of 10,000 take 7 ms, not
+  118 ms; in batches of 1,000, 12 ms, not 897 ms. `sink_parquet` is a third
+  faster, and batches with a foreign key five times. Seeded output is
+  unchanged: a batch holds the rows it held. A `List`, `Array` or `Map`
+  column is still drawn batch by batch.
+
 ## [1.5.0] - 2026-11-15
 
 **Real data in.** `profile_all` profiles a set of related tables into a

@@ -79,6 +79,9 @@ def generate_dataframe(
 ) -> pl.DataFrame:
     """Fills every planned column in parallel; each column's seed derives from `seed` and its seed name (its name, unless the plan carries `seed_name`). `row_offset` asks for rows `[row_offset, row_offset + n_rows)` of the frame `seed` describes, so a batch is a window onto one frame."""
 
+def chunk_size() -> int:
+    """The rows in one chunk of a column, each filled from its own seed: a window starting on a multiple of it draws no row it does not keep."""
+
 def distribution_params(name: str) -> list[tuple[str, float, bool]]:
     """`(name, default, must_be_positive)` for each canonical parameter of a distribution."""
 
