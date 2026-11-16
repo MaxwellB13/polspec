@@ -197,28 +197,37 @@ ColSpec(pl.Float32, bounds=(-1e40, 1e40))
 ColSpec(pl.String, choices=["GBP", "USD", "EUR"])
 ```
 
-`weights` biases the draw. Supply them positionally, or as a `{choice: weight}`
-mapping — never both:
+Choices that are not equally likely are written as a mapping, each choice
+beside its weight. A weight is relative, so `{"a": 10, "b": 5, "c": 1}`
+draws `a` ten times as often as `c`:
 
 ```python
-ColSpec(pl.String, choices=["a", "b", "c"], weights=[10.0, 5.0, 1.0])
-ColSpec(pl.String, choices={"a": 10.0, "b": 5.0, "c": 1.0})   # same thing
-```
-
-Weights need a domain to apply to, so they require `choices`, an `Enum` dtype,
-or `Boolean` (where they read `[p_false, p_true]`):
-
-```python
-ColSpec(pl.Enum, choices={"x": 0.1, "y": 0.2, "z": 0.7})
-ColSpec(pl.Boolean, weights=[0.9, 0.1])   # 10% true
+ColSpec(pl.String, choices={"a": 10.0, "b": 5.0, "c": 1.0})
 ```
 
 A bare `pl.Enum` takes its categories from `choices`, in the order written,
-so each category sits beside its share: the first line is
-`ColSpec(pl.Enum(["x", "y", "z"]), weights=[0.1, 0.2, 0.7])`, and the two
-spellings are the same spec. It is how polspec writes a weighted `Enum` out
-as Python; an `Enum` without weights is written with its categories,
-`ColSpec(pl.Enum(["x", "y", "z"]))`. *Added in 1.2.*
+each beside its share. It is how a column's `repr` and `to_python` write a
+weighted `Enum`, and how `profile` reports one:
+
+```python
+print(ColSpec(pl.Enum, choices={"x": 0.1, "y": 0.2, "z": 0.7}))
+```
+
+```text
+ColSpec(Enum, choices={'x': 0.1, 'y': 0.2, 'z': 0.7})
+```
+
+The same weights can be given apart, as `weights=`, in the order of the
+choices or of an `Enum`'s categories; the two spellings are the same spec.
+A `Boolean` has no choices to map, so it takes them that way, as
+`[p_false, p_true]`:
+
+```python
+ColSpec(pl.Enum(["x", "y", "z"]), weights=[0.1, 0.2, 0.7])   # the Enum above
+ColSpec(pl.Boolean, weights=[0.9, 0.1])                        # 10% true
+```
+
+*`choices` as a mapping on a bare `Enum` added in 1.2.*
 
 Choices are held in the column's own dtype, so a `datetime` choice on a
 `Datetime` column or a `bytes` choice on a `Binary` column stays what it is.

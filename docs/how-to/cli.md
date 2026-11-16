@@ -90,6 +90,32 @@ explains each from Python.
 Treat the output as a draft. It describes the sample it saw — edit bounds,
 add rules, tighten a domain — before trusting it as a contract.
 
+### Several files — a registry
+
+Given several files, `schema infer` profiles them together and writes one
+registry: a spec per file, named after it (`customers.csv` is `Customers`),
+with the foreign keys between them found from their values. `.yaml` writes
+a registry file; `.py` writes a class per file, parents first, and a
+`registry = Registry(...)` after them; `-o -` prints the YAML.
+
+```bash
+polspec schema infer customers.csv orders.csv lines.csv -o shop.yaml
+polspec schema infer customers.csv orders.csv -o shop.py --foreign-key Orders.buyer=Customers.id
+```
+
+`--foreign-key CHILD.COLUMN=PARENT.COLUMN` declares a key the values do
+not show, and is checked against them; `--no-foreign-keys` finds none.
+`--name` names one spec, so it is refused with several files. How a key is
+found is in [Related tables](synthesizing.md#related-tables); the
+[tutorial on data you already have](../tutorial/existing-data.md) walks
+through it. *Added in 1.5.*
+
+`--no-patterns` leaves out the `pattern` a code-like text column's values
+share (`^ORD-[0-9]{6}$`), and `--parse-text` reads text as the numbers,
+flags and dates it holds, in the format it is written in, saying why a
+column that nearly parses stays text. See
+[Data read as text](profiling.md#data-read-as-text).
+
 The draft is written as a person would write it: bounds rounded outward and
 rates rounded up, to two significant figures — `amount: [3.17, 9871.23]`
 becomes `[0, 9900]` and a 2.37% null rate `0.024` — so the file reads as a
@@ -256,15 +282,30 @@ outside the directory. A pin names its spec: `--fixed Orders.status=PAID`.
 ## `synthesize` — fake data from real data
 
 ```bash
-polspec synthesize customers.parquet -o fake_customers.parquet     -n 1000000 --seed 1 --replace name email --spec fake_customers.yaml
+polspec synthesize customers.parquet -o fake_customers.parquet -n 1000000 --seed 1 --replace name email --spec fake_customers.yaml
 ```
 
 Profiles the file — shapes, keys, category frequencies, null rates — and
 writes a fake one with the same schema, `-n` rows (as many as the source,
-by default). `--replace` names the columns whose values must not be carried
-over; `--sample N` profiles a random sample of N rows; `--spec` writes the
+by default), or `--scale` times as many: `--scale 0.1` is a tenth.
+`--replace` names the columns whose values must not be carried over;
+`--sample N` profiles a random sample of N rows; `--spec` writes the
 profiled spec beside the data, to review or to regenerate from. See
 [Fake data from real data](synthesizing.md) for what carries over.
+
+Given several files, it writes a fake set into a directory, one file per
+source, every key between them held by a fake parent row:
+
+```bash
+polspec synthesize customers.csv orders.csv lines.csv -o fake/ --scale 0.1 --seed 1
+polspec synthesize customers.csv orders.csv -o fake/ --format parquet --spec fake/shop.yaml
+```
+
+Each file keeps its own format unless `--format` names one for all, and
+`--spec` writes the registry. `--foreign-key` and `--no-foreign-keys` work
+as for `schema infer`. With `--parse-text`, a date read in a format, such
+as `30 Sep 2031`, is written back in it to a CSV or NDJSON file.
+*Several files added in 1.5.*
 
 ## `validate` — check data against a schema
 
