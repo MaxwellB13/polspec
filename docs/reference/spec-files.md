@@ -69,6 +69,7 @@ too. *Added in 1.2.*
 | `rules` | A list of rules |
 | `validators` | A list of checks, each over this column |
 | `derive` | An expression over other columns, written as a predicate is — see [Predicates](#predicates); *added in 1.4* |
+| `text_format` | A strftime string (`'%d %b %Y'`): how a date, datetime or time is written as text; *added in 1.6* |
 
 ### A rule
 

@@ -158,7 +158,7 @@ def parse_declared_text(df: pl.DataFrame, spec: TableSpec) -> pl.DataFrame:
             continue
         arrived = df.schema[name]
         if arrived == pl.String:
-            values, _ = parse_series(df[name], column.dtype)
+            values, _ = parse_series(df[name], column.dtype, column.text_format)
             if values is not None:
                 parsed.append(values)
             continue

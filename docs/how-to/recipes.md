@@ -249,6 +249,21 @@ Customers.validate(raw, parse_text=True, cast=True)
 See [Data read as text](validating.md#data-read-as-text) and
 [profiling it](profiling.md#data-read-as-text).
 
+### Dates written as `30 Sep 2031`
+
+Declare the format the file writes them in; `parse_text=True` and `read()`
+read the column with it, and a CSV polspec writes holds it the same way:
+
+```python
+class Bonds(FrameSpec):
+    maturity = ColSpec(pl.Date, text_format="%d %b %Y")
+
+Bonds.validate(pl.DataFrame({"maturity": ["30 Sep 2031"]}), parse_text=True)
+```
+
+*Added in 1.6.* `profile(parse_text=True)` finds the format itself; see
+[Dates written another way](profiling.md#dates-written-another-way).
+
 ## In CI
 
 ### Gate on drift

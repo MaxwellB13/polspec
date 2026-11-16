@@ -1666,3 +1666,30 @@ def test_several_sources_refuse_what_they_cannot_do(tmp_path, capsys, args, mess
     ]
     assert run_cli(*filled) == 1
     assert message in capsys.readouterr().err
+
+
+def test_schema_infer_says_why_a_column_stays_text(tmp_path, capsys):
+    source = tmp_path / "bonds.csv"
+    pl.DataFrame(
+        {
+            "NOMINAL": [f"{i},{i:03d}.50" for i in range(1, 60)],
+            "maturity": ["30 Sep 2031", "31 Dec 2049", "05 Mar 2027"] * 19
+            + ["01 Jan 2030"] * 2,
+        }
+    ).write_csv(source)
+    spec = tmp_path / "bonds.yaml"
+    assert run_cli("schema", "infer", source, "-o", spec, "--parse-text") == 0
+    err = capsys.readouterr().err
+    assert "column 'NOMINAL' stays text: 59 value(s) do not parse as a number" in err
+    written = spec.read_text(encoding="utf-8")
+    assert "text_format: '%d %b %Y'" in written
+
+
+def test_synthesize_writes_dates_as_the_source_wrote_them(tmp_path):
+    source = tmp_path / "bonds.csv"
+    days = [dt.date(2030, 1, 1) + dt.timedelta(days=i) for i in range(200)]
+    pl.DataFrame({"maturity": [d.strftime("%d %b %Y") for d in days]}).write_csv(source)
+    fake = tmp_path / "fake.csv"
+    assert run_cli("synthesize", source, "-o", fake, "--parse-text", "--seed", "1") == 0
+    text = pl.read_csv(fake, infer_schema=False)["maturity"]
+    assert text.str.to_date("%d %b %Y", strict=True).null_count() == 0

@@ -5,6 +5,7 @@ Internal: not part of the public API.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -165,3 +166,51 @@ def validate_pattern(spec: colspec_module.ColSpec) -> None:
             f"ColSpec.pattern {spec.pattern!r} is not a valid regular "
             f"expression: {' '.join(str(exc).split())}"
         ) from exc
+
+
+# The strftime directives a date's text may use, and a time's; a datetime's
+# may use both. Checked here because Polars panics, rather than raising, on
+# a directive its dtype cannot write -- `%d` for a time.
+_DATE_DIRECTIVES = frozenset(
+    ["Y", "y", "C", "m", "-m", "d", "-d", "e", "b", "B", "h", "a", "A", "j", "-j", "u", "w", "U", "W", "G", "g", "V", "D", "F", "x"]
+)  # fmt: skip
+_TIME_DIRECTIVES = frozenset(
+    ["H", "-H", "k", "I", "-I", "l", "M", "-M", "S", "-S", "p", "P", "f", ".f", "3f", "6f", "9f", ".3f", ".6f", ".9f", "T", "R", "r", "X"]
+)  # fmt: skip
+_DIRECTIVE = r"%(%|-?[A-Za-z]|\.?[369]?f)"
+
+
+def validate_text_format(spec: colspec_module.ColSpec) -> None:
+    """Refuses a `text_format` on a column that is not a date, a datetime or
+    a time, or one with a directive the column's dtype cannot write."""
+    fmt = spec.text_format
+    if fmt is None:
+        return
+    if not isinstance(fmt, str) or not fmt:
+        raise SpecError(f"ColSpec.text_format must be a non-empty string, got {fmt!r}")
+    dtype = spec.dtype
+    if dtype == pl.Date:
+        allowed, what = _DATE_DIRECTIVES, "a date"
+    elif dtype == pl.Time:
+        allowed, what = _TIME_DIRECTIVES, "a time"
+    elif isinstance(dtype, pl.Datetime):
+        allowed, what = _DATE_DIRECTIVES | _TIME_DIRECTIVES, "a datetime"
+    else:
+        raise SpecError(
+            f"ColSpec.text_format is the way a date, a datetime or a time is "
+            f"written as text, so it needs a Date, Datetime or Time column, "
+            f"not {dtype!r}. A list's values are never text in a file."
+        )
+    used = [m.group(1) for m in re.finditer(_DIRECTIVE, fmt)]
+    unknown = sorted({d for d in used if d != "%" and d not in allowed})
+    if unknown:
+        raise SpecError(
+            f"ColSpec.text_format {fmt!r} uses "
+            + ", ".join(f"%{d}" for d in unknown)
+            + f", which {what} cannot be written with"
+        )
+    if not used or used == ["%"] * len(used):
+        raise SpecError(
+            f"ColSpec.text_format {fmt!r} has no directive, such as %Y or %H, "
+            "so it writes every value the same"
+        )

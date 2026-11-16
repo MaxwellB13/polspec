@@ -37,6 +37,7 @@ import polars as pl
 from polspec import frames
 from polspec._options import options_from
 from polspec._text import infer as infer_text
+from polspec._text import stays_text
 from polspec.bound import Bound
 from polspec.constants import DEFAULT_NULL_PROBABILITY
 from polspec.dtypes import MAP, dtype_value_limits, field_dtypes, map_entries, map_parts
@@ -576,47 +577,82 @@ def _for_each_column(profile_one: Callable[[str], Any], df: pl.DataFrame) -> lis
 # what `polspec schema infer` looks for to say so on the terminal too.
 TEXT_NOTE = "Every value is text that parses as "
 
+# The start of the description of a text column that nearly parses as a
+# type, and stays text: what stopped it follows.
+STAYS_TEXT_NOTE = "Stays text: "
 
-def text_note(dtype: pl.DataType) -> str:
-    """The description of a text column that would parse as `dtype`."""
+
+def text_note(dtype: pl.DataType, text_format: str | None = None) -> str:
+    """The description of a text column that would parse as `dtype`,
+    written as `text_format` says when it is not the form Polars writes."""
+    written = f" ('{text_format}')" if text_format is not None else ""
     return (
-        f"{TEXT_NOTE}{type(dtype).__name__}; profile with parse_text=True "
-        "(--parse-text) to declare it as one."
+        f"{TEXT_NOTE}{type(dtype).__name__}{written}; profile with "
+        "parse_text=True (--parse-text) to declare it as one."
     )
 
 
+@dataclass(frozen=True, slots=True)
+class _ReadText:
+    """What `typed_text` made of a frame's text: the frame, each column it
+    read and the format that read it, each it could have read, and why each
+    that nearly parsed stays text."""
+
+    frame: pl.DataFrame
+    formats: dict[str, str]
+    would: dict[str, tuple[pl.DataType, str | None]]
+    stays: dict[str, str]
+
+
 def typed_text(
-    frame: pl.DataFrame, opts: ProfileOptions
-) -> tuple[pl.DataFrame, dict[str, pl.DataType]]:
+    frame: pl.DataFrame, opts: ProfileOptions, *, explain: bool = True
+) -> _ReadText:
     """`frame` with each text column read as the type its values hold,
-    under `parse_text`; and, without it, the type each would be read as.
+    under `parse_text`, and the format each was read with; without it, the
+    type each would be read as. Under `parse_text`, why each column that
+    nearly parsed stays text, unless not `explain`.
 
     A column in `replace` is left as text either way: its values are not
     carried over, and a number's extremes would be.
     """
     parsed: list[pl.Series] = []
-    would: dict[str, pl.DataType] = {}
+    formats: dict[str, str] = {}
+    would: dict[str, tuple[pl.DataType, str | None]] = {}
+    stays: dict[str, str] = {}
     for name, dtype in frame.schema.items():
         if dtype != pl.String or name in opts.replace:
             continue
-        values = infer_text(frame[name])
-        if values is None:
+        read = infer_text(frame[name])
+        if read is None:
+            reason = stays_text(frame[name]) if opts.parse_text and explain else None
+            if reason is not None:
+                stays[name] = reason
             continue
         if opts.parse_text:
-            parsed.append(values)
+            parsed.append(read.values)
+            if read.text_format is not None:
+                formats[name] = read.text_format
         else:
-            would[name] = values.dtype
-    return (frame.with_columns(parsed) if parsed else frame), would
+            would[name] = (read.values.dtype, read.text_format)
+    typed = frame.with_columns(parsed) if parsed else frame
+    return _ReadText(typed, formats, would, stays)
 
 
 def profiled_table(frame: pl.DataFrame, opts: ProfileOptions, name: str) -> TableSpec:
     """`frame` described as a `TableSpec`: its text read as `opts` says,
     each column profiled, and the order its rows come in."""
-    frame, would = typed_text(frame, opts)
+    read = typed_text(frame, opts)
+    frame = read.frame
     columns = profile_columns(frame, opts)
-    for column, dtype in would.items():
+    for column, fmt in read.formats.items():
+        columns[column] = dataclasses.replace(columns[column], text_format=fmt)
+    for column, (dtype, fmt) in read.would.items():
         columns[column] = dataclasses.replace(
-            columns[column], description=text_note(dtype)
+            columns[column], description=text_note(dtype, fmt)
+        )
+    for column, reason in read.stays.items():
+        columns[column] = dataclasses.replace(
+            columns[column], description=f"{STAYS_TEXT_NOTE}{reason}."
         )
     order = detect_order(frame) if opts.detect_order else None
     order_by, descending = order if order is not None else ((), False)

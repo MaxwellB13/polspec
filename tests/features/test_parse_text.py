@@ -45,14 +45,14 @@ def test_integers_come_before_floats_and_a_decimal_makes_them_floats():
 
 
 @pytest.mark.parametrize(
-    "values",
+    ("values", "why"),
     [
-        ["007", "123", "456"],
-        ["-01", "5", "6"],
-        ["00.5", "1.5", "2.5"],
-        [str(10**20 + i) for i in range(3)],
-        ["1", "2", "two"],
-        ["2024-01-31", "31/01/2024", "2024-02-01"],
+        (["007", "123", "456"], "leading zero, such as ['007']"),
+        (["-01", "5", "6"], "leading zero, such as ['-01']"),
+        (["00.5", "1.5", "2.5"], "leading zero, such as ['00.5']"),
+        ([str(10**20 + i) for i in range(3)], "too large for an Int64"),
+        (["1", "2", "two"], None),
+        (["2024-01-31", "31/01/2024", "2024-02-01"], None),
     ],
     ids=[
         "leading zero",
@@ -63,12 +63,17 @@ def test_integers_come_before_floats_and_a_decimal_makes_them_floats():
         "not iso",
     ],
 )
-def test_text_that_is_a_code_or_not_all_one_type_stays_text(values):
+def test_text_that_is_a_code_or_not_all_one_type_stays_text(values, why):
     """A leading zero, or an integer no Int64 holds, makes a code: parsing
-    would lose the zero, or round it into a float."""
+    would lose the zero, or round it into a float. The column says so; one
+    that is not nearly anything says nothing."""
     column = _profiled(pl.DataFrame({"c": values}), parse_text=True)["c"]
     assert column.dtype == pl.String
-    assert column.description is None
+    if why is None:
+        assert column.description is None
+    else:
+        assert column.description.startswith("Stays text: ")
+        assert why in column.description
 
 
 def test_empty_text_is_a_null():

@@ -129,13 +129,13 @@ def _write_split(
         except ValueError as exc:  # too few rows pass for the spec's `rows`
             raise CliError(str(exc)) from exc
         typed = validate(spec, passing, references=references, cast=True, **options)
-        _write_data_file(typed, Path(args.output))
+        _write_data_file(typed, Path(args.output), spec)
         print(f"Wrote {typed.height} passing row(s) to {args.output}", file=sys.stderr)
     if args.failing:
         # Each row once, naming every claim it breaks: with --output, the
         # file is split exactly, whatever a row breaks.
         failing = report.failing_rows(once=True).collect()
-        _write_data_file(failing, Path(args.failing))
+        _write_data_file(failing, Path(args.failing), spec)
         print(
             f"Wrote {failing.height} failing row(s) to {args.failing}", file=sys.stderr
         )
@@ -175,7 +175,7 @@ def _cmd_generate(args: argparse.Namespace) -> int:
         max_bytes=0,  # said above already; one warning is enough
         fixed=_fixed_from(args.fixed or [], spec_cls.spec),
     )
-    _write_data_file(df, output)
+    _write_data_file(df, output, spec_cls.spec)
     print(f"Wrote {df.height} row(s) of {spec_cls.__name__} to {output}")
     return 0
 
@@ -204,7 +204,12 @@ def _fixed_from(pins: list[str], spec: TableSpec) -> dict[str, Any]:
             # Text, an Enum, a Categorical: the value is the text itself.
             fixed[name] = text or None
             continue
-        parsed, _ = parse_series(pl.Series([text]), dtype)
+        # In the column's own text_format, as its file holds it, or in the
+        # form Polars writes.
+        written = spec.columns[name].text_format
+        parsed, _ = parse_series(pl.Series([text]), dtype, written)
+        if parsed is None and written is not None:
+            parsed, _ = parse_series(pl.Series([text]), dtype)
         if parsed is None:
             raise CliError(f"--fixed {pin!r}: {text!r} does not read as {dtype!r}")
         fixed[name] = parsed[0]
@@ -277,7 +282,7 @@ def _generate_all(args: argparse.Namespace) -> int:
         if name not in frames:
             continue
         path = output / f"{name}{suffix}"
-        _write_data_file(frames[name], path)
+        _write_data_file(frames[name], path, registry[name])
         print(f"Wrote {frames[name].height} row(s) of {name} to {path}")
     return 0
 
