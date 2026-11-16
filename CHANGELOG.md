@@ -29,6 +29,22 @@ page promises; before 1.0, a minor version could break any of them.
   integers, not divided into: 5 ms a million, not 20 ms. A unique column's
   permutation runs in 64-bit arithmetic where its domain fits, a tenth
   faster. Seeded output is unchanged.
+- **A foreign key reads a unique parent without deduplicating it.** A
+  parent's key is usually unique, so its keys are the column as it stands;
+  one count of distinct values says so. A 1,000-row child of a 1M-row
+  parent takes 3 ms, not 33 ms, and a self-referencing key a quarter of
+  the time. Seeded output is unchanged.
+- **Validation leaves out a check that cannot fail.** Values that arrive in
+  the very `Enum` a column declares, with no `choices` narrowing it, are
+  all its categories; testing each against them took most of the time of
+  validating a frame with an `Enum` in it. A four-column frame of a
+  million rows validates in 1 ms, not 20 ms.
+- **Profiling is faster.** A frame of 50,000 rows or more has its columns
+  profiled at once, on a pool of threads; a column every value of which has
+  a format (an `email`, a `uuid4`) is checked in one pass, not counted value
+  by value. An 11-column frame of a million rows profiles in 204 ms, not
+  509 ms; a UUID column in 96 ms, not 182 ms. Every profile is the same
+  as before, warnings and their order included.
 
 ## [1.5.0] - 2026-11-15
 

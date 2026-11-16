@@ -488,6 +488,16 @@ def _choices_claim(value: _Value) -> Constraint | None:
     allowed = _allowed_values(value.spec)
     if allowed is None:
         return None
+    declared = value.spec.value_dtype
+    if (
+        isinstance(declared, pl.Enum)
+        and value.actual_dtype == declared
+        and len(allowed) == declared.categories.len()
+    ):
+        # An Enum column holds only its categories, so values of the very
+        # Enum declared -- with no choices narrowing it -- are all allowed.
+        # Testing each against the categories is a pass that cannot fail.
+        return None
     column, dtype = value.column, value.spec.value_dtype
     if is_textual(value.actual_dtype):
         in_domain = column.cast(pl.String).is_in(as_strings(allowed, dtype))

@@ -539,3 +539,43 @@ def test_a_null_column_is_declared_nullable_with_every_value_null():
         ColSpec(pl.Null)
     with pytest.raises(SpecError, match="every value of a Null column is null"):
         ColSpec(pl.Null, nullable=True, null_probability=0.5)
+
+
+ENUM = pl.Enum(["UK", "US", "DE"])
+
+
+@pytest.mark.parametrize(
+    ("column", "values", "fails"),
+    [
+        pytest.param(
+            ColSpec(ENUM),
+            pl.Series(["UK", "DE"], dtype=ENUM),
+            False,
+            id="the Enum declared",
+        ),
+        pytest.param(
+            ColSpec(ENUM, choices=["UK", "US"]),
+            pl.Series(["UK", "DE"], dtype=ENUM),
+            True,
+            id="choices narrowing it",
+        ),
+        pytest.param(ColSpec(ENUM), pl.Series(["UK", "FR"]), True, id="text for it"),
+        pytest.param(
+            ColSpec(ENUM),
+            pl.Series(["UK", "FR"], dtype=pl.Enum(["UK", "US", "DE", "FR"])),
+            True,
+            id="a wider Enum",
+        ),
+        pytest.param(
+            ColSpec(pl.List(ENUM)),
+            pl.Series([["UK"], ["DE", "US"]], dtype=pl.List(ENUM)),
+            False,
+            id="a list of the Enum declared",
+        ),
+    ],
+)
+def test_an_enum_is_held_to_its_categories_however_it_arrives(column, values, fails):
+    """Values of the very Enum declared hold nothing else, so their check
+    is left out; every other way a value arrives is still checked."""
+    report = inspect(TableSpec("T", {"c": column}), values.alias("c").to_frame())
+    assert [f.code for f in report] == (["choices"] if fails else [])
