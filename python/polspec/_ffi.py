@@ -80,6 +80,24 @@ def permuted_indices(domain: int, seed: int, start: int, n: int) -> pl.Series:
         raise GenerationError(str(exc)) from exc
 
 
+def list_from_lengths(name: str, lengths: pl.Series, elements: pl.Series) -> pl.Series:
+    """A `List` column named `name`: `elements` cut into cells by `lengths`,
+    a null length a null cell. The elements keep their dtype."""
+    try:
+        return _extension().list_from_lengths(name, lengths, elements)
+    except ValueError as exc:
+        raise GenerationError(str(exc)) from exc
+
+
+def decimal_from_physical(raw: pl.Series, precision: int, scale: int) -> pl.Series:
+    """A `Decimal(precision, scale)` column from its physical integers: the
+    integer `v` is the decimal `v / 10**scale`."""
+    try:
+        return _extension().decimal_from_physical(raw, precision, scale)
+    except ValueError as exc:
+        raise GenerationError(str(exc)) from exc
+
+
 @functools.cache
 def chunk_size() -> int:
     """The rows in one chunk of an engine column. A window that starts on a

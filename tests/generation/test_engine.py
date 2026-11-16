@@ -85,6 +85,7 @@ def test_the_package_imports_without_the_extension(monkeypatch):
     import importlib
 
     import polspec
+    import polspec.validation  # loaded lazily; this file may run first
 
     # Make the extension unimportable: no module in sys.modules, no attribute
     # on the package for `from polspec import _polspec` to find.
@@ -242,3 +243,27 @@ def test_rust_engine_complaints_surface_as_generation_error():
         )
     assert isinstance(info.value.__cause__, ValueError)
     assert "'a'" in str(info.value) and "must be positive" in str(info.value)
+
+
+def test_a_list_is_built_from_its_lengths_and_refuses_a_mismatch_by_name():
+    lengths = pl.Series([2, None, 0, 1], dtype=pl.Int64)
+    elements = pl.Series([dt.date(2024, 1, d) for d in (1, 2, 3)])
+    cells = _ffi.list_from_lengths("when", lengths, elements)
+    assert cells.name == "when" and cells.dtype == pl.List(pl.Date)
+    assert cells.to_list() == [
+        [dt.date(2024, 1, 1), dt.date(2024, 1, 2)],
+        None,
+        [],
+        [dt.date(2024, 1, 3)],
+    ]
+    with pytest.raises(GenerationError, match="'when'"):
+        _ffi.list_from_lengths("when", pl.Series([5], dtype=pl.Int64), elements)
+
+
+def test_a_decimal_is_built_from_its_physical_integers():
+    raw = pl.Series("amount", [12345, None, -5], dtype=pl.Int64)
+    decimal = _ffi.decimal_from_physical(raw, 12, 2)
+    assert decimal.dtype == pl.Decimal(12, 2)
+    assert decimal.cast(pl.String).to_list() == ["123.45", None, "-0.05"]
+    with pytest.raises(GenerationError, match="precision"):
+        _ffi.decimal_from_physical(raw, 3, 2)

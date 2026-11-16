@@ -13,7 +13,10 @@
 //! - `unique.rs` -- filling a column whose values must all differ.
 //! - `permute.rs` -- the keyed permutation behind both, and behind a unique
 //!   foreign key's pick of parent rows.
+//! - `assemble.rs` -- a `List` column from its lengths and elements, and a
+//!   `Decimal` from its physical integers.
 
+mod assemble;
 mod dist;
 mod format;
 mod math;
@@ -95,6 +98,35 @@ fn permuted_indices(
     Ok(PySeries(series.into_series()))
 }
 
+/// A `List` column from each cell's length and every cell's elements, in
+/// order; a null length is a null cell. The elements keep their dtype.
+#[pyfunction]
+fn list_from_lengths(
+    py: Python<'_>,
+    name: &str,
+    lengths: PySeries,
+    elements: PySeries,
+) -> PyResult<PySeries> {
+    let series = py
+        .detach(|| assemble::list_from_lengths(name, &lengths.0, &elements.0))
+        .map_err(PyValueError::new_err)?;
+    Ok(PySeries(series))
+}
+
+/// A `Decimal(precision, scale)` column from its physical integers.
+#[pyfunction]
+fn decimal_from_physical(
+    py: Python<'_>,
+    raw: PySeries,
+    precision: usize,
+    scale: usize,
+) -> PyResult<PySeries> {
+    let series = py
+        .detach(|| assemble::decimal_from_physical(&raw.0, precision, scale))
+        .map_err(PyValueError::new_err)?;
+    Ok(PySeries(series))
+}
+
 /// The canonical parameters of one distribution: `(name, default, must_be_positive)`.
 #[pyfunction]
 fn distribution_params(name: &str) -> PyResult<Vec<(String, f64, bool)>> {
@@ -161,6 +193,8 @@ fn chunk_size() -> usize {
 fn _polspec(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ColumnPlan>()?;
     m.add_function(wrap_pyfunction!(chunk_size, m)?)?;
+    m.add_function(wrap_pyfunction!(decimal_from_physical, m)?)?;
+    m.add_function(wrap_pyfunction!(list_from_lengths, m)?)?;
     m.add_function(wrap_pyfunction!(generate_dataframe, m)?)?;
     m.add_function(wrap_pyfunction!(distribution_params, m)?)?;
     m.add_function(wrap_pyfunction!(distributions, m)?)?;

@@ -79,6 +79,12 @@ def generate_dataframe(
 ) -> pl.DataFrame:
     """Fills every planned column in parallel; each column's seed derives from `seed` and its seed name (its name, unless the plan carries `seed_name`). `row_offset` asks for rows `[row_offset, row_offset + n_rows)` of the frame `seed` describes, so a batch is a window onto one frame."""
 
+def list_from_lengths(name: str, lengths: pl.Series, elements: pl.Series) -> pl.Series:
+    """A `List` column: `elements` cut into cells by `lengths`, a null length a null cell; the elements keep their dtype. Raises `ValueError` when the lengths do not total the elements."""
+
+def decimal_from_physical(raw: pl.Series, precision: int, scale: int) -> pl.Series:
+    """A `Decimal(precision, scale)` column from its physical integers: `v` is `v / 10**scale`. Raises `ValueError` for a value the precision cannot hold."""
+
 def chunk_size() -> int:
     """The rows in one chunk of a column, each filled from its own seed: a window starting on a multiple of it draws no row it does not keep."""
 
