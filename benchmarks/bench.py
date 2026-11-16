@@ -392,6 +392,79 @@ def _validate(n: int) -> None:
     DataSource.validate(_profiled_frame(n, text=False))
 
 
+# What 1.6 speeds up, each recorded on 1.5 first: batches small enough that
+# each is a fraction of an engine chunk; a scan of a frame with every kind of
+# column a pass rewrites; the nested and decimal columns; an Enum validated;
+# and the columns profiling reads slowest.
+
+
+class Mixed11(FrameSpec):
+    """Eleven columns: one of every kind a realistic table holds."""
+
+    id = ColSpec(pl.Int64, bounds=(1, 100_000_000), unique=True)
+    ref = ColSpec(pl.String, pattern=r"^ORD-[0-9]{6}$")
+    status = ColSpec(pl.String, choices={"NEW": 0.2, "PAID": 0.5, "SHIPPED": 0.3})
+    country = ColSpec(pl.Enum(["UK", "US", "DE"]))
+    qty = ColSpec(pl.Int64, bounds=(1, 20))
+    price = ColSpec(pl.Float64, bounds=(0.0, 500.0), nullable=True)
+    total = ColSpec(pl.Float64, derive=col("qty") * col("price"), nullable=True)
+    placed = ColSpec(pl.Date, bounds=(dt.date(2025, 1, 1), dt.date(2026, 1, 1)))
+    email = ColSpec(pl.String, format="email")
+    note = ColSpec(pl.String, string_length=(0, 40), nullable=True)
+    tags = ColSpec(pl.List(pl.String), nullable=True)
+
+
+class OneListInt(FrameSpec):
+    values = ColSpec(pl.List(pl.Int64))
+
+
+class OneListString(FrameSpec):
+    values = ColSpec(pl.List(pl.String), nullable=True)
+
+
+class OneDecimal(FrameSpec):
+    amount = ColSpec(pl.Decimal(12, 2), bounds=(0, 1_000))
+
+
+class OneUuid(FrameSpec):
+    id = ColSpec(pl.String, format="uuid4")
+
+
+def _batches(batch_size: int) -> Callable[[int], None]:
+    def run(n: int) -> None:
+        for _ in DataSource.generate_batches(n, batch_size=batch_size, seed=SEED):
+            pass
+
+    return run
+
+
+def _scan_mixed(n: int) -> None:
+    Mixed11.scan(n, seed=SEED).collect()
+
+
+@functools.cache
+def _frame_of(spec: type[FrameSpec], n: int) -> pl.DataFrame:
+    return spec.generate(n, seed=SEED)
+
+
+def _validate_enum(n: int) -> None:
+    OneEnumOnly.validate(_frame_of(OneEnumOnly, n))
+
+
+class OneEnumOnly(FrameSpec):
+    """An Enum with no nulls: the column whose check 1.6 drops."""
+
+    country = ColSpec(pl.Enum(["UK", "US", "DE"]))
+
+
+def _profile_mixed(n: int) -> None:
+    polspec.profile(_frame_of(Mixed11, n))
+
+
+def _profile_uuid(n: int) -> None:
+    polspec.profile(_frame_of(OneUuid, n))
+
+
 def _import(_n: int) -> None:
     """A fresh interpreter importing Polars and then polspec: Polars is
     the larger share, and the same in every run, so a change is polspec's."""
@@ -492,6 +565,17 @@ CASES: tuple[Case, ...] = (
     Case("synthesize_all", "regression", (1_000_000,), _synthesize_all),
     Case("validate", "regression", (1_000_000,), _validate),
     Case("import", "regression", (1,), _import),
+    # What 1.6 speeds up, against which its exit criteria are measured.
+    Case("batches_10k", "regression", (1_000_000,), _batches(10_000)),
+    Case("batches_1k", "regression", (1_000_000,), _batches(1_000)),
+    Case("generate_mixed11", "regression", (1_000_000,), _polspec(Mixed11)),
+    Case("scan_mixed11", "regression", (1_000_000,), _scan_mixed),
+    Case("list_int", "regression", (1_000_000,), _polspec(OneListInt)),
+    Case("list_string", "regression", (1_000_000,), _polspec(OneListString)),
+    Case("decimal", "regression", (1_000_000,), _polspec(OneDecimal)),
+    Case("validate_enum", "regression", (1_000_000,), _validate_enum),
+    Case("profile_mixed11", "regression", (1_000_000,), _profile_mixed),
+    Case("profile_uuid", "regression", (1_000_000,), _profile_uuid),
 )
 
 BY_NAME = {case.name: case for case in CASES}
