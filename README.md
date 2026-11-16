@@ -20,15 +20,15 @@ from polspec import ColSpec, FrameSpec
 
 class Orders(FrameSpec):
     order_id = ColSpec(pl.Int64, bounds=(1, 10**9), unique=True)
-    status   = ColSpec(pl.Enum(["NEW", "PAID", "SHIPPED"]), weights=[0.2, 0.5, 0.3])
+    status   = ColSpec(pl.Enum, choices={"NEW": 0.2, "PAID": 0.5, "SHIPPED": 0.3})
     total    = ColSpec(pl.Float64, bounds=(0, 5_000), distribution="lognormal",
                        distribution_params={"mean": 4, "std": 1})
     placed   = ColSpec(pl.Date, bounds=(dt.date(2025, 1, 1), dt.date(2025, 12, 31)),
                        nullable=True, null_probability=0.05)
     email    = ColSpec(pl.String, format="email")
 
-orders = Orders.generate(1_000_000, seed=42)   # a million rows in ~12 ms
-Orders.validate(orders)                        # ~27 ms; raises on any breach
+orders = Orders.generate(1_000_000, seed=42)   # a million rows in ~8 ms
+Orders.validate(orders)                        # ~26 ms; raises on any breach
 ```
 
 ```text
@@ -68,9 +68,12 @@ Orders.validate(orders)                        # ~27 ms; raises on any breach
   offending rows a lazy filter away, and splits a frame into what passed and
   what to quarantine. Declared defaults can fill what is missing first.
 - **Learn from real data.** `profile()` turns a frame into a spec, finding
-  formats, frequencies, distributions and null rates — and, with
-  `parse_text=True`, the numbers, flags and dates in a file read as text;
-  `synthesize()` makes a stand-in with the same shape.
+  formats, the patterns codes share, frequencies, distributions and null
+  rates — and, with `parse_text=True`, the numbers, flags and dates in a
+  file read as text, in the format they are written in. `profile_all()`
+  profiles related tables at once and finds the keys between them;
+  `synthesize()` and `synthesize_all()` make stand-ins with the same shape,
+  a tenth the size or ten times it, every key kept.
 - **Drift with statistics behind it.** A move is reported only when it is
   both significant and large, as breaking or compatible.
 - **Specs as files and docs.** Save and load specs as YAML or Python. Render
@@ -96,7 +99,7 @@ paid = (
     Orders.scan(10_000_000, seed=1)
     .filter(pl.col("status") == "PAID")
     .select("order_id", "total")
-    .collect()                                            # ~0.2 s
+    .collect()                                            # ~0.06 s
 )
 Orders.sink_parquet("orders.parquet", 1_000_000, seed=1)  # streamed in batches
 ```
@@ -123,6 +126,20 @@ spec["total"].distribution                         # 'lognormal', fitted
 fake = synthesize(orders.head(100_000), seed=1)    # a stand-in with the same shape
 ```
 
+### Fake a set of related tables
+
+```python
+import polspec
+
+customers = pl.DataFrame({"id": range(1, 101), "tier": ["free", "pro"] * 50})
+purchases = pl.DataFrame({"id": range(1, 401), "customer_id": [i % 37 + 1 for i in range(400)]})
+real = {"Customers": customers, "Purchases": purchases}
+
+registry = polspec.profile_all(real)               # Purchases.customer_id -> Customers.id
+fake = polspec.synthesize_all(real, scale=0.1, seed=1)
+registry.validate_all(fake)                        # every key held by a fake parent
+```
+
 ### Catch drift
 
 ```python
@@ -139,6 +156,7 @@ Drift: 0 breaking, 2 compatible, DataFrame against 'Orders'
 
 ```bash
 polspec schema infer orders.csv -o orders_spec.py
+polspec schema infer customers.csv orders.csv -o shop.yaml   # a registry, keys found
 polspec validate orders_spec.py orders.csv --failing rejected.csv
 polspec drift orders_spec.py orders.csv --markdown
 polspec generate orders_spec.py -n 1000000 -o fixture.parquet --seed 1

@@ -96,6 +96,23 @@ page promises; before 1.0, a minor version could break any of them.
   509 ms; a UUID column in 96 ms, not 182 ms. Every profile is the same
   as before, warnings and their order included.
 
+### Documentation
+
+- **The README and *Command line* catch up with 1.5:** related tables
+  profiled and faked together, several files on the command line,
+  `--foreign-key`, `--no-foreign-keys`, `--scale`, `--format` and
+  `--no-patterns`. The README's timings are re-measured.
+- **A weighted column is taught as `choices={...}`,** the spelling its
+  `repr` prints and `profile` reports; `weights=` is shown as the same
+  spec given apart, and for a `Boolean`.
+- **Dates written as text, and why a column stays text,** have their own
+  sections in *Infer a spec* and *Validate data*, a recipe, and rows in
+  *ColSpec fields* and *Spec files*. *Generate data* says small batches
+  cost little now.
+- ***Comparison* is re-measured on 1.6:** generation, last measured on
+  0.21.0, and validation, where polspec is 1.4 to 2.1 times as fast as
+  dataframely and pandera.
+
 ## [1.5.0] - 2026-11-15
 
 **Real data in.** `profile_all` profiles a set of related tables into a
