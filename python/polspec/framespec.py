@@ -923,12 +923,17 @@ class FrameSpec(metaclass=_FrameSpecMeta):
 
     @classmethod
     def to_markdown(
-        cls, path: str | Path | None = None, *, title: str | None = None
+        cls,
+        path: str | Path | None = None,
+        *,
+        title: str | None = None,
+        choices: Literal["summary", "appendix", "full"] = "summary",
     ) -> str:
-        """A Markdown data dictionary for this spec, written to `path` if given."""
+        """A Markdown data dictionary for this spec, written to `path` if
+        given; `choices` as `polspec.to_markdown` takes it."""
         from polspec.render import framespec_to_markdown
 
-        return framespec_to_markdown(cls.spec, path, title=title)
+        return framespec_to_markdown(cls.spec, path, title=title, choices=choices)
 
     @classmethod
     def to_mermaid(
