@@ -11,6 +11,7 @@ import pytest
 import yaml
 from polspec import (
     Bound,
+    CatSpec,
     Check,
     ColRule,
     ColSpec,
@@ -657,3 +658,23 @@ def test_a_registry_error_names_the_file_and_the_spec(tmp_path):
     )
     with pytest.raises(SpecError, match=r"specs\.yaml: specs\.orders: columns\.total:"):
         Registry.from_yaml(path)
+
+
+@pytest.mark.parametrize(
+    ("read", "text_reader"),
+    [
+        (from_yaml, "from_dict"),
+        (Registry.from_yaml, "Registry.from_dict"),
+        (CatSpec.from_yaml, "CatSpec.from_dict"),
+    ],
+    ids=["spec", "registry", "categories"],
+)
+def test_yaml_text_given_for_a_path_is_refused_with_the_call_that_reads_text(
+    read, text_reader
+):
+    """`to_yaml()` with no path returns text, and passing it back is the
+    natural mistake: it says so, rather than failing to find a file whose
+    name is the YAML."""
+    text = to_yaml(TableSpec("T", {"a": ColSpec(pl.Int64)}))
+    with pytest.raises(SerializationError, match=rf"reads a file.*{text_reader}"):
+        read(text)

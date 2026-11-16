@@ -908,16 +908,20 @@ class TableSpec:
             ),
         }
 
-    def drop(self, *names: str) -> TableSpec:
+    def drop(self, *names: str | Sequence[str]) -> TableSpec:
         """Removes columns, and any composite key, foreign key or check that
-        used them."""
+        used them. The names may be given one by one or as a list, as
+        Polars' own `drop` takes them."""
+        names = _listed(names)
         self._require_columns(names, "drop")
         dropped = set(names)
         columns = {k: v for k, v in self.columns.items() if k not in dropped}
         return dataclasses.replace(self, columns=columns, **self._without(dropped))
 
-    def select(self, *names: str) -> TableSpec:
-        """Keeps only the named columns, in the order given."""
+    def select(self, *names: str | Sequence[str]) -> TableSpec:
+        """Keeps only the named columns, in the order given: one by one or
+        as a list, as Polars' own `select` takes them."""
+        names = _listed(names)
         self._require_columns(names, "select")
         dropped = set(self.columns) - set(names)
         columns = {n: self.columns[n] for n in names}
@@ -1098,6 +1102,21 @@ class TableSpec:
                     choices=pool_of(catspec, key) or spec.choices,
                 )
         return dataclasses.replace(self, columns=new_columns)
+
+
+def _listed(names: tuple[str | Sequence[str], ...]) -> tuple[str, ...]:
+    """Column names given one by one, or in lists, as one tuple."""
+    flat: list[str] = []
+    for name in names:
+        if isinstance(name, str):
+            flat.append(name)
+        elif isinstance(name, Sequence):
+            flat.extend(name)
+        else:
+            raise TypeError(
+                f"Column names are strings or lists of them, got {type(name).__name__}"
+            )
+    return tuple(flat)
 
 
 def _renamed_check(check: Check, mapping: Mapping[str, str], what: str) -> Check:

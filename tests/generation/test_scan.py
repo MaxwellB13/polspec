@@ -9,7 +9,6 @@ batch, and passes drawn per batch.
 
 from __future__ import annotations
 
-import importlib
 import inspect
 import itertools
 
@@ -20,6 +19,7 @@ from polspec import (
     ColSpec,
     ForeignKey,
     FrameSpec,
+    GenerationError,
     Hierarchy,
     Registry,
     SpecError,
@@ -126,62 +126,53 @@ def test_a_foreign_key_column_scans_against_its_parent():
 # ---------------------------------------------------------------------------
 
 
-def _spy(monkeypatch) -> list[tuple[tuple[str, ...], int, int | None]]:
-    """Records (columns, rows, batch_size) for each call the reader makes."""
-    # By import_module: `polspec.generation.scan` as an attribute is the
-    # `scan` function the package exports, not the module of that name.
-    generation = importlib.import_module("polspec.generation.scan")
-
-    seen: list[tuple[tuple[str, ...], int, int | None]] = []
-    real = generation.batch_stream
-
-    def spy(spec, n, **kwargs):
-        seen.append((tuple(spec.columns), n, kwargs.get("batch_size")))
-        yield from real(spec, n, **kwargs)
-
-    monkeypatch.setattr(generation, "batch_stream", spy)
-    return seen
+# A column whose domain holds ten values, so drawing more than ten rows of
+# it raises: a scan that succeeds with it never drew more rows of it than
+# that -- or, projected away, any.
+_TIGHT = ColSpec(pl.Int8, bounds=(0, 9), unique=True)
 
 
-def test_head_generates_only_the_rows_asked_for(monkeypatch):
-    seen = _spy(monkeypatch)
-    out = Source.scan(50_000_000, seed=SEED).select("plain").head(3).collect()
+def test_head_generates_only_the_rows_asked_for():
+    spec = Source.spec.with_columns({"tight": _TIGHT})
+    out = scan(spec, 50_000_000, seed=SEED).head(3).collect()
     assert out.height == 3
-    assert seen == [(("plain",), 3, 100_000)]
 
 
-def test_a_projection_reaches_the_reader_as_its_closure(monkeypatch):
-    seen = _spy(monkeypatch)
-    Source.scan(1_000, seed=SEED).select("ruled").head(10).collect()
-    assert seen == [(("flag", "ruled"), 10, 100_000)]
+def test_a_column_projected_away_is_not_generated():
+    spec = Source.spec.with_columns({"tight": _TIGHT})
+    lf = scan(spec, 1_000, seed=SEED)
+    assert lf.select("plain").collect().height == 1_000
+    # Polars 1 wraps the source's error in its own; Polars 2 raises it.
+    with pytest.raises(
+        (pl.exceptions.ComputeError, GenerationError), match="'tight' is unique"
+    ):
+        lf.collect()
 
 
-def test_batch_size_is_the_callers_when_given_and_polars_hint_otherwise(monkeypatch):
-    seen = _spy(monkeypatch)
-    Source.scan(1_000, seed=SEED, batch_size=250).collect()
-    assert seen[0][2] == 250
+def test_a_projection_keeps_what_its_columns_depend_on():
+    """`ruled` reads `flag`: projected alone, it holds what it holds in the
+    whole frame."""
+    lf = Source.scan(1_000, seed=SEED)
+    assert lf.select("ruled").collect().equals(lf.collect().select("ruled"))
 
 
-def test_a_predicate_filters_rows_that_were_drawn_it_never_narrows_the_draw(
-    monkeypatch,
-):
+def test_batch_size_is_the_callers_when_given():
+    frame = Source.scan(1_000, seed=SEED, batch_size=250).collect()
+    assert [len(chunk) for chunk in frame["plain"].get_chunks()] == [250] * 4
+
+
+def test_a_predicate_filters_rows_that_were_drawn_it_never_narrows_the_draw():
     """`n` rows are generated and the matching ones kept. Drawing only
     matching rows would change what a rate or a `unique` column means."""
-    seen = _spy(monkeypatch)
     lf = Source.scan(10_000, seed=SEED)
     got = lf.filter(pl.col("a") == 1).collect()
-    assert seen[0][1] == 10_000, "every row is drawn, then filtered"
     assert got.equals(lf.collect().filter(pl.col("a") == 1))
     assert 0 < got.height < 10_000
 
 
-def test_a_predicate_on_a_column_the_projection_drops_still_generates_it(
-    monkeypatch,
-):
-    seen = _spy(monkeypatch)
+def test_a_predicate_on_a_column_the_projection_drops_still_generates_it():
     lf = Source.scan(5_000, seed=SEED)
     got = lf.filter(pl.col("a") == 1).select("plain").collect()
-    assert seen[0][0] == ("plain", "a", "b"), "the predicate's column joins the closure"
     assert got.columns == ["plain"]
     assert got.equals(lf.collect().filter(pl.col("a") == 1).select("plain"))
 

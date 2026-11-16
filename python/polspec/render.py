@@ -74,12 +74,11 @@ def _code(value: object) -> str:
 
 
 def _describe_dtype(dtype: pl.DataType) -> str:
-    """A dtype as it reads in a table cell, with long category lists elided."""
+    """A dtype as it reads in a table cell: an `Enum` as `Enum`, its
+    categories being its choices, which the Domain cell lists -- as a
+    column's `repr` writes them."""
     if isinstance(dtype, pl.Enum):
-        categories = list(dtype.categories)
-        if len(categories) <= 4:
-            return f"Enum({categories})"
-        return f"Enum({categories[:3]} + {len(categories) - 3} more)"
+        return "Enum"
     if isinstance(dtype, pl.Categorical):
         registry = getattr(dtype, "categories", None)
         if registry and hasattr(registry, "name") and registry.name():
@@ -110,14 +109,17 @@ def _describe_domain(cs) -> str:
         return f"pattern {_code(cs.pattern)}"
     if cs.list_length is not None:
         return f"{cs.list_length.min}..{cs.list_length.max} elements"
-    return _describe_choices(cs.choices)
+    choices = cs.choices
+    if choices is None and isinstance(cs.dtype, pl.Enum):
+        choices = tuple(cs.dtype.categories.to_list())
+    return _describe_choices(choices, cs.weights)
 
 
 def _describe_nullable(cs) -> str:
     """The Nullable column: the cell, for a list its elements, and for a
     float value how often it is NaN -- a float's other way of holding no
     number."""
-    cell = "Yes" if cs.nullable else "No"
+    cell = f"Yes ({_share(cs.null_probability)})" if cs.nullable else "No"
     rate = getattr(cs, "element_null_probability", 0.0)
     described = f"{cell} (elements {rate:.0%})" if rate else cell
     nan = getattr(cs, "nan_probability", 0.0)
@@ -131,14 +133,28 @@ def _describe_nullable(cs) -> str:
     return described
 
 
-def _describe_choices(choices) -> str:
+def _share(rate: float) -> str:
+    """A rate as a percentage, to three significant figures: `5%`, `0.25%`."""
+    return f"{rate * 100:.3g}%"
+
+
+def _describe_choices(choices, weights=None) -> str:
+    """The values a column takes, each beside its share when weighted --
+    `SEN` 60%, `SUB` 40% -- the first three of a longer list."""
     if choices is None:
         return "-"
     values = list(choices)
-    if len(values) <= 4:
-        return str(values)
-    shown = ", ".join(str(c) for c in values[:3])
-    return f"[{shown}, ... ({len(values)} total)]"
+    if weights:
+        total = sum(weights)
+        shown = [
+            f"{_code(value)} {_share(weight / total)}"
+            for value, weight in zip(values, weights, strict=True)
+        ]
+    else:
+        shown = [_code(value) for value in values]
+    if len(shown) <= 4:
+        return ", ".join(shown)
+    return f"{', '.join(shown[:3])}, ... ({len(values)} total)"
 
 
 def _overview_section(spec: TableSpec, doc_title: str) -> list[str]:

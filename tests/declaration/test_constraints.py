@@ -325,3 +325,15 @@ def test_a_key_filling_a_unique_column_needs_a_parent_that_can():
     assert df["fk"].n_unique() == 100
     assert set(df["fk"].to_list()) <= set(parent["k"].to_list())
     Child.validate(df, references={Parent: parent})
+
+
+def test_a_foreign_keys_repr_names_its_target_rather_than_printing_it():
+    class Parent(FrameSpec):
+        id = ColSpec(pl.Int64, unique=True)
+        name = ColSpec(pl.String)
+
+    key = ForeignKey("parent_id", references=Parent, ref_columns="id")
+    assert repr(key) == (
+        "ForeignKey(columns=('parent_id',), references='Parent', "
+        "ref_columns=('id',), name='fk_parent_id__Parent')"
+    )
