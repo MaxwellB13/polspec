@@ -5,6 +5,7 @@ against a directory of data files named after them."""
 from __future__ import annotations
 
 import argparse
+import decimal
 import json
 import sys
 from pathlib import Path
@@ -30,6 +31,7 @@ from polspec.sizing import estimated_size
 from polspec.tablespec import TableSpec
 from polspec.validation import FINDING_COLUMN, validate
 from polspec.validation.report import SCHEMA_VERSION as REPORT_SCHEMA_VERSION
+from polspec.validation.tolerance import CODES
 
 if TYPE_CHECKING:
     from polspec.registry import Registry
@@ -81,7 +83,49 @@ def _validation_options(args: argparse.Namespace) -> dict[str, Any]:
         # again names the values of a column that stayed text.
         "parse_text": True,
         **_skipped(args),
+        **_tolerance(args),
     }
+
+
+def _tolerance(args: argparse.Namespace) -> dict[str, Any]:
+    """`--tolerate [KEY=]SHARE ...` as the `tolerate=` `inspect` takes: one
+    share for every finding, or a mapping by code, column, or `column:code`.
+    A share may be written as a percentage."""
+    given = getattr(args, "tolerate", None)
+    if not given:
+        return {}
+    every: float | None = None
+    keyed: dict[Any, float] = {}
+    for entry in given:
+        key, sep, text = entry.rpartition("=")
+        share = _share_text(text, entry)
+        if not sep:
+            every = share
+            continue
+        column, colon, code = key.rpartition(":")
+        keyed[(column, code) if colon and code in CODES else key] = share
+    if every is not None and keyed:
+        raise CliError(
+            "--tolerate takes one share for every finding, or shares by "
+            f"KEY=SHARE, not both (got {', '.join(given)})"
+        )
+    return {"tolerate": every if every is not None else keyed}
+
+
+def _share_text(text: str, entry: str) -> float:
+    """A share as `--tolerate` writes it: `0.001`, or `0.1%`."""
+    percent = text.endswith("%")
+    try:
+        # Through a decimal, so `0.1%` is exactly the share `0.001` is.
+        value = decimal.Decimal(text.removesuffix("%"))
+        if not value.is_finite():
+            raise ValueError(text)
+    except (ValueError, decimal.InvalidOperation):
+        raise CliError(
+            f"--tolerate {entry!r}: {text!r} is not a share of the rows; write "
+            "0.001 or 0.1%"
+        ) from None
+    return float(value / 100 if percent else value)
 
 
 def _writable(path: Path) -> None:

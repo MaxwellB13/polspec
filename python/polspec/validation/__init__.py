@@ -51,6 +51,7 @@ from polspec.validation.report import (
     FindingCode,
     ValidationReport,
 )
+from polspec.validation.tolerance import Tolerance, checked_tolerance, tolerated
 
 if TYPE_CHECKING:
     from polspec.spec import ColSpec
@@ -74,12 +75,25 @@ class ValidationOptions:
     Grouped rather than passed as ten separate arguments, so adding a check
     does not widen every signature between here and `FrameSpec.validate`.
 
+    `tolerate` accepts findings up to a share of the rows, so a pipeline
+    can fail only above, say, 0.1% bad rows: one share for every finding
+    (`0.001`), or a mapping by finding code (`{"nullability": 0.01}`), by column
+    (`{"total": 0.001}`) or by both (`{("total", "bounds"): 0.01}`). The
+    most specific key wins. A tolerated finding stays in the report, marked
+    `tolerated`, and does not fail it; a finding with no share, such as a
+    missing column or a wrong dtype, is never tolerated. A key that names
+    neither a code nor a column of the spec is refused, as is one that
+    names both. *Added in 1.7.*
+
     Examples
     --------
     >>> spec = TableSpec("Orders", {"total": ColSpec(pl.Float64, bounds=(0, 100))})
     >>> lenient = ValidationOptions(extra_cols="drop", bounds=False)
     >>> validate(spec, pl.DataFrame({"total": [250.0], "note": ["x"]}), options=lenient).columns
     ['total']
+    >>> frame = pl.DataFrame({"total": [250.0] + [10.0] * 999})
+    >>> inspect(spec, frame, tolerate={"bounds": 0.001}).passed
+    True
     """
 
     extra_cols: Literal["drop", "allow", "raise"] = "raise"
@@ -101,8 +115,10 @@ class ValidationOptions:
     parse_text: bool = False
     streaming: bool = False
     schema_only: bool = False
+    tolerate: Tolerance = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "tolerate", checked_tolerance(self.tolerate))
         if self.extra_cols not in ("drop", "allow", "raise"):
             raise ValueError(
                 f"extra_cols must be one of 'drop', 'allow', 'raise'; got {self.extra_cols!r}"
@@ -132,6 +148,7 @@ class ValidationKeywords(TypedDict, total=False):
     extra_cols: Literal["drop", "allow", "raise"]
     missing_cols: Literal["add", "allow", "raise"]
     strict_dtypes: bool
+    tolerate: Tolerance
     rules: bool
     derived: bool
     validators: bool
@@ -567,6 +584,7 @@ def _report(
     references: References,
 ) -> ValidationReport:
     recheck = _Recheck(spec, opts, references)
+    findings = tolerated(findings, opts.tolerate, list(spec.columns))
 
     # Only a claim relating rows to other rows -- an order, a key into the
     # frame's own rows -- can break in the rows left after the failing ones

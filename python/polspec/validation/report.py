@@ -129,6 +129,10 @@ class Finding:
     details : Mapping
         Code-specific facts: the expected and actual dtype, the observed
         extremes, the foreign key's target.
+    tolerated : bool
+        Whether `tolerate=` accepts this finding: its share is at or under
+        the tolerance given for it, so it does not fail the report. *Added
+        in 1.7.*
 
     Examples
     --------
@@ -148,6 +152,7 @@ class Finding:
     share: float | None = None
     samples: tuple[Any, ...] = ()
     details: Mapping[str, Any] = field(default_factory=dict)
+    tolerated: bool = False
     _locate: Callable[[pl.LazyFrame], pl.LazyFrame] | None = field(
         default=None, repr=False, compare=False
     )
@@ -182,12 +187,15 @@ class Finding:
             "share": self.share,
             "samples": json_value(list(self.samples)),
             "details": json_value(dict(self.details)),
+            "tolerated": self.tolerated,
         }
 
 
 def _share_note(finding: Finding) -> str:
-    """` (2.5% of rows)`, for a finding that counts rows."""
-    return "" if finding.share is None else f" ({finding.share:.1%} of rows)"
+    """` (2.5% of rows)`, for a finding that counts rows, and whether it was
+    tolerated."""
+    share = "" if finding.share is None else f" ({finding.share:.1%} of rows)"
+    return f"{share} [tolerated]" if finding.tolerated else share
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,8 +239,21 @@ class ValidationReport:
 
     @property
     def passed(self) -> bool:
-        """True when nothing was found."""
-        return not self.findings
+        """True when nothing was found, or only findings `tolerate=`
+        accepts."""
+        return not self.failures
+
+    @property
+    def failures(self) -> tuple[Finding, ...]:
+        """The findings that fail the report: every one `tolerate=` does not
+        accept. *Added in 1.7.*"""
+        return tuple(f for f in self.findings if not f.tolerated)
+
+    @property
+    def tolerated(self) -> tuple[Finding, ...]:
+        """The findings `tolerate=` accepts, which stay in the report and do
+        not fail it. *Added in 1.7.*"""
+        return tuple(f for f in self.findings if f.tolerated)
 
     def __len__(self) -> int:
         return len(self.findings)
@@ -241,8 +262,8 @@ class ValidationReport:
         return iter(self.findings)
 
     def raise_if_failed(self) -> None:
-        """Raises `ValidationError` carrying this report, if anything was found."""
-        if self.findings:
+        """Raises `ValidationError` carrying this report, if it failed."""
+        if not self.passed:
             raise ValidationError(self)
 
     def by_column(self) -> dict[str, tuple[Finding, ...]]:
@@ -460,17 +481,27 @@ class ValidationReport:
             rows = "-" if f.count is None else f"{f.count:,}"
             if f.share is not None:
                 rows += f" ({f.share:.1%})"
+            if f.tolerated:
+                rows += ", tolerated"
             message = f.message.replace("|", "\\|").replace("\n", " ")
             lines.append(f"| `{f.code}` | {columns} | {rows} | {message} |")
         return "\n".join(lines)
 
     def __str__(self) -> str:
-        if self.passed:
+        if not self.findings:
             return f"Validation passed for DataFrame against '{self.spec_name}'"
-        return "\n".join(
-            [
+        if self.passed:
+            head = (
+                f"Validation passed for DataFrame against '{self.spec_name}' "
+                f"({len(self.findings)} finding(s) tolerated):"
+            )
+        else:
+            tolerated = len(self.tolerated)
+            also = f", {tolerated} tolerated" if tolerated else ""
+            head = (
                 f"Validation failed for DataFrame against '{self.spec_name}' "
-                f"({len(self.findings)} error(s) found):",
-                *(f"  - {f.message}{_share_note(f)}" for f in self.findings),
-            ]
+                f"({len(self.failures)} error(s) found{also}):"
+            )
+        return "\n".join(
+            [head, *(f"  - {f.message}{_share_note(f)}" for f in self.findings)]
         )

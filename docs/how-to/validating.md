@@ -163,6 +163,54 @@ transformations described below. `polspec validate` on the
 [command line](cli.md#validate-check-data-against-a-schema) prints the same
 report.
 
+## Tolerating a few bad rows — `tolerate=`
+
+A pipeline often accepts a little bad data and fails only past a
+threshold: a few nulls in a feed, a handful of totals out of range.
+`tolerate=` says how large a share of the rows is acceptable. *Added in
+1.7.*
+
+```python
+from polspec import TableSpec
+
+feed = TableSpec("Feed", {"total": ColSpec(pl.Float64, bounds=(0, 100))})
+frame = pl.DataFrame({"total": [250.0] + [10.0] * 999})   # 0.1% out of bounds
+
+polspec.inspect(feed, frame).passed                        # False
+polspec.inspect(feed, frame, tolerate=0.001).passed        # True
+```
+
+One number tolerates every finding up to that share. A mapping tolerates
+some, by finding code, by column, or by both, and the most specific key
+wins:
+
+```python
+polspec.validate(feed, frame, tolerate={"bounds": 0.01})            # by code
+polspec.validate(feed, frame, tolerate={"total": 0.001})            # by column
+polspec.validate(feed, frame, tolerate={("total", "bounds"): 0.01}) # by both
+```
+
+A share is inclusive: `0.001` accepts up to one row in a thousand. A
+tolerated finding stays in the report, marked, so nothing is hidden:
+
+```python
+report = polspec.inspect(feed, frame, tolerate=0.001)
+report.passed                                  # True
+[f.code for f in report.tolerated]             # ['bounds']
+report.failures                                # () -- what fails the report
+report.findings[0].tolerated                   # True
+```
+
+`validate()` raises only for a finding no tolerance covers, and
+`passing_rows()` still leaves out every row a finding names, tolerated or
+not. A finding with no share — a missing or extra column, a wrong dtype, an
+unresolved foreign key — judges the whole frame and is never tolerated. A
+key naming neither a finding code nor a column of the spec is refused,
+naming the nearest; so is a key that is both, such as a column called
+`order`, which `("order", "order")` or the code's own column then
+disambiguates. `polspec validate --tolerate` takes the same on the
+[command line](cli.md#validate-check-data-against-a-schema).
+
 ## Checking a file you were given
 
 The usual way in: someone hands you a file, and there is a spec it should

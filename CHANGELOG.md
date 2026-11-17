@@ -26,6 +26,14 @@ page promises; before 1.0, a minor version could break any of them.
 - **`@check` declares a check as a function** on a `FrameSpec` class,
   named after the function: it returns a `col()` predicate or a Polars
   expression, and joins `__checks__`.
+- **`tolerate=` accepts a little bad data.** `validate`, `inspect`
+  and their facades take a share of the rows that a finding may cover
+  and still pass: one for every finding, or by finding code, column,
+  or `(column, code)`. A tolerated finding stays in the report, marked
+  `Finding.tolerated`; `ValidationReport.failures` and `.tolerated`
+  split them, and `passed` counts failures only. `polspec validate
+  --tolerate [KEY=]SHARE` takes the same, with `0.1%` for a share. The
+  JSON report gains a `tolerated` key on each finding.
 
 ### Changed
 

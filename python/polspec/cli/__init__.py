@@ -211,6 +211,17 @@ def _add_validate_parser(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     validate.add_argument(
+        "--tolerate",
+        action="append",
+        metavar="[KEY=]SHARE",
+        help=(
+            "Accept findings up to SHARE of the rows (0.001, or 0.1%%): every "
+            "finding, or those KEY names -- a finding code (nullability), a "
+            "column (total), or both (total:bounds); repeat for several. A "
+            "tolerated finding is reported and does not fail the data"
+        ),
+    )
+    validate.add_argument(
         "--json",
         action="store_true",
         help="Print the report as JSON instead of text",
