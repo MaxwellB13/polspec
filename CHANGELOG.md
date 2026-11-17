@@ -44,6 +44,13 @@ page promises; before 1.0, a minor version could break any of them.
 
 ### Changed
 
+- **A `TableSpec` asked for a verb names the function.** `polspec.profile(df)
+  .validate(df)` raised a bare `AttributeError`; a spec is a value and its
+  verbs are functions over it, so it now says to call
+  `polspec.validate(spec, ...)`, or wrap it with `FrameSpec.from_spec`.
+- **Docs: How the pieces fit**, a new explanation page with one diagram:
+  the declarations, verbs as functions, what generation keeps, why
+  `schema infer` and `profile()` have different defaults, and seeds.
 - **`schema infer` and `synthesize` describe their shared flags alike.**
   `--max-unique-enum`, `--sample` and `--replace` read the same on both
   commands' `--help`, and `synthesize` lists them in `schema infer`'s

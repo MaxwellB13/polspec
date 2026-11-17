@@ -25,13 +25,21 @@ that it cannot be done.
 | Drift from the spec | yes | not found | not found | profile comparison, `DataScan.compare` |
 | Schema in a file | YAML or Python | not found | YAML, JSON | YAML validation plans |
 | Typed frames for signatures | **no** | yes | yes | no |
-| Reports with thresholds and actions | **no** | no | no | yes |
+| Thresholds on bad rows | yes, `tolerate=` | no | no | yes |
+| Reports and actions | **no** | no | no | yes |
 | pytest fixture | yes, `polspec_frames` | not found | not found | yes, `generate_dataset` |
 | Hypothesis strategy | yes, `strategy` | not found | pandas only | not found |
 
 Where polspec trails: typed frames, and Pointblank's reports and
-thresholds. Where it leads: generation
-speed, related tables, lazy output, profiling and drift. See
+actions. Where it leads: generation
+speed, related tables, lazy output, profiling and drift.
+
+Typed frames — `dy.DataFrame[Orders]`, pandera's `DataFrame[Orders]` — are
+left out on purpose. Such an annotation checks nothing at runtime unless a
+decorator validates at the call, and polspec's specs are values first:
+built, loaded from files, profiled and edited, often never a class a
+signature could name. Validate where data enters a function, with
+`Orders.validate(df)` or `assert_valid`, and annotate `pl.DataFrame`. See
 [Comparison](../explanation/comparison.md) for the rest.
 
 ## The schema translated

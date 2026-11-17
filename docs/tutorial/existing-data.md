@@ -84,8 +84,11 @@ ColSpec(String, string_length=(10, 10), pattern='^ORD-[0-9]{6}$')
 ## Edit what is too exact
 
 A profile says what this data held, not what the data may hold. The
-command line rounds bounds outward to two significant figures, but a few
-claims still need a person to decide. Here, an order line may hold up to
+command line rounds bounds outward to two significant figures — so
+`Customers.id`, from 1 to 150, is written `[0, 150]` — where
+`polspec.profile_all` in Python writes them exactly; the command describes
+data for a person to read, and the function imitates it. A few claims
+still need a person to decide. Here, an order line may hold up to
 20 of an item, and a price has no upper limit:
 
 ```python
@@ -94,7 +97,7 @@ lines = lines.with_columns({
     "qty": lines["qty"].replace(bounds=(1, 20)),
     "price": lines["price"].replace(bounds=(0.0, None)),
 })
-registry = Registry(*(lines if spec.name == "Lines" else spec for spec in registry.specs))
+registry = registry.replace(lines)
 registry.to_yaml("shop.yaml")
 ```
 

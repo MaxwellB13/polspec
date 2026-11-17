@@ -61,6 +61,7 @@ nav = [
     { "Errors and findings" = "reference/errors.md" },
   ] },
   { "Explanation" = [
+    { "How the pieces fit" = "explanation/concepts.md" },
     { "Known limitations" = "explanation/limitations.md" },
     { "Comparison" = "explanation/comparison.md" },
     { "Stability" = "explanation/stability.md" },

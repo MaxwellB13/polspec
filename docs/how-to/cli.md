@@ -74,6 +74,15 @@ written rounded outward and frequencies to two significant figures, as the
 options below describe. A column with no nulls says nothing about them, as
 one written by hand would not.
 
+These are not `polspec.profile()`'s defaults, on purpose. `schema infer`
+*describes* data, as `FrameSpec.from_dataframe` does, for a person to read
+and edit: no frequencies, keys or row order unless asked (`--weights`,
+`--keys`, `--order`), and rounded numbers, so ids from 1 to 150 are written
+`[0, 150]`. `profile()` *imitates* data, for generating a stand-in, and
+records everything, exactly. `--round-bounds exact --round-rates exact`
+writes what was observed. See [How the pieces
+fit](../explanation/concepts.md#describe-or-imitate).
+
 Columns are declared through `__columns__` rather than as class attributes,
 same as `from_yaml` — see [Column names that are not
 identifiers](columns.md#column-names-that-are-not-identifiers). The `.py`
