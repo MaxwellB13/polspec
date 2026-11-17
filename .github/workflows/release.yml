@@ -103,6 +103,9 @@ jobs:
       # The build downloads maturin and a Rust toolchain inside its
       # container, and a download that times out fails it -- as 1.1.0's
       # aarch64 build did -- so a failed attempt gets one more.
+      # No sccache: a tag's run reads only its own caches and main's, so one
+      # release never reused another's, and each left ~600 MB of entries that
+      # pushed the repo's cache store past its 10 GB limit.
       - name: Build wheel
         id: build
         continue-on-error: true
@@ -112,7 +115,6 @@ jobs:
           target: ${{ matrix.target }}
           manylinux: auto
           args: --release --out dist
-          sccache: "true"
 
       - name: Build wheel (second attempt)
         if: steps.build.outcome == 'failure'
@@ -122,7 +124,6 @@ jobs:
           target: ${{ matrix.target }}
           manylinux: auto
           args: --release --out dist
-          sccache: "true"
 
       # The suite ran against an editable build; this is the wheel itself,
       # installed alone into a fresh environment, as a user would get it.
