@@ -9,6 +9,25 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-17
+
+**Generated data that keeps its checks, and validation that tolerates a
+little.** `generate(checks=True)` keeps only the rows a spec's checks pass,
+so fake data no longer fails its own spec; `@check` declares a check as a
+function. `tolerate=` lets a finding cover a share of the rows and still
+pass, from Python or `polspec validate --tolerate`. `polspec.formats()`
+lists every string format, `synthesize` can return the spec it generated
+from, and a `TableSpec` asked for a verb names the function to call. Text
+of whole numbers followed by decimals now reads as `Float64`. The docs gain
+*Performance* and *How the pieces fit*.
+
+Everything is additive under the 1.0 promises. No seeded output moves:
+`checks=True` is off by default, and a frame whose rows all pass is the
+frame 1.6 generated. Profiles change where a column of numbers written as
+text is now read as `Float64`, which *Stability* leaves open. The JSON
+report gains a `tolerated` key on each finding. Nothing is deprecated. The
+spec-file format stays at version 4, and 1.6 reads 1.7's files.
+
 ### Added
 
 - **`checks=True` keeps a spec's checks in the data it generates.**
@@ -3474,7 +3493,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v1.6.1...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/MaxwellB13/polspec/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/MaxwellB13/polspec/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/MaxwellB13/polspec/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/MaxwellB13/polspec/compare/v1.4.0...v1.5.0
