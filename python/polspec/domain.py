@@ -24,8 +24,8 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 
 from polspec.bound import Bound
-from polspec.formats import Format
-from polspec.formats import lookup as _lookup_format
+from polspec.string_formats import Format
+from polspec.string_formats import lookup as _lookup_format
 
 if TYPE_CHECKING:
     from polspec.spec import ColSpec

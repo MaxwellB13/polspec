@@ -18,7 +18,7 @@ import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Unpack
+from typing import Any, Literal, Unpack, overload
 
 import polars as pl
 
@@ -127,6 +127,7 @@ def profile_all(
     return Registry(*specs.values()).resolve()
 
 
+@overload
 def synthesize_all(
     frames: Mapping[str, Source],
     n: int | Mapping[str, int] | None = None,
@@ -134,9 +135,37 @@ def synthesize_all(
     scale: float | None = None,
     seed: int | None = None,
     keys: Keys | Literal[False] | None = None,
+    return_registry: Literal[False] = False,
     options: ProfileOptions | None = None,
     **keywords: Unpack[SynthesizeKeywords],
-) -> dict[str, pl.DataFrame]:
+) -> dict[str, pl.DataFrame]: ...
+
+
+@overload
+def synthesize_all(
+    frames: Mapping[str, Source],
+    n: int | Mapping[str, int] | None = None,
+    *,
+    scale: float | None = None,
+    seed: int | None = None,
+    keys: Keys | Literal[False] | None = None,
+    return_registry: Literal[True],
+    options: ProfileOptions | None = None,
+    **keywords: Unpack[SynthesizeKeywords],
+) -> tuple[dict[str, pl.DataFrame], Registry]: ...
+
+
+def synthesize_all(
+    frames: Mapping[str, Source],
+    n: int | Mapping[str, int] | None = None,
+    *,
+    scale: float | None = None,
+    seed: int | None = None,
+    keys: Keys | Literal[False] | None = None,
+    return_registry: bool = False,
+    options: ProfileOptions | None = None,
+    **keywords: Unpack[SynthesizeKeywords],
+) -> dict[str, pl.DataFrame] | tuple[dict[str, pl.DataFrame], Registry]:
     """Fake frames that look like a set of related tables, with the keys
     between them intact: `generate_all()` over `profile_all()`.
 
@@ -163,13 +192,20 @@ def synthesize_all(
         same sources and seed give the same frames.
     keys : Mapping[str, Sequence[ForeignKey]] | False, optional
         Keys to declare rather than infer, as `profile_all` takes them.
+    return_registry : bool, default False
+        Also return the registry the frames were generated from, which they
+        validate against. It is `profile_all`'s, except that a key column
+        is widened when a table gets more rows than its source has keys for
+        -- at a `scale` above 1, say -- so `profile_all`'s own registry
+        would refuse the fake set on bounds. *Added in 1.7.*
     options : ProfileOptions, optional
         How every table is profiled -- or pass its fields as keywords.
 
     Returns
     -------
     dict[str, pl.DataFrame]
-        A fake frame per table, in the order of `frames`.
+        A fake frame per table, in the order of `frames`; with
+        `return_registry=True`, that and the `Registry`.
 
     Examples
     --------
@@ -181,13 +217,16 @@ def synthesize_all(
     {'Customers': 50, 'Orders': 150}
     >>> fake["Orders"]["customer_id"].is_in(fake["Customers"]["id"].implode()).all()
     True
+    >>> bigger, registry = synthesize_all(real, scale=2, seed=1, return_registry=True)
+    >>> all(report.passed for report in registry.inspect_all(bigger).values())
+    True
 
     *Added in 1.5.*
     """
-    fake, _ = synthesized_all(
+    fake, registry = synthesized_all(
         frames, n, scale=scale, seed=seed, keys=keys, options=options, **keywords
     )
-    return fake
+    return (fake, registry) if return_registry else fake
 
 
 def synthesized_all(

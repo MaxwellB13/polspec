@@ -16,7 +16,7 @@ class ColumnPlan:
     takes `n_categories` and optional `weights` and yields `UInt32` indices
     into a domain the caller holds; `bool` takes `weights=[p_false, p_true]`;
     `string` takes `str_min_len`/`str_max_len`; `template` takes `template`,
-    a list of `(kind, strings, lo, hi)` parts -- see `polspec.formats`.
+    a list of `(kind, strings, lo, hi)` parts -- see `polspec.string_formats`.
 
     `unique` draws without replacement instead, from the same domain; a
     domain too small to cover the row count is refused by name.

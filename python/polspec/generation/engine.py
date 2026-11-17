@@ -43,9 +43,9 @@ from polspec.dtypes import (
     typed_values,
 )
 from polspec.errors import GenerationError
-from polspec.formats import lookup as _lookup_format
 from polspec.generation.seeds import pass_seed, stable_seed
 from polspec.spec import ColSpec, column_kind, drawn_entries_of, element_of, field_of
+from polspec.string_formats import lookup as _lookup_format
 
 if TYPE_CHECKING:
     from polspec._polspec import ColumnPlan

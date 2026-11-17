@@ -57,6 +57,7 @@ cannot describe a signature the code does not have.
 | [`profile`][polspec.profile] | [Profiling](profiling.md) |
 | [`profile_all`][polspec.profile_all] | [Profiling](profiling.md) |
 | [`synthesize_all`][polspec.synthesize_all] | [Profiling](profiling.md) |
+| [`formats`][polspec.formats] | [Columns](columns.md) |
 | [`ProfileOptions`][polspec.ProfileOptions] | [Profiling](profiling.md) |
 | [`PolspecError`][polspec.PolspecError] | [Errors](errors.md) |
 | [`SpecError`][polspec.SpecError] | [Errors](errors.md) |

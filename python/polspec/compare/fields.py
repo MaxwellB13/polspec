@@ -37,11 +37,11 @@ from polspec.compare.report import DriftFinding, Severity
 from polspec.domain import Domain, describe_values
 from polspec.dtypes import bound_endpoint_to_physical, field_dtypes
 from polspec.errors import PolspecError
-from polspec.formats import lookup as _lookup_format
 from polspec.generation import generate
 from polspec.pass_order import DISTRIBUTION, NAN_RATE, NULL_RATE, VALUES, WEIGHTS
 from polspec.shape import ks_distance, physical
 from polspec.spec import field_of
+from polspec.string_formats import lookup as _lookup_format
 from polspec.validation.constraints import is_dtype_compatible
 
 # The sample a declared distribution is drawn as, to hold values against:

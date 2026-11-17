@@ -119,14 +119,39 @@ def test_bad_sizes(shop, kwargs, match):
         polspec.synthesize_all(shop, **kwargs)
 
 
-@pytest.mark.parametrize("scale", [1, 0.1, 3])
-def test_the_tutorials_shop_synthesizes_to_frames_its_registry_accepts(scale):
-    """Every check on, foreign keys included; a larger set's keys outrun the
-    profiled bounds on purpose, to have room, so those are left out there."""
-    shop = {
+def _the_shop() -> dict[str, pl.DataFrame]:
+    return {
         name: pl.read_csv(DOCS_DATA / f"{name.lower()}.csv", try_parse_dates=True)
         for name in ("Customers", "Orders", "Lines")
     }
-    registry = polspec.profile_all(shop)
-    fake = polspec.synthesize_all(shop, scale=scale, seed=1)
-    registry.validate_all(fake, bounds=scale <= 1)
+
+
+@pytest.mark.parametrize("scale", [1, 0.1, 3])
+def test_the_tutorials_shop_synthesizes_to_frames_its_registry_accepts(scale):
+    """Every check on, foreign keys and bounds included, at every scale:
+    the registry returned is the one the frames were generated from."""
+    fake, registry = polspec.synthesize_all(
+        _the_shop(), scale=scale, seed=1, return_registry=True
+    )
+    registry.validate_all(fake)
+
+
+def test_a_larger_set_outgrows_the_profiles_keys_and_the_returned_registry_says_so():
+    """`profile_all`'s registry holds the keys the source had; three times
+    the rows need three times the keys, so it refuses the larger set on
+    bounds, and the registry returned widens them."""
+    shop = _the_shop()
+    fake, registry = polspec.synthesize_all(shop, scale=3, seed=1, return_registry=True)
+    profiled = polspec.profile_all(shop)
+    assert not all(r.passed for r in profiled.inspect_all(fake).values())
+    assert all(r.passed for r in registry.inspect_all(fake).values())
+    source_top = profiled["Customers"].columns["id"].bounds.max
+    assert registry["Customers"].columns["id"].bounds.max > source_top
+
+
+def test_without_return_registry_the_frames_alone_come_back_as_before():
+    shop = _the_shop()
+    alone = polspec.synthesize_all(shop, scale=0.5, seed=4)
+    with_it, _ = polspec.synthesize_all(shop, scale=0.5, seed=4, return_registry=True)
+    assert isinstance(alone, dict)
+    assert all(alone[name].equals(with_it[name]) for name in alone)

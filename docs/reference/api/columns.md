@@ -21,3 +21,7 @@ What one column declares, and the pieces that make up a declaration.
 ## check
 
 ::: polspec.check
+
+## formats
+
+::: polspec.formats

@@ -591,3 +591,40 @@ def test_iso_country3_holds_the_same_countries_as_iso_country():
     three = set(generate(_formatted("iso_country3"), 50_000, seed=1)["v"].drop_nulls())
     assert len(two) == len(three) == 249
     assert {"GBR", "FRA", "JPN", "BRA"} <= three
+
+
+# ---------------------------------------------------------------------------
+# polspec.formats(): the list
+# ---------------------------------------------------------------------------
+
+
+def test_the_list_names_every_format_a_column_accepts():
+    import polspec
+
+    listed = polspec.formats()
+    assert listed.columns == ["name", "summary", "finite", "example", "values"]
+    for name in listed["name"]:
+        ColSpec(pl.String, format=name)  # each is one `format=` takes
+    with pytest.raises(SpecError, match="Known formats: " + ", ".join(listed["name"])):
+        ColSpec(pl.String, format="emial")
+
+
+def test_each_example_is_a_value_of_its_format():
+    import polspec
+
+    for row in polspec.formats().iter_rows(named=True):
+        spec = TableSpec("T", {"c": ColSpec(pl.String, format=row["name"])})
+        assert inspect(spec, pl.DataFrame({"c": [row["example"]]})).passed, row["name"]
+
+
+def test_a_finite_format_lists_its_values_and_a_shape_lists_none():
+    import polspec
+
+    listed = polspec.formats()
+    finite = listed.filter(pl.col("finite"))
+    assert finite["name"].to_list() == ["iso_country", "iso_country3", "iso_currency"]
+    assert listed.filter(~pl.col("finite"))["values"].null_count() == len(listed) - 3
+    currencies = finite.filter(pl.col("name") == "iso_currency")["values"][0].to_list()
+    assert "GBP" in currencies
+    spec = TableSpec("T", {"c": ColSpec(pl.String, format="iso_currency", unique=True)})
+    assert set(generate(spec, len(currencies), seed=1)["c"]) == set(currencies)

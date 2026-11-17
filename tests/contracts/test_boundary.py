@@ -244,7 +244,6 @@ INTERNAL_SUBJECTS = {
 TEST_PARAMETERS = {
     "polspec.cli.main": "the command line's entry point, as `polspec` runs it",
     "polspec.expr.literals": "which literal types the drawn checks reach",
-    "polspec.formats.FORMATS": "every format, so each is tested",
     "polspec.generation.pipeline": "its 5 GiB warning lowered, not allocated past",
     "polspec.profiler.FORMAT_MIN_DISTINCT": "a threshold, tested either side",
     "polspec.profiler.ORDER_PREFIX_ROWS": "a threshold, tested either side",

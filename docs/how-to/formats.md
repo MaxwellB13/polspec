@@ -44,6 +44,19 @@ A validator is deliberately wider than its sampler where real data is: an
 uppercase UUID from another system validates, even though polspec generates
 lowercase ones. It is never wider than the standard it names.
 
+`polspec.formats()` lists them as a frame, one row each: the `name`
+`format=` takes, a `summary`, whether it is `finite`, an `example` value,
+and a finite format's every value. *Added in 1.7.*
+
+```python
+import polspec
+
+listed = polspec.formats()
+listed.filter(pl.col("finite"))["name"].to_list()
+# ['iso_country', 'iso_country3', 'iso_currency']
+listed.filter(pl.col("name") == "iso_currency")["values"][0].len()   # every currency
+```
+
 For any other shape, declare a [`pattern=`](#patterns):
 it is generated from and checked as a format is. A format names the shape
 and keeps its test exactly as wide as the standard; a pattern says the

@@ -30,6 +30,7 @@ from polspec import (
     TableSpec,
     drift,
     generate,
+    inspect,
     profile,
     synthesize,
     to_dict,
@@ -387,3 +388,14 @@ def test_a_rounding_that_is_not_one_is_refused_when_the_options_are_made():
 
     with pytest.raises(ValueError, match="rounding step"):
         ProfileOptions(round_bounds="banana")
+
+
+def test_return_spec_gives_the_spec_the_frame_was_generated_from():
+    """More rows than the source has keys for widen the key, so the profile
+    refuses the frame on bounds and the spec returned accepts it."""
+    source = pl.DataFrame({"id": range(1, 101), "tier": ["a", "b"] * 50})
+    fake, spec = synthesize(source, 1_000, seed=3, return_spec=True)
+    assert inspect(spec, fake).passed
+    assert not inspect(profile(source), fake).passed
+    assert spec["id"].bounds.max == 1_000
+    assert synthesize(source, 1_000, seed=3).equals(fake)

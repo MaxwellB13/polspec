@@ -37,6 +37,7 @@
   "diff",
   "drift",
   "estimated_size",
+  "formats",
   "from_dict",
   "from_yaml",
   "generate",

@@ -21,7 +21,7 @@ from __future__ import annotations
 import dataclasses
 import math
 import os
-from typing import Unpack
+from typing import Literal, Unpack, overload
 
 import polars as pl
 
@@ -91,14 +91,39 @@ def profile(
     return profiled_table(frame, opts, name)
 
 
+@overload
 def synthesize(
     source: Source,
     n: int | None = None,
     *,
     seed: int | None = None,
+    return_spec: Literal[False] = False,
     options: ProfileOptions | None = None,
     **keywords: Unpack[SynthesizeKeywords],
-) -> pl.DataFrame:
+) -> pl.DataFrame: ...
+
+
+@overload
+def synthesize(
+    source: Source,
+    n: int | None = None,
+    *,
+    seed: int | None = None,
+    return_spec: Literal[True],
+    options: ProfileOptions | None = None,
+    **keywords: Unpack[SynthesizeKeywords],
+) -> tuple[pl.DataFrame, TableSpec]: ...
+
+
+def synthesize(
+    source: Source,
+    n: int | None = None,
+    *,
+    seed: int | None = None,
+    return_spec: bool = False,
+    options: ProfileOptions | None = None,
+    **keywords: Unpack[SynthesizeKeywords],
+) -> pl.DataFrame | tuple[pl.DataFrame, TableSpec]:
     """A fake frame that looks like `source`: `generate()` over `profile()`.
 
     The result has `source`'s schema, and `n` rows -- as many as `source`
@@ -114,8 +139,14 @@ def synthesize(
     date is generated as one, so the result's dtype is the parsed one there.
 
     `seed` seeds the generation, and the sample and fitting behind it, so the
-    same source and seed give the same frame. To look at, edit or keep the
-    spec the frame came from, call `profile` and `generate` separately.
+    same source and seed give the same frame.
+
+    `return_spec=True` returns the frame and the spec it was generated from,
+    which the frame validates against. It is the profile, except that a key
+    column is widened when `n` is more rows than the source has keys for,
+    so the profile itself would refuse the larger frame on bounds. To edit
+    the spec before generating, call `profile` and `generate` separately.
+    *Added in 1.7.*
 
     Examples
     --------
@@ -123,9 +154,12 @@ def synthesize(
     >>> fake = synthesize(frame, 50, seed=1)
     >>> fake.shape, fake.schema == frame.schema
     ((50, 2), True)
+    >>> bigger, spec = synthesize(frame, 1_000, seed=1, return_spec=True)
+    >>> spec["id"].bounds
+    Bound(min=1, max=1000)
     """
-    fake, _ = synthesized(source, n, seed=seed, options=options, **keywords)
-    return fake
+    fake, spec = synthesized(source, n, seed=seed, options=options, **keywords)
+    return (fake, spec) if return_spec else fake
 
 
 def synthesized(
