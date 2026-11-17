@@ -197,6 +197,11 @@ def infer(text: pl.Series) -> Parsed | None:
         parsed = _parsed(parse, values)
         if parsed is not None:
             return Parsed(parsed.alias(text.name))
+        # The first values fit a type the rest do not: they are no guide to
+        # the column, so every later type is tried on all of it. A column
+        # of whole numbers that turns to decimals past its first values is
+        # a Float64, which the whole numbers alone would refuse.
+        probe = present
     readings = _readings(values, probe)
     if len(readings) != 1:
         return None
@@ -340,7 +345,11 @@ def stays_text(text: pl.Series) -> str | None:
             f"{zeros.len():,} value(s) are written with a leading zero, such "
             f"as {_examples(zeros)}, so the column is read as a code"
         )
-    too_big = present.filter(present.cast(pl.Int64, strict=False).is_null())
+    whole = present.str.contains(_INTEGER)
+    too_big = present.filter(whole & present.cast(pl.Int64, strict=False).is_null())
+    if not whole.all() or too_big.is_empty():
+        # Numbers every one, read as no type: nothing here to say why.
+        return None
     return (
         "every value is a whole number and some are too large for an Int64, "
         f"such as {_examples(too_big)}, so the column is read as a code"
