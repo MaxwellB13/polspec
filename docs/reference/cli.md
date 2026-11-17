@@ -94,8 +94,8 @@ Check a data file against a schema.
 ```
 polspec validate [-h] [--all] [--references NAME=PATH] [--class NAME]
                         [--allow-extra] [--allow-missing] [--strict-dtypes]
-                        [--fill-defaults] [--skip CHECK] [--json] [--output PATH]
-                        [--failing PATH]
+                        [--fill-defaults] [--skip CHECK] [--tolerate [KEY=]SHARE]
+                        [--json] [--output PATH] [--failing PATH]
                         spec data
 ```
 
@@ -111,6 +111,7 @@ polspec validate [-h] [--all] [--references NAME=PATH] [--class NAME]
 | `--strict-dtypes` | Require exact dtypes rather than compatible ones |
 | `--fill-defaults` | Fill each defaulted column's nulls with its default, and add it when absent, before checking; --output writes the filled rows |
 | `--skip` `CHECK` | Turn off one kind of check, as CHECK=False does in Python; repeat for several. One of `rules`, `derived`, `validators`, `unique`, `checks`, `foreign_keys`, `hierarchy`, `order`, `rows`, `pattern`, `bounds`. |
+| `--tolerate` `[KEY=]SHARE` | Accept findings up to SHARE of the rows (0.001, or 0.1%%): every finding, or those KEY names -- a finding code (nullability), a column (total), or both (total:bounds); repeat for several. A tolerated finding is reported and does not fail the data |
 | `--json` | Print the report as JSON instead of text |
 | `--output` `PATH` | Write the rows that passed, typed as the spec declares, to PATH (the format by its extension) |
 | `--failing` `PATH` | Write the rows that failed, with the finding each broke, to PATH |

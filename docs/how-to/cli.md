@@ -370,6 +370,17 @@ turns off one kind of check, as `CHECK=False` does in Python —
 `validators`, `unique`, `checks`, `foreign_keys`, `hierarchy`, `order`,
 `rows`, `pattern` and `bounds`.
 
+`--tolerate [KEY=]SHARE` accepts findings up to a share of the rows, as
+[`tolerate=`](validating.md#tolerating-a-few-bad-rows-tolerate) does: a
+bare share for every finding, or one by finding code, column, or
+`column:code`, repeated for several. A share is `0.001` or `0.1%`. A
+tolerated finding is printed, marked, and the exit status is 0 if nothing
+else failed. *Added in 1.7.*
+
+```bash
+polspec validate orders.py orders.csv --tolerate nullability=1% --tolerate total:bounds=0.1%
+```
+
 A CSV, TSV or JSON file has no date type, so a date arrives as text — and
 JSON holds a decimal or a duration as text too. The CLI reads each column
 the spec declares as a `Date`, `Datetime`, `Time`, `Decimal` or `Duration`

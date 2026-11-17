@@ -182,6 +182,7 @@ def test_report_serialises_to_json():
         "share",
         "samples",
         "details",
+        "tolerated",
     }
 
 

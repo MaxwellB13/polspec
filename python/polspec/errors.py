@@ -54,7 +54,8 @@ class ValidationError(PolspecError, ValueError):
         else:
             super().__init__(str(report))
             self.report = report
-            self._errors = [f.message for f in report.findings]
+            # What failed it: a finding `tolerate=` accepts is no error.
+            self._errors = [f.message for f in report.failures]
 
     @property
     def errors(self) -> list[str]:
@@ -76,7 +77,7 @@ class MultiValidationError(ValidationError):
         failed = {name: report for name, report in reports.items() if not report.passed}
         super().__init__(
             "\n\n".join(str(report) for report in failed.values()),
-            errors=[f.message for report in failed.values() for f in report.findings],
+            errors=[f.message for report in failed.values() for f in report.failures],
         )
         self.reports: dict[str, Any] = failed
 

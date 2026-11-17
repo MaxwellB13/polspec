@@ -85,7 +85,8 @@
     "key": "string",
     "message": "string",
     "samples": "array",
-    "share": "number"
+    "share": "number",
+    "tolerated": "boolean"
    }
   ],
   "passed": "boolean",
@@ -112,7 +113,8 @@
       "key": "string",
       "message": "string",
       "samples": "array",
-      "share": "number"
+      "share": "number",
+      "tolerated": "boolean"
      }
     ],
     "passed": "boolean",
