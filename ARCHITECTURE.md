@@ -37,7 +37,7 @@ they can change in any release, so code outside polspec should use only
 | `_frozen` | `FrozenDict` -- the read-only mapping every spec and report holds, which pickles where `MappingProxyType` does not |
 | `_text` | Text that holds another type: the type a text column's values all parse as, and the parsed values -- shared by profiling and validating |
 | `scalars` | The plain forms a spec file writes for the values YAML cannot hold -- a time, a duration -- shared by bounds, choices and predicate literals |
-| `formats` | Named string formats -- what each looks like, said once for generation and validation |
+| `string_formats` | Named string formats -- what each looks like, said once for generation and validation -- and `formats()`, the public list of them |
 | `hierarchy` | `Hierarchy` -- a self-referencing link table, declared |
 | `compare` | `diff` and `drift`: what changed between two specs, or between a spec and data. `fields.py` holds one comparator per `ColSpec` field, `data.py` measures a frame in the declaration's terms |
 | `asserting` | `assert_valid` and `check_pipeline`: `validate()` as an assertion whose message holds the findings and the first failing rows, and a pipeline test -- inputs generated together through a `Registry`, the call, the check -- in one call |

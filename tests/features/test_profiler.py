@@ -13,7 +13,6 @@ from polspec import (
     generate,
     inspect,
 )
-from polspec.formats import FORMATS
 from polspec.profiler import FORMAT_MIN_DISTINCT
 
 
@@ -395,7 +394,7 @@ def _values_of(format_name: str, n: int) -> list[str]:
     return generate(spec, n, seed=1)["c"].to_list()
 
 
-@pytest.mark.parametrize("format_name", list(FORMATS))
+@pytest.mark.parametrize("format_name", polspec.formats()["name"].to_list())
 def test_a_column_of_one_format_is_named_for_it(format_name):
     """Every format polspec can generate, recognised from its own values --
     before a finite one could narrow to an Enum of the codes seen."""

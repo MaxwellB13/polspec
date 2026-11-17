@@ -34,6 +34,13 @@ page promises; before 1.0, a minor version could break any of them.
   split them, and `passed` counts failures only. `polspec validate
   --tolerate [KEY=]SHARE` takes the same, with `0.1%` for a share. The
   JSON report gains a `tolerated` key on each finding.
+- **`polspec.formats()` lists every string format** as a frame: its
+  name, a summary, whether it is a finite list, an example value, and a
+  finite format's values.
+- **`synthesize_all(return_registry=True)` and `synthesize(return_spec=True)`**
+  return what the fake data was generated from. A larger fake set
+  widens its key ranges, so `profile_all`'s registry refused it on
+  bounds; the one returned accepts it.
 
 ### Changed
 

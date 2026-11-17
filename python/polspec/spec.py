@@ -34,8 +34,8 @@ from polspec.dtypes import (
     map_entries,
 )
 from polspec.expr import Pred
-from polspec.formats import lookup as _lookup_format
 from polspec.rules import ColRule
+from polspec.string_formats import lookup as _lookup_format
 
 
 @dataclass(frozen=True, slots=True)

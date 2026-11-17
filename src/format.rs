@@ -1,7 +1,7 @@
 //! Strings with a shape: a `Template` and the sampler that fills one.
 //!
 //! The engine knows nothing about emails or UUIDs. Python owns every named
-//! format -- `polspec.formats` -- and hands each column a `Template`: a run of
+//! format -- `polspec.string_formats` -- and hands each column a `Template`: a run of
 //! parts, each either a literal, a stretch of characters drawn from an
 //! alphabet, or one value from a list. That is enough to spell every format
 //! polspec ships, and it keeps the knowledge of what a format *is* in one

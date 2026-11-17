@@ -17,7 +17,7 @@ from polspec.constants import (
     DEFAULT_EXTRA_SHARE,
 )
 from polspec.errors import SpecError
-from polspec.formats import lookup as _lookup_format
+from polspec.string_formats import lookup as _lookup_format
 
 
 def validate_format(spec: colspec_module.ColSpec) -> None:

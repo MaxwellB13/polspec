@@ -24,6 +24,7 @@ import dataclasses
 import datetime as dt
 
 import polars as pl
+import polspec
 import pytest
 from cases import COLUMN_CASES, EVERY_DTYPE
 from polspec import (
@@ -48,7 +49,6 @@ from polspec import (
     to_dict,
     validate,
 )
-from polspec.formats import FORMATS
 
 ROWS = 300
 SEED = 11
@@ -138,7 +138,8 @@ def test_a_unique_finite_format_covers_its_list_exactly_once():
     """A finite format is a domain like `choices`: `unique=True` can use all
     of it and not one row more, and the refusal counts the list.
     """
-    currencies = len(FORMATS["iso_currency"].values)
+    listed = polspec.formats()
+    currencies = len(listed.filter(pl.col("name") == "iso_currency")["values"][0])
     spec_cls = _spec_for(
         "currency", ColSpec(pl.String, format="iso_currency", unique=True)
     )
@@ -578,12 +579,12 @@ def test_with_catspec_keeps_weights_that_still_fit():
     assert retyped.spec.columns["code"].weights == (1.0, 1.0, 2.0)
 
 
-@pytest.mark.parametrize("name", sorted(FORMATS))
+@pytest.mark.parametrize("name", sorted(polspec.formats()["name"].to_list()))
 def test_every_format_survives_a_file_round_trip(name, tmp_path):
     """generate -> validate -> to_yaml -> from_yaml -> generate -> validate.
 
     The sampler and the check for a format are one declaration in
-    `polspec.formats`; the file is the one place a column's format is
+    `polspec.string_formats`; the file is the one place a column's format is
     reduced to its name alone, so this is where the name has to be enough.
     """
     spec_cls = _spec_for(f"file_{name}", ColSpec(pl.String, format=name))

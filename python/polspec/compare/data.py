@@ -28,9 +28,9 @@ from polspec import frames
 from polspec.bound import Bound
 from polspec.domain import Domain, is_textual
 from polspec.dtypes import field_dtypes, map_entries
-from polspec.formats import lookup as _lookup_format
 from polspec.shape import physical
 from polspec.spec import entries_of, field_of
+from polspec.string_formats import lookup as _lookup_format
 from polspec.validation.constraints import is_dtype_compatible
 
 if TYPE_CHECKING:

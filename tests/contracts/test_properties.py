@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any
 
 import polars as pl
+import polspec
 import pytest
 import yaml
 from hypothesis import HealthCheck, assume, given, settings
@@ -64,7 +65,6 @@ from polspec import (
     validate,
 )
 from polspec.expr import literals
-from polspec.formats import FORMATS
 
 # Polars 2's `Map`; on Polars 1, no dtype is one.
 MAP = getattr(pl, "Map", ())
@@ -235,7 +235,9 @@ def _text(draw: st.DrawFn) -> dict[str, Any]:
         if draw(st.booleans()):
             fields["weights"] = draw(_weights(len(choices)))
     elif shape == "format":
-        fields["format"] = draw(st.sampled_from(sorted(FORMATS)))
+        fields["format"] = draw(
+            st.sampled_from(sorted(polspec.formats()["name"].to_list()))
+        )
         if draw(st.booleans()):
             # `~` is in no format, so an extra is never one of its values.
             extras = draw(

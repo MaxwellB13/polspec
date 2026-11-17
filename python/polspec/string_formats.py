@@ -1,4 +1,5 @@
-"""Named string formats: what each one looks like, said once for both sides.
+"""Named string formats: what each one looks like, said once for both sides,
+and `formats()`, which lists them.
 
 A `String` column can say how long its values are; `format=` lets it say what
 they look like. Each format below is one `Format`: the *template* the engine
@@ -68,6 +69,9 @@ class Format:
 
     name: str
     summary: str
+    # One value of the format, as the list of formats shows it; a test holds
+    # it to the format's own check.
+    example: str = ""
     template: tuple[RawPart, ...] | None = None
     pattern: str | None = None
     max_length: int | None = None
@@ -803,6 +807,7 @@ FORMATS: dict[str, Format] = {
         Format(
             "uuid4",
             "a version-4 UUID in canonical 8-4-4-4-12 form",
+            example="0b6f2c1e-8a4d-4c3b-9f2e-5d7a1b3c4e6f",
             template=(
                 chars(_HEX, 8),
                 lit("-"),
@@ -823,6 +828,7 @@ FORMATS: dict[str, Format] = {
         Format(
             "uuid7",
             "a version-7 UUID in canonical 8-4-4-4-12 form; its time is not read",
+            example="01890a5d-ac96-774b-bcce-b302099a8057",
             template=(
                 chars(_HEX, 8),
                 lit("-"),
@@ -843,12 +849,14 @@ FORMATS: dict[str, Format] = {
         Format(
             "ulid",
             "26 characters of Crockford base 32, the first 0-7; its time is not read",
+            example="01ARZ3NDEKTSV4RRFFQ69G5FAV",
             template=(chars("01234567", 1), chars(_CROCKFORD, 25)),
             pattern=r"(?i)^[0-7][0-9A-HJKMNP-TV-Z]{25}$",
         ),
         Format(
             "email",
             "an address with one '@' and a dotted domain",
+            example="alex42@example.com",
             template=(
                 chars(_LOWER + _DIGITS, 3, 12),
                 lit("@"),
@@ -860,6 +868,7 @@ FORMATS: dict[str, Format] = {
         Format(
             "ipv4",
             "four dotted decimal octets, each 0-255",
+            example="192.168.0.1",
             template=(
                 one_of(_OCTETS),
                 lit("."),
@@ -877,18 +886,21 @@ FORMATS: dict[str, Format] = {
         Format(
             "ipv6",
             "eight colon-separated hextets, uncompressed",
+            example="2001:0db8:85a3:0000:0000:8a2e:0370:7334",
             template=_hex_groups(4, 8, ":"),
             pattern=r"(?i)^(?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}$",
         ),
         Format(
             "mac",
             "six colon-separated hex pairs",
+            example="00:1a:2b:3c:4d:5e",
             template=_hex_groups(2, 6, ":"),
             pattern=r"(?i)^(?:[0-9a-f]{2}:){5}[0-9a-f]{2}$",
         ),
         Format(
             "hostname",
             "dot-separated RFC 1123 labels, at most 253 characters",
+            example="db01.internal.example.com",
             template=(
                 chars(_LOWER + _DIGITS, 2, 12),
                 one_of(("", ".internal", ".corp", ".svc", ".eu", ".us", ".staging")),
@@ -900,6 +912,7 @@ FORMATS: dict[str, Format] = {
         Format(
             "url",
             "an http or https URL: a hostname, an optional port, path, query and fragment",
+            example="https://example.com/docs?page=2",
             template=(
                 lit("https://"),
                 chars(_LOWER + _DIGITS, 3, 12),
@@ -915,20 +928,63 @@ FORMATS: dict[str, Format] = {
         Format(
             "iso_country",
             "an ISO 3166-1 alpha-2 country code",
+            example="GB",
             values=tuple(_ISO_COUNTRIES),
         ),
         Format(
             "iso_country3",
             "an ISO 3166-1 alpha-3 country code",
+            example="GBR",
             values=tuple(_ISO_COUNTRIES_3),
         ),
         Format(
             "iso_currency",
             "an ISO 4217 alpha-3 currency code",
+            example="GBP",
             values=tuple(_ISO_CURRENCIES),
         ),
     )
 }
+
+
+def formats() -> pl.DataFrame:
+    """Every format `ColSpec(format=...)` accepts, one row each, in the order
+    they are documented. *Added in 1.7.*
+
+    Returns
+    -------
+    pl.DataFrame
+        `name`, what `format=` takes; `summary`, what a value of it looks
+        like; `finite`, whether it is a list of values (a country, a
+        currency) rather than a shape (an email, a UUID); `example`, one
+        value of it; and `values`, a finite format's every value, null for
+        a shape.
+
+    Examples
+    --------
+    >>> listed = formats()
+    >>> listed.filter(pl.col("name") == "email").select("name", "example").row(0)
+    ('email', 'alex42@example.com')
+    >>> listed.filter(pl.col("finite"))["name"].to_list()
+    ['iso_country', 'iso_country3', 'iso_currency']
+    """
+    every = list(FORMATS.values())
+    return pl.DataFrame(
+        {
+            "name": [f.name for f in every],
+            "summary": [f.summary for f in every],
+            "finite": [f.is_finite for f in every],
+            "example": [f.example for f in every],
+            "values": [list(f.values) if f.values is not None else None for f in every],
+        },
+        schema={
+            "name": pl.String,
+            "summary": pl.String,
+            "finite": pl.Boolean,
+            "example": pl.String,
+            "values": pl.List(pl.String),
+        },
+    )
 
 
 def names() -> list[str]:

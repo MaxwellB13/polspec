@@ -192,6 +192,16 @@ for every table, or a mapping for some of them; `scale` multiplies every
 height, so `scale=0.1` takes a tenth and keeps the ratios between the
 tables. A larger set widens a parent's key range, and its children's with it,
 so its keys can fall outside the bounds profiled from the source.
+`return_registry=True` returns the registry the frames were generated from,
+widened keys and all, which they validate against (*added in 1.7*):
+
+```python
+bigger, registry = polspec.synthesize_all(real, scale=3, seed=1, return_registry=True)
+registry.validate_all(bigger)          # passes, bounds included
+```
+
+`synthesize` takes `return_spec=True` the same way, for the one spec its
+frame came from.
 
 **How keys are found.** A column becomes a key into another table's column,
 or its own table's, when all of these hold:

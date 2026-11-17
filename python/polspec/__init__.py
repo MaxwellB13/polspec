@@ -62,6 +62,7 @@ if TYPE_CHECKING:
     )
     from polspec.sizing import estimated_size
     from polspec.strategies import strategy
+    from polspec.string_formats import formats
     from polspec.synthesis import profile, synthesize
     from polspec.validation import (
         FINDING_COLUMN,
@@ -102,6 +103,7 @@ _LAZY: dict[str, str] = {
     "profile_all": "polspec.related",
     "synthesize_all": "polspec.related",
     "Registry": "polspec.registry",
+    "formats": "polspec.string_formats",
     "to_markdown": "polspec.render",
     "to_mermaid": "polspec.render",
     **dict.fromkeys(
@@ -195,6 +197,7 @@ __all__ = [
     "diff",
     "drift",
     "estimated_size",
+    "formats",
     "from_dict",
     "from_yaml",
     "generate",

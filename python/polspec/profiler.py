@@ -41,9 +41,9 @@ from polspec._text import stays_text
 from polspec.bound import Bound
 from polspec.constants import DEFAULT_NULL_PROBABILITY
 from polspec.dtypes import MAP, dtype_value_limits, field_dtypes, map_entries, map_parts
-from polspec.formats import lookup as _lookup_format
 from polspec.shape import fit, physical, with_fit
 from polspec.spec import ColSpec, is_categorical_dtype
+from polspec.string_formats import lookup as _lookup_format
 from polspec.tablespec import TableSpec
 
 # The fewest distinct values that make an all-distinct column a key. Ten

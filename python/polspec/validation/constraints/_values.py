@@ -22,14 +22,14 @@ from polspec.dtypes import (
     field_dtypes,
     map_entries,
 )
-from polspec.formats import lookup as _lookup_format
+from polspec.string_formats import lookup as _lookup_format
 from polspec.validation.report import FindingCode
 
 if TYPE_CHECKING:
     from polspec.bound import Bound
     from polspec.checks import Check
-    from polspec.formats import Format
     from polspec.spec import ColSpec
+    from polspec.string_formats import Format
     from polspec.validation import ValidationOptions
 
 from polspec._colspec.masks import (
