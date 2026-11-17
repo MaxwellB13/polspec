@@ -25,13 +25,15 @@ to be updated.
 
 ## Generation does not enforce these
 
-### `__checks__` and `ColSpec.validators` are validation-only
+### `__checks__` and `ColSpec.validators` are kept only when asked
 
-This one is by design, not a defect: checks and validators wrap arbitrary
-Polars expressions, and nothing can generate data satisfying an arbitrary
-predicate. Validate generated data with `checks=False` or
-`validators=False`, or pin the columns concerned to values that pass with
-[`generate(fixed=)`](../how-to/generating.md#pinning-columns-fixed).
+Checks and validators wrap arbitrary Polars expressions, and nothing can
+draw data satisfying an arbitrary predicate. By default generation leaves
+them to validation. `checks=True` keeps them by keeping the rows that
+pass and reading on for more (*since 1.7*), which a check rejecting
+nearly every row defeats, and which refuses `method="cartesian"`, a
+hierarchy, a key into the spec's own rows, and a pin of all `n` values.
+See [Keeping checks](../how-to/generating.md#keeping-checks-checkstrue).
 
 ### A pattern the generator cannot follow
 

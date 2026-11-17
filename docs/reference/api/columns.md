@@ -17,3 +17,7 @@ What one column declares, and the pieces that make up a declaration.
 ## Check
 
 ::: polspec.Check
+
+## check
+
+::: polspec.check

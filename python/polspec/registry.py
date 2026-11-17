@@ -471,6 +471,7 @@ class Registry:
         method: Literal["random", "cartesian"],
         references: Frames | None,
         fixed: Mapping[Any, Mapping[str, Any]] | None = None,
+        checks: bool = False,
     ) -> dict[str, pl.DataFrame]:
         counts = self._counts(n, names)
         pins = self._pins(fixed, names)
@@ -498,6 +499,7 @@ class Registry:
                 seed=spec_seed,
                 references={**supplied, **frames},
                 fixed=pins.get(name),
+                checks=checks,
             )
         return frames
 
@@ -531,6 +533,7 @@ class Registry:
         batch_size: int | None = None,
         references: Frames | None = None,
         fixed: Mapping[Any, Mapping[str, Any]] | None = None,
+        checks: bool = False,
     ) -> dict[str, pl.LazyFrame]:
         """One `LazyFrame` per spec, each generating as it is collected.
 
@@ -558,6 +561,7 @@ class Registry:
                 method="random",
                 references=references,
                 fixed={p: pins[p] for p in pins if p in parents},
+                checks=checks,
             )
             if parents
             else {}
@@ -571,6 +575,7 @@ class Registry:
                 batch_size=batch_size,
                 references={k: v for k, v in supplied.items() if k != name} or None,
                 fixed=pins.get(name),
+                checks=checks,
             )
             for name in self.order()
             if name in names
@@ -584,6 +589,7 @@ class Registry:
         method: Literal["random", "cartesian"] = "random",
         references: Frames | None = None,
         fixed: Mapping[Any, Mapping[str, Any]] | None = None,
+        checks: bool = False,
     ) -> dict[str, pl.DataFrame]:
         """One frame per spec, parents generated first and threaded into
         their children, so every foreign key is satisfied by construction.
@@ -597,9 +603,19 @@ class Registry:
         `fixed` pins columns spec by spec, `{Orders: {"status": "PAID"}}`,
         each as `generate()` takes it; a child's foreign key draws from its
         pinned parent's rows. *Added in 1.4.*
+
+        `checks=True` keeps each spec's checks, as `generate()` does; a
+        child's foreign key draws from its parent's kept rows. *Added in
+        1.7.*
         """
         return self._generate(
-            self.names, n, seed=seed, method=method, references=references, fixed=fixed
+            self.names,
+            n,
+            seed=seed,
+            method=method,
+            references=references,
+            fixed=fixed,
+            checks=checks,
         )
 
     def generate_related(
@@ -611,6 +627,7 @@ class Registry:
         method: Literal["random", "cartesian"] = "random",
         references: Frames | None = None,
         fixed: Mapping[Any, Mapping[str, Any]] | None = None,
+        checks: bool = False,
     ) -> dict[str, pl.DataFrame]:
         """`generate_all` restricted to one spec and everything it depends on."""
         root = as_spec_name(key)
@@ -621,7 +638,13 @@ class Registry:
             if name == root or name in self.ancestors(root)
         )
         return self._generate(
-            needed, n, seed=seed, method=method, references=references, fixed=fixed
+            needed,
+            n,
+            seed=seed,
+            method=method,
+            references=references,
+            fixed=fixed,
+            checks=checks,
         )
 
     # ------------------------------------------------------------------

@@ -31,6 +31,7 @@
   "ValidationOptions",
   "ValidationReport",
   "assert_valid",
+  "check",
   "check_pipeline",
   "col",
   "diff",

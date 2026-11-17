@@ -39,6 +39,11 @@ import polars as pl
 
 from polspec import frames
 from polspec.frames import Method, References
+from polspec.generation.keeping import (
+    check_columns,
+    holds_checks,
+    refuse_unkeepable,
+)
 from polspec.generation.pipeline import (
     batch_stream,
     check_counts,
@@ -94,6 +99,7 @@ def scan(
     method: Method = "random",
     references: References = None,
     fixed: Mapping[str, Any] | None = None,
+    checks: bool = False,
 ) -> pl.LazyFrame:
     """A `LazyFrame` of `n` generated rows, produced as they are collected.
 
@@ -105,6 +111,12 @@ def scan(
     column is unique across the whole scan -- a foreign-keyed one too -- and
     a composite key only within each batch. `fixed` pins columns as
     `generate_batches` takes it. *`fixed` added in 1.4.*
+
+    `checks=True` keeps the spec's checks batch by batch, as
+    `generate_batches` does. Which rows are kept depends on every column a
+    check reads, so those are generated whatever the plan projects, and a
+    `head` takes the first rows of the batches the whole scan would make.
+    *Added in 1.7.*
 
     Examples
     --------
@@ -124,6 +136,14 @@ def scan(
     # Checked against the whole spec, now: a pin on a column the plan never
     # reads is still a pin that has to make sense.
     pins = checked_pins(spec, fixed, n, method) if fixed else None
+    if checks:
+        refuse_unkeepable(
+            spec, method, sequence_pins=pins is not None and pins.has_sequences
+        )
+    keeping = checks and holds_checks(spec)
+    # Which rows a check keeps depends on every column it reads, so those
+    # are generated whatever the plan asks for.
+    kept_by = check_columns(spec) if keeping else frozenset()
 
     def io_source(
         with_columns: list[str] | None,
@@ -132,7 +152,7 @@ def scan(
         polars_batch_size: int | None,
     ) -> Iterator[pl.DataFrame]:
         wanted = list(spec.columns) if with_columns is None else with_columns
-        needed = frozenset(wanted) | _predicate_columns(predicate)
+        needed = frozenset(wanted) | _predicate_columns(predicate) | kept_by
         # A coverage set is the product of every dimension the spec has, so
         # under `cartesian` a dropped column would change the rows of every
         # other: the whole spec is generated and only then projected.
@@ -141,8 +161,11 @@ def scan(
             if method == "cartesian"
             else spec.select(*needed_columns(spec, needed))
         )
-        rows = n if n_rows is None else min(n, n_rows)
+        # Kept rows depend on the batch they are drawn in, so a `head` is
+        # the first rows of the scan's own batches, not a smaller draw.
+        rows = n if n_rows is None or keeping else min(n, n_rows)
         size = batch_size or polars_batch_size or DEFAULT_BATCH_SIZE
+        left = n if n_rows is None else min(n, n_rows)
         for batch in batch_stream(
             source,
             rows,
@@ -151,7 +174,12 @@ def scan(
             seed=seed,
             references=references,
             pins=pins.restricted(source.columns) if pins is not None else None,
+            checks=keeping,
         ):
+            if left <= 0:
+                return
+            batch = batch.head(left)
+            left -= batch.height
             # A predicate filters rows that were drawn; it never narrows the
             # draw. `n` rows are generated and the matching ones kept, which
             # is the only reading that leaves a rate or a `unique` column

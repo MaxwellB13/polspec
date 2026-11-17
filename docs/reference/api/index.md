@@ -9,6 +9,7 @@ cannot describe a signature the code does not have.
 | [`Bound`][polspec.Bound] | [Columns](columns.md) |
 | [`ColRule`][polspec.ColRule] | [Columns](columns.md) |
 | [`Check`][polspec.Check] | [Columns](columns.md) |
+| [`check`][polspec.check] | [Columns](columns.md) |
 | [`col`][polspec.col] | [Predicates](predicates.md) |
 | [`lit`][polspec.lit] | [Predicates](predicates.md) |
 | [`Pred`][polspec.Pred] | [Predicates](predicates.md) |
