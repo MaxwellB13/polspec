@@ -14,7 +14,7 @@ they can change in any release, so code outside polspec should use only
 | Module | Responsibility |
 |:--|:--|
 | `bound` | An inclusive `[min, max]`, either end optionally open |
-| `check` | A named boolean expression, with SQL-style null handling |
+| `checks` | `Check` -- a named boolean expression, with SQL-style null handling -- and `@check`, which declares one as a function on a `FrameSpec` class |
 | `constants` | Default generation ranges |
 | `dtypes` | What each dtype can actually hold |
 | `distributions` | The distributions available, and each one's parameter aliases |
@@ -30,7 +30,7 @@ they can change in any release, so code outside polspec should use only
 | `validation` | `inspect` and `validate` over a `TableSpec`: every claim becomes a `Constraint` that produces a `Finding`. The `constraints/` package holds them by kind: `_values` (one value's domain, bounds, length, format, pattern, recursing into a struct's fields and lifted over a list's elements), `_rules`, `_table` (composite keys, checks), `_relations` (foreign keys, hierarchy); `report.py` holds `Finding` and `ValidationReport` |
 | `tablespec` | `TableSpec` — a spec as an immutable value, with its declaration-time checks and structural operations |
 | `framespec` | `FrameSpec` — the metaclass that builds a `TableSpec` from a class body, and the facade forwarding every verb to it |
-| `generation` | `generate`, `generate_batches`, `scan` and the file sinks, as functions over a `TableSpec`. `pipeline.py` runs the engine then the passes, window by window; `engine.py` turns a spec into the `ColumnPlan`s the Rust extension takes and finishes the result -- gathering typed choices, casting temporal columns back, wrapping a `List` around the column its elements make and gathering a `Struct` from its fields'; `passes/` holds one pass per kind of cross-column claim (`rules`, `foreign_keys`, `hierarchy`, `unique_together`); `seeds.py` keys every pass's seed by name, as the engine keys columns; `scan.py` is the lazy source every sink writes out |
+| `generation` | `generate`, `generate_batches`, `scan` and the file sinks, as functions over a `TableSpec`. `pipeline.py` runs the engine then the passes, window by window; `engine.py` turns a spec into the `ColumnPlan`s the Rust extension takes and finishes the result -- gathering typed choices, casting temporal columns back, wrapping a `List` around the column its elements make and gathering a `Struct` from its fields'; `passes/` holds one pass per kind of cross-column claim (`rules`, `foreign_keys`, `hierarchy`, `unique_together`); `seeds.py` keys every pass's seed by name, as the engine keys columns; `keeping.py` keeps a spec's checks under `checks=True`, reading on into the frame for the rows that pass; `scan.py` is the lazy source every sink writes out |
 | `frames` | The frame plumbing every verb shares: accepting a `DataFrame` or `LazyFrame`, and resolving `references=` to parent frames |
 | `_options` | One way to take options -- an options object, keywords, or neither -- shared by `validate`, `inspect` and `drift` |
 | `expr` | `col()`: a small predicate language that evaluates like Polars and survives a trip through a file |
@@ -63,7 +63,7 @@ imports each inside the method that uses it. A test holds a bare import to
 that.
 
 The dependency direction is one-way. The declarations -- `spec`, `rules`,
-`check`, `foreign_key`, `hierarchy`, `tablespec` -- import none of
+`checks`, `foreign_key`, `hierarchy`, `tablespec` -- import none of
 `generation`, `validation`, `drift`, `serialization` or the Rust extension, so
 a spec is data that every verb reads and none owns; generation and validation
 import nothing of each other; and `render` is reachable from neither. An

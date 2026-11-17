@@ -15,7 +15,7 @@ import polars as pl
 
 from polspec import spec as colspec_module
 from polspec._colspec.common import is_dtype, not_a_dtype
-from polspec.check import Check
+from polspec.checks import Check
 from polspec.constants import (
     DEFAULT_NULL_PROBABILITY,
 )

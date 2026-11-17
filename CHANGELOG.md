@@ -9,6 +9,24 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+### Added
+
+- **`checks=True` keeps a spec's checks in the data it generates.**
+  `__checks__` and column validators were validation-only, so a
+  generated frame could fail its own spec. With `checks=True`,
+  `generate`, `generate_batches`, `scan`, every `sink_*` and a
+  registry's `generate_all`, `generate_related` and `scan_all` keep the
+  first rows of the seed's frame that pass every check, reading on for
+  more when some fail. A `unique` column stays unique, across batches
+  too, and a frame whose rows all pass is the frame `checks=False`
+  gives. `method="cartesian"`, a hierarchy, a key into the spec's own
+  rows and a pin of all `n` values are refused, and a check that
+  rejects nearly every row is a `GenerationError` naming it. Off by
+  default, so no seeded output moves.
+- **`@check` declares a check as a function** on a `FrameSpec` class,
+  named after the function: it returns a `col()` predicate or a Polars
+  expression, and joins `__checks__`.
+
 ### Changed
 
 - **`schema infer` and `synthesize` describe their shared flags alike.**

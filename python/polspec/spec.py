@@ -24,7 +24,7 @@ from polspec._colspec.common import is_categorical_dtype as is_categorical_dtype
 from polspec._colspec.common import is_dtype as is_dtype
 from polspec._colspec.masks import in_values, measure_length, out_of_bounds
 from polspec.bound import Bound
-from polspec.check import Check, failure_mask
+from polspec.checks import Check, failure_mask
 from polspec.constants import (
     DEFAULT_LIST_LEN,
     DEFAULT_NULL_PROBABILITY,

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 # caller never asks for. A type checker reads the imports as written.
 from polspec.bound import Bound
 from polspec.catspec import CatSpec
-from polspec.check import Check
+from polspec.checks import Check, check
 from polspec.errors import (
     GenerationError,
     MultiValidationError,
@@ -189,6 +189,7 @@ __all__ = [
     "ValidationOptions",
     "ValidationReport",
     "assert_valid",
+    "check",
     "check_pipeline",
     "col",
     "diff",

@@ -27,7 +27,7 @@ from polspec.validation.report import FindingCode
 
 if TYPE_CHECKING:
     from polspec.bound import Bound
-    from polspec.check import Check
+    from polspec.checks import Check
     from polspec.formats import Format
     from polspec.spec import ColSpec
     from polspec.validation import ValidationOptions
@@ -38,7 +38,7 @@ from polspec._colspec.masks import (
     out_of_bounds,
     unholdable_mask,
 )
-from polspec.check import failure_mask
+from polspec.checks import failure_mask
 from polspec.spec import element_of, entries_of, field_of
 from polspec.validation.constraints._base import (
     Constraint,

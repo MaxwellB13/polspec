@@ -12,13 +12,13 @@ validation; a few are only checked:
 | `__order_by__` | yes | yes |
 | `__hierarchy__` — see [Hierarchies](hierarchies.md) | yes | yes |
 | `__rows__` | no: `generate()` makes the rows asked for | yes |
-| `ColSpec.validators`, `__checks__` | no | yes |
+| `ColSpec.validators`, `__checks__` | with `checks=True` | yes |
 
-Validators and checks are validation-only by design: both wrap arbitrary
-expressions, and nothing can produce data that satisfies an arbitrary
-predicate. Validate generated data with `validators=False` or
-`checks=False`, or [pin](generating.md#pinning-columns-fixed) a validated
-column to values you know pass.
+Validators and checks wrap arbitrary expressions, and nothing can draw
+data that satisfies an arbitrary predicate. So generation leaves them to
+validation unless asked: `generate(..., checks=True)` keeps the rows
+that pass them, and reads on for more — see
+[Keeping checks](generating.md#keeping-checks-checkstrue).
 
 ## Writing conditions — `col()`
 
@@ -206,6 +206,34 @@ semantics. `Check(..., ignore_nulls=False)` treats null as a failure.
 Checks are inherited: a subclass collects its bases' checks as well as its own,
 de-duplicated. Two *different* checks sharing a name is an error, since the name
 is what an error message points at.
+
+### A check as a function — `@check`
+
+A check can be written as a function in the class body instead, named
+after the function. *Added in 1.7.*
+
+```python
+from polspec import check
+
+
+class Billed(FrameSpec):
+    subtotal = ColSpec(pl.Float64, bounds=(0.0, 1000.0))
+    total    = ColSpec(pl.Float64, bounds=(0.0, 2000.0))
+
+    @check(description="tax never makes a total smaller")
+    def total_covers_subtotal():
+        return col("total") >= col("subtotal")
+
+
+[c.name for c in Billed.spec.checks]   # ['total_covers_subtotal']
+```
+
+The function takes no arguments and returns the condition: a `col()`
+predicate, which a spec file can hold, or a Polars expression. It is
+called once, when the class is built, and its check joins
+`__checks__` after any listed there. `@check` takes `name=`,
+`description=` and `ignore_nulls=` as `Check` does; bare, the name is
+the function's. The function does not stay on the class.
 
 ## Composite uniqueness — `__unique_together__`
 

@@ -24,7 +24,7 @@ import polars as pl
 
 from polspec._frozen import FrozenDict
 from polspec.bound import Bound, coerce_bound
-from polspec.check import Check
+from polspec.checks import Check
 from polspec.domain import Domain
 from polspec.dtypes import map_parts
 from polspec.errors import SpecError

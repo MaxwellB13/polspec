@@ -37,6 +37,7 @@ def _scan(
     seed: int | None,
     references: References,
     fixed: Mapping[str, Any] | None = None,
+    checks: bool = False,
 ) -> tuple[pl.LazyFrame, Path]:
     """The lazy frame a sink writes, and where it writes it.
 
@@ -57,6 +58,7 @@ def _scan(
         method=method,
         references=references,
         fixed=fixed,
+        checks=checks,
     )
     target.parent.mkdir(parents=True, exist_ok=True)
     return lf, target
@@ -73,6 +75,7 @@ def sink_parquet(
     seed: int | None = None,
     references: References = None,
     fixed: Mapping[str, Any] | None = None,
+    checks: bool = False,
     **kwargs: Any,
 ) -> None:
     """Generates `n` rows and streams them to a Parquet file in batches.
@@ -91,7 +94,9 @@ def sink_parquet(
     >>> pl.scan_parquet(folder / "orders.parquet").select(pl.len()).collect().item()
     250000
     """
-    lf, target = _scan(spec, path, n, batch_size, method, seed, references, fixed)
+    lf, target = _scan(
+        spec, path, n, batch_size, method, seed, references, fixed, checks
+    )
     lf.sink_parquet(target, compression=compression, **kwargs)
 
 
@@ -106,6 +111,7 @@ def sink_ipc(
     seed: int | None = None,
     references: References = None,
     fixed: Mapping[str, Any] | None = None,
+    checks: bool = False,
     **kwargs: Any,
 ) -> None:
     """Generates `n` rows and streams them to an Arrow IPC / Feather file in batches.
@@ -124,7 +130,9 @@ def sink_ipc(
     >>> pl.read_ipc(folder / "orders.arrow").shape
     (1000, 2)
     """
-    lf, target = _scan(spec, path, n, batch_size, method, seed, references, fixed)
+    lf, target = _scan(
+        spec, path, n, batch_size, method, seed, references, fixed, checks
+    )
     lf.sink_ipc(target, compression=compression, **kwargs)
 
 
@@ -139,6 +147,7 @@ def sink_csv(
     seed: int | None = None,
     references: References = None,
     fixed: Mapping[str, Any] | None = None,
+    checks: bool = False,
     **kwargs: Any,
 ) -> None:
     """Generates `n` rows and streams them to a CSV file in batches.
@@ -157,7 +166,9 @@ def sink_csv(
     >>> pl.read_csv(folder / "orders.csv").shape
     (1000, 2)
     """
-    lf, target = _scan(spec, path, n, batch_size, method, seed, references, fixed)
+    lf, target = _scan(
+        spec, path, n, batch_size, method, seed, references, fixed, checks
+    )
     lf = lf.with_columns(text_format_casts(as_table_spec(spec).columns))
     lf.sink_csv(target, include_header=include_header, **kwargs)
 
@@ -172,6 +183,7 @@ def sink_ndjson(
     seed: int | None = None,
     references: References = None,
     fixed: Mapping[str, Any] | None = None,
+    checks: bool = False,
     **kwargs: Any,
 ) -> None:
     """Generates `n` rows and streams them to a newline-delimited JSON file in batches.
@@ -195,7 +207,9 @@ def sink_ndjson(
     >>> pl.read_ndjson(folder / "orders.ndjson").shape
     (1000, 2)
     """
-    lf, target = _scan(spec, path, n, batch_size, method, seed, references, fixed)
+    lf, target = _scan(
+        spec, path, n, batch_size, method, seed, references, fixed, checks
+    )
     lf = lf.with_columns(text_format_casts(as_table_spec(spec).columns))
     casts = json_casts(lf.collect_schema(), error=GenerationError)
     lf.with_columns(casts).sink_ndjson(target, **kwargs)

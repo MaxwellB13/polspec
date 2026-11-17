@@ -28,6 +28,12 @@ from polspec.dtypes import MAP, field_dtypes, map_parts, unholdable
 from polspec.errors import GenerationError, SpecError
 from polspec.frames import Method, References, to_eager
 from polspec.generation.engine import generate_cartesian, generate_random
+from polspec.generation.keeping import (
+    KEY_ROOM,
+    holds_checks,
+    kept_window,
+    refuse_unkeepable,
+)
 from polspec.generation.passes.derived import apply_derived
 from polspec.generation.passes.foreign_keys import (
     apply_foreign_key,
@@ -131,6 +137,16 @@ def room_for_open_keys(spec: TableSpec, n: int) -> TableSpec:
     return spec.with_columns(widened) if widened else spec
 
 
+def room_keeping_checks(spec: TableSpec, n: int) -> TableSpec:
+    """`room_for_open_keys` for a frame whose checks are kept, which may read
+    more than `n` rows. Where the default range holds `n`, it is left as
+    `checks=False` leaves it, so a frame whose rows all pass is that one;
+    where it does not, and would hold exactly `n`, a key is given room for
+    the rows a check rejects."""
+    widened = room_for_open_keys(spec, n)
+    return widened if widened is spec else room_for_open_keys(spec, n * KEY_ROOM)
+
+
 def check_counts(n: int, batch_size: int | None = None) -> None:
     if n < 0:
         raise ValueError("n must be >= 0")
@@ -189,6 +205,7 @@ def generate(
     self_references: int = 0,
     max_bytes: int | None = None,
     fixed: Mapping[str, Any] | None = None,
+    checks: bool = False,
 ) -> pl.DataFrame:
     """Generates a DataFrame matching `spec`.
 
@@ -249,6 +266,17 @@ def generate(
     `order_by`, pinned rows move with the sort like any other.
     `method="cartesian"`, whose row count is not `n`, takes no pins.
 
+    `checks=True` keeps the spec's `__checks__` and column validators,
+    which are otherwise validation-only: the frame is drawn as always, the
+    rows every check passes are kept, and when fewer than `n` pass, a
+    larger frame is drawn from a seed of its own and its first `n` passing
+    rows taken. A spec whose rows all pass is the frame `checks=False`
+    gives. Rates a check reads -- a null rate, a weight -- become rates
+    among the rows that pass. A check that rejects nearly every row is
+    refused with a `GenerationError` naming it; a hierarchy, a key into the
+    spec's own rows, `method="cartesian"` and a pin of all `n` values
+    cannot be filtered, and are refused. *Added in 1.7.*
+
     The whole frame is built before this returns. `scan()` is the lazy
     verb: it generates as the plan is collected, so only the columns and
     rows a plan asks for are made.
@@ -271,20 +299,33 @@ def generate(
     _check_faults(spec, cycles, self_references)
     _check_size(spec, n, max_bytes)
     check_method(method)
-    pins = checked_pins(spec, fixed, n, method).window(0, n) if fixed else {}
-    spec = room_for_open_keys(spec, n)
+    checked = checked_pins(spec, fixed, n, method) if fixed else None
+    if checks:
+        refuse_unkeepable(
+            spec,
+            method,
+            sequence_pins=checked is not None and checked.has_sequences,
+        )
+    keeping = checks and holds_checks(spec)
+    planned = room_keeping_checks(spec, n) if keeping else room_for_open_keys(spec, n)
+    frame_seed = _frame_seed(seed)
 
-    frame = _window(
-        spec,
-        n,
-        _frame_seed(seed),
-        method=method,
-        references=references,
-        cycles=cycles,
-        self_references=self_references,
-        pins=pins,
-    )
-    return ordered(frame, spec)
+    def read(offset: int, rows: int) -> pl.DataFrame:
+        # The first `rows` rows of the one frame the seed describes: a
+        # longer read is the same rows and more.
+        return _window(
+            planned,
+            rows,
+            frame_seed,
+            method=method,
+            references=references,
+            cycles=cycles,
+            self_references=self_references,
+            pins=checked.window(0, rows) if checked is not None else {},
+        )
+
+    frame = kept_window(planned, n, 0, read)[0] if keeping else read(0, n)
+    return ordered(frame, planned)
 
 
 @dataclass(frozen=True)
@@ -306,6 +347,11 @@ class Pins:
             )
             for name, values in self.values.items()
         }
+
+    @property
+    def has_sequences(self) -> bool:
+        """Whether a pin gives a column all `n` values, not one."""
+        return bool(set(self.values) - self.scalars)
 
     def restricted(self, columns: Iterable[str]) -> Pins:
         """The pins of `columns` only: the rest are not drawn."""
@@ -642,6 +688,7 @@ def generate_batches(
     seed: int | None = None,
     references: References = None,
     fixed: Mapping[str, Any] | None = None,
+    checks: bool = False,
 ) -> Iterator[pl.DataFrame]:
     """Yields chunks of generated rows without holding all `n` in memory.
 
@@ -663,6 +710,12 @@ def generate_batches(
     a sequence of all `n` values, which each batch takes its stretch of.
     *Added in 1.4.*
 
+    `checks=True` keeps the spec's checks, as `generate()` keeps them:
+    each batch is the first rows that pass from where the last batch
+    stopped reading, so a `unique=True` column stays unique across `n`.
+    Batches whose rows all pass are the batches `checks=False` gives.
+    *Added in 1.7.*
+
     Examples
     --------
     >>> spec = TableSpec("Orders", {"id": ColSpec(pl.Int64, unique=True)})
@@ -675,6 +728,10 @@ def generate_batches(
     check_counts(n, batch_size)
     check_method(method)
     pins = checked_pins(spec, fixed, n, method) if fixed else None
+    if checks:
+        refuse_unkeepable(
+            spec, method, sequence_pins=pins is not None and pins.has_sequences
+        )
     return batch_stream(
         spec,
         n,
@@ -683,6 +740,7 @@ def generate_batches(
         seed=seed,
         references=references,
         pins=pins,
+        checks=checks,
     )
 
 
@@ -695,13 +753,17 @@ def batch_stream(
     seed: int | None,
     references: References,
     pins: Pins | None,
+    checks: bool = False,
 ) -> Iterator[pl.DataFrame]:
     """`generate_batches` once its arguments are checked, as a generator --
-    so the checks above run when it is called, not when it is first read."""
+    so the checks above run when it is called, not when it is first read.
+    `checks` keeps the spec's checks in each batch, refused beforehand
+    where it cannot be."""
     if n == 0:
         return
     # The whole frame's `n`, so every batch draws from one key range.
-    spec = room_for_open_keys(spec, n)
+    keeping = checks and holds_checks(spec)
+    spec = room_keeping_checks(spec, n) if keeping else room_for_open_keys(spec, n)
 
     # A parent frame is the same frame for every batch, so collect it once.
     # Left as given, a `LazyFrame` reference would be collected inside each
@@ -754,20 +816,32 @@ def batch_stream(
         produced = first.height
 
     blocks = _Blocks(dict(spec.columns), frame_seed, n, batch_size)
-    while produced < n:
-        current = min(n - produced, batch_size)
-        yield _window(
+
+    def read(offset: int, rows: int) -> pl.DataFrame:
+        return _window(
             spec,
-            current,
+            rows,
             frame_seed,
             method="random",
             references=references,
-            row_offset=produced,
+            row_offset=offset,
             parent_keys=parent_keys,
-            pins=pins.window(produced, current) if pins is not None else None,
-            drawn=blocks.window(produced, current),
+            pins=pins.window(offset, rows) if pins is not None else None,
+            # Blocks hold the first `n` rows; kept rows can read past them.
+            drawn=blocks.window(offset, rows) if offset + rows <= n else None,
         )
+
+    # Where the frame has been read to: `produced` while every row passes.
+    cursor = produced
+    while produced < n:
+        current = min(n - produced, batch_size)
+        if keeping:
+            batch, used = kept_window(spec, current, cursor, read)
+        else:
+            batch, used = read(cursor, current), current
+        yield batch
         produced += current
+        cursor += used
 
 
 # The most a block of batch rows holds, in bytes, by `estimated_size`: enough

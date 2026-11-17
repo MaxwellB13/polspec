@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 
 from polspec.bound import Bound
-from polspec.check import Check
+from polspec.checks import Check
 from polspec.constants import DEFAULT_EXTRA_SHARE, DEFAULT_NULL_PROBABILITY
 from polspec.errors import SerializationError, SpecError
 from polspec.expr import from_data as pred_from_data

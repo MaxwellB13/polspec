@@ -11,10 +11,10 @@ import polars as pl
 
 if TYPE_CHECKING:
     from polspec.bound import Bound
-    from polspec.check import Check
+    from polspec.checks import Check
 
 from polspec import frames
-from polspec.check import failure_mask
+from polspec.checks import failure_mask
 from polspec.validation.constraints._base import Constraint, struct_of
 from polspec.validation.report import Finding, FindingCode
 

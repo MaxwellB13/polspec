@@ -165,7 +165,7 @@ type = "forbidden"
 source_modules = [
     "polspec._colspec",
     "polspec.bound",
-    "polspec.check",
+    "polspec.checks",
     "polspec.domain",
     "polspec.expr",
     "polspec.foreign_key",

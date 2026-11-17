@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, Unpack, cast, overload
 import polars as pl
 
 from polspec.catspec import CatSpec
-from polspec.check import Check
+from polspec.checks import Check, DeclaredCheck
 from polspec.errors import SpecError
 from polspec.foreign_key import ForeignKey
 from polspec.hierarchy import Hierarchy
@@ -371,6 +371,15 @@ class _FrameSpecMeta(type):
                 own_columns[attr] = ColSpec(ns.pop(attr))
         declared = ns.pop("__columns__", None)
         checks = _pop_declaration(ns, ("__checks__", "checks"), Check)
+        # `@check` functions, in the order the body declares them.
+        for attr in list(ns):
+            if isinstance(ns[attr], DeclaredCheck):
+                declared_check = ns.pop(attr).as_check(attr)
+                if any(c.name == declared_check.name for c in checks):
+                    raise SpecError(
+                        f"{name} declares two checks named {declared_check.name!r}"
+                    )
+                checks.append(declared_check)
         foreign_keys = _pop_declaration(
             ns, ("__foreign_keys__", "foreign_keys"), ForeignKey
         )
@@ -638,6 +647,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         self_references: int = 0,
         max_bytes: int | None = None,
         fixed: Mapping[str, Any] | None = None,
+        checks: bool = False,
     ) -> pl.DataFrame:
         """Generates a DataFrame matching this spec.
 
@@ -658,6 +668,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             self_references=self_references,
             max_bytes=max_bytes,
             fixed=fixed,
+            checks=checks,
         )
 
     @classmethod
@@ -681,6 +692,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         method: Literal["random", "cartesian"] = "random",
         references: References = None,
         fixed: Mapping[str, Any] | None = None,
+        checks: bool = False,
     ) -> pl.LazyFrame:
         """A `LazyFrame` of `n` rows, generated as they are collected.
 
@@ -712,6 +724,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             method=method,
             references=references,
             fixed=fixed,
+            checks=checks,
         )
 
     @classmethod
@@ -724,6 +737,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         seed: int | None = None,
         references: References = None,
         fixed: Mapping[str, Any] | None = None,
+        checks: bool = False,
     ) -> Iterator[pl.DataFrame]:
         """Yields chunks of generated rows without holding all `n` in memory.
 
@@ -741,6 +755,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             seed=seed,
             references=references,
             fixed=fixed,
+            checks=checks,
         )
 
     # The sink options are spelled out here rather than forwarded as
@@ -761,6 +776,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         seed: int | None = None,
         references: References = None,
         fixed: Mapping[str, Any] | None = None,
+        checks: bool = False,
         **kwargs: Any,
     ) -> None:
         """Generates `n` rows and streams them to a Parquet file in batches.
@@ -779,6 +795,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             seed=seed,
             references=references,
             fixed=fixed,
+            checks=checks,
             **kwargs,
         )
 
@@ -794,6 +811,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         seed: int | None = None,
         references: References = None,
         fixed: Mapping[str, Any] | None = None,
+        checks: bool = False,
         **kwargs: Any,
     ) -> None:
         """Generates `n` rows and streams them to a CSV file in batches.
@@ -812,6 +830,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             seed=seed,
             references=references,
             fixed=fixed,
+            checks=checks,
             **kwargs,
         )
 
@@ -827,6 +846,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         seed: int | None = None,
         references: References = None,
         fixed: Mapping[str, Any] | None = None,
+        checks: bool = False,
         **kwargs: Any,
     ) -> None:
         """Generates `n` rows and streams them to an Arrow IPC file in batches.
@@ -845,6 +865,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             seed=seed,
             references=references,
             fixed=fixed,
+            checks=checks,
             **kwargs,
         )
 
@@ -859,6 +880,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         seed: int | None = None,
         references: References = None,
         fixed: Mapping[str, Any] | None = None,
+        checks: bool = False,
         **kwargs: Any,
     ) -> None:
         """Generates `n` rows and streams them to an NDJSON file in batches.
@@ -876,6 +898,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             seed=seed,
             references=references,
             fixed=fixed,
+            checks=checks,
             **kwargs,
         )
 

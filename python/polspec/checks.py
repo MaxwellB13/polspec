@@ -1,12 +1,14 @@
-"""`Check` -- a claim about a whole row, made across its columns.
+"""`Check` -- a claim about a whole row, made across its columns -- and
+`check`, which declares one as a function on a `FrameSpec` class.
 
 Internal: not part of the public API.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import KW_ONLY, dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, overload
 
 import polars as pl
 
@@ -91,6 +93,99 @@ class Check:
 
     def __hash__(self) -> int:
         return hash((self.name, str(self.expr), self.description, self.ignore_nulls))
+
+
+@dataclass(frozen=True, slots=True)
+class DeclaredCheck:
+    """A function `@check` marked in a `FrameSpec` class body, waiting for
+    the class to be built: it becomes a `Check` named after the function.
+    Not callable, so nothing mistakes it for a method."""
+
+    function: Callable[[], pl.Expr | Pred]
+    name: str | None
+    description: str | None
+    ignore_nulls: bool
+
+    def as_check(self, attr: str) -> Check:
+        """The `Check` this declares, named `name` or else `attr`."""
+        expr = self.function()
+        if not isinstance(expr, (pl.Expr, Pred)):
+            raise SpecError(
+                f"@check {attr}() must return a polars Expr or a polspec "
+                f"predicate (built with col()), got {type(expr).__name__}"
+            )
+        return Check(
+            expr,
+            name=self.name or attr,
+            description=self.description,
+            ignore_nulls=self.ignore_nulls,
+        )
+
+
+type _CheckFunction = Callable[[], pl.Expr | Pred]
+
+
+@overload
+def check(function: _CheckFunction, /) -> DeclaredCheck: ...
+
+
+@overload
+def check(
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    ignore_nulls: bool = True,
+) -> Callable[[_CheckFunction], DeclaredCheck]: ...
+
+
+def check(
+    function: _CheckFunction | None = None,
+    /,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    ignore_nulls: bool = True,
+) -> DeclaredCheck | Callable[[_CheckFunction], DeclaredCheck]:
+    """Declares a function in a `FrameSpec` class body as one of its checks,
+    named after the function. *Added in 1.7.*
+
+    The function takes no arguments and returns the condition each row must
+    satisfy: a Polars expression, or a predicate built with `polspec.col()`,
+    which a spec file can hold. It is called once, when the class is built,
+    and the check joins `__checks__` after any listed there, in the order
+    the functions are declared. The function's name does not stay on the
+    class: the check is `Orders.spec.checks`.
+
+    Parameters
+    ----------
+    function : callable, optional
+        The function, when `@check` is used bare.
+    name : str, optional
+        The check's name, when it should not be the function's.
+    description : str, optional
+        What the check means, for a reader: `to_markdown` shows it.
+    ignore_nulls : bool, default True
+        As `Check` takes it: a row whose condition is null passes.
+
+    Examples
+    --------
+    >>> class Orders(FrameSpec):
+    ...     subtotal = ColSpec(pl.Float64, bounds=(0, 1000))
+    ...     total = ColSpec(pl.Float64, bounds=(0, 1100))
+    ...
+    ...     @check(description="tax never makes a total smaller")
+    ...     def total_gte_subtotal():
+    ...         return pl.col("total") >= pl.col("subtotal")
+    >>> [c.name for c in Orders.spec.checks]
+    ['total_gte_subtotal']
+    """
+
+    def declare(given: _CheckFunction) -> DeclaredCheck:
+        if not callable(given):
+            raise TypeError(f"@check decorates a function, got {type(given).__name__}")
+        return DeclaredCheck(given, name, description, ignore_nulls)
+
+    return declare if function is None else declare(function)
 
 
 def failure_mask(check: Check) -> pl.Expr:
