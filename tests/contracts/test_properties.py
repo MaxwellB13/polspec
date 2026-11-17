@@ -64,7 +64,6 @@ from polspec import (
     to_python,
     validate,
 )
-from polspec.expr import literals
 
 # Polars 2's `Map`; on Polars 1, no dtype is one.
 MAP = getattr(pl, "Map", ())
@@ -752,6 +751,9 @@ def test_the_strategy_reaches_every_kind_of_column():
     } <= seen, sorted(seen)
 
 
+_TYPED_LITERAL = re.compile(r"datetime\.(date|datetime|time|timedelta)\(")
+
+
 def test_the_spec_strategy_reaches_rules_and_checks():
     """Each defect the 0.13.0 review found sat in a gap of the strategy --
     no rules, no checks, no typed literals -- so those are held to it too."""
@@ -768,8 +770,9 @@ def test_the_spec_strategy_reaches_rules_and_checks():
                 seen.add("descending")
         for check in spec.checks:
             seen.add("checks")
-            found = literals(check.pred) if check.pred is not None else []
-            seen.update(type(v).__name__ for v in found)
+            # A predicate's repr writes each literal as Python does:
+            # `datetime.date(2024, 1, 1)`.
+            seen.update(_TYPED_LITERAL.findall(repr(check.pred)))
 
     record()
     reached = {"rules", "checks", "date", "datetime", "time", "timedelta"}

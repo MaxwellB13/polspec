@@ -9,6 +9,7 @@ import math
 
 import polars as pl
 import pytest
+from helpers import run_cli
 from polspec import (
     ColSpec,
     FrameSpec,
@@ -27,12 +28,6 @@ from polspec import (
     to_yaml,
     validate,
 )
-from polspec.cli import main
-
-
-def run_cli(*args: str) -> int:
-    return main(list(args))
-
 
 SPEC = TableSpec(
     "Orders",

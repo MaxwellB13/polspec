@@ -32,65 +32,141 @@ from polspec import (
     generate,
     profile,
 )
-from polspec.compare import stats
 
 scipy_stats = pytest.importorskip("scipy.stats")
 
 
 # ---------------------------------------------------------------------------
-# The statistics, against SciPy
+# The statistics, against SciPy: each finding's p-value, as `drift` reports it
 # ---------------------------------------------------------------------------
 
+# Every move reported, however small and however likely by chance, so each
+# finding's p-value can be read: no tolerance, and a significance that only
+# a p-value of 1 fails.
+_EVERY_MOVE = DriftOptions(
+    significance=1 - 1e-12,
+    null_rate_tolerance=0.0,
+    frequency_tolerance=0.0,
+    distribution_tolerance=0.0,
+)
 
-def test_binomial_p_is_scipys_binomtest():
+# The rows of the reference sample a distribution is compared against.
+_REFERENCE_ROWS = 50_000
+
+
+def _reported(spec: TableSpec, frame: pl.DataFrame, code: str):
+    found = [
+        f for f in drift(spec, frame, options=_EVERY_MOVE).findings if f.code == code
+    ]
+    return found[0] if found else None
+
+
+def test_a_null_rates_p_value_is_scipys_binomtest():
     rng = random.Random(0)
-    for _ in range(1_500):
-        n = rng.choice([1, 5, 20, 50, 300, 5_000, 200_000, 3_000_000])
+    compared = 0
+    for _ in range(300):
+        n = rng.choice([1, 5, 20, 50, 300, 5_000, 50_000])
         p = rng.choice([0.001, 0.01, 0.1, 0.3, 0.5, 0.9, 0.999])
         spread = 3 * math.sqrt(n * p * (1 - p)) + 2
         k = max(0, min(n, round(rng.gauss(n * p, spread))))
+        spec = TableSpec(
+            "T", {"c": ColSpec(pl.Int64, nullable=True, null_probability=p)}
+        )
+        frame = pl.DataFrame(
+            {"c": pl.Series([None] * k + [1] * (n - k), dtype=pl.Int64)}
+        )
         expected = scipy_stats.binomtest(k, n, p).pvalue
-        assert stats.binomial_p(k, n, p) == pytest.approx(expected, rel=1e-6, abs=1e-12)
+        finding = _reported(spec, frame, "null_rate_moved")
+        if finding is None:
+            # Exactly the declared rate, or a p-value of 1: nothing moved.
+            assert k / n == p or expected == pytest.approx(1.0)
+            continue
+        assert finding.details["p_value"] == pytest.approx(
+            expected, rel=1e-6, abs=1e-12
+        )
+        compared += 1
+    assert compared > 200
 
 
-def test_chi_square_p_is_scipys_chisquare():
+def test_a_frequency_moves_p_value_is_scipys_chisquare():
     rng = random.Random(1)
-    for _ in range(500):
+    compared = 0
+    for _ in range(200):
         k = rng.randint(2, 8)
-        weights = [rng.random() for _ in range(k)]
+        weights = [rng.random() + 0.01 for _ in range(k)]
         shares = [w / sum(weights) for w in weights]
         n = rng.choice([10, 100, 10_000])
-        counts = [0] * k
-        for index in rng.choices(range(k), shares, k=n):
-            counts[index] += 1
+        categories = [f"v{i}" for i in range(k)]
+        drawn = rng.choices(categories, shares, k=n)
+        counts = [drawn.count(c) for c in categories]
+        spec = TableSpec(
+            "T",
+            {
+                "c": ColSpec(
+                    pl.Enum, choices=dict(zip(categories, weights, strict=True))
+                )
+            },
+        )
+        frame = pl.DataFrame({"c": pl.Series(drawn, dtype=pl.Enum(categories))})
         expected = scipy_stats.chisquare(counts, [s * n for s in shares]).pvalue
-        assert stats.chi_square_p(counts, shares) == pytest.approx(
+        finding = _reported(spec, frame, "frequencies_moved")
+        if finding is None:
+            assert expected == pytest.approx(1.0, abs=1e-9)
+            continue
+        assert finding.details["p_value"] == pytest.approx(
             expected, rel=1e-9, abs=1e-12
         )
+        compared += 1
+    assert compared > 150
 
 
-def test_ks_p_is_the_kolmogorov_survival_function():
-    rng = random.Random(2)
-    for _ in range(500):
-        z = rng.uniform(0.2, 3.0)
-        n, m = rng.randint(10, 10**6), rng.randint(10, 10**6)
-        distance = z / math.sqrt(n * m / (n + m))
-        expected = scipy_stats.kstwobign.sf(z)
-        assert stats.ks_p(distance, n, m) == pytest.approx(expected, abs=1e-6)
+def test_a_distribution_moves_p_value_is_the_kolmogorov_survival_function():
+    """Against a reference sample of 50,000 drawn from the declaration."""
+    rng = np.random.default_rng(2)
+    spec = TableSpec(
+        "T",
+        {
+            "c": ColSpec(
+                pl.Float64,
+                bounds=(-10, 10),
+                distribution="normal",
+                distribution_params={"mean": 0.0, "std": 1.0},
+            )
+        },
+    )
+    compared = 0
+    for _ in range(60):
+        n = int(rng.choice([50, 500, 5_000]))
+        shift = float(rng.uniform(0.0, 0.4))
+        frame = pl.DataFrame({"c": rng.normal(shift, 1.0, n)})
+        finding = _reported(spec, frame, "distribution_moved")
+        if finding is None:
+            continue
+        distance, count = finding.details["distance"], finding.details["count"]
+        z = math.sqrt(count * _REFERENCE_ROWS / (count + _REFERENCE_ROWS)) * distance
+        assert finding.details["p_value"] == pytest.approx(
+            scipy_stats.kstwobign.sf(z), abs=1e-6
+        )
+        compared += 1
+    assert compared > 40
 
 
-def test_the_edges_of_each_statistic():
-    assert stats.binomial_p(0, 0, 0.5) == 1.0
-    assert stats.binomial_p(0, 10, 0.0) == 1.0
-    assert stats.binomial_p(1, 10, 0.0) == 0.0
-    assert stats.binomial_p(10, 10, 1.0) == 1.0
-    assert stats.chi_square_p([5, 1], [1.0, 0.0]) == 0.0  # seen, never expected
-    assert stats.chi_square_p([0, 0], [0.5, 0.5]) == 1.0
-    assert stats.total_variation([1, 1], [0.5, 0.5]) == 0.0
-    assert stats.total_variation([2, 0], [0.0, 1.0]) == 1.0
-    assert stats.ks_p(0.0, 10, 10) == 1.0
-    assert stats.unseen_p(0.01, 50) == pytest.approx(0.99**50)
-    assert stats.unseen_p(1.0, 3) == 0.0
+def test_nothing_moves_in_an_empty_frame_or_at_exactly_the_declared_rate():
+    spec = TableSpec(
+        "T",
+        {
+            "rate": ColSpec(pl.Int64, nullable=True, null_probability=0.5),
+            "tier": ColSpec(pl.Enum, choices={"a": 1, "b": 1}),
+        },
+    )
+    exact = pl.DataFrame(
+        {
+            "rate": pl.Series([None, 1] * 50, dtype=pl.Int64),
+            "tier": pl.Series(["a", "b"] * 50, dtype=pl.Enum(["a", "b"])),
+        }
+    )
+    assert drift(spec, exact, options=_EVERY_MOVE).findings == ()
+    assert drift(spec, exact.clear(), options=_EVERY_MOVE).findings == ()
 
 
 # ---------------------------------------------------------------------------

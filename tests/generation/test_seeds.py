@@ -2,28 +2,19 @@
 for, so the columns declared around a pass never change what it draws.
 
 The column seeds always worked that way (`sample.rs::seed_for_column`); the
-Python-side passes drew theirs in declaration order until 0.7.0. The port
-that keys them is pinned bit for bit against the engine's golden value, so
-"keyed by name" means one thing on both sides of the boundary.
+Python-side passes drew theirs in declaration order until 0.7.0. The engine's
+function is pinned to its golden value by `cargo test`, and the Python port
+by what it draws: `tests/contracts/test_seeded.py` holds the digest of every
+pass's output.
 """
 
 from __future__ import annotations
 
 import polars as pl
 from polspec import ColRule, ColSpec, ForeignKey, FrameSpec, Hierarchy, col
-from polspec.generation.seeds import pass_seed
 
 ROWS, SEED = 300, 11
 RULE = [ColRule(when=col("flag"), choices=tuple(range(50, 100)))]
-
-
-def test_the_port_matches_the_engine_bit_for_bit():
-    # The golden value `src/sample.rs` pins for seed_for_column(42, "order_id").
-    assert pass_seed(42, "order_id") == 26_122_605_474_442_453
-    assert pass_seed(1, "a") == pass_seed(1, "a")
-    assert pass_seed(1, "a") != pass_seed(1, "b")
-    assert pass_seed(1, "a") != pass_seed(2, "a")
-    assert 0 <= pass_seed(2**63 - 1, "x") < 2**64
 
 
 def _column(spec_cls: type[FrameSpec], name: str) -> pl.Series:

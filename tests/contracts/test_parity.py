@@ -1,9 +1,12 @@
-"""Every field has its entry everywhere a field must be known.
+"""Every field and option reaches everywhere it must, held by what it does.
 
-A field added to `ColSpec` (or `TableSpec`, `Check`, `ForeignKey`, `ColRule`)
-has to reach the serialization registry, the drift comparators, the typed
-`__init__` type checkers read, and -- for an option -- the facade's spelled-out
-signatures. Each test here fails, naming what is missing, until it has.
+A field added to `ColSpec` (or `TableSpec`, `Check`, `ColRule`, `ForeignKey`,
+`Hierarchy`) has to survive a spec file and be reported by `diff` when it
+changes, and the typed `__init__` type checkers read has to name it. An
+option added to validation, drift or profiling has to reach every entry point
+that takes it, and the command line. Each test here fails, naming what is
+missing, until it has -- and each asks the public interface, not the tables
+behind it.
 """
 
 from __future__ import annotations
@@ -11,69 +14,91 @@ from __future__ import annotations
 import ast
 import dataclasses
 import inspect
+import json
+import re
 import textwrap
 
+import numpy as np
 import polars as pl
+import polspec
 import pytest
+import yaml
+from field_examples import COLUMN_FIELDS, TABLE_FIELDS, with_column
 from polspec import (
     Check,
-    ColRule,
     ColSpec,
+    DriftOptions,
     ForeignKey,
     FrameSpec,
+    ProfileOptions,
     TableSpec,
+    ValidationOptions,
 )
-from polspec.compare.fields import FIELD_COMPARATORS, TABLE_COMPARATORS
-from polspec.serialization.fields import (
-    CHECK_FIELDS,
-    COLRULE_FIELDS,
-    COLSPEC_FIELDS,
-    FK_FIELDS,
-    TABLESPEC_FIELDS,
-)
+from polspec.cli import main
 
 # ---------------------------------------------------------------------------
-# One registry entry per dataclass field
+# Every field survives a spec file, and `diff` reports a change to it
 # ---------------------------------------------------------------------------
 
-# Fields the registry deliberately covers under another key, or derives.
-_DERIVED = {
-    Check: {"expr"}
-}  # `expr` is derived from `pred`; the registry writes `pred` as `expr`
+# A spec's name is what it is called, not what it says: `diff` compares
+# what two specs declare, whatever each is named.
+_NOT_A_DIFFERENCE = {(TableSpec, "name")}
+
+
+def _constructed(cls: type) -> set[str]:
+    """The fields a caller gives: one filled in from another is not."""
+    return {f.name for f in dataclasses.fields(cls) if f.init}
+
+
+def _through_a_file(spec: TableSpec, tmp_path) -> TableSpec:
+    path = tmp_path / f"{spec.name}.yaml"
+    polspec.to_yaml(spec, path)
+    return polspec.from_yaml(path)
+
+
+def test_every_column_field_has_an_example():
+    assert set(COLUMN_FIELDS) | {"col_name"} == _constructed(ColSpec)
+
+
+@pytest.mark.parametrize("cls", list(TABLE_FIELDS), ids=lambda c: c.__name__)
+def test_every_table_field_has_an_example(cls):
+    assert set(TABLE_FIELDS[cls]) == _constructed(cls)
+
+
+@pytest.mark.parametrize("field", sorted(COLUMN_FIELDS))
+def test_every_column_field_survives_a_file_and_is_diffed(field, tmp_path):
+    without, with_it = (with_column(c) for c in COLUMN_FIELDS[field])
+    assert _through_a_file(with_it, tmp_path) == with_it
+    assert polspec.diff(without, with_it).findings, field
 
 
 @pytest.mark.parametrize(
-    "cls, fields",
-    [
-        (ColSpec, COLSPEC_FIELDS),
-        (ColRule, COLRULE_FIELDS),
-        (Check, CHECK_FIELDS),
-        (ForeignKey, FK_FIELDS),
-        (TableSpec, TABLESPEC_FIELDS),
-    ],
-    ids=lambda x: getattr(x, "__name__", ""),
+    ("cls", "field"),
+    [(cls, field) for cls, fields in TABLE_FIELDS.items() for field in sorted(fields)],
+    ids=lambda x: getattr(x, "__name__", x),
 )
-def test_every_dataclass_field_has_a_registry_entry(cls, fields):
-    declared = {f.name for f in dataclasses.fields(cls)} - _DERIVED.get(cls, set())
-    registered = {f.attribute for f in fields}
-    assert registered == declared, (
-        f"{cls.__name__}: registry and dataclass disagree. "
-        f"Missing from registry: {declared - registered}; "
-        f"registry-only: {registered - declared}"
-    )
+def test_every_table_field_survives_a_file_and_is_diffed(cls, field, tmp_path):
+    without, with_it = TABLE_FIELDS[cls][field]
+    assert _through_a_file(with_it, tmp_path) == with_it
+    if (cls, field) not in _NOT_A_DIFFERENCE:
+        assert polspec.diff(without, with_it).findings, (cls.__name__, field)
 
 
-# ---------------------------------------------------------------------------
-# Completeness
-# ---------------------------------------------------------------------------
+def test_a_column_name_unlike_its_attribute_survives_a_file_and_is_diffed(tmp_path):
+    """`col_name` is a class body's: the attribute a column is reached by,
+    beside the name it has in the data."""
 
+    class Priced(FrameSpec):
+        unit_price = ColSpec(pl.Float64, col_name="Unit Price")
 
-def test_every_colspec_field_has_a_comparator():
-    assert set(FIELD_COMPARATORS) == {f.name for f in dataclasses.fields(ColSpec)}
+    class Renamed(FrameSpec):
+        unit_price = ColSpec(pl.Float64, col_name="Price")
 
-
-def test_every_tablespec_field_has_a_comparator():
-    assert set(TABLE_COMPARATORS) == {f.name for f in dataclasses.fields(TableSpec)}
+    # A file holds the column by the name it has in the data, which is
+    # what `col_name` says; the attribute is the class body's alone.
+    assert list(Priced.spec.columns) == ["Unit Price"]
+    assert list(_through_a_file(Priced.spec, tmp_path).columns) == ["Unit Price"]
+    assert polspec.diff(Priced, Renamed).findings
 
 
 # ---------------------------------------------------------------------------
@@ -125,71 +150,74 @@ def test_the_declared_constructor_matches_the_fields(cls):
     ]
 
 
-def test_the_facade_names_exactly_the_options_the_function_accepts():
-    """One list of options, on `ValidationOptions`; `ValidationKeywords` is
-    its typed copy, which `validate`, `inspect` and the `FrameSpec` facades
-    take as `**keywords` -- and this keeps the copy honest."""
-    from inspect import Parameter, signature
-
-    from polspec.validation import _ACCEPTED_OPTIONS, ValidationKeywords
-
-    assert set(ValidationKeywords.__annotations__) == set(_ACCEPTED_OPTIONS)
-    for verb in (FrameSpec.inspect, FrameSpec.validate):
-        params = signature(verb).parameters
-        assert [p.kind for p in params.values()][-1] is Parameter.VAR_KEYWORD
-        named = {n for n, p in params.items() if p.kind is not Parameter.VAR_KEYWORD}
-        assert named == {"df", "options", "references"}, verb.__name__
+# ---------------------------------------------------------------------------
+# Every option, as a typed keyword, wherever it is taken
+# ---------------------------------------------------------------------------
 
 
-def test_every_entry_point_takes_every_option_as_a_typed_keyword():
-    """`ValidationKeywords` and `DriftKeywords` are their options' fields,
-    typed; and every function, facade and registry method that validates
-    or measures drift takes `options=` or those keywords. Until 0.23
-    `FrameSpec.drift` named four of the seven drift options."""
-    from inspect import Parameter, signature
+def _keywords(function) -> set[str]:
+    """The names `function` takes as `**keywords`, read from its
+    `Unpack[...]` annotation: the typed copy of an options class. The name
+    is looked up where the public verbs of each kind are defined, since a
+    facade may import it for type checkers alone."""
+    last = list(inspect.signature(function).parameters.values())[-1]
+    assert last.kind is inspect.Parameter.VAR_KEYWORD, function.__qualname__
+    found = re.search(r"Unpack\[(\w+)\]", str(last.annotation))
+    assert found, (function.__qualname__, last.annotation)
+    homes = (function, polspec.inspect, polspec.drift, polspec.profile)
+    typed = next(h.__globals__[found[1]] for h in homes if found[1] in h.__globals__)
+    return set(typed.__annotations__)
 
-    import polspec
-    from polspec import DriftOptions, Registry, ValidationOptions
-    from polspec.compare import DriftKeywords
-    from polspec.validation import ValidationKeywords
 
-    for options, keywords in (
-        (ValidationOptions, ValidationKeywords),
-        (DriftOptions, DriftKeywords),
-    ):
-        assert set(keywords.__annotations__) == {
-            f.name for f in dataclasses.fields(options)
-        }, keywords.__name__
-    verbs = {
-        ValidationKeywords: (
-            polspec.validate,
-            polspec.inspect,
-            FrameSpec.validate,
-            FrameSpec.inspect,
-            Registry.inspect_all,
-            Registry.validate_all,
+def _fields(cls: type) -> set[str]:
+    return {f.name for f in dataclasses.fields(cls)}
+
+
+@pytest.mark.parametrize(
+    ("options", "functions"),
+    [
+        (
+            ValidationOptions,
+            (
+                polspec.validate,
+                polspec.inspect,
+                FrameSpec.validate,
+                FrameSpec.inspect,
+                polspec.Registry.inspect_all,
+                polspec.Registry.validate_all,
+            ),
         ),
-        DriftKeywords: (polspec.drift, polspec.diff, FrameSpec.drift, FrameSpec.diff),
-    }
-    for keywords, functions in verbs.items():
-        for verb in functions:
-            params = signature(verb).parameters
-            assert "options" in params, verb.__qualname__
-            last = list(params.values())[-1]
-            assert last.kind is Parameter.VAR_KEYWORD, verb.__qualname__
-            # The annotation as written: `Unpack[ValidationKeywords]`.
-            assert keywords.__name__ in str(last.annotation), verb.__qualname__
+        (
+            DriftOptions,
+            (polspec.drift, polspec.diff, FrameSpec.drift, FrameSpec.diff),
+        ),
+        (ProfileOptions, (polspec.profile, polspec.profile_all)),
+    ],
+    ids=lambda x: getattr(x, "__name__", ""),
+)
+def test_every_entry_point_takes_every_option_as_a_typed_keyword(options, functions):
+    """Until 0.23 `FrameSpec.drift` named four of the seven drift options."""
+    for function in functions:
+        assert "options" in inspect.signature(function).parameters, (
+            function.__qualname__
+        )
+        assert _keywords(function) == _fields(options), function.__qualname__
 
 
-def test_the_profiling_keywords_are_its_options():
-    """`ProfileKeywords` -- and `SynthesizeKeywords`, which leaves `seed` to
-    `synthesize` -- are `ProfileOptions`' fields, typed."""
-    from polspec import ProfileOptions
-    from polspec.profiler import ProfileKeywords, SynthesizeKeywords
+def test_synthesize_takes_every_profiling_option_but_the_seed_it_takes_itself():
+    for function in (polspec.synthesize, polspec.synthesize_all):
+        assert _keywords(function) == _fields(ProfileOptions) - {"seed"}
+        assert "seed" in inspect.signature(function).parameters
 
-    fields = {f.name for f in dataclasses.fields(ProfileOptions)}
-    assert set(ProfileKeywords.__annotations__) == fields
-    assert set(SynthesizeKeywords.__annotations__) == fields - {"seed"}
+
+def test_the_validation_facades_name_only_the_frame_options_and_parents():
+    """Every other option arrives as a typed keyword, so it is named once."""
+    for verb in (FrameSpec.inspect, FrameSpec.validate):
+        params = inspect.signature(verb).parameters
+        named = {
+            n for n, p in params.items() if p.kind is not inspect.Parameter.VAR_KEYWORD
+        }
+        assert named == {"df", "options", "references"}, verb.__name__
 
 
 # ---------------------------------------------------------------------------
@@ -305,42 +333,117 @@ def test_a_class_that_is_not_a_spec_is_refused_by_name():
 
 
 # ---------------------------------------------------------------------------
-# `polspec drift` sets every DriftOptions field
+# `polspec drift` sets every DriftOptions field: each flag changes the report
 # ---------------------------------------------------------------------------
 
-# Each field, the flags that set it, and the value they set it to -- never the
-# default, so the test sees the flag reach the option.
+_ROWS = 2_000
+
+
+def _drifting(tmp_path):
+    """A spec, and a file that has moved from it every way drift can see."""
+    rng = np.random.default_rng(3)
+    spec = TableSpec(
+        "Feed",
+        {
+            "rate": ColSpec(pl.Int64, nullable=True, null_probability=0.1),
+            "mild": ColSpec(pl.Int64, nullable=True, null_probability=0.1),
+            "tier": ColSpec(pl.String, choices={"a": 1, "b": 1, "c": 1}),
+            "amount": ColSpec(
+                pl.Float64,
+                bounds=(-10, 10),
+                distribution="normal",
+                distribution_params={"mean": 0.0, "std": 1.0},
+            ),
+            "code": ColSpec(pl.String, choices=["x", "y"]),
+            "small": ColSpec(pl.Int64),
+        },
+    )
+    frame = pl.DataFrame(
+        {
+            # 30% null for a declared 10%; and 12%, which only a looser
+            # significance reports.
+            "rate": pl.Series(
+                [None if i % 10 < 3 else 1 for i in range(_ROWS)], dtype=pl.Int64
+            ),
+            "mild": pl.Series(
+                [None if i % 25 < 3 else 1 for i in range(_ROWS)], dtype=pl.Int64
+            ),
+            "tier": ["a" if i % 5 else "b" for i in range(_ROWS)],  # never "c"
+            "amount": rng.normal(1.0, 1.0, _ROWS),
+            "code": [f"n{i % 12}" if i % 2 else "x" for i in range(_ROWS)],
+            "small": pl.Series([1] * _ROWS, dtype=pl.Int32),
+        }
+    )
+    spec_path, data = tmp_path / "feed.yaml", tmp_path / "feed.parquet"
+    polspec.to_yaml(spec, spec_path)
+    frame.write_parquet(data)
+    return str(spec_path), str(data)
+
+
+def _found(report: dict) -> set[tuple[str, str]]:
+    return {(f["code"], f["columns"][0]) for f in report["findings"]}
+
+
+# Each DriftOptions field, the flags that set it, and what they change in the
+# report of `_drifting`'s file: a field with no entry fails the test.
 _DRIFT_FLAGS = {
-    "significance": (["--significance", "0.05"], 0.05),
-    "null_rate_tolerance": (["--null-rate-tolerance", "0.2"], 0.2),
-    "frequency_tolerance": (["--frequency-tolerance", "0.2"], 0.2),
-    "distribution_tolerance": (["--distribution-tolerance", "0.2"], 0.2),
-    "unseen_values": (["--no-unseen"], False),
-    "strict_dtypes": (["--strict-dtypes"], True),
-    "max_samples": (["--max-samples", "3"], 3),
+    "significance": (
+        ["--significance", "0.05", "--null-rate-tolerance", "0"],
+        lambda r: ("null_rate_moved", "mild") in _found(r),
+    ),
+    "null_rate_tolerance": (
+        ["--null-rate-tolerance", "0.5"],
+        lambda r: ("null_rate_moved", "rate") not in _found(r),
+    ),
+    "frequency_tolerance": (
+        ["--frequency-tolerance", "0.9"],
+        lambda r: ("frequencies_moved", "tier") not in _found(r),
+    ),
+    "distribution_tolerance": (
+        ["--distribution-tolerance", "0.9"],
+        lambda r: ("distribution_moved", "amount") not in _found(r),
+    ),
+    "unseen_values": (
+        ["--no-unseen"],
+        lambda r: ("cardinality_moved", "tier") not in _found(r),
+    ),
+    "strict_dtypes": (
+        ["--strict-dtypes"],
+        lambda r: ("dtype_changed", "small") in _found(r),
+    ),
+    "max_samples": (
+        ["--max-samples", "2"],
+        lambda r: (
+            [
+                len(f["details"]["values"])
+                for f in r["findings"]
+                if f["code"] == "new_values"
+            ]
+            == [2]
+        ),
+    ),
 }
 
 
-def test_every_drift_option_has_a_flag():
-    """0.14.0 added three drift options and no flags for them; this is what
-    holds the command to the options from now on."""
-    from polspec import DriftOptions
-    from polspec.cli import _build_parser
-    from polspec.cli._drift import _drift_options
+def _drift_report(capsys, files, *flags: str) -> dict:
+    main(["drift", *files, "--json", *flags])
+    return json.loads(capsys.readouterr().out)
 
-    assert set(_DRIFT_FLAGS) == {f.name for f in dataclasses.fields(DriftOptions)}
-    parser = _build_parser()
-    defaults = _drift_options(parser.parse_args(["drift", "spec.yaml", "data.csv"]))
-    assert defaults == DriftOptions()
-    for name, (flags, value) in _DRIFT_FLAGS.items():
-        assert value != getattr(DriftOptions(), name), name
-        args = parser.parse_args(["drift", "spec.yaml", "data.csv", *flags])
-        assert getattr(_drift_options(args), name) == value, name
+
+def test_every_drift_option_has_a_flag():
+    """0.14.0 added three drift options and no flags for them."""
+    assert set(_DRIFT_FLAGS) == _fields(DriftOptions)
+
+
+@pytest.mark.parametrize("option", sorted(_DRIFT_FLAGS))
+def test_each_drift_flag_changes_the_report(option, tmp_path, capsys):
+    files = _drifting(tmp_path)
+    flags, changed = _DRIFT_FLAGS[option]
+    assert not changed(_drift_report(capsys, files)), "the default already shows it"
+    assert changed(_drift_report(capsys, files, *flags)), option
 
 
 def test_a_drift_option_out_of_range_is_a_cli_error(tmp_path, capsys):
-    from polspec.cli import main
-
     spec, data = tmp_path / "s.yaml", tmp_path / "d.csv"
     spec.write_text(
         "version: 4\nname: S\ncolumns:\n  a: {dtype: Int64}\n", encoding="utf-8"
@@ -351,58 +454,126 @@ def test_a_drift_option_out_of_range_is_a_cli_error(tmp_path, capsys):
 
 
 # ---------------------------------------------------------------------------
-# `polspec schema infer` and `synthesize` set the profiling options
+# `schema infer` and `synthesize` set the profiling options: each flag
+# changes the spec written
 # ---------------------------------------------------------------------------
 
-# Each ProfileOptions field but `seed`, the flags that set it, and the value
-# they set it to -- never `schema infer`'s default, so the test sees the
-# flag reach the option.
+
+def _profiled_source(tmp_path) -> str:
+    """A file with a column to show each profiling option's effect."""
+    rng = np.random.default_rng(4)
+    n = 200
+    frame = pl.DataFrame(
+        {
+            "id": range(1, n + 1),
+            "status": ["NEW" if i % 3 else "PAID" for i in range(n)],
+            "email": [f"user{i}@example.com" for i in range(n)],
+            "ref": [f"ORD-{i:06d}" for i in range(n)],
+            "amount": [
+                None if i % 8 == 0 else float(v)
+                for i, v in enumerate(rng.lognormal(3, 0.5, n))
+            ],
+            "text": [f"{i}.5" for i in range(n)],
+        }
+    )
+    path = tmp_path / "source.parquet"
+    frame.write_parquet(path)
+    return str(path)
+
+
+def _status_is_an_enum(spec: dict) -> bool:
+    return not isinstance(spec["columns"]["status"]["dtype"], str)
+
+
+# Each ProfileOptions field but `seed`, the flags that set it, and what they
+# change in the spec written for `_profiled_source`'s file.
 _PROFILE_FLAGS = {
-    "replace": (["--replace", "a", "b"], ("a", "b")),
-    "sample": (["--sample", "7"], 7),
-    "max_unique_enum": (["--max-unique-enum", "3"], 3),
-    "formats": (["--no-formats"], False),
-    "patterns": (["--no-patterns"], False),
-    "weights": (["--weights"], True),
-    "shape": (["--shape"], True),
-    "detect_unique": (["--keys"], True),
-    "calculate_bounds": (["--no-bounds"], False),
-    "detect_order": (["--order"], True),
-    "round_bounds": (["--round-bounds", "1k"], 1000),
-    "round_rates": (["--round-rates", "exact"], None),
-    "parse_text": (["--parse-text"], True),
+    "weights": (["--weights"], lambda s: "weights" in s["columns"]["status"]),
+    "max_unique_enum": (
+        ["--max-unique-enum", "1"],
+        lambda s: not _status_is_an_enum(s),
+    ),
+    "formats": (["--no-formats"], lambda s: "format" not in s["columns"]["email"]),
+    "patterns": (["--no-patterns"], lambda s: "pattern" not in s["columns"]["ref"]),
+    "parse_text": (
+        ["--parse-text"],
+        lambda s: s["columns"]["text"]["dtype"] == "Float64",
+    ),
+    "calculate_bounds": (["--no-bounds"], lambda s: "bounds" not in s["columns"]["id"]),
+    "sample": (["--sample", "20"], lambda s: s["columns"]["id"]["bounds"][1] < 200),
+    "shape": (["--shape"], lambda s: "distribution" in s["columns"]["amount"]),
+    "detect_unique": (["--keys"], lambda s: s["columns"]["id"].get("unique") is True),
+    "detect_order": (["--order"], lambda s: s.get("order_by") == ["id"]),
+    "round_bounds": (
+        ["--round-bounds", "exact"],
+        lambda s: s["columns"]["id"]["bounds"][0] == 1,
+    ),
+    "round_rates": (
+        ["--round-rates", "exact"],
+        lambda s: s["columns"]["amount"]["null_probability"] == 0.125,
+    ),
+    "replace": (["--replace", "status"], lambda s: not _status_is_an_enum(s)),
 }
 
-# What `synthesize` profiles with: the source imitated as it stands.
+# What `synthesize` profiles with: the source imitated as it stands, so no
+# option that would describe it less than whole.
 _SYNTHESIZE_FLAGS = (
-    "replace",
-    "sample",
     "max_unique_enum",
     "formats",
     "patterns",
     "parse_text",
+    "sample",
+    "replace",
 )
+
+
+def _written_spec(tmp_path, command: str, source: str, *flags: str) -> dict:
+    out = tmp_path / "spec.yaml"
+    if command == "schema infer":
+        args = ["schema", "infer", source, "-o", str(out)]
+    else:
+        fake = tmp_path / "fake.parquet"
+        args = [
+            "synthesize",
+            source,
+            "-o",
+            str(fake),
+            "-n",
+            "50",
+            "--seed",
+            "1",
+            "--spec",
+            str(out),
+        ]
+    assert main([*args, *flags]) == 0
+    return yaml.safe_load(out.read_text(encoding="utf-8"))
 
 
 def test_every_profiling_option_has_a_flag():
     """Until 1.7 the same option list was written out four times across the
-    two commands; this holds the commands to `ProfileOptions` instead."""
-    from polspec import ProfileOptions
-    from polspec.cli import _build_parser
-    from polspec.cli._profiling import profile_keywords
+    two commands."""
+    assert set(_PROFILE_FLAGS) == _fields(ProfileOptions) - {"seed"}
 
-    fields = {f.name for f in dataclasses.fields(ProfileOptions)}
-    assert set(_PROFILE_FLAGS) == fields - {"seed"}
-    parser = _build_parser()
-    commands = {
-        ("schema", "infer", "data.csv", "-o", "s.yaml"): set(_PROFILE_FLAGS),
-        ("synthesize", "data.csv", "-o", "fake.csv"): set(_SYNTHESIZE_FLAGS),
-    }
-    for command, options in commands.items():
-        assert set(profile_keywords(parser.parse_args(command))) == options, command
-        for name in options:
-            flags, value = _PROFILE_FLAGS[name]
-            got = ProfileOptions(
-                **profile_keywords(parser.parse_args([*command, *flags]))
-            )
-            assert getattr(got, name) == value, (command[0], name)
+
+@pytest.mark.parametrize(
+    ("command", "option"),
+    [("schema infer", option) for option in sorted(_PROFILE_FLAGS)]
+    + [("synthesize", option) for option in _SYNTHESIZE_FLAGS],
+)
+def test_each_profiling_flag_changes_the_spec_written(command, option, tmp_path):
+    source = _profiled_source(tmp_path)
+    flags, changed = _PROFILE_FLAGS[option]
+    assert not changed(_written_spec(tmp_path, command, source)), (
+        "the default already shows it"
+    )
+    assert changed(_written_spec(tmp_path, command, source, *flags)), (command, option)
+
+
+@pytest.mark.parametrize("option", sorted(set(_PROFILE_FLAGS) - set(_SYNTHESIZE_FLAGS)))
+def test_synthesize_refuses_the_flags_that_only_describe(option, capsys):
+    """They describe a source less than whole, which a stand-in for it must
+    not be."""
+    flags, _ = _PROFILE_FLAGS[option]
+    with pytest.raises(SystemExit):
+        main(["synthesize", "x.csv", "-o", "y.csv", *flags])
+    assert "unrecognized arguments" in capsys.readouterr().err

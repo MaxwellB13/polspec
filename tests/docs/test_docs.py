@@ -8,6 +8,7 @@ example carries the format version `to_yaml()` writes today, and the files a
 language model reads are the ones the current docs produce.
 """
 
+import dataclasses
 import importlib.util
 import inspect
 import re
@@ -15,8 +16,11 @@ import tomllib
 import typing
 from pathlib import Path
 
+import polars as pl
 import polspec
-from polspec import FORMAT_VERSION
+import yaml
+from field_examples import COLUMN_FIELDS, TABLE_FIELDS, with_column
+from polspec import FORMAT_VERSION, ColSpec, TableSpec
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCS = ROOT / "docs"
@@ -324,76 +328,103 @@ def _first_column(page: Path, heading: str) -> list[str]:
     return [m.group(1) for m in TABLE_KEY.finditer(_section(page, heading))]
 
 
+def _written(spec) -> dict:
+    """What a spec file holds for `spec`, as data."""
+    return yaml.safe_load(polspec.to_yaml(spec))
+
+
+def _keys_within(found: dict[str, set[str]], data: dict) -> None:
+    """Each kind of mapping a spec file holds, and the keys it uses."""
+    found["## A spec file"] |= set(data)
+    for column in data.get("columns", {}).values():
+        found["### A column"] |= set(column)
+        for rule in column.get("rules", ()):
+            found["### A rule"] |= set(rule)
+        for validator in column.get("validators", ()):
+            found["### A check or validator"] |= set(validator)
+    for check in data.get("checks", ()):
+        found["### A check or validator"] |= set(check)
+    for key in data.get("foreign_keys", ()):
+        found["### A foreign key"] |= set(key)
+    if "hierarchy" in data:
+        found["### A hierarchy"] |= set(data["hierarchy"])
+
+
 def test_the_colspec_field_reference_has_a_row_per_field():
     """One row per `ColSpec` field, in declaration order, each with the key
-    a spec file writes it under."""
-    import dataclasses
-
-    from polspec import ColSpec
-    from polspec.serialization.fields import COLSPEC_FIELDS
-
+    a spec file writes it under -- the key the field's example adds."""
     rows = TABLE_KEY.findall(
         (REFERENCE / "colspec-fields.md").read_text(encoding="utf-8")
     )
     assert [field for field, _ in rows] == [f.name for f in dataclasses.fields(ColSpec)]
-    file_key = {f.attribute: f.name for f in COLSPEC_FIELDS}
-    assert dict(rows) == file_key
+    for field, key in rows:
+        if field == "col_name":
+            continue  # a class body's: the file holds the column by that name
+        without, with_it = (
+            _written(with_column(c))["columns"]["c"] for c in COLUMN_FIELDS[field]
+        )
+        added = set(with_it) - set(without) or set(with_it)
+        assert key in added, (field, key, sorted(added))
 
 
-def test_the_spec_file_reference_names_every_key_the_reader_takes():
-    """Each table on the page is the reader's own list of keys for that
-    kind of mapping -- no more, no fewer."""
-    from polspec.serialization import __dict__ as serialization
-    from polspec.serialization import fields
-    from polspec.serialization.fields import (
-        CHECK_FIELDS,
-        COLRULE_FIELDS,
-        COLSPEC_FIELDS,
-        FK_FIELDS,
-        TABLESPEC_FIELDS,
+def test_the_spec_file_reference_names_every_key_a_file_holds():
+    """Each table on the page is the keys a file holds for that kind of
+    mapping, no more and no fewer: every field's example is written, and
+    the keys each kind of mapping uses are the page's."""
+    from collections import defaultdict
+
+    found: dict[str, set[str]] = defaultdict(set)
+    for pair in COLUMN_FIELDS.values():
+        for column in pair:
+            _keys_within(found, _written(with_column(column)))
+    for fields in TABLE_FIELDS.values():
+        for pair in fields.values():
+            for spec in pair:
+                _keys_within(found, _written(spec))
+    categories = polspec.CatSpec(
+        enums={"STATE": ["A", "B"]},
+        categoricals={"CODE": pl.Categories("CODE", physical=pl.UInt8)},
+        choices={"SIZE": [1, 2, 3]},
     )
+    # A spec whose Enum columns are named categories carries them.
+    named = TableSpec("Named", {"state": ColSpec(pl.Enum(["A", "B"]))})
+    _keys_within(found, _written(named.with_catspec(categories)))
+    found["## A category registry"] = set(yaml.safe_load(categories.to_yaml()))
+    registry = polspec.Registry(
+        TableSpec("One", {"a": ColSpec(pl.Int64)}), categories=categories
+    )
+    found["## A registry of specs"] = set(yaml.safe_load(registry.to_yaml()))
 
+    # A key the reader takes that no writer emits for a spec alone: a spec
+    # file may name its category registry (`test_a_spec_file_may_name_its_categories`).
+    found["## A spec file"].add("categories")
+    # And a column's `col_name`, which a file may repeat and never needs
+    # (`test_a_spec_files_column_may_repeat_its_name`).
+    found["### A column"].add("col_name")
     page = REFERENCE / "spec-files.md"
-    written = {f.name for f in FK_FIELDS} - {"target"}  # never written to a file
-    expected = {
-        "## A spec file": {f.name for f in TABLESPEC_FIELDS} | set(fields.FILE_KEYS),
-        "### A column": {f.name for f in COLSPEC_FIELDS},
-        "### A rule": {f.name for f in COLRULE_FIELDS},
-        "### A check or validator": {f.name for f in CHECK_FIELDS},
-        "### A foreign key": written,
-        "### A hierarchy": {f.name for f in fields.HIERARCHY_FIELDS},
-        "## A category registry": set(serialization["_CATSPEC_KEYS"]),
-        "## A registry of specs": set(serialization["_REGISTRY_KEYS"]),
-    }
-    for heading, keys in expected.items():
+    for heading, keys in found.items():
         assert set(_first_column(page, heading)) == keys, heading
 
 
-def test_the_spec_file_reference_names_every_dtype_operation_and_version():
-    from polspec.expr import KNOWN_OPS
-    from polspec.serialization.dtypes import _BUILDERS, DTYPE_NAMES
+def test_a_spec_files_column_may_repeat_its_name():
+    data = {
+        "version": 4,
+        "name": "T",
+        "columns": {"Unit Price": {"dtype": "Float64", "col_name": "Unit Price"}},
+    }
+    assert list(polspec.from_dict(data).columns) == ["Unit Price"]
 
-    page = REFERENCE / "spec-files.md"
-    dtypes = _section(page, "## Dtypes")
-    for name in set(DTYPE_NAMES.values()) | set(_BUILDERS):
-        assert f"`{name}`" in dtypes, name
-    operations = {
-        op.strip("` ")
-        for cell in _first_column(page, "## Predicates")
-        for op in cell.split(",")
-    }
-    written_out = {
-        op.strip("` ")
-        for row in re.findall(
-            r"^\| (`[^|]+`) \|", _section(page, "## Predicates"), re.M
-        )
-        for op in row.split(",")
-    }
-    assert operations | written_out == set(KNOWN_OPS)
-    assert f"`version: {FORMAT_VERSION}`" in page.read_text(encoding="utf-8")
-    assert _first_column(page, "## Versions") == [] and re.findall(
-        r"^\| (\d+) \|", _section(page, "## Versions"), re.M
-    ) == [str(v) for v in range(1, FORMAT_VERSION + 1)]
+
+def test_a_spec_file_may_name_its_categories(tmp_path):
+    categories = polspec.CatSpec(enums={"STATE": ["A", "B"]})
+    categories.to_yaml(tmp_path / "categories.yaml")
+    (tmp_path / "spec.yaml").write_text(
+        "version: 4\nname: Named\ncategories: categories.yaml\n"
+        "columns:\n  state:\n    dtype: {Enum: STATE}\n",
+        encoding="utf-8",
+    )
+    spec = polspec.from_yaml(tmp_path / "spec.yaml")
+    assert spec["state"].dtype == pl.Enum(["A", "B"])
 
 
 def test_the_cli_reference_is_current():

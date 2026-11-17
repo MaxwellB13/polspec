@@ -27,7 +27,8 @@ def pass_seed(frame_seed: int, key: str) -> int:
 
     FNV-1a over the key's UTF-8 bytes, xor'd into the frame seed, then a
     splitmix64 finaliser -- bit for bit what `seed_for_column` does in
-    `src/sample.rs`, and pinned against its golden value in the tests.
+    `src/sample.rs`, whose golden value `cargo test` pins; the seeded
+    digests in `tests/contracts/test_seeded.py` hold this side to it.
     """
     digest = _FNV_OFFSET
     for byte in key.encode("utf-8"):

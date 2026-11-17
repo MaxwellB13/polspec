@@ -364,13 +364,11 @@ def test_the_markdown_names_the_order():
 
 def test_order_detection_reads_the_head_first_and_still_checks_the_whole():
     """The head rules a column out cheaply; a column sorted only for its
-    head is still not an order, because the survivors are checked whole."""
-    from polspec.profiler import ORDER_PREFIX_ROWS
-
-    n = ORDER_PREFIX_ROWS * 3
-    sorted_then_not = list(range(ORDER_PREFIX_ROWS)) + list(
-        range(n - ORDER_PREFIX_ROWS, 0, -1)
-    )
+    head is still not an order, because the survivors are checked whole.
+    The head is its first 2,048 rows."""
+    head = 2_048
+    n = head * 3
+    sorted_then_not = list(range(head)) + list(range(n - head, 0, -1))
     frame = pl.DataFrame(
         {"head_only": sorted_then_not, "noise": [(i * 7919) % 101 for i in range(n)]}
     )

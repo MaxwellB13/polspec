@@ -117,13 +117,6 @@ class Pred:
         """Every column name this predicate reads."""
         return set().union(*(c._root_names() for c in self._children()))
 
-    def _literals(self) -> list[Any]:
-        """Every constant this predicate compares against.
-
-        Used to check a rule's operands against the column's own domain.
-        """
-        return [v for c in self._children() for v in c._literals()]
-
     def rename(self, mapping: Mapping[builtins.str, builtins.str]) -> Pred:
         """The same predicate with its columns renamed by `mapping`.
 
@@ -282,9 +275,6 @@ class Lit(Pred):
 
     def _rebuild(self, children: tuple[Pred, ...]) -> Pred:
         return self
-
-    def _literals(self) -> list[Any]:
-        return [self.value]
 
 
 @dataclass(frozen=True, slots=True, eq=False, repr=False)
@@ -445,10 +435,6 @@ class IsIn(Pred):
 
     def _rebuild(self, children: tuple[Pred, ...]) -> Pred:
         return IsIn(children[0], self.values)
-
-    def _literals(self) -> list[Any]:
-        # Its own values are operands too, though they are not nodes.
-        return self.item._literals() + list(self.values)
 
 
 @dataclass(frozen=True, slots=True, eq=False, repr=False)
@@ -721,8 +707,3 @@ def _pair(data: Any, payload: Any) -> tuple[Any, Any]:
 def root_names(pred: Pred) -> set[str]:
     """Every column `pred` reads."""
     return pred._root_names()
-
-
-def literals(pred: Pred) -> list[Any]:
-    """Every literal value `pred` compares against, in order."""
-    return pred._literals()

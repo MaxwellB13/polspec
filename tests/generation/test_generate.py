@@ -5,6 +5,8 @@ have the shape, domain and reproducibility the spec declared? Rules, foreign
 keys and serialization each have their own file.
 """
 
+import datetime as dt
+
 import polars as pl
 import pytest
 from polspec import (
@@ -518,3 +520,95 @@ def test_a_key_within_the_default_range_is_unchanged_and_a_bounded_one_refuses()
     bounded = TableSpec("Keys", {"id": ColSpec(pl.Int64, unique=True, bounds=(0, 9))})
     with pytest.raises(GenerationError, match="only 10 distinct"):
         generate(bounded, 11, seed=2)
+
+
+# ---------------------------------------------------------------------------
+# What a column becomes on its way through the engine and back
+# ---------------------------------------------------------------------------
+
+
+def test_typed_choices_survive_generation_and_validation():
+    class Spec(FrameSpec):
+        when = ColSpec(
+            pl.Datetime("us"),
+            choices=[dt.datetime(2024, 1, 1, 12), dt.datetime(2025, 6, 30)],
+        )
+        blob = ColSpec(pl.Binary, choices=[b"\x00\x01", b"\xff"])
+        flag = ColSpec(pl.Boolean, choices=[True])
+        code = ColSpec(pl.String, choices=[True, "True"])  # distinct in String
+        n = ColSpec(pl.Int64, choices=[1, 2, 3], nullable=True, null_probability=0.5)
+
+    df = Spec.generate(500, seed=1)
+    assert set(df["when"].to_list()) == {
+        dt.datetime(2024, 1, 1, 12),
+        dt.datetime(2025, 6, 30),
+    }
+    assert set(df["blob"].to_list()) == {b"\x00\x01", b"\xff"}
+    assert df["flag"].all()
+    assert set(df["code"].to_list()) == {"true", "True"}
+    assert df["n"].null_count() > 100 and set(df["n"].drop_nulls().to_list()) <= {
+        1,
+        2,
+        3,
+    }
+    Spec.validate(df)
+
+
+def test_seeds_follow_column_names_not_positions():
+    class Narrow(FrameSpec):
+        a = ColSpec(pl.Int64)
+        c = ColSpec(pl.Float64)
+
+    class Wide(FrameSpec):
+        a = ColSpec(pl.Int64)
+        b = ColSpec(pl.String)  # inserted in the middle
+        c = ColSpec(pl.Float64)
+
+    narrow = Narrow.generate(1_000, seed=5)
+    wide = Wide.generate(1_000, seed=5)
+    assert narrow["a"].equals(wide["a"])
+    assert narrow["c"].equals(wide["c"])
+
+
+def test_rules_only_sample_what_they_scatter():
+    class Spec(FrameSpec):
+        region = ColSpec(pl.Enum(["UK", "US"]), weights=[1.0, 99.0])
+        carrier = ColSpec(
+            pl.Enum(["RM", "UPS", "DHL"]),
+            rules=[
+                ColRule(when=col("region") == "UK", choices=["RM"]),
+                ColRule(
+                    when=col("region") == "US",
+                    choices={"UPS": 1.0, "DHL": 1.0},
+                ),
+            ],
+        )
+        n = ColSpec(
+            pl.Int64,
+            bounds=(0, 10),
+            nullable=True,
+            rules=[ColRule(when=col("region") == "US", choices=[7])],
+        )
+
+    df = Spec.generate(2_000, seed=2)
+    assert set(df.filter(pl.col("region") == "UK")["carrier"].to_list()) <= {"RM"}
+    assert set(df.filter(pl.col("region") == "US")["carrier"].to_list()) == {
+        "UPS",
+        "DHL",
+    }
+    assert df["carrier"].dtype == pl.Enum(["RM", "UPS", "DHL"])
+    assert (df.filter(pl.col("region") == "US")["n"] == 7).all()
+    Spec.validate(df)
+
+
+def test_integer_bounds_keep_every_bit():
+    """Bounds cross into the engine exactly, at the ends of the dtype."""
+
+    class Edges(FrameSpec):
+        big = ColSpec(pl.UInt64, bounds=(2**64 - 16, 2**64 - 1))
+        neg = ColSpec(pl.Int64, bounds=(-(2**63), -(2**63) + 15))
+
+    frame = Edges.generate(2_000, seed=1)
+    assert frame["big"].min() >= 2**64 - 16 and frame["big"].max() == 2**64 - 1
+    assert frame["neg"].min() == -(2**63) and frame["neg"].max() <= -(2**63) + 15
+    Edges.validate(frame)
