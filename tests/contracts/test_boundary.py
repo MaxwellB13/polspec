@@ -233,20 +233,13 @@ TESTS = ROOT / "tests"
 INTERNAL_SUBJECTS = {
     "contracts/test_boundary.py": "this file: the line itself",
     "contracts/test_deprecation.py": "the deprecation helper, and what warns",
-    "contracts/test_parity.py": "internal tables against the signatures they mirror",
-    "docs/test_docs.py": "the docs against the codec's own tables",
-    "drift/test_significance.py": "drift's statistics, held to SciPy",
+    "docs/test_codec_reference.py": "the dtype and predicate vocabulary, which has no public list",
     "generation/test_engine.py": "the Python / Rust boundary, which has no public face",
-    "generation/test_seeds.py": "the Python port of the engine's seeds, against it",
 }
 
 # Internal names any test may use, and why.
 TEST_PARAMETERS = {
     "polspec.cli.main": "the command line's entry point, as `polspec` runs it",
-    "polspec.expr.literals": "which literal types the drawn checks reach",
-    "polspec.generation.pipeline": "its 5 GiB warning lowered, not allocated past",
-    "polspec.profiler.FORMAT_MIN_DISTINCT": "a threshold, tested either side",
-    "polspec.profiler.ORDER_PREFIX_ROWS": "a threshold, tested either side",
 }
 
 

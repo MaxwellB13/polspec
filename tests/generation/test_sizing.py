@@ -148,24 +148,30 @@ def test_max_bytes_refuses_rather_than_warning():
     assert "scan()" in str(raised.value)
 
 
-def test_max_bytes_zero_says_nothing(monkeypatch):
-    import polspec.generation.pipeline as generation
+class Tight(FrameSpec):
+    """A five-gibibyte frame that is refused once its size has been said: a
+    unique column of ten values cannot fill it, so nothing is allocated."""
 
-    monkeypatch.setattr(generation, "LARGE_FRAME_BYTES", 10)
+    a = ColSpec(pl.Float64)
+    b = ColSpec(pl.Float64)
+    code = ColSpec(pl.Int8, bounds=(0, 9), unique=True)
+
+
+def _past_the_warning() -> int:
+    return int(5 * 1024**3 / (Tight.estimated_size(1_000) / 1_000)) + 1
+
+
+def test_max_bytes_zero_says_nothing():
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        Wide.generate(1_000, seed=1, max_bytes=0)
+        with pytest.raises(GenerationError, match="only 10 distinct"):
+            Tight.generate(_past_the_warning(), seed=1, max_bytes=0)
 
 
-def test_the_warning_names_the_estimate_and_what_to_do_instead(monkeypatch):
-    """Rather than allocating five gibibytes to see the warning, the size is
-    lowered to what the test frame actually is."""
-    import polspec.generation.pipeline as generation
-
-    monkeypatch.setattr(generation, "LARGE_FRAME_BYTES", 100)
-    with pytest.warns(UserWarning) as caught:
-        Wide.generate(1_000, seed=1)
+def test_the_warning_names_the_estimate_and_what_to_do_instead():
+    with pytest.warns(UserWarning) as caught, pytest.raises(GenerationError):
+        Tight.generate(_past_the_warning(), seed=1)
     message = str(caught[0].message)
-    assert "Wide at 1,000 rows is an estimated 15.6 KiB" in message
+    assert "is an estimated 5.0 GiB" in message
     assert "scan()" in message and "generate_batches()" in message
     assert "max_bytes=0 to silence" in message

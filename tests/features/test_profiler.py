@@ -13,7 +13,6 @@ from polspec import (
     generate,
     inspect,
 )
-from polspec.profiler import FORMAT_MIN_DISTINCT
 
 
 def _described(df: pl.DataFrame, **options) -> dict[str, ColSpec]:
@@ -411,7 +410,8 @@ def test_a_column_of_one_format_is_named_for_it(format_name):
 
 
 def test_too_few_distinct_values_are_not_evidence_of_a_format():
-    few = _values_of("email", FORMAT_MIN_DISTINCT - 1) * 3
+    """A format is named from 20 distinct values; 19 are not enough."""
+    few = _values_of("email", 19) * 3
     column = _described(pl.DataFrame({"c": few}))["c"]
     assert column.format is None
     assert isinstance(column.dtype, pl.Enum)

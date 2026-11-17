@@ -5,6 +5,7 @@ import json
 
 import polars as pl
 import pytest
+from helpers import run_cli
 from polspec import (
     Bound,
     ColSpec,
@@ -23,12 +24,6 @@ from polspec import (
     to_yaml,
     validate,
 )
-from polspec.cli import main
-
-
-def run_cli(*args: str) -> int:
-    return main(list(args))
-
 
 COLUMNS = {"a": ColSpec(pl.Int64, bounds=(0, 9))}
 NOT_EMPTY = TableSpec("T", COLUMNS, rows=(1, None))
