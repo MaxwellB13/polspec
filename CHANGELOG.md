@@ -9,6 +9,13 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+### Changed
+
+- **`schema infer` and `synthesize` describe their shared flags alike.**
+  `--max-unique-enum`, `--sample` and `--replace` read the same on both
+  commands' `--help`, and `synthesize` lists them in `schema infer`'s
+  order. What each flag does is unchanged.
+
 ## [1.6.1] - 2026-11-16
 
 **Every choice and its share, in the data dictionary.** `to_markdown` can

@@ -20,6 +20,7 @@ from polspec.cli._io import (
     _warnings_printed,
     _write_registry,
 )
+from polspec.cli._profiling import profile_keywords
 from polspec.errors import CliError
 from polspec.profiler import ProfileOptions
 from polspec.related import profile_all
@@ -45,18 +46,7 @@ def _cmd_schema_infer(args: argparse.Namespace) -> int:
             spec_cls = FrameSpec.from_dataframe(
                 df,
                 name=name,
-                weights=args.weights,
-                max_unique_enum=args.max_unique_enum,
-                formats=not args.no_formats,
-                patterns=not args.no_patterns,
-                calculate_bounds=not args.no_bounds,
-                shape=args.shape,
-                detect_unique=args.keys,
-                detect_order=args.order,
-                replace=args.replace or (),
-                round_bounds=args.round_bounds,
-                round_rates=args.round_rates,
-                parse_text=args.parse_text,
+                **profile_keywords(args),
             )
         except ValueError as exc:  # a name in --replace the file lacks
             raise CliError(str(exc)) from exc
@@ -93,21 +83,7 @@ def _infer_related(args: argparse.Namespace, sources: list[Path]) -> int:
         )
     keys = _declared_keys(args)
     tables = _tables(sources)
-    options = ProfileOptions(
-        sample=args.sample,
-        weights=args.weights,
-        max_unique_enum=args.max_unique_enum,
-        formats=not args.no_formats,
-        patterns=not args.no_patterns,
-        calculate_bounds=not args.no_bounds,
-        shape=args.shape,
-        detect_unique=args.keys,
-        detect_order=args.order,
-        replace=args.replace or (),
-        round_bounds=args.round_bounds,
-        round_rates=args.round_rates,
-        parse_text=args.parse_text,
-    )
+    options = ProfileOptions(**profile_keywords(args))
     with _warnings_printed():
         try:
             registry = profile_all(tables, keys=keys, options=options)

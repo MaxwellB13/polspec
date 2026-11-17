@@ -28,12 +28,12 @@ import sys
 from polspec.cli._data import _cmd_generate, _cmd_validate
 from polspec.cli._drift import _FAIL_ON, _cmd_diff, _cmd_drift
 from polspec.cli._io import _add_key_flags
+from polspec.cli._profiling import add_profile_flags
 from polspec.cli._schema import _cmd_schema_infer, _cmd_schema_new
 from polspec.cli._synthesize import add_synthesize_parser
 from polspec.cli._test import _cmd_test
 from polspec.compare import DriftOptions
 from polspec.errors import PolspecError
-from polspec.profiler import step_of
 from polspec.validation import SWITCHES
 
 try:
@@ -42,15 +42,6 @@ try:
     _VERSION = _pkg_version("polspec")
 except Exception:  # noqa: BLE001 - version detection must never break the CLI
     _VERSION = "unknown"
-
-
-def _rounding(text: str) -> object:
-    """`--round-bounds` and `--round-rates`: a step (`1k`, `0.01`), `auto`
-    or `exact`, read as `profile()` reads one."""
-    try:
-        return step_of(text)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(str(exc)) from None
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -101,93 +92,7 @@ def _add_schema_parser(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     infer.add_argument("--name", help="Spec class name (default: derived from source)")
-    infer.add_argument(
-        "--weights",
-        action="store_true",
-        help="Record each category's observed frequency",
-    )
-    infer.add_argument(
-        "--max-unique-enum",
-        type=int,
-        default=50,
-        metavar="N",
-        help="Max distinct values for a string column to become an Enum, when they repeat (default: 50)",
-    )
-    infer.add_argument(
-        "--no-formats",
-        action="store_true",
-        help="Do not name the format a text column's values have (email, uuid4, ...)",
-    )
-    infer.add_argument(
-        "--no-patterns",
-        action="store_true",
-        help="Do not write the pattern a code-like text column's values share (ORD-[0-9]{6}, ...)",
-    )
-    infer.add_argument(
-        "--parse-text",
-        action="store_true",
-        help=(
-            "Read a text column as the number, flag or date every value holds "
-            "(Boolean, Int64, Float64, Date, Datetime)"
-        ),
-    )
-    infer.add_argument(
-        "--no-bounds",
-        action="store_true",
-        help="Skip computing numeric/temporal bounds and string lengths",
-    )
-    infer.add_argument(
-        "--sample",
-        type=int,
-        metavar="N",
-        help="Profile a random sample of N rows (seeded, so the same every run)",
-    )
-    infer.add_argument(
-        "--shape",
-        action="store_true",
-        help="Fit the distribution each numeric or temporal column follows",
-    )
-    infer.add_argument(
-        "--keys",
-        action="store_true",
-        help="Declare an all-distinct integer or text column unique",
-    )
-    infer.add_argument(
-        "--order",
-        action="store_true",
-        help="Declare order_by when the rows come sorted by a column",
-    )
-    infer.add_argument(
-        "--round-bounds",
-        default="auto",
-        type=_rounding,
-        metavar="STEP",
-        help=(
-            "Round each numeric column's bounds outward to STEP (1000, 1k, 10k, "
-            "1M, 0.01), within its dtype, so the data stays inside; 'auto' "
-            "keeps two significant figures of the span and whole seconds; "
-            "'exact' writes them as observed (default: auto)"
-        ),
-    )
-    infer.add_argument(
-        "--round-rates",
-        default="auto",
-        type=_rounding,
-        metavar="STEP",
-        help=(
-            "Round each null and NaN rate up to STEP (0.01), and each "
-            "--weights frequency to its nearest STEP; 'auto' keeps two "
-            "significant figures; 'exact' writes them as observed. A rate of "
-            "0 stays 0 (default: auto)"
-        ),
-    )
-    infer.add_argument(
-        "--replace",
-        nargs="+",
-        action="extend",
-        metavar="COL",
-        help="Columns whose values must not be carried into the spec",
-    )
+    add_profile_flags(infer)
     _add_key_flags(infer)
     infer.set_defaults(func=_cmd_schema_infer)
 
