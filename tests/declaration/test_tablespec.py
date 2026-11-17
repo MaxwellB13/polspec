@@ -491,3 +491,48 @@ def test_select_and_drop_take_names_one_by_one_or_as_a_list():
     assert list(spec.drop(["b"]).names) == list(spec.drop("b").names) == ["a", "c"]
     with pytest.raises(TypeError, match="strings or lists of them"):
         spec.select(1)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# A spec is a value: asked for a verb, it names the function
+# ---------------------------------------------------------------------------
+
+
+def _verbs() -> list[str]:
+    """Every public function that takes a spec."""
+    import inspect as introspect
+
+    import polspec
+
+    found = []
+    for name in polspec.__all__:
+        value = getattr(polspec, name)
+        if not introspect.isfunction(value):
+            continue
+        parameters = introspect.signature(value).parameters
+        if "spec" in parameters or name == "diff":
+            found.append(name)
+    return sorted(found)
+
+
+def test_every_verb_taking_a_spec_is_found():
+    assert {"generate", "validate", "inspect", "scan", "diff", "assert_valid"} <= set(
+        _verbs()
+    )
+
+
+@pytest.mark.parametrize("verb", _verbs())
+def test_asked_for_a_verb_a_spec_names_the_function_to_call(verb):
+    """`polspec.profile(df).validate(df)` was an AttributeError saying only
+    that there is no such attribute."""
+    spec = Orders.spec
+    with pytest.raises(AttributeError, match=rf"Call polspec\.{verb}\(spec, \.\.\.\)"):
+        getattr(spec, verb)
+    assert not hasattr(spec, verb)
+
+
+def test_any_other_missing_attribute_is_an_ordinary_attribute_error():
+    with pytest.raises(
+        AttributeError, match="'TableSpec' object has no attribute 'nope'"
+    ):
+        Orders.spec.nope  # noqa: B018 - the lookup is the test

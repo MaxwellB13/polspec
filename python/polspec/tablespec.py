@@ -207,6 +207,35 @@ def _fk_kind_bucket(kind: str) -> str:
     return "string" if kind in ("string", "enum", "categorical") else kind
 
 
+# The public functions that take a spec: what a `TableSpec` is asked
+# for as a method, and answered with the function to call. A test holds it
+# to `polspec`'s own functions.
+SPEC_VERBS = frozenset(
+    {
+        "assert_valid",
+        "diff",
+        "drift",
+        "estimated_size",
+        "generate",
+        "generate_batches",
+        "inspect",
+        "read",
+        "scan",
+        "sink_csv",
+        "sink_ipc",
+        "sink_ndjson",
+        "sink_parquet",
+        "strategy",
+        "to_dict",
+        "to_markdown",
+        "to_mermaid",
+        "to_python",
+        "to_yaml",
+        "validate",
+    }
+)
+
+
 @dataclass(frozen=True, slots=True)
 class TableSpec:
     """The columns and constraints of one table, as an immutable value.
@@ -673,6 +702,22 @@ class TableSpec:
             return self.columns[name]
         except KeyError:
             raise KeyError(f"{self.name} has no column {name!r}") from None
+
+    def __getattr__(self, name: str) -> Any:
+        # Reached only when ordinary lookup fails. A spec is a value, and
+        # every verb is a function over it, so the declarations import no
+        # verb; `profile(df).validate(df)` is told which function to call
+        # rather than only that there is no such attribute.
+        if name in SPEC_VERBS:
+            raise AttributeError(
+                f"TableSpec has no method {name!r}: a spec is a value, and "
+                f"every verb is a function over it. Call "
+                f"polspec.{name}(spec, ...), or FrameSpec.from_spec(spec) for "
+                "a class with the methods."
+            )
+        raise AttributeError(
+            f"{type(self).__name__!r} object has no attribute {name!r}"
+        )
 
     def __contains__(self, name: object) -> bool:
         return name in self.columns

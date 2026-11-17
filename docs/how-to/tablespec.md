@@ -47,6 +47,12 @@ classmethod that forwards to it with `cls.spec`. Use whichever suits the code:
 the classmethods read better when a class body declared the spec, the
 functions when the spec is a value that was built, loaded or derived.
 
+A `TableSpec` itself has no verb methods, so a spec stays data that every
+verb reads. Asked for one, it names the function: `spec.validate` raises an
+`AttributeError` saying to call `polspec.validate(spec, ...)`, or to wrap
+the spec with `FrameSpec.from_spec(spec)`. *Since 1.7.* See [How the pieces
+fit](../explanation/concepts.md#verbs-are-functions-a-spec-is-a-value).
+
 ## Building one directly
 
 A `TableSpec` can be constructed without a class body, which is how

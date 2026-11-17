@@ -675,7 +675,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     def estimated_size(cls, n: int) -> int:
         """Bytes a frame of `n` generated rows is expected to hold.
 
-        See `TableSpec.estimated_size`. `generate()` warns when the estimate
+        See `polspec.estimated_size`. `generate()` warns when the estimate
         passes four gibibytes, and takes `max_bytes=` to refuse instead.
         """
         from polspec import sizing
