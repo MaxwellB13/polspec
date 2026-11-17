@@ -34,6 +34,15 @@ page promises; before 1.0, a minor version could break any of them.
   commands' `--help`, and `synthesize` lists them in `schema infer`'s
   order. What each flag does is unchanged.
 
+### Fixed
+
+- **Text of whole numbers then decimals reads as `Float64`.** Text is
+  tried on its first 1,000 values first, and a column whose first values
+  were whole and whose decimals came later stayed text, saying its values
+  were too large for an Int64 and quoting the decimals. Every later type is
+  now tried on the whole column, and that reason is given only for whole
+  numbers an Int64 cannot hold.
+
 ## [1.6.1] - 2026-11-16
 
 **Every choice and its share, in the data dictionary.** `to_markdown` can

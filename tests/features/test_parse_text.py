@@ -44,6 +44,30 @@ def test_integers_come_before_floats_and_a_decimal_makes_them_floats():
     assert (ints.dtype, mixed.dtype) == (pl.Int64, pl.Float64)
 
 
+@pytest.mark.parametrize("where", ["first", "last"])
+def test_where_the_decimals_are_does_not_change_the_type(where):
+    """Text is read from its first values first. Until 1.7 a column whose
+    first thousand values were whole and whose decimals came later stayed
+    text, and said its values were too large for an Int64."""
+    whole = [str(1_000 + i) for i in range(3_000)]
+    decimals = ["128195.51", "10879.61", "242777.53"]
+    values = decimals + whole if where == "first" else whole + decimals
+    column = _profiled(pl.DataFrame({"c": values}), parse_text=True)["c"]
+    assert column.dtype == pl.Float64
+    assert column.description is None
+
+
+def test_a_code_whose_large_values_come_late_still_says_why():
+    values = [str(1_000 + i) for i in range(3_000)] + [
+        str(10**20 + i) for i in range(3)
+    ]
+    column = _profiled(pl.DataFrame({"c": values}), parse_text=True)["c"]
+    assert column.dtype == pl.String
+    assert "too large for an Int64, such as ['100000000000000000000'" in (
+        column.description or ""
+    )
+
+
 @pytest.mark.parametrize(
     ("values", "why"),
     [
