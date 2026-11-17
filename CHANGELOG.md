@@ -48,6 +48,11 @@ page promises; before 1.0, a minor version could break any of them.
   .validate(df)` raised a bare `AttributeError`; a spec is a value and its
   verbs are functions over it, so it now says to call
   `polspec.validate(spec, ...)`, or wrap it with `FrameSpec.from_spec`.
+- **Docs: Performance**, a new how-to page with what each choice costs —
+  generating, streaming, keeping checks, validating a lazy frame,
+  profiling a sample — measured. *Generate data* and *Validate data* show
+  what their examples print, and *Multiple specs* declares the key its
+  example relied on.
 - **Docs: How the pieces fit**, a new explanation page with one diagram:
   the declarations, verbs as functions, what generation keeps, why
   `schema infer` and `profile()` have different defaults, and seeds.

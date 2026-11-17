@@ -59,12 +59,25 @@ evaluated in a single scan. Every breach is gathered before anything is raised:
 ```python
 from polspec import ValidationError
 
+row = pl.int_range(pl.len())
+broken = df.with_columns(
+    # Three totals made negative, and the tenth order given the first's id.
+    total=pl.when(row < 3).then(-pl.col("total")).otherwise("total"),
+    order_id=pl.when(row == 9).then(pl.col("order_id").first()).otherwise("order_id"),
+)
+
 try:
-    Orders.validate(df)
+    Orders.validate(broken)
 except ValidationError as err:
     print(len(err.errors), "problems")
     for problem in err.errors:
         print(problem)
+```
+
+```text
+2 problems
+Column 'order_id': unique column contains 2 duplicate value(s). Duplicate samples: [633030]
+Column 'total': found 3 value(s) out of bounds [0.0, 5000.0] (min found: -4626.908973514467, max found: 4952.446695621952). Out of bounds samples: [-2506.9942460024845, -1514.4631123193444, -4626.908973514467]
 ```
 
 `ValidationError` is a `PolspecError` (and still a `ValueError`); see
@@ -111,6 +124,28 @@ report.failing_rows().collect()   # every violating row, with a `__polspec_findi
                                   # claims appears twice)
 report.failing_rows(once=True).collect()  # each violating row once, naming
                                           # every claim it broke
+```
+
+For the `broken` frame above, the quarantine view names both problems of
+the one row that has two:
+
+```python
+quarantine = Orders.inspect(broken).failing_rows(once=True).collect()
+print(quarantine.select("order_id", "total", "__polspec_finding"))
+```
+
+```text
+shape: (4, 3)
+┌──────────┬──────────────┬────────────────────────────────┐
+│ order_id ┆ total        ┆ __polspec_finding              │
+│ ---      ┆ ---          ┆ ---                            │
+│ i64      ┆ f64          ┆ str                            │
+╞══════════╪══════════════╪════════════════════════════════╡
+│ 633030   ┆ -2506.994246 ┆ order_id__unique,total__bounds │
+│ 562818   ┆ -1514.463112 ┆ total__bounds                  │
+│ 509480   ┆ -4626.908974 ┆ total__bounds                  │
+│ 633030   ┆ 1231.613496  ┆ order_id__unique               │
+└──────────┴──────────────┴────────────────────────────────┘
 ```
 
 `once=True` is the quarantine view: with `passing_rows()` it splits a frame
