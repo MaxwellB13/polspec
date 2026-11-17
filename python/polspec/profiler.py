@@ -27,7 +27,7 @@ import os
 import warnings
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_EVEN, Decimal, localcontext
 from types import MappingProxyType
 from typing import Any, Literal, TypedDict
@@ -386,28 +386,6 @@ DESCRIBE_DEFAULTS: Mapping[str, Any] = MappingProxyType(
 )
 
 
-@dataclass(frozen=True, slots=True)
-class _Options:
-    """How much to infer, read by every column, however deeply nested."""
-
-    weights: bool
-    max_unique_enum: int
-    calculate_bounds: bool
-    shape: bool = False
-    detect_unique: bool = False
-    formats: bool = True
-    patterns: bool = False
-    seed: int = 0
-    # Bounds rounded outward and rates up, to a step or "auto"; None leaves
-    # them exactly as observed (`Rounding`).
-    round_bounds: Rounding = None
-    round_rates: Rounding = None
-    # Each float column holding an infinity outside the bounds its finite
-    # values gave it, as (path, infinities): said once, after. A NaN needs no
-    # word -- the column's `nan_probability` records it.
-    infinite: list[tuple[str, int]] = field(default_factory=list)
-
-
 # Distinct values a column needs before its order is taken to be the
 # frame's, and not chance: a short or repetitive column is often sorted by
 # accident. The same bar a format clears.
@@ -512,33 +490,24 @@ def profile_columns(
                 "it to String first to have its values replaced."
             )
 
-    options = _Options(
-        weights=opts.weights,
-        max_unique_enum=opts.max_unique_enum,
-        calculate_bounds=opts.calculate_bounds,
-        shape=opts.shape and opts.calculate_bounds,
-        detect_unique=opts.detect_unique,
-        formats=opts.formats,
-        patterns=opts.patterns,
-        seed=opts.seed,
-        round_bounds=opts.round_bounds,
-        round_rates=opts.round_rates,
-    )
+    # A shape is fitted between bounds, so without bounds there is none.
+    options = dataclasses.replace(opts, shape=opts.shape and opts.calculate_bounds)
 
     def profiled(name: str) -> tuple[ColSpec, list[tuple[str, int]]]:
         # Each column notes its infinities in a list of its own, so columns
         # profiled at once share nothing, and the notes come out in column
         # order whichever finished first.
-        own = dataclasses.replace(options, infinite=[])
+        infinite: list[tuple[str, int]] = []
         column = _profile_column(
             df[name],
             name,
             total_rows=df.height,
-            options=own,
+            options=options,
+            infinite=infinite,
             imitate=name not in replaced,
             top=True,
         )
-        return column, own.infinite
+        return column, infinite
 
     results = _for_each_column(profiled, df)
     columns = {
@@ -665,13 +634,17 @@ class _Column:
 
     `imitate` is False for a column in `replace=`, whose values are not to be
     carried over; `top` is False for a struct's field or a list's element,
-    which cannot be declared unique.
+    which cannot be declared unique. `infinite` collects each float column
+    holding an infinity outside the bounds its finite values gave it, as
+    (path, infinities), to be said once, after; a NaN needs no word, since
+    `nan_probability` records it.
     """
 
     series: pl.Series
     name: str
     total_rows: int
-    options: _Options
+    options: ProfileOptions
+    infinite: list[tuple[str, int]]
     imitate: bool
     top: bool
     non_null: pl.Series
@@ -699,6 +672,7 @@ class _Column:
             label,
             total_rows=rows,
             options=self.options,
+            infinite=self.infinite,
             imitate=self.imitate,
         )
 
@@ -708,7 +682,8 @@ def _profile_column(
     name: str,
     *,
     total_rows: int,
-    options: _Options,
+    options: ProfileOptions,
+    infinite: list[tuple[str, int]],
     imitate: bool = True,
     top: bool = False,
 ) -> ColSpec:
@@ -724,6 +699,7 @@ def _profile_column(
         name=name,
         total_rows=total_rows,
         options=options,
+        infinite=infinite,
         imitate=imitate,
         top=top,
         non_null=series.drop_nulls(),
@@ -832,19 +808,7 @@ def _text(c: _Column) -> ColSpec:
     # Counted once, for the text profile and the key check both: hashing a
     # million strings is most of what profiling one costs.
     distinct = c.non_null.n_unique()
-    described = _profile_textual(
-        c.non_null,
-        c.name,
-        c.dtype,
-        c.spec,
-        with_weights=c.with_weights,
-        max_unique_enum=c.options.max_unique_enum if c.imitate else 0,
-        calculate_bounds=c.options.calculate_bounds,
-        formats=c.options.formats,
-        patterns=c.options.patterns,
-        keep_values=c.imitate,
-        distinct=distinct,
-    )
+    described = _profile_textual(c, distinct)
     return _as_key(described, c.non_null, c.options, c.top, distinct=distinct)
 
 
@@ -884,7 +848,7 @@ def _float(c: _Column) -> ColSpec:
     )
     infinities = len(non_null) - len(finite) - nans
     if described.bounds is not None and infinities:
-        c.options.infinite.append((c.name, infinities))
+        c.infinite.append((c.name, infinities))
     return _shaped(described, finite, c.options)
 
 
@@ -964,7 +928,7 @@ _FAMILIES: tuple[
 def _as_key(
     column: ColSpec,
     non_null: pl.Series,
-    options: _Options,
+    options: ProfileOptions,
     top: bool,
     *,
     distinct: int | None = None,
@@ -1001,7 +965,7 @@ def _repeats_early(values: pl.Series) -> bool:
     return head.n_unique() != len(head)
 
 
-def _shaped(column: ColSpec, non_null: pl.Series, options: _Options) -> ColSpec:
+def _shaped(column: ColSpec, non_null: pl.Series, options: ProfileOptions) -> ColSpec:
     """`column` declaring the distribution its values follow, when asked to
     fit one and one describes them better than uniform does."""
     if not options.shape or column.bounds is None:
@@ -1010,23 +974,11 @@ def _shaped(column: ColSpec, non_null: pl.Series, options: _Options) -> ColSpec:
     return with_fit(column, fitted) if fitted is not None else column
 
 
-def _profile_textual(
-    non_null: pl.Series,
-    name: str,
-    dtype: pl.DataType,
-    spec: Callable[..., ColSpec],
-    *,
-    with_weights: bool,
-    max_unique_enum: int,
-    calculate_bounds: bool,
-    formats: bool = False,
-    patterns: bool = False,
-    keep_values: bool = True,
-    distinct: int | None = None,
-) -> ColSpec:
+def _profile_textual(c: _Column, distinct: int) -> ColSpec:
     """A String or Categorical column, narrowed to an Enum when it holds few
-    enough distinct values and they repeat. `distinct` is the values'
-    distinct count, when the caller has it.
+    enough distinct values and they repeat; `distinct` is the values'
+    distinct count. A column in `replace=` never narrows: its values are not
+    to be carried over.
 
     A template format (an email, a UUID) is named before that: its values are
     identifiers, and an Enum of them would carry the source's own. A finite
@@ -1034,12 +986,19 @@ def _profile_textual(
     an Enum of the codes it holds keeps their frequencies, which the format
     -- every code, evenly -- would throw away.
     """
-    n_unique = non_null.n_unique() if distinct is None else distinct
+    non_null, dtype, spec, options = c.non_null, c.dtype, c.spec, c.options
+    keep_values = c.imitate
+    n_unique = distinct
+    max_unique_enum = options.max_unique_enum if keep_values else 0
     narrows = 0 < n_unique <= max_unique_enum and (
         n_unique * ENUM_MIN_REPEATS <= len(non_null)
     )
 
-    if formats and dtype in (pl.String, pl.Utf8) and n_unique >= FORMAT_MIN_DISTINCT:
+    if (
+        options.formats
+        and dtype in (pl.String, pl.Utf8)
+        and n_unique >= FORMAT_MIN_DISTINCT
+    ):
         named = _named_format(
             non_null, keep_values=keep_values, finite=not narrows, distinct=n_unique
         )
@@ -1051,7 +1010,9 @@ def _profile_textual(
         categories = non_null.unique().sort().to_list()
         return spec(
             dtype=pl.Enum(categories),
-            weights=_empirical_weights(non_null, categories) if with_weights else None,
+            weights=_empirical_weights(non_null, categories)
+            if c.with_weights
+            else None,
         )
 
     if is_categorical_dtype(dtype):
@@ -1059,7 +1020,7 @@ def _profile_textual(
 
     shaped = None
     if (
-        patterns
+        options.patterns
         and keep_values
         and n_unique >= FORMAT_MIN_DISTINCT
         # Numbers, dates or booleans written as text are no code: their
@@ -1078,7 +1039,7 @@ def _profile_textual(
         string_length=_extent(
             non_null.str.len_chars() if len(non_null) else non_null,
             int,
-            calculate_bounds,
+            options.calculate_bounds,
         ),
         pattern=shaped,
     )

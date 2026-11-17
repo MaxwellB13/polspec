@@ -20,6 +20,11 @@ from polspec.cli._io import (
     _write_data_file,
     _write_registry,
 )
+from polspec.cli._profiling import (
+    SYNTHESIZE_OPTIONS,
+    add_profile_flags,
+    profile_keywords,
+)
 from polspec.errors import CliError
 from polspec.framespec import FrameSpec
 from polspec.related import synthesized_all
@@ -56,12 +61,7 @@ def _cmd_synthesize(args: argparse.Namespace) -> int:
                 args.rows,
                 scale=args.scale,
                 seed=args.seed,
-                replace=args.replace or (),
-                sample=args.sample,
-                max_unique_enum=args.max_unique_enum,
-                formats=not args.no_formats,
-                patterns=not args.no_patterns,
-                parse_text=args.parse_text,
+                **profile_keywords(args),
                 name=name,
             )
         except ValueError as exc:  # a name in --replace the file lacks, and the like
@@ -115,12 +115,7 @@ def _synthesize_related(args: argparse.Namespace, sources: list[Path]) -> int:
                 scale=args.scale,
                 seed=args.seed,
                 keys=keys,
-                replace=args.replace or (),
-                sample=args.sample,
-                max_unique_enum=args.max_unique_enum,
-                formats=not args.no_formats,
-                patterns=not args.no_patterns,
-                parse_text=args.parse_text,
+                **profile_keywords(args),
             )
         except ValueError as exc:
             raise CliError(str(exc)) from exc
@@ -195,47 +190,7 @@ def add_synthesize_parser(subparsers: argparse._SubParsersAction) -> None:
         help="With several sources, write each as EXT (parquet, csv, ...) (default: its own)",
     )
     _add_key_flags(synthesize)
-    synthesize.add_argument(
-        "--replace",
-        nargs="+",
-        action="extend",
-        metavar="COL",
-        help=(
-            "Columns whose values must not be carried over: text in them is "
-            "generated from its lengths, never from the values the source holds"
-        ),
-    )
-    synthesize.add_argument(
-        "--sample",
-        type=int,
-        metavar="N",
-        help="Profile a random sample of N rows rather than every row",
-    )
-    synthesize.add_argument(
-        "--max-unique-enum",
-        type=int,
-        default=50,
-        metavar="N",
-        help="Max distinct values for a text column to keep its values, when they repeat (default: 50)",
-    )
-    synthesize.add_argument(
-        "--no-formats",
-        action="store_true",
-        help="Do not name the format a text column's values have (email, uuid4, ...)",
-    )
-    synthesize.add_argument(
-        "--no-patterns",
-        action="store_true",
-        help="Do not write the pattern a code-like text column's values share (ORD-[0-9]{6}, ...)",
-    )
-    synthesize.add_argument(
-        "--parse-text",
-        action="store_true",
-        help=(
-            "Read a text column as the number, flag or date every value holds "
-            "(Boolean, Int64, Float64, Date, Datetime)"
-        ),
-    )
+    add_profile_flags(synthesize, SYNTHESIZE_OPTIONS)
     synthesize.add_argument(
         "--spec",
         metavar="PATH",

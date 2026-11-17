@@ -348,3 +348,61 @@ def test_a_drift_option_out_of_range_is_a_cli_error(tmp_path, capsys):
     data.write_text("a\n1\n", encoding="utf-8")
     assert main(["drift", str(spec), str(data), "--significance", "2"]) == 1
     assert "significance must be between 0 and 1" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# `polspec schema infer` and `synthesize` set the profiling options
+# ---------------------------------------------------------------------------
+
+# Each ProfileOptions field but `seed`, the flags that set it, and the value
+# they set it to -- never `schema infer`'s default, so the test sees the
+# flag reach the option.
+_PROFILE_FLAGS = {
+    "replace": (["--replace", "a", "b"], ("a", "b")),
+    "sample": (["--sample", "7"], 7),
+    "max_unique_enum": (["--max-unique-enum", "3"], 3),
+    "formats": (["--no-formats"], False),
+    "patterns": (["--no-patterns"], False),
+    "weights": (["--weights"], True),
+    "shape": (["--shape"], True),
+    "detect_unique": (["--keys"], True),
+    "calculate_bounds": (["--no-bounds"], False),
+    "detect_order": (["--order"], True),
+    "round_bounds": (["--round-bounds", "1k"], 1000),
+    "round_rates": (["--round-rates", "exact"], None),
+    "parse_text": (["--parse-text"], True),
+}
+
+# What `synthesize` profiles with: the source imitated as it stands.
+_SYNTHESIZE_FLAGS = (
+    "replace",
+    "sample",
+    "max_unique_enum",
+    "formats",
+    "patterns",
+    "parse_text",
+)
+
+
+def test_every_profiling_option_has_a_flag():
+    """Until 1.7 the same option list was written out four times across the
+    two commands; this holds the commands to `ProfileOptions` instead."""
+    from polspec import ProfileOptions
+    from polspec.cli import _build_parser
+    from polspec.cli._profiling import profile_keywords
+
+    fields = {f.name for f in dataclasses.fields(ProfileOptions)}
+    assert set(_PROFILE_FLAGS) == fields - {"seed"}
+    parser = _build_parser()
+    commands = {
+        ("schema", "infer", "data.csv", "-o", "s.yaml"): set(_PROFILE_FLAGS),
+        ("synthesize", "data.csv", "-o", "fake.csv"): set(_SYNTHESIZE_FLAGS),
+    }
+    for command, options in commands.items():
+        assert set(profile_keywords(parser.parse_args(command))) == options, command
+        for name in options:
+            flags, value = _PROFILE_FLAGS[name]
+            got = ProfileOptions(
+                **profile_keywords(parser.parse_args([*command, *flags]))
+            )
+            assert getattr(got, name) == value, (command[0], name)
