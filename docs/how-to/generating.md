@@ -27,10 +27,29 @@ class OrderLines(FrameSpec):
 
 ```python
 df = Orders.generate(1_000_000, seed=42)
+print(df.head(3))
+```
+
+```text
+shape: (3, 5)
+┌──────────┬─────────────┬────────┬─────────────┬─────────────────────────────┐
+│ order_id ┆ customer_id ┆ status ┆ total       ┆ internal_note               │
+│ ---      ┆ ---         ┆ ---    ┆ ---         ┆ ---                         │
+│ i64      ┆ i64         ┆ enum   ┆ f64         ┆ str                         │
+╞══════════╪═════════════╪════════╪═════════════╪═════════════════════════════╡
+│ 935845   ┆ 597         ┆ PAID   ┆ 199.269963  ┆ eUhZbMQR62f36osPhyxduKbiR   │
+│ 512715   ┆ 8167        ┆ PAID   ┆ 744.84394   ┆ 1NrtfQRgkw7Vj8OuZZQ21dDWe9N │
+│ 79860    ┆ 4558        ┆ PAID   ┆ 4410.974884 ┆ lNbQawe                     │
+└──────────┴─────────────┴────────┴─────────────┴─────────────────────────────┘
 ```
 
 Columns are generated independently and in parallel by the Rust extension, then
-cast to their declared dtypes in one Polars pass.
+cast to their declared dtypes in one Polars pass. Every value meets its
+column's claims — `order_id` unique, `total` within its bounds — but a
+column with no further claim, like `internal_note`, is only as realistic as
+its declaration: text of the declared lengths. A
+[`format`](formats.md) or [`pattern`](formats.md#patterns) says what a value
+looks like.
 
 ## Reproducibility
 
@@ -337,6 +356,9 @@ same write with the rest of a lazy plan available — a `filter`, a `select`,
 a `sort` — before it reaches the file.
 
 ## Memory
+
+[Performance](performance.md) gathers what each way of generating costs,
+in time and memory.
 
 `generate()` allocates the whole frame before it returns, so it is worth
 knowing what that is before asking for it:

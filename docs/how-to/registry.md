@@ -28,6 +28,7 @@ class Orders(FrameSpec):
     status        = ColSpec(pl.Enum(["NEW", "PAID", "SHIPPED"]))
     total         = ColSpec(pl.Float64, bounds=(0.0, 5_000.0))
     internal_note = ColSpec(pl.String, string_length=(0, 40), nullable=True)
+    __foreign_keys__ = [ForeignKey("customer_id", references=Customers, ref_columns="id")]
 
 
 class OrderLines(FrameSpec):
@@ -77,8 +78,16 @@ children, and threads every frame into `references=` for you:
 
 ```python
 frames = registry.generate_all(1_000, seed=1)
-frames["Orders"]["customer_id"]   # every value exists in frames["Customers"]["id"]
+customers, orders = frames["Customers"], frames["Orders"]
+print(orders["customer_id"].is_in(customers["id"].implode()).all())
 ```
+
+```text
+True
+```
+
+Every order's `customer_id` is a generated customer's `id`, and every line's
+`order_id` a generated order's.
 
 `n` is one count for every spec or a mapping with each spec's own:
 
@@ -194,15 +203,22 @@ registry.to_mermaid("docs/schema.mmd")
 ```mermaid
 erDiagram
     Customers {
-        Int64 id PK
+        Int64 id PK "bounds: [1, 10000]"
+        String name "tags: [pii], len: [3, 20]"
+        Enum country
+        Date signed_up "bounds: [2020-01-01, 2026-01-01]"
     }
     Orders {
-        Int64 order_id PK
-        Int64 customer_id FK
+        Int64 order_id PK "bounds: [1, 1000000]"
+        Int64 customer_id FK "bounds: [1, 10000]"
+        Enum status
+        Float64 total "bounds: [0.0, 5000.0]"
+        String internal_note "nullable, len: [0, 40]"
     }
     OrderLines {
-        Int64 order_id UK
-        Int32 line_no UK
+        Int64 order_id UK "bounds: [1, 1000000]"
+        Int32 line_no UK "bounds: [1, 50]"
+        UInt16 quantity "bounds: [1, 500]"
     }
     Customers ||--o{ Orders : "fk_customer_id__Customers"
     Orders ||--o{ OrderLines : "fk_order_id__Orders"

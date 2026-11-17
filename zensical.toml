@@ -31,6 +31,7 @@ nav = [
       { "Schema and data drift" = "how-to/drift.md" },
       { "Test pipelines" = "how-to/testing.md" },
       { "Fake data from real data" = "how-to/synthesizing.md" },
+      { "Performance" = "how-to/performance.md" },
     ] },
     { "Specs as values and files" = [
       { "Specs as values" = "how-to/tablespec.md" },
