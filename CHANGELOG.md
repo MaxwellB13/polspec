@@ -9,6 +9,19 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+Toward 2.0, which changes what a seed generates once, and then keeps it
+for all of 2.x.
+
+### Changed
+
+- **Seeded output (2.0): columns are seeded every 4,096 rows, and nulls
+  from a stream of their own.** A frame's rows past the first 4,096 change,
+  and so does every nullable column. Small frames fill on every core: the
+  five-column benchmark at 65,536 rows takes 0.8 ms, not 1.8. A column's
+  values no longer move when its `null_probability` does. Output is still
+  the same on every thread count and platform, and a batch still holds the
+  rows the whole frame holds there.
+
 ## [1.7.0] - 2026-11-17
 
 **Generated data that keeps its checks, and validation that tolerates a

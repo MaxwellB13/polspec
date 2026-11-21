@@ -18,23 +18,23 @@
 //!
 //! Nulls are exempt, as they are everywhere else in polspec: a null means "no
 //! value", and repeating it is not repeating a value. The null mask is the
-//! ordinary per-row draw, and a null row simply spends its index -- so a
-//! permuted column's space has to hold every row, not only the non-null ones.
+//! column's null stream, as for every other kind, and a null row simply
+//! spends its index -- so a permuted column's space has to hold every row,
+//! not only the non-null ones.
 
 use polars::prelude::*;
 use polars_arrow::array::BooleanArray;
 use polars_arrow::bitmap::Bitmap;
 use polars_arrow::datatypes::ArrowDataType;
 use polars_core::chunked_array::builder::StringChunkedBuilder;
-use rand::distr::Distribution as _;
 use rayon::prelude::*;
 
 use crate::format::{Enumerable, Template};
 use crate::permute::Permutation;
 use crate::plan::{ColumnPlan, Kind};
 use crate::sample::{
-    CHARSET, CHUNK_SIZE, ColumnSeed, VALIDITY_BYTES_PER_CHUNK, chunk_rng, draws_nulls,
-    null_bernoulli,
+    CHARSET, ColumnSeed, SEED_CHUNK, draws_nulls, fill_task_validity, null_bernoulli, null_mask,
+    task_rows,
 };
 
 /// A float grid's points sit this many units in the last place apart at the
@@ -60,8 +60,9 @@ fn too_small(plan: &ColumnPlan, wanted: u128, domain: u128) -> String {
 
 /// Rows `[first_row, first_row + n)` of a column whose value at row `r` is
 /// `decode(π(r))`, and their validity. `first_row` is where `seed`'s first
-/// chunk starts, so the chunks, their null draws and the rows they permute
-/// are the whole column's.
+/// seed chunk starts, so the null draws and the rows permuted are the whole
+/// column's. A row's value depends on the row alone, so the tasks are only a
+/// way to share the work.
 fn permuted_buffer<N, F>(
     plan: &ColumnPlan,
     n: usize,
@@ -73,7 +74,7 @@ where
     N: Default + Copy + Send + Sync,
     F: Fn(u128) -> N + Sync,
 {
-    let first_row = seed.first_chunk * CHUNK_SIZE;
+    let first_row = seed.first_chunk * SEED_CHUNK;
     let rows = (first_row + n) as u128;
     if rows > domain {
         return Err(too_small(plan, rows, domain));
@@ -83,43 +84,35 @@ where
         return Ok((values, None));
     }
     let permutation = Permutation::new(domain, permutation_seed(seed));
-    let at = |i: usize, row: usize| {
-        decode(permutation.apply((first_row + i * CHUNK_SIZE + row) as u128))
+    let task = task_rows(n);
+    let fill = |t: usize, slots: &mut [N]| {
+        let start = first_row + t * task;
+        for (row, slot) in slots.iter_mut().enumerate() {
+            *slot = decode(permutation.apply((start + row) as u128));
+        }
     };
-
     if !draws_nulls(plan) {
         values
-            .par_chunks_mut(CHUNK_SIZE)
+            .par_chunks_mut(task)
             .enumerate()
-            .for_each(|(i, slots)| {
-                for (row, slot) in slots.iter_mut().enumerate() {
-                    *slot = at(i, row);
-                }
-            });
+            .for_each(|(t, slots)| fill(t, slots));
         return Ok((values, None));
     }
-
     let bernoulli = null_bernoulli(plan)?;
     let mut validity: Vec<u8> = vec![0u8; n.div_ceil(8)];
     values
-        .par_chunks_mut(CHUNK_SIZE)
-        .zip(validity.par_chunks_mut(VALIDITY_BYTES_PER_CHUNK))
+        .par_chunks_mut(task)
+        .zip(validity.par_chunks_mut(task / 8))
         .enumerate()
-        .for_each(|(i, (slots, bits))| {
-            let mut rng = chunk_rng(seed, i);
-            for (row, slot) in slots.iter_mut().enumerate() {
-                if bernoulli.sample(&mut rng) {
-                    continue; // null: the row spends its index, the bit stays unset
-                }
-                bits[row / 8] |= 1 << (row % 8);
-                *slot = at(i, row);
-            }
+        .for_each(|(t, (slots, bits))| {
+            fill(t, slots);
+            fill_task_validity(bits, t, task, n, seed, &bernoulli);
         });
     Ok((values, Some(Bitmap::from_u8_vec(validity, n))))
 }
 
 /// The key a column's permutation is built from: the column seed, kept apart
-/// from the chunk seeds its null mask draws from.
+/// from the seeds its null stream draws from.
 fn permutation_seed(seed: ColumnSeed) -> u64 {
     seed.base ^ 0x5EED_0F5A_BE11_A5E5
 }
@@ -248,7 +241,7 @@ fn unique_index(plan: &ColumnPlan, n: usize, seed: ColumnSeed) -> Result<UInt32C
 }
 
 /// A string column -- plain, or with a `format=` template -- through its
-/// template's value space, chunk by chunk like `sample::gen_template_column`.
+/// template's value space, task by task like `sample::build_strings`.
 fn unique_strings(
     plan: &ColumnPlan,
     n: usize,
@@ -256,7 +249,7 @@ fn unique_strings(
     template: &(dyn Enumerable + Sync),
 ) -> Result<StringChunked, String> {
     let name = PlSmallStr::from(plan.name.as_str());
-    let first_row = seed.first_chunk * CHUNK_SIZE;
+    let first_row = seed.first_chunk * SEED_CHUNK;
     let domain = template.cardinality();
     let rows = (first_row + n) as u128;
     if rows > domain {
@@ -266,25 +259,24 @@ fn unique_strings(
         return Ok(StringChunkedBuilder::new(name, 0).finish());
     }
     let permutation = Permutation::new(domain, permutation_seed(seed));
-    let bernoulli = draws_nulls(plan)
-        .then(|| null_bernoulli(plan))
+    let validity = draws_nulls(plan)
+        .then(|| null_mask(plan, n, seed))
         .transpose()?;
+    let task = task_rows(n);
 
-    let chunks: Vec<StringChunked> = (0..n.div_ceil(CHUNK_SIZE))
+    let arrays: Vec<StringChunked> = (0..n.div_ceil(task))
         .into_par_iter()
-        .map(|i| {
-            let start = i * CHUNK_SIZE;
-            let len = (start + CHUNK_SIZE).min(n) - start;
+        .map(|t| {
+            let start = t * task;
+            let len = (start + task).min(n) - start;
             let mut builder = StringChunkedBuilder::new(name.clone(), len);
-            let mut rng = chunk_rng(seed, i);
             let mut scratch: Vec<u8> = Vec::with_capacity(template.max_bytes());
-            for row in 0..len {
-                if bernoulli.as_ref().is_some_and(|b| b.sample(&mut rng)) {
+            for row in start..start + len {
+                if validity.as_ref().is_some_and(|v| !v.get_bit(row)) {
                     builder.append_null();
                     continue;
                 }
-                let index = permutation.apply((first_row + start + row) as u128);
-                template.decode(index, &mut scratch);
+                template.decode(permutation.apply((first_row + row) as u128), &mut scratch);
                 // SAFETY: a template's parts are ASCII or a `String`, and a
                 // pattern's units are each a `str`, so the buffer is valid
                 // UTF-8 -- see `format::Template::compile` and `pattern.rs`.
@@ -296,10 +288,10 @@ fn unique_strings(
 
     Ok(StringChunked::from_chunk_iter(
         name,
-        chunks.iter().map(|ca| {
+        arrays.iter().map(|ca| {
             ca.downcast_iter()
                 .next()
-                .expect("one chunk per part")
+                .expect("one array per task")
                 .clone()
         }),
     ))
@@ -450,7 +442,7 @@ mod tests {
 
     #[test]
     fn a_permuted_column_is_unique_across_chunks_and_a_window_is_its_slice() {
-        let whole_n = CHUNK_SIZE * 3 + 500;
+        let whole_n = SEED_CHUNK * 3 + 500;
         for (kind, min, max, cats) in [
             ("int64", None, None, None),
             ("uint32", None, None, None),
@@ -473,8 +465,8 @@ mod tests {
             for (offset, n) in [
                 (0, 10),
                 (17, 100),
-                (CHUNK_SIZE - 3, 10),
-                (CHUNK_SIZE + 1234, CHUNK_SIZE * 2 - 2000),
+                (SEED_CHUNK - 3, 10),
+                (SEED_CHUNK + 1234, SEED_CHUNK * 2 - 2000),
                 (whole_n - 5, 5),
             ] {
                 let window = generate_series(&p, n, 9, offset).unwrap();
@@ -510,7 +502,7 @@ mod tests {
 
     #[test]
     fn a_string_or_template_column_is_a_window_too() {
-        let whole_n = CHUNK_SIZE * 2 + 300;
+        let whole_n = SEED_CHUNK * 3 + 300;
         for p in [
             plan("string", None, None, None),
             template_plan(&[
@@ -521,7 +513,7 @@ mod tests {
         ] {
             let whole = column(&p, whole_n, 21).unwrap();
             assert_eq!(distinct_count(&whole), whole_n, "{:?} repeated", p.kind);
-            for (offset, n) in [(0, 10), (CHUNK_SIZE - 3, 10), (CHUNK_SIZE + 77, 5_000)] {
+            for (offset, n) in [(0, 10), (SEED_CHUNK - 3, 10), (SEED_CHUNK + 77, 5_000)] {
                 let window = generate_series(&p, n, 21, offset).unwrap();
                 assert!(window.equals_missing(&whole.slice(offset as i64, n)));
             }

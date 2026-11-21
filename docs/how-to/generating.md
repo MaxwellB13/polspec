@@ -32,15 +32,15 @@ print(df.head(3))
 
 ```text
 shape: (3, 5)
-┌──────────┬─────────────┬────────┬─────────────┬─────────────────────────────┐
-│ order_id ┆ customer_id ┆ status ┆ total       ┆ internal_note               │
-│ ---      ┆ ---         ┆ ---    ┆ ---         ┆ ---                         │
-│ i64      ┆ i64         ┆ enum   ┆ f64         ┆ str                         │
-╞══════════╪═════════════╪════════╪═════════════╪═════════════════════════════╡
-│ 935845   ┆ 597         ┆ PAID   ┆ 199.269963  ┆ eUhZbMQR62f36osPhyxduKbiR   │
-│ 512715   ┆ 8167        ┆ PAID   ┆ 744.84394   ┆ 1NrtfQRgkw7Vj8OuZZQ21dDWe9N │
-│ 79860    ┆ 4558        ┆ PAID   ┆ 4410.974884 ┆ lNbQawe                     │
-└──────────┴─────────────┴────────┴─────────────┴─────────────────────────────┘
+┌──────────┬─────────────┬────────┬─────────────┬─────────────────────────────────┐
+│ order_id ┆ customer_id ┆ status ┆ total       ┆ internal_note                   │
+│ ---      ┆ ---         ┆ ---    ┆ ---         ┆ ---                             │
+│ i64      ┆ i64         ┆ enum   ┆ f64         ┆ str                             │
+╞══════════╪═════════════╪════════╪═════════════╪═════════════════════════════════╡
+│ 935845   ┆ 597         ┆ PAID   ┆ 199.269963  ┆ Gu4RkWrc59eUhZbMQR62f36osPhyxd… │
+│ 512715   ┆ 8167        ┆ PAID   ┆ 744.84394   ┆ fkMwRFZbL                       │
+│ 79860    ┆ 4558        ┆ PAID   ┆ 4410.974884 ┆ 7Vj8OuZZQ                       │
+└──────────┴─────────────┴────────┴─────────────┴─────────────────────────────────┘
 ```
 
 Columns are generated independently and in parallel by the Rust extension, then
@@ -55,9 +55,11 @@ looks like.
 
 A `seed` fixes the result across processes, machines and thread counts. Each
 column derives its own seed from the frame seed and its *name*, and each
-65,536-row chunk from its index, so the same seed gives the same frame
+4,096-row chunk from its index, so the same seed gives the same frame
 regardless of how many threads did the work, and adding or reordering columns
-never changes the values of the others. The passes that run after the columns
+never changes the values of the others. A column's nulls are drawn apart from
+its values, so changing its `null_probability` moves which rows are null and
+leaves the values of the rest where they were. The passes that run after the columns
 are filled — rules, the hierarchy, foreign keys, composite uniqueness — are
 seeded the same way, from the frame seed and a key naming what the pass is
 for, so a column added beside a ruled or foreign-keyed one leaves it alone
