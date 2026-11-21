@@ -5,16 +5,32 @@
 //!
 //! A column is one allocation, not a pile of them. The values buffer and the
 //! validity bitmap are each allocated once at full length and then divided
-//! into fixed-size chunks that are filled in parallel, every chunk writing
-//! only its own disjoint slice. `CHUNK_SIZE` is a multiple of 8, which is what
-//! lets the bitmap be split on a byte boundary alongside the values, so
-//! neither buffer needs synchronising and neither needs stitching together
-//! afterwards -- the column reaches Polars as a single chunk.
+//! into tasks that are filled in parallel, every task writing only its own
+//! disjoint slice. Neither buffer needs synchronising and neither needs
+//! stitching together afterwards -- the column reaches Polars as a single
+//! chunk.
 //!
-//! Each chunk is seeded from the column seed and its chunk index, so the
-//! output for a given seed is identical whatever the thread count, and the
-//! first rows of a column never change when more rows are asked for. The
-//! column seed itself is derived from the frame seed and the column *name* --
+//! Two sizes, kept apart on purpose (PLAN-2.0.0.md, S1):
+//!
+//! - **What is seeded**: a *seed chunk* of `SEED_CHUNK` rows draws from its
+//!   own generator, seeded from the column seed and the chunk's index. This
+//!   alone decides the output: the first rows of a column never change when
+//!   more rows are asked for, and a window onto the frame regenerates at most
+//!   one partial seed chunk.
+//! - **What is scheduled**: a *task* is a run of whole seed chunks, sized
+//!   from the frame and the thread count (`task_rows`), filled on one thread,
+//!   in order. A small frame gets many tasks, so it fills on every core; a
+//!   large one gets tasks of up to `MAX_TASK_ROWS`, so it pays no more per
+//!   task than it ever did. Since each seed chunk's generator is its own, the
+//!   task size never reaches the output: a seed gives one frame on one thread
+//!   or thirty-two.
+//!
+//! A nullable column draws its nulls from a stream of their own, one
+//! generator per seed chunk, and its values from the value stream for every
+//! row, null or not. So a column's values do not move when its null rate
+//! does, and the value loop has no branch in it.
+//!
+//! The column seed is derived from the frame seed and the column *name* --
 //! or the `seed_name` a spec declares in its place -- so inserting a column
 //! never reshuffles its neighbours, and renaming one need not change it.
 
@@ -38,16 +54,42 @@ const DEFAULT_WIDE_INT_BOUND: i64 = 1_000_000;
 const DEFAULT_WIDE_UINT_BOUND: u64 = 1_000_000;
 const DEFAULT_FLOAT_BOUND: f64 = 1_000_000.0;
 const DEFAULT_FLOAT32_BOUND: f32 = 1_000_000.0;
-pub const CHUNK_SIZE: usize = 65_536;
+/// The rows one generator draws: what the output depends on.
+pub const SEED_CHUNK: usize = 4_096;
 
-/// Validity bytes covering exactly the rows of one chunk. The assertion below
-/// is what makes that division exact -- without it a chunk would own a
+/// The most rows one parallel task fills, and so the most rows in one string
+/// array: 1.x's chunk, which large frames are tuned to.
+const MAX_TASK_ROWS: usize = 65_536;
+
+/// Tasks per thread a column is split into, when it has rows enough. One:
+/// a frame's columns already run in parallel with each other, and pass 2 of
+/// PLAN-2.0.0.md measured four a thread 15% slower on a million-row list
+/// column and no faster at 65,536 rows.
+const TASKS_PER_THREAD: usize = 1;
+
+/// Validity bytes covering exactly the rows of one seed chunk. The assertion
+/// below is what makes that division exact -- without it a chunk would own a
 /// fraction of a byte and two threads could write the same one.
-pub(crate) const VALIDITY_BYTES_PER_CHUNK: usize = CHUNK_SIZE / 8;
+pub(crate) const VALIDITY_BYTES_PER_CHUNK: usize = SEED_CHUNK / 8;
 const _: () = assert!(
-    CHUNK_SIZE.is_multiple_of(8),
-    "a chunk must cover a whole number of validity bytes"
+    SEED_CHUNK.is_multiple_of(8) && MAX_TASK_ROWS.is_multiple_of(SEED_CHUNK),
+    "a seed chunk covers whole validity bytes, and a task whole seed chunks"
 );
+
+/// Mixed into a column seed to give its null stream a seed of its own.
+const NULL_STREAM: u64 = 0x6E75_6C6C_5EED_0001;
+
+/// The rows one parallel task fills for a column of `n` rows: whole seed
+/// chunks, `TASKS_PER_THREAD` tasks a thread, at most `MAX_TASK_ROWS`.
+/// Scheduling only -- the output never depends on it.
+pub(crate) fn task_rows(n: usize) -> usize {
+    let threads = rayon::current_num_threads().max(1);
+    let wanted = n.div_ceil(threads * TASKS_PER_THREAD);
+    wanted
+        .div_ceil(SEED_CHUNK)
+        .clamp(1, MAX_TASK_ROWS / SEED_CHUNK)
+        * SEED_CHUNK
+}
 
 /// The seed one chunk of a column is filled from.
 pub fn seed_for_chunk(base_seed: u64, chunk_index: usize) -> u64 {
@@ -74,7 +116,7 @@ pub fn seed_for_column(base_seed: u64, name: &str) -> u64 {
 /// What a column's chunks are seeded from: the column seed, and the index
 /// of the first chunk this call fills. A call that generates rows
 /// `[offset, offset + n)` of a frame numbers its chunks from
-/// `offset / CHUNK_SIZE`, so it draws exactly the values the whole frame
+/// `offset / SEED_CHUNK`, so it draws exactly the values the whole frame
 /// holds there -- a batch is a window onto one frame, whatever its size.
 #[derive(Clone, Copy, Debug)]
 pub struct ColumnSeed {
@@ -82,10 +124,77 @@ pub struct ColumnSeed {
     pub first_chunk: usize,
 }
 
-/// The RNG one chunk draws from.
+/// The generator one seed chunk draws its values from. `chunk_index` counts
+/// from the call's first chunk.
 #[inline]
 pub(crate) fn chunk_rng(seed: ColumnSeed, chunk_index: usize) -> Xoshiro256PlusPlus {
     Xoshiro256PlusPlus::seed_from_u64(seed_for_chunk(seed.base, seed.first_chunk + chunk_index))
+}
+
+/// The generator one seed chunk draws its nulls from: the value stream's
+/// chunk, under a column seed of its own.
+#[inline]
+fn null_rng(seed: ColumnSeed, chunk_index: usize) -> Xoshiro256PlusPlus {
+    Xoshiro256PlusPlus::seed_from_u64(seed_for_chunk(
+        seed.base ^ NULL_STREAM,
+        seed.first_chunk + chunk_index,
+    ))
+}
+
+/// The validity of `n` rows of a nullable column, from its null stream: set
+/// for a row that holds a value. Filled in tasks like the values, and as
+/// independent of the task size.
+pub(crate) fn null_mask(plan: &ColumnPlan, n: usize, seed: ColumnSeed) -> Result<Bitmap, String> {
+    let bernoulli = null_bernoulli(plan)?;
+    let task = task_rows(n);
+    let mut validity: Vec<u8> = vec![0u8; n.div_ceil(8)];
+    validity
+        .par_chunks_mut(task / 8)
+        .enumerate()
+        .for_each(|(t, bytes)| fill_task_validity(bytes, t, task, n, seed, &bernoulli));
+    Ok(Bitmap::from_u8_vec(validity, n))
+}
+
+/// Task `t`'s validity bytes, from its seed chunks' null streams. The values'
+/// own loops call this inside the same task, so a nullable column is still
+/// one pass over its rows.
+pub(crate) fn fill_task_validity(
+    bytes: &mut [u8],
+    t: usize,
+    task: usize,
+    n: usize,
+    seed: ColumnSeed,
+    bernoulli: &Bernoulli,
+) {
+    let first = t * (task / SEED_CHUNK);
+    for (j, bits) in bytes.chunks_mut(VALIDITY_BYTES_PER_CHUNK).enumerate() {
+        let rows = (bits.len() * 8).min(n - (first + j) * SEED_CHUNK);
+        let mut rng = null_rng(seed, first + j);
+        for row in 0..rows {
+            if !bernoulli.sample(&mut rng) {
+                bits[row / 8] |= 1 << (row % 8);
+            }
+        }
+    }
+}
+
+/// Whether row `row` of a seed chunk is null, for the builders that append a
+/// row at a time: `nulls` is that chunk's null generator, drawn once a row.
+#[inline(always)]
+fn is_null(nulls: &mut Option<(Bernoulli, Xoshiro256PlusPlus)>) -> bool {
+    nulls.as_mut().is_some_and(|(b, rng)| b.sample(rng))
+}
+
+/// One task's run of seed chunks, as `(chunk index, rows)` from the call's
+/// first chunk: the rows `[task * task_rows, ...)` of a column of `n`.
+fn task_chunks(task: usize, task_rows: usize, n: usize) -> impl Iterator<Item = (usize, usize)> {
+    let first = task * (task_rows / SEED_CHUNK);
+    let start = task * task_rows;
+    let end = (start + task_rows).min(n);
+    (0..(end - start).div_ceil(SEED_CHUNK)).map(move |j| {
+        let chunk_start = start + j * SEED_CHUNK;
+        (first + j, (chunk_start + SEED_CHUNK).min(end) - chunk_start)
+    })
 }
 
 /// Whether this column actually produces nulls.
@@ -110,16 +219,18 @@ pub(crate) fn null_bernoulli(plan: &ColumnPlan) -> Result<Bernoulli, String> {
     })
 }
 
-/// Fills `n` values and their validity, chunk by chunk in parallel.
+/// Fills `n` values and their validity, task by task in parallel.
 ///
-/// One allocation for the values and one for the validity bytes; chunk `i`
-/// owns `values[i * CHUNK_SIZE..]` and the validity bytes covering the same
-/// rows, so the two are written without synchronisation and the result needs
-/// no concatenation. A null row leaves its value slot at `N::default()`, which
-/// the validity bitmap marks unset -- Polars never reads it.
+/// One allocation for the values and one for the validity bytes; a task owns
+/// its run of `values` and the validity bytes covering the same rows, so both
+/// are written without synchronisation and the result needs no
+/// concatenation.
 ///
-/// `sample` is called exactly once per non-null row, in row order within a
-/// chunk, which is what keeps a shorter frame a prefix of a longer one.
+/// `sample` is called exactly once per row, null or not, in row order within
+/// a seed chunk from that chunk's generator -- which keeps a shorter frame a
+/// prefix of a longer one, and a value where it is when the null rate moves.
+/// A null row's value is drawn and left in its slot, which the validity
+/// bitmap marks unset; Polars never reads it.
 fn fill_buffer<N, F>(
     plan: &ColumnPlan,
     n: usize,
@@ -131,35 +242,32 @@ where
     F: Fn(&mut Xoshiro256PlusPlus) -> N + Sync,
 {
     let mut values: Vec<N> = vec![N::default(); n];
-
+    let task = task_rows(n);
+    let fill = |t: usize, slots: &mut [N]| {
+        let first = t * (task / SEED_CHUNK);
+        for (j, chunk) in slots.chunks_mut(SEED_CHUNK).enumerate() {
+            let mut rng = chunk_rng(seed, first + j);
+            for slot in chunk.iter_mut() {
+                *slot = sample(&mut rng);
+            }
+        }
+    };
     if !draws_nulls(plan) {
         values
-            .par_chunks_mut(CHUNK_SIZE)
+            .par_chunks_mut(task)
             .enumerate()
-            .for_each(|(i, slots)| {
-                let mut rng = chunk_rng(seed, i);
-                for slot in slots.iter_mut() {
-                    *slot = sample(&mut rng);
-                }
-            });
+            .for_each(|(t, slots)| fill(t, slots));
         return Ok((values, None));
     }
-
     let bernoulli = null_bernoulli(plan)?;
     let mut validity: Vec<u8> = vec![0u8; n.div_ceil(8)];
     values
-        .par_chunks_mut(CHUNK_SIZE)
-        .zip(validity.par_chunks_mut(VALIDITY_BYTES_PER_CHUNK))
+        .par_chunks_mut(task)
+        .zip(validity.par_chunks_mut(task / 8))
         .enumerate()
-        .for_each(|(i, (slots, bits))| {
-            let mut rng = chunk_rng(seed, i);
-            for (row, slot) in slots.iter_mut().enumerate() {
-                if bernoulli.sample(&mut rng) {
-                    continue; // null: the value stays default and the bit unset
-                }
-                bits[row / 8] |= 1 << (row % 8);
-                *slot = sample(&mut rng);
-            }
+        .for_each(|(t, (slots, bits))| {
+            fill(t, slots);
+            fill_task_validity(bits, t, task, n, seed, &bernoulli);
         });
     Ok((values, Some(Bitmap::from_u8_vec(validity, n))))
 }
@@ -286,59 +394,53 @@ macro_rules! impl_gen_float_column {
 impl_gen_float_column!(gen_float32_column, Float32Type, f32, DEFAULT_FLOAT32_BOUND);
 impl_gen_float_column!(gen_float64_column, Float64Type, f64, DEFAULT_FLOAT_BOUND);
 
-/// A boolean column, values and validity both bit-packed in one pass.
+/// A boolean column, its values bit-packed.
 ///
-/// The same byte-per-chunk division as `fill_buffer`, except that the values
-/// are a bitmap too, so a chunk owns one byte range in each of the two.
+/// The same division as `fill_buffer`, except that the values are a bitmap
+/// too, so a task owns a byte range of it; nulls come from `null_mask`.
 fn gen_bool_column(
     plan: &ColumnPlan,
     n: usize,
     seed: ColumnSeed,
 ) -> Result<BooleanChunked, String> {
     let name = PlSmallStr::from(plan.name.as_str());
-    let n_bytes = n.div_ceil(8);
-    let mut values: Vec<u8> = vec![0u8; n_bytes];
+    let mut values: Vec<u8> = vec![0u8; n.div_ceil(8)];
     let truth = Bernoulli::new(plan.p_true).map_err(|e| {
         format!(
             "Invalid boolean probability {} for column '{}': {e}",
             plan.p_true, plan.name
         )
     })?;
-
+    let task = task_rows(n);
+    let fill = |t: usize, bytes: &mut [u8]| {
+        let first = t * (task / SEED_CHUNK);
+        for (j, vals) in bytes.chunks_mut(VALIDITY_BYTES_PER_CHUNK).enumerate() {
+            let rows = (vals.len() * 8).min(n - (first + j) * SEED_CHUNK);
+            let mut rng = chunk_rng(seed, first + j);
+            for row in 0..rows {
+                if truth.sample(&mut rng) {
+                    vals[row / 8] |= 1 << (row % 8);
+                }
+            }
+        }
+    };
     let validity = if draws_nulls(plan) {
         let bernoulli = null_bernoulli(plan)?;
-        let mut validity: Vec<u8> = vec![0u8; n_bytes];
+        let mut validity: Vec<u8> = vec![0u8; n.div_ceil(8)];
         values
-            .par_chunks_mut(VALIDITY_BYTES_PER_CHUNK)
-            .zip(validity.par_chunks_mut(VALIDITY_BYTES_PER_CHUNK))
+            .par_chunks_mut(task / 8)
+            .zip(validity.par_chunks_mut(task / 8))
             .enumerate()
-            .for_each(|(i, (vals, bits))| {
-                let mut rng = chunk_rng(seed, i);
-                let rows = (vals.len() * 8).min(n.saturating_sub(i * CHUNK_SIZE));
-                for row in 0..rows {
-                    if bernoulli.sample(&mut rng) {
-                        continue;
-                    }
-                    bits[row / 8] |= 1 << (row % 8);
-                    if truth.sample(&mut rng) {
-                        vals[row / 8] |= 1 << (row % 8);
-                    }
-                }
+            .for_each(|(t, (bytes, bits))| {
+                fill(t, bytes);
+                fill_task_validity(bits, t, task, n, seed, &bernoulli);
             });
         Some(Bitmap::from_u8_vec(validity, n))
     } else {
         values
-            .par_chunks_mut(VALIDITY_BYTES_PER_CHUNK)
+            .par_chunks_mut(task / 8)
             .enumerate()
-            .for_each(|(i, vals)| {
-                let mut rng = chunk_rng(seed, i);
-                let rows = (vals.len() * 8).min(n.saturating_sub(i * CHUNK_SIZE));
-                for row in 0..rows {
-                    if truth.sample(&mut rng) {
-                        vals[row / 8] |= 1 << (row % 8);
-                    }
-                }
-            });
+            .for_each(|(t, bytes)| fill(t, bytes));
         None
     };
 
@@ -442,190 +544,152 @@ pub fn random_ascii(rng: &mut Xoshiro256PlusPlus, scratch: &mut [u8], len: usize
     }
 }
 
-/// A string column, built one chunk at a time.
+/// A string column, built task by task.
 ///
 /// Strings are the one kind that cannot be written into a preallocated buffer:
 /// a row's width is not known until it is drawn, and Polars backs a string
 /// column with view arrays rather than one contiguous run of bytes. So each
-/// chunk builds its own array in parallel and the column keeps them.
+/// task builds its own array in parallel and the column keeps them: a column
+/// of up to `MAX_TASK_ROWS` rows a piece, as 1.x's chunks were.
 ///
-/// `from_chunk_iter` rather than appending the chunks one by one: an append
+/// `from_chunk_iter` rather than appending the arrays one by one: an append
 /// rescans both sides for their first and last non-null value to maintain the
-/// sorted flag, so hundreds of chunks mean hundreds of passes over the data to
+/// sorted flag, so hundreds of arrays mean hundreds of passes over the data to
 /// maintain a flag a column of random strings will not have set anyway.
 ///
-/// Merging the chunks into one was tried and reverted. It copies no string
+/// Merging the arrays into one was tried and reverted. It copies no string
 /// bytes -- view arrays concatenate by merging their buffer lists -- but it
 /// does copy the views, sixteen bytes a row, and at twenty million rows that
 /// costs appreciably more than leaving the column split ever did.
-fn gen_string_column(
+///
+/// `draw` fills `scratch` with one row's string from the chunk's generator;
+/// it runs for every row, null or not, so the values stay where they are when
+/// the null rate moves. `text` reads the string back out of `scratch`.
+fn build_strings<S>(
     plan: &ColumnPlan,
     n: usize,
     seed: ColumnSeed,
+    scratch: impl Fn() -> S + Sync,
+    draw: impl Fn(&mut Xoshiro256PlusPlus, &mut S) + Sync,
+    text: impl Fn(&S) -> &str + Sync,
 ) -> Result<StringChunked, String> {
     let name = PlSmallStr::from(plan.name.as_str());
     if n == 0 {
         return Ok(StringChunkedBuilder::new(name, 0).finish());
     }
+    let bernoulli = draws_nulls(plan)
+        .then(|| null_bernoulli(plan))
+        .transpose()?;
+    let task = task_rows(n);
+    let arrays: Vec<StringChunked> = (0..n.div_ceil(task))
+        .into_par_iter()
+        .map(|t| {
+            let rows = (t * task + task).min(n) - t * task;
+            let mut builder = StringChunkedBuilder::new(name.clone(), rows);
+            let mut buffer = scratch();
+            for (chunk, rows) in task_chunks(t, task, n) {
+                let mut rng = chunk_rng(seed, chunk);
+                let mut nulls = bernoulli.map(|b| (b, null_rng(seed, chunk)));
+                for _ in 0..rows {
+                    draw(&mut rng, &mut buffer);
+                    if is_null(&mut nulls) {
+                        builder.append_null();
+                    } else {
+                        builder.append_value(text(&buffer));
+                    }
+                }
+            }
+            builder.finish()
+        })
+        .collect();
+    Ok(StringChunked::from_chunk_iter(
+        name,
+        arrays.iter().map(|ca| {
+            ca.downcast_iter()
+                .next()
+                .expect("one array per task")
+                .clone()
+        }),
+    ))
+}
+
+/// A plain string column: a length, then that many characters.
+fn gen_string_column(
+    plan: &ColumnPlan,
+    n: usize,
+    seed: ColumnSeed,
+) -> Result<StringChunked, String> {
     let min_len = plan.str_min_len;
     let max_len = plan.str_max_len.max(min_len);
     let len_dist = match max_len > min_len {
         true => Some(uniform(min_len, max_len, plan)?),
         false => None,
     };
-    let bernoulli = draws_nulls(plan)
-        .then(|| null_bernoulli(plan))
-        .transpose()?;
-
-    let chunks: Vec<StringChunked> = (0..n.div_ceil(CHUNK_SIZE))
-        .into_par_iter()
-        .map(|i| {
-            let start = i * CHUNK_SIZE;
-            let len = (start + CHUNK_SIZE).min(n) - start;
-            let mut builder = StringChunkedBuilder::new(name.clone(), len);
-            let mut rng = chunk_rng(seed, i);
-            let mut scratch: Vec<u8> = vec![0u8; max_len];
-            for _ in 0..len {
-                if bernoulli.as_ref().is_some_and(|b| b.sample(&mut rng)) {
-                    builder.append_null();
-                    continue;
-                }
-                let str_len = len_dist.as_ref().map_or(min_len, |d| d.sample(&mut rng));
-                random_ascii(&mut rng, &mut scratch, str_len);
-                // SAFETY: CHARSET contains only ASCII bytes (A-Z, a-z, 0-9).
-                let s = unsafe { std::str::from_utf8_unchecked(&scratch[..str_len]) };
-                builder.append_value(s);
-            }
-            builder.finish()
-        })
-        .collect();
-
-    Ok(StringChunked::from_chunk_iter(
-        name,
-        chunks.iter().map(|ca| {
-            ca.downcast_iter()
-                .next()
-                .expect("one chunk per part")
-                .clone()
-        }),
-    ))
+    build_strings(
+        plan,
+        n,
+        seed,
+        || (vec![0u8; max_len], 0usize),
+        |rng, (bytes, len)| {
+            *len = len_dist.as_ref().map_or(min_len, |d| d.sample(rng));
+            random_ascii(rng, bytes, *len);
+        },
+        // SAFETY: CHARSET contains only ASCII bytes (A-Z, a-z, 0-9).
+        |(bytes, len)| unsafe { std::str::from_utf8_unchecked(&bytes[..*len]) },
+    )
 }
 
 /// A templated string column: each row filled from the plan's `Template`.
-///
-/// Chunked and collected the same way as `gen_string_column`, and for the
-/// same reasons; the only difference is where the bytes come from.
 fn gen_template_column(
     plan: &ColumnPlan,
     n: usize,
     seed: ColumnSeed,
 ) -> Result<StringChunked, String> {
-    let name = PlSmallStr::from(plan.name.as_str());
-    if n == 0 {
-        return Ok(StringChunkedBuilder::new(name, 0).finish());
-    }
     let template = plan
         .template
         .as_ref()
         .ok_or_else(|| format!("Column '{}' has kind 'template' but no template", plan.name))?;
     let sampler = template.sampler();
-    let bernoulli = draws_nulls(plan)
-        .then(|| null_bernoulli(plan))
-        .transpose()?;
-
-    let chunks: Vec<StringChunked> = (0..n.div_ceil(CHUNK_SIZE))
-        .into_par_iter()
-        .map(|i| {
-            let start = i * CHUNK_SIZE;
-            let len = (start + CHUNK_SIZE).min(n) - start;
-            let mut builder = StringChunkedBuilder::new(name.clone(), len);
-            let mut rng = chunk_rng(seed, i);
-            let mut scratch: Vec<u8> = Vec::with_capacity(template.max_bytes());
-            for _ in 0..len {
-                if bernoulli.as_ref().is_some_and(|b| b.sample(&mut rng)) {
-                    builder.append_null();
-                    continue;
-                }
-                sampler.fill(&mut rng, &mut scratch);
-                // SAFETY: every template part is ASCII or a `String`, so the
-                // buffer is valid UTF-8 -- see `format::Template::compile`.
-                let s = unsafe { std::str::from_utf8_unchecked(&scratch) };
-                builder.append_value(s);
-            }
-            builder.finish()
-        })
-        .collect();
-
-    Ok(StringChunked::from_chunk_iter(
-        name,
-        chunks.iter().map(|ca| {
-            ca.downcast_iter()
-                .next()
-                .expect("one chunk per part")
-                .clone()
-        }),
-    ))
+    build_strings(
+        plan,
+        n,
+        seed,
+        || Vec::<u8>::with_capacity(template.max_bytes()),
+        |rng, bytes| sampler.fill(rng, bytes),
+        // SAFETY: every template part is ASCII or a `String`, so the buffer
+        // is valid UTF-8 -- see `format::Template::compile`.
+        |bytes| unsafe { std::str::from_utf8_unchecked(bytes) },
+    )
 }
 
-/// A pattern column: each row a full match of the plan's pattern.
-///
-/// Chunked and collected the same way as `gen_string_column`; the values come
-/// from a walk through the pattern's automaton -- see `pattern.rs`.
+/// A pattern column: each row a full match of the plan's pattern, from a
+/// walk through its automaton -- see `pattern.rs`.
 fn gen_pattern_column(
     plan: &ColumnPlan,
     n: usize,
     seed: ColumnSeed,
 ) -> Result<StringChunked, String> {
-    let name = PlSmallStr::from(plan.name.as_str());
-    if n == 0 {
-        return Ok(StringChunkedBuilder::new(name, 0).finish());
-    }
     let sampler = plan
         .pattern
         .as_ref()
         .ok_or_else(|| format!("Column '{}' has kind 'pattern' but no pattern", plan.name))?;
-    let bernoulli = draws_nulls(plan)
-        .then(|| null_bernoulli(plan))
-        .transpose()?;
-
-    let chunks: Vec<StringChunked> = (0..n.div_ceil(CHUNK_SIZE))
-        .into_par_iter()
-        .map(|i| {
-            let start = i * CHUNK_SIZE;
-            let len = (start + CHUNK_SIZE).min(n) - start;
-            let mut builder = StringChunkedBuilder::new(name.clone(), len);
-            let mut rng = chunk_rng(seed, i);
-            let mut value = String::with_capacity(sampler.max_bytes());
-            for _ in 0..len {
-                if bernoulli.as_ref().is_some_and(|b| b.sample(&mut rng)) {
-                    builder.append_null();
-                    continue;
-                }
-                sampler.fill(&mut rng, &mut value);
-                builder.append_value(&value);
-            }
-            builder.finish()
-        })
-        .collect();
-
-    Ok(StringChunked::from_chunk_iter(
-        name,
-        chunks.iter().map(|ca| {
-            ca.downcast_iter()
-                .next()
-                .expect("one chunk per part")
-                .clone()
-        }),
-    ))
+    build_strings(
+        plan,
+        n,
+        seed,
+        || String::with_capacity(sampler.max_bytes()),
+        |rng, value| sampler.fill(rng, value),
+        |value| value.as_str(),
+    )
 }
 
 /// Fills one column according to its plan.
 /// Rows `[row_offset, row_offset + n)` of the column `plan` describes.
 ///
-/// Chunks are numbered from `row_offset / CHUNK_SIZE`, so the values are the
-/// ones the whole column holds at those rows whatever `n` and `row_offset`
+/// Seed chunks are numbered from `row_offset / SEED_CHUNK`, so the values are
+/// the ones the whole column holds at those rows whatever `n` and `row_offset`
 /// are; a call starting mid-chunk fills that chunk from its start and slices
-/// the head off, at most one partial chunk of extra work. A unique column is
+/// the head off, at most one partial seed chunk of extra work. A unique column is
 /// a window too, through a permutation of its value space.
 pub fn generate_series(
     plan: &ColumnPlan,
@@ -633,10 +697,10 @@ pub fn generate_series(
     seed: u64,
     row_offset: usize,
 ) -> Result<Series, String> {
-    let head = row_offset % CHUNK_SIZE;
+    let head = row_offset % SEED_CHUNK;
     let seed = ColumnSeed {
         base: seed,
-        first_chunk: row_offset / CHUNK_SIZE,
+        first_chunk: row_offset / SEED_CHUNK,
     };
     let series = if plan.unique {
         crate::unique::generate_unique_series(plan, n + head, seed)?
@@ -699,7 +763,7 @@ mod tests {
     #[test]
     fn same_seed_same_values_across_chunk_boundaries() {
         let p = simple("int64");
-        let n = CHUNK_SIZE * 2 + 17;
+        let n = SEED_CHUNK * 2 + 17;
         let a = generate_series(&p, n, 42, 0).unwrap();
         let b = generate_series(&p, n, 42, 0).unwrap();
         assert!(a.equals(&b));
@@ -714,7 +778,7 @@ mod tests {
         // column never change when more rows are asked for.
         let p = simple("float64");
         let short = generate_series(&p, 1000, 7, 0).unwrap();
-        let long = generate_series(&p, CHUNK_SIZE + 1000, 7, 0).unwrap();
+        let long = generate_series(&p, SEED_CHUNK + 1000, 7, 0).unwrap();
         assert!(short.equals(&long.slice(0, 1000)));
     }
 
@@ -723,7 +787,7 @@ mod tests {
         // Every kind, every offset: rows [offset, offset + n) of a call with
         // that offset are the rows the whole column holds there -- on a chunk
         // boundary, mid-chunk, spanning several chunks, and nullable.
-        let whole_n = CHUNK_SIZE * 3 + 500;
+        let whole_n = SEED_CHUNK * 3 + 500;
         let template = [("chars".to_string(), vec!["ab".to_string()], 2, 4)];
         for kind in ["int64", "float64", "bool", "string", "template", "index"] {
             let plan = ColumnPlan::build(PlanArgs {
@@ -737,10 +801,10 @@ mod tests {
             let whole = generate_series(&plan, whole_n, 9, 0).unwrap();
             for (offset, n) in [
                 (0, 10),
-                (CHUNK_SIZE, 10),
+                (SEED_CHUNK, 10),
                 (17, 100),
-                (CHUNK_SIZE - 3, 10),
-                (CHUNK_SIZE + 1234, CHUNK_SIZE * 2 - 2000),
+                (SEED_CHUNK - 3, 10),
+                (SEED_CHUNK + 1234, SEED_CHUNK * 2 - 2000),
                 (whole_n - 5, 5),
             ] {
                 let window = generate_series(&plan, n, 9, offset).unwrap();
@@ -759,16 +823,103 @@ mod tests {
         })
         .unwrap();
         let whole = generate_series(&nullable, whole_n, 9, 0).unwrap();
-        let window = generate_series(&nullable, 1000, 9, CHUNK_SIZE - 400).unwrap();
-        assert!(window.equals_missing(&whole.slice((CHUNK_SIZE - 400) as i64, 1000)));
+        let window = generate_series(&nullable, 1000, 9, SEED_CHUNK - 400).unwrap();
+        assert!(window.equals_missing(&whole.slice((SEED_CHUNK - 400) as i64, 1000)));
         assert_eq!(window.len(), 1000);
+    }
+
+    fn in_pool<T: Send>(threads: usize, f: impl FnOnce() -> T + Send) -> T {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .unwrap()
+            .install(f)
+    }
+
+    #[test]
+    fn a_seed_gives_one_column_on_any_number_of_threads() {
+        // Tasks are sized by the thread count; seed chunks are not. Every
+        // kind, nullable and not, across several tasks of every size.
+        let n = MAX_TASK_ROWS * 3 + 777;
+        let template = [("chars".to_string(), vec!["ab".to_string()], 2, 4)];
+        for kind in ["int64", "float64", "bool", "string", "template", "index"] {
+            for nullable in [false, true] {
+                let plan = ColumnPlan::build(PlanArgs {
+                    name: "c".into(),
+                    kind,
+                    nullable,
+                    null_probability: 0.3,
+                    template: (kind == "template").then_some(&template[..]),
+                    n_categories: (kind == "index").then_some(7),
+                    ..Default::default()
+                })
+                .unwrap();
+                let one = in_pool(1, || generate_series(&plan, n, 5, 0).unwrap());
+                for threads in [2, 3, 8, 32] {
+                    let many = in_pool(threads, || generate_series(&plan, n, 5, 0).unwrap());
+                    assert!(
+                        one.equals_missing(&many),
+                        "{kind} (nullable {nullable}) differs on {threads} threads"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_task_is_whole_seed_chunks_and_at_most_the_largest() {
+        for n in [0, 1, SEED_CHUNK, 65_536, 1_000_000, 50_000_000] {
+            for threads in [1, 4, 32] {
+                let rows = in_pool(threads, || task_rows(n));
+                assert!(rows.is_multiple_of(SEED_CHUNK), "{n} on {threads}: {rows}");
+                assert!((SEED_CHUNK..=MAX_TASK_ROWS).contains(&rows));
+            }
+        }
+        // A fixture-sized frame splits on many threads, so it fills on them.
+        assert!(in_pool(32, || task_rows(65_536)) < 65_536);
+    }
+
+    #[test]
+    fn a_columns_values_stay_where_they_are_when_its_null_rate_moves() {
+        // Nulls draw from a stream of their own, so a row present at two null
+        // rates holds the same value at both, and the value a column with no
+        // nulls holds there.
+        let n = SEED_CHUNK * 5 + 31;
+        let template = [("chars".to_string(), vec!["abc".to_string()], 1, 6)];
+        for kind in ["int64", "float64", "bool", "string", "template", "index"] {
+            let with = |nullable: bool, p: f64| {
+                let plan = ColumnPlan::build(PlanArgs {
+                    name: "c".into(),
+                    kind,
+                    nullable,
+                    null_probability: p,
+                    template: (kind == "template").then_some(&template[..]),
+                    n_categories: (kind == "index").then_some(9),
+                    ..Default::default()
+                })
+                .unwrap();
+                generate_series(&plan, n, 13, 0).unwrap()
+            };
+            let none = with(false, 0.0);
+            for p in [0.1, 0.5] {
+                let some = with(true, p);
+                assert!(some.null_count() > 0, "{kind} at {p}");
+                let present = some.is_not_null();
+                assert!(
+                    some.filter(&present)
+                        .unwrap()
+                        .equals(&none.filter(&present).unwrap()),
+                    "{kind}: a present value moved at null rate {p}"
+                );
+            }
+        }
     }
 
     #[test]
     fn a_fixed_width_column_arrives_as_one_chunk() {
         // The whole point of filling into one buffer: nothing downstream --
         // a gather, a cast, a write -- pays for a column split 40 ways.
-        let n = CHUNK_SIZE * 40 + 3;
+        let n = SEED_CHUNK * 40 + 3;
         for kind in ["int64", "float32", "bool"] {
             let s = generate_series(&simple(kind), n, 3, 0).unwrap();
             assert_eq!(s.n_chunks(), 1, "{kind} came back split");
@@ -790,7 +941,7 @@ mod tests {
         // Deliberate, and the opposite of every other kind: merging a view
         // array copies sixteen bytes of view per row, which costs more than
         // the split it removes. Pinned so the merge is not quietly re-added.
-        let n = CHUNK_SIZE * 40 + 3;
+        let n = SEED_CHUNK * 40 + 3;
         let s = generate_series(&simple("string"), n, 3, 0).unwrap();
         assert_eq!(s.len(), n);
         assert!(s.n_chunks() > 1, "a long string column is left split");

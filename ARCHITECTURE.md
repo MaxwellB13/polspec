@@ -84,22 +84,49 @@ flowchart LR
 
 Each column becomes a `ColumnPlan` — kind, nullability, exact bounds, domain
 size and weights, lengths, distribution — crossing into Rust once. Rust fills the
-columns in parallel, and within a column in 65,536-row chunks whose seeds come
-from the chunk index, so output is identical regardless of thread count.
+columns in parallel, and within a column in tasks of whole seed chunks; what a
+seed draws is set out under *The seeding scheme* below.
 
-For a fixed-width column a chunk is a unit of work, not a unit of storage. The
+For a fixed-width column a task is a unit of work, not a unit of storage. The
 values buffer and the validity bitmap are each allocated once at the column's
-full length, and a chunk fills its own disjoint slice of both — which is why
-the chunk size is a multiple of 8, so the bitmap divides on a byte boundary and
-no two threads touch the same byte. The column reaches Polars as a single
+full length, and a task fills its own disjoint slice of both — which is why a
+seed chunk is a multiple of 8 rows, so the bitmap divides on a byte boundary
+and no two threads touch the same byte. The column reaches Polars as a single
 chunk, so nothing downstream — the gather behind a `choices` domain, the cast
 behind a temporal dtype, a `sink_*` write — pays for a column split into
 hundreds of pieces.
 
 String columns are the exception: a row's width is not known until it is drawn,
 and Polars backs them with view arrays, which merge by copying sixteen bytes of
-view per row. That costs more than the split it would remove, so a long string
-column stays chunked.
+view per row. That costs more than the split it would remove, so a string
+column arrives as one array per task, of at most 65,536 rows.
+
+### The seeding scheme
+
+What a seed draws, stream by stream. Everything here is output: changing any
+of it changes what a seed generates, which *Stability* allows only in a major
+release. Written down so the next major knows what it is changing.
+
+| Stream | Seeded from | Draws |
+|:--|:--|:--|
+| A column | `seed_for_column(frame seed, seed name)`: FNV-1a of the column's `seed_name`, or its name, mixed with the frame seed by a splitmix64 finaliser (`src/sample.rs`) | nothing itself; every stream below is keyed by it |
+| A seed chunk's values | `seed_for_chunk(column seed, i)` for rows `[4096·i, 4096·(i+1))`, as a Xoshiro256++ | one value per row, null or not, in row order: a number from its `Uniform` or distribution; a boolean from a Bernoulli; a category index, uniform or by `WeightedIndex`; a plain string's length and then six bits a character; a template's or a pattern's parts in order |
+| A seed chunk's nulls | `seed_for_chunk(column seed ^ NULL_STREAM, i)` | one Bernoulli per row of a nullable column with a non-zero rate |
+| A unique column | a Feistel permutation `π` keyed by `column seed ^ 0x5EED_0F5A_BE11_A5E5` (`src/permute.rs`) | row `r` holds the `π(r)`-th value of the column's space; nulls from the null stream above, a null row spending its index |
+| An overlay | an engine column of its own, under a seed name no user column can carry: `<name> nan`, `<name> extra` | which present rows of a float column are NaN; which rows of a format take one of its extra values |
+| Each pass | `pass_seed(frame seed, what it is for)` (`generation/seeds.py`) | rules, a hierarchy, foreign keys, the composite-key repair, cartesian coverage, a list's elements past the first window, a bounded `Categorical`'s pool |
+
+Three properties follow, and `cargo test` holds each:
+
+- **A seed gives one frame on any thread count.** Tasks are sized from the
+  frame and the thread count (`task_rows`: whole seed chunks, one task a
+  thread, at most 65,536 rows), and only scheduling depends on them.
+- **A window is the frame's rows.** A call for rows `[offset, offset + n)`
+  numbers its seed chunks from `offset / 4096`, so a batch draws the values
+  the whole frame holds there, regenerating at most one partial chunk.
+- **A column's values do not move with its null rate.** Values are drawn for
+  every row and nulls from their own stream, so a row present at two rates
+  holds the same value at both.
 
 Rules and foreign keys are applied afterwards as vectorised passes over the
 finished frame, not row by row. Each pass declares the columns it reads and
