@@ -48,6 +48,7 @@ import argparse
 import datetime as dt
 import functools
 import json
+import os
 import platform
 import statistics
 import subprocess
@@ -62,7 +63,16 @@ from typing import Any
 
 import polars as pl
 import polspec
-from polspec import Bound, ColRule, ColSpec, ForeignKey, FrameSpec, Hierarchy, col
+from polspec import (
+    Bound,
+    Check,
+    ColRule,
+    ColSpec,
+    ForeignKey,
+    FrameSpec,
+    Hierarchy,
+    col,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 BASELINE = Path(__file__).resolve().parent / "baseline.json"
@@ -476,6 +486,59 @@ def _sink_parquet(n: int) -> None:
         DataSource.sink_parquet(Path(tmp) / "out.parquet", n, batch_size=100_000)
 
 
+# What 2.0's engine is measured against (PLAN-2.0.0.md, pass 1), recorded on
+# 1.7.0 first: frames of fixture size on 1, 4 and every thread, which one
+# 65,536-row chunk per column holds to one thread each; small batches; lists
+# in batches; 200 weighted categories; and checks kept at two reject rates.
+
+# A case's thread count is set in its process's environment: Polars reads
+# POLARS_MAX_THREADS, and the extension's own rayon pool RAYON_NUM_THREADS.
+THREADS = (1, 4)
+FIXTURE_SIZES = (1_000, 10_000, 65_536, 1_000_000, 20_000_000)
+
+
+class Five(FrameSpec):
+    """Five columns, one per base sampler: the 2.0 exit criteria's frame."""
+
+    string_1 = ColSpec(pl.String, string_length=(STR_MIN_LEN, STR_MAX_LEN))
+    enum_1 = ColSpec(pl.Enum(CATEGORIES), nullable=True, null_probability=NULL_P)
+    int_1 = ColSpec(pl.Int64, bounds=(INT_LO, INT_HI), nullable=True)
+    float_1 = ColSpec(pl.Float64, bounds=(FLOAT_LO, FLOAT_HI), nullable=True)
+    bool_1 = ColSpec(pl.Boolean)
+
+
+class Weighted200(FrameSpec):
+    """An Enum of 200 categories, weighted as a profiled one is: the
+    sampler's search over cumulative weights, at its widest."""
+
+    c = ColSpec(
+        pl.String,
+        choices={f"c{i:03d}": 1.0 / (i + 1) for i in range(200)},
+    )
+
+
+class Kept10(Mixed11):
+    """Mixed11 with a check that rejects 10% of rows: two of qty's twenty."""
+
+    __checks__ = [Check(col("qty") > 2, name="qty_above_2")]
+
+
+class Kept50(Mixed11):
+    """Mixed11 with a check that rejects half the rows."""
+
+    __checks__ = [Check(col("qty") > 10, name="qty_above_10")]
+
+
+def _batches_of(
+    spec: type[FrameSpec], batch_size: int, **kw: Any
+) -> Callable[[int], None]:
+    def run(n: int) -> None:
+        for _ in spec.generate_batches(n, batch_size=batch_size, seed=SEED, **kw):
+            pass
+
+    return run
+
+
 # ---------------------------------------------------------------------------
 # The case registry
 # ---------------------------------------------------------------------------
@@ -495,6 +558,17 @@ class Case:
     suite: str
     sizes: tuple[int, ...]
     run: Callable[[int], Any]
+    threads: int | None = None  # None: every thread the machine has
+
+
+def _threaded(
+    name: str, sizes: tuple[int, ...], run: Callable[[int], Any]
+) -> tuple[Case, ...]:
+    """The same work on every thread, and on each count in `THREADS`."""
+    return (
+        Case(name, "regression", sizes, run),
+        *(Case(f"{name}_t{t}", "regression", sizes, run, threads=t) for t in THREADS),
+    )
 
 
 def _polspec(spec: type[FrameSpec], **kwargs: Any) -> Callable[[int], Any]:
@@ -576,6 +650,34 @@ CASES: tuple[Case, ...] = (
     Case("validate_enum", "regression", (1_000_000,), _validate_enum),
     Case("profile_mixed11", "regression", (1_000_000,), _profile_mixed),
     Case("profile_uuid", "regression", (1_000_000,), _profile_uuid),
+    # What 2.0 speeds up, against which its exit criteria are measured.
+    *_threaded("five", FIXTURE_SIZES, _polspec(Five)),
+    Case("string_t1", "regression", (1_000_000,), _polspec(OneString), threads=1),
+    Case(
+        "unique_int64_t1", "regression", (1_000_000,), _polspec(UniqueRoomy), threads=1
+    ),
+    Case("batches_100", "regression", (100_000,), _batches_of(DataSource, 100)),
+    Case("batches_mixed11_1k", "regression", (1_000_000,), _batches_of(Mixed11, 1_000)),
+    Case("list_batches_1k", "regression", (1_000_000,), _batches_of(OneListInt, 1_000)),
+    Case("weighted_200", "regression", (1_000_000,), _polspec(Weighted200)),
+    Case(
+        "weighted_200_t1", "regression", (1_000_000,), _polspec(Weighted200), threads=1
+    ),
+    Case("list_int_t1", "regression", (1_000_000,), _polspec(OneListInt), threads=1),
+    Case("checks_10", "regression", (1_000_000,), _polspec(Kept10, checks=True)),
+    Case("checks_50", "regression", (1_000_000,), _polspec(Kept50, checks=True)),
+    Case(
+        "checks_10_batches",
+        "regression",
+        (1_000_000,),
+        _batches_of(Kept10, 100_000, checks=True),
+    ),
+    Case(
+        "checks_50_batches",
+        "regression",
+        (1_000_000,),
+        _batches_of(Kept50, 100_000, checks=True),
+    ),
 )
 
 BY_NAME = {case.name: case for case in CASES}
@@ -666,6 +768,7 @@ def measure(case: Case, n: int, repeat: int) -> dict[str, Any]:
         "median": statistics.median(times),
         "max": max(times),
         "peak_rss_mb": peak_rss_mb(),
+        "threads": pl.thread_pool_size(),
     }
 
 
@@ -763,8 +866,11 @@ def run_isolated(names: list[str], repeat: int) -> list[dict[str, Any]]:
                 "--repeat",
                 str(repeat),
             ]
+            env = dict(os.environ)
+            if case.threads is not None:
+                env["POLARS_MAX_THREADS"] = env["RAYON_NUM_THREADS"] = str(case.threads)
             completed = subprocess.run(  # noqa: S603 - fixed argv from this file's own case registry, no shell
-                argv, capture_output=True, text=True, check=False
+                argv, capture_output=True, text=True, check=False, env=env
             )
             if completed.returncode != 0:
                 print(f"  {name} n={n:,}: FAILED", file=sys.stderr)
