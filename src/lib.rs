@@ -10,12 +10,14 @@
 //! - `math.rs` -- `exp`, `ln` and `pow`, the same bits on every platform
 //!   (`math_tables.rs` holds their tables).
 //! - `sample.rs` -- filling a column, in seeded parallel chunks.
+//! - `alias.rs` -- weighted categories, drawn by the alias method.
 //! - `unique.rs` -- filling a column whose values must all differ.
 //! - `permute.rs` -- the keyed permutation behind both, and behind a unique
 //!   foreign key's pick of parent rows.
 //! - `assemble.rs` -- a `List` column from its lengths and elements, and a
 //!   `Decimal` from its physical integers.
 
+mod alias;
 mod assemble;
 mod chars;
 mod dist;

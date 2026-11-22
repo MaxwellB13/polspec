@@ -520,6 +520,12 @@ class Five(FrameSpec):
     bool_1 = ColSpec(pl.Boolean)
 
 
+class Weighted3(FrameSpec):
+    """Three weighted categories: the narrowest weighted draw."""
+
+    c = ColSpec(pl.String, choices={"NEW": 0.2, "PAID": 0.5, "SHIPPED": 0.3})
+
+
 class Weighted200(FrameSpec):
     """An Enum of 200 categories, weighted as a profiled one is: the
     sampler's search over cumulative weights, at its widest."""
@@ -690,6 +696,7 @@ CASES: tuple[Case, ...] = (
     Case(
         "weighted_200_t1", "regression", (1_000_000,), _polspec(Weighted200), threads=1
     ),
+    Case("weighted_3_t1", "regression", (1_000_000,), _polspec(Weighted3), threads=1),
     Case("list_int_t1", "regression", (1_000_000,), _polspec(OneListInt), threads=1),
     Case("checks_10", "regression", (1_000_000,), _polspec(Kept10, checks=True)),
     Case("checks_50", "regression", (1_000_000,), _polspec(Kept50, checks=True)),
