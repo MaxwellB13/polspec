@@ -76,7 +76,7 @@ except ValidationError as err:
 
 ```text
 2 problems
-Column 'order_id': unique column contains 2 duplicate value(s). Duplicate samples: [633030]
+Column 'order_id': unique column contains 2 duplicate value(s). Duplicate samples: [286775]
 Column 'total': found 3 value(s) out of bounds [0.0, 5000.0] (min found: -4626.908973514467, max found: 4952.446695621952). Out of bounds samples: [-2506.9942460024845, -1514.4631123193444, -4626.908973514467]
 ```
 
@@ -141,10 +141,10 @@ shape: (4, 3)
 │ ---      ┆ ---          ┆ ---                            │
 │ i64      ┆ f64          ┆ str                            │
 ╞══════════╪══════════════╪════════════════════════════════╡
-│ 633030   ┆ -2506.994246 ┆ order_id__unique,total__bounds │
-│ 562818   ┆ -1514.463112 ┆ total__bounds                  │
-│ 509480   ┆ -4626.908974 ┆ total__bounds                  │
-│ 633030   ┆ 1231.613496  ┆ order_id__unique               │
+│ 286775   ┆ -2506.994246 ┆ order_id__unique,total__bounds │
+│ 771965   ┆ -1514.463112 ┆ total__bounds                  │
+│ 778392   ┆ -4626.908974 ┆ total__bounds                  │
+│ 286775   ┆ 1231.613496  ┆ order_id__unique               │
 └──────────┴──────────────┴────────────────────────────────┘
 ```
 

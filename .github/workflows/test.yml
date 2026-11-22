@@ -1,9 +1,10 @@
 name: Test
 
 # A pull request runs the corners of the matrix: the oldest and newest
-# Python on each OS, with the floor and newest-Polars jobs, eight test jobs
-# in all. `main` runs every Python on every OS, and so does the weekly run,
-# which catches a runner image or dependency that changed between pushes.
+# Python on each OS, with the floor job and the newest-Polars jobs (Linux
+# and Windows), nine test jobs in all. `main` runs every Python on every
+# OS, and so does the weekly run, which catches a runner image or
+# dependency that changed between pushes.
 # A release builds only from a commit whose run on `main` passed: see
 # release.yml.
 on:
@@ -133,9 +134,17 @@ jobs:
     # the bound in pyproject.toml allows -- a Polars 2.x -- so it is also the
     # required run of the tests only Polars 2 has (`Map`). With `test` on the
     # lock and `lowest-direct` on the floor, it covers the supported range's
-    # two ends and its newest 1.x.
-    name: Test (ubuntu, py3.13, newest polars)
-    runs-on: ubuntu-latest
+    # two ends and its newest 1.x. It runs on Windows too: the extension
+    # hands its frames to Polars through Polars' own FFI, so a Polars major
+    # is tested with the extension built for that platform.
+    name: Test (${{ matrix.label }}, py3.13, newest polars)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, label: ubuntu }
+          - { os: windows-latest, label: windows }
     steps:
       - uses: actions/checkout@v7
 

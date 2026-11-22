@@ -140,25 +140,11 @@ pub(crate) fn chunk_rng(seed: ColumnSeed, chunk_index: usize) -> Xoshiro256PlusP
 /// The generator one seed chunk draws its nulls from: the value stream's
 /// chunk, under a column seed of its own.
 #[inline]
-fn null_rng(seed: ColumnSeed, chunk_index: usize) -> Xoshiro256PlusPlus {
+pub(crate) fn null_rng(seed: ColumnSeed, chunk_index: usize) -> Xoshiro256PlusPlus {
     Xoshiro256PlusPlus::seed_from_u64(seed_for_chunk(
         seed.base ^ NULL_STREAM,
         seed.first_chunk + chunk_index,
     ))
-}
-
-/// The validity of `n` rows of a nullable column, from its null stream: set
-/// for a row that holds a value. Filled in tasks like the values, and as
-/// independent of the task size.
-pub(crate) fn null_mask(plan: &ColumnPlan, n: usize, seed: ColumnSeed) -> Result<Bitmap, String> {
-    let bernoulli = null_bernoulli(plan)?;
-    let task = task_rows(n);
-    let mut validity: Vec<u8> = vec![0u8; n.div_ceil(8)];
-    validity
-        .par_chunks_mut(task / 8)
-        .enumerate()
-        .for_each(|(t, bytes)| fill_task_validity(bytes, t, task, n, seed, &bernoulli));
-    Ok(Bitmap::from_u8_vec(validity, n))
 }
 
 /// Task `t`'s validity bytes, from its seed chunks' null streams. The values'

@@ -29,6 +29,16 @@ for all of 2.x.
   change; patterns and unique strings do not. A plain string costs about
   11 ns on one thread, not 22, and is built straight into Polars' view
   array.
+- **Seeded output (2.0): unique columns draw through a cheaper permutation,
+  a unique string spreads over its lengths, and a null spends no value.**
+  Every unique column changes, and so does every frame holding one. A unique
+  `Int64` costs 11 ns on one thread, not 31, and a unique string 44, not
+  126. A unique plain string spreads over its lengths as one that is not
+  unique does, rather than nearly always taking the longest. A nullable
+  unique column needs only as many values as it draws: a thousand rows at a
+  null rate of one half need about five hundred, not a thousand. Its nulls
+  are still drawn at `null_probability`, and a batch still holds the rows the
+  whole frame holds there.
 
 ## [1.7.0] - 2026-11-17
 

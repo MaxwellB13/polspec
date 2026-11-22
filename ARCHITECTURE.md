@@ -112,8 +112,8 @@ release. Written down so the next major knows what it is changing.
 | A column | `seed_for_column(frame seed, seed name)`: FNV-1a of the column's `seed_name`, or its name, mixed with the frame seed by a splitmix64 finaliser (`src/sample.rs`) | nothing itself; every stream below is keyed by it |
 | A seed chunk's values | `seed_for_chunk(column seed, i)` for rows `[4096·i, 4096·(i+1))`, as a Xoshiro256++ | one value per row, null or not, in row order: a number from its `Uniform` or distribution; a boolean from a Bernoulli; a category index, uniform or by `WeightedIndex`; a plain string's length; a template's widths and choices; a pattern's walk |
 | A seed chunk's characters | `seed_for_chunk(column seed ^ CHAR_STREAM, i)` | every character of the chunk's plain strings and template runs, in row order, as one run: 64-bit draws cut into lanes of the alphabet's width, a lane past the alphabet skipped (`src/chars.rs`) |
-| A seed chunk's nulls | `seed_for_chunk(column seed ^ NULL_STREAM, i)` | one Bernoulli per row of a nullable column with a non-zero rate |
-| A unique column | a Feistel permutation `π` keyed by `column seed ^ 0x5EED_0F5A_BE11_A5E5` (`src/permute.rs`) | row `r` holds the `π(r)`-th value of the column's space; nulls from the null stream above, a null row spending its index |
+| A seed chunk's nulls | `seed_for_chunk(column seed ^ NULL_STREAM, i)` | one Bernoulli per row of a nullable column with a non-zero rate; for a unique column, instead, the chunk's null count from `Binomial(4096, p)` by inversion of a table, then each row null with the share of the rows left that the nulls left are (`src/unique.rs`) |
+| A unique column | a four-round Feistel permutation `π` over the fewest bits that hold the space, keyed by `column seed ^ 0x5EED_0F5A_BE11_A5E5` (`src/permute.rs`) | the `k`-th non-null row holds the `π(k)`-th value of the column's space, `k` counted from the chunks' null counts; a plain string's space is ordered member by member across its lengths (`EvenLengths`), each length's members through a permutation of their own |
 | An overlay | an engine column of its own, under a seed name no user column can carry: `<name>\0nan`, `<name>\0extra` | which present rows of a float column are NaN; which rows of a format take one of its extra values |
 | Each pass | `pass_seed(frame seed, what it is for)` (`generation/seeds.py`) | rules, a hierarchy, foreign keys, the composite-key repair, cartesian coverage, a list's elements past the first window, a bounded `Categorical`'s pool |
 
@@ -127,7 +127,8 @@ Three properties follow, and `cargo test` holds each:
   the whole frame holds there, regenerating at most one partial chunk.
 - **A column's values do not move with its null rate.** Values are drawn for
   every row and nulls from their own stream, so a row present at two rates
-  holds the same value at both.
+  holds the same value at both. A unique column is the exception: a null
+  spends no value, so its values are numbered by the rows that hold one.
 
 Rules and foreign keys are applied afterwards as vectorised passes over the
 finished frame, not row by row. Each pass declares the columns it reads and

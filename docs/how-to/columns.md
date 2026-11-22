@@ -328,15 +328,16 @@ only on its row and the seed. That makes a unique column unique across a
 whole frame however it is produced: `generate_batches`, `scan()` and the
 sinks give the same values `generate()` does.
 
-Drawn uniformly from every string it could hold, a unique string favours
-its longer lengths, since they hold most of the strings: with
-`string_length=(5, 15)` nearly every value is fifteen characters. Narrow the
-lengths if their spread matters.
+A unique plain string spreads over its lengths as one that is not unique
+does: with `string_length=(5, 15)` each length from five to fifteen holds
+about an eleventh of the values. Only a length too short to take its share --
+there are 62 one-character strings -- shows up less, leaving its share to
+the longer ones.
 
 Nulls are exempt, as they are for foreign keys: a null means "no value", so a
-nullable unique column may repeat nulls and nothing else. A null row still
-takes its place in the permutation, so the column's domain has to hold every
-row, nulls included.
+nullable unique column may repeat nulls and nothing else. A null spends no
+value either, so the column's domain has to hold only the values it draws:
+a thousand rows at a null rate of one half need about five hundred.
 
 A domain too small to cover the row count is refused, naming the column:
 

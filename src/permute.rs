@@ -7,23 +7,31 @@
 //! column's slice, chunks fill in parallel, and nothing is held but the output
 //! -- no set of values already drawn, and no memory in proportion to anything.
 //!
-//! The permutation is a balanced Feistel network over the smallest even
-//! number of bits that holds the domain. A Feistel network is a bijection on
-//! `[0, 2^bits)` whatever its round function, and walking the cycle -- applying
-//! it again to an index that lands past `domain` -- stays inside the cycle the
-//! start is on, so the first index back in range is a bijection on
-//! `[0, domain)` too. `bits` is rounded up to even, so `2^bits < 4 * domain`
-//! and the walk takes fewer than four steps on average.
+//! The permutation is a Feistel network over the fewest bits that hold the
+//! domain, split into a high half of `ceil(bits / 2)` bits and a low half of
+//! `floor(bits / 2)`. A Feistel network is a bijection on `[0, 2^bits)`
+//! whatever its round function -- an unbalanced one too, as long as each
+//! round's output is masked to the half it is mixed into -- and walking the
+//! cycle -- applying it again to an index that lands past `domain` -- stays
+//! inside the cycle the start is on, so the first index back in range is a
+//! bijection on `[0, domain)` too. `2^bits < 2 * domain`, so the walk takes
+//! fewer than two steps on average.
 
-/// Rounds of the network. Four make a Feistel network a pseudo-random
-/// permutation in theory; eight leave the output well spread for a round
-/// function as cheap as the one below.
-const ROUNDS: usize = 8;
+/// Rounds of the network: the four that make a Feistel network a
+/// pseudo-random permutation in theory (Luby-Rackoff), with a round
+/// function -- the splitmix64 finaliser -- that reaches every output bit
+/// from every input bit. 1.x took eight.
+const ROUNDS: usize = 4;
+
+/// The indices `apply_run` takes through the network together.
+const RUN: usize = 256;
 
 pub struct Permutation {
     domain: u128,
-    half: u32,
-    mask: u128,
+    /// Width of the low half; the high half is `bits - low`, one more when
+    /// `bits` is odd.
+    low: u32,
+    high: u32,
     keys: [u64; ROUNDS],
 }
 
@@ -32,14 +40,8 @@ impl Permutation {
     /// positive.
     pub fn new(domain: u128, seed: u64) -> Self {
         assert!(domain > 0, "a permutation needs a non-empty domain");
-        let needed = 128 - (domain - 1).leading_zeros();
-        let bits = needed.max(2).next_multiple_of(2);
-        let half = bits / 2;
-        let mask = if half >= 64 {
-            u64::MAX as u128
-        } else {
-            (1u128 << half) - 1
-        };
+        let bits = (128 - (domain - 1).leading_zeros()).max(2);
+        let low = bits / 2;
         let mut state = seed;
         let keys = std::array::from_fn(|_| {
             state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
@@ -47,8 +49,8 @@ impl Permutation {
         });
         Permutation {
             domain,
-            half,
-            mask,
+            low,
+            high: bits - low,
             keys,
         }
     }
@@ -61,7 +63,7 @@ impl Permutation {
             "{index} is outside [0, {})",
             self.domain
         );
-        if self.half <= 32 {
+        if self.high <= 32 {
             return self.apply_narrow(index as u64) as u128;
         }
         self.apply_wide(index)
@@ -74,20 +76,75 @@ impl Permutation {
     #[inline]
     fn apply_narrow(&self, index: u64) -> u64 {
         let last = (self.domain - 1) as u64;
-        let (half, mask) = (self.half, self.mask as u64);
         let mut x = index;
         loop {
-            let mut left = (x >> half) & mask;
-            let mut right = x & mask;
-            for key in &self.keys {
-                let round = mix(right ^ key) & mask;
-                (left, right) = (right, left ^ round);
-            }
-            x = (left << half) | right;
+            x = self.network_narrow(x);
             if x <= last {
                 return x;
             }
         }
+    }
+
+    /// `apply` of `first`, `first + 1`, ... into each slot of `out` in turn:
+    /// the same outputs, computed a block at a time. Every index takes one
+    /// pass of the network with no branch between them, so the rows overlap
+    /// in the processor; the few that landed past the domain walk again
+    /// together. `first + out.len()` must not pass the domain.
+    pub fn apply_run(&self, first: u128, out: &mut [u128]) {
+        if self.high > 32 {
+            for (i, slot) in out.iter_mut().enumerate() {
+                *slot = self.apply_wide(first + i as u128);
+            }
+            return;
+        }
+        let last = (self.domain - 1) as u64;
+        let mut xs = [0u64; RUN];
+        let mut strays = [0u16; RUN];
+        for (b, block) in out.chunks_mut(RUN).enumerate() {
+            let base = first as u64 + (b * RUN) as u64;
+            let xs = &mut xs[..block.len()];
+            for (i, x) in xs.iter_mut().enumerate() {
+                *x = self.network_narrow(base + i as u64);
+            }
+            let mut k = 0;
+            for (i, x) in xs.iter().enumerate() {
+                strays[k] = i as u16;
+                k += usize::from(*x > last);
+            }
+            while k > 0 {
+                for &i in &strays[..k] {
+                    xs[i as usize] = self.network_narrow(xs[i as usize]);
+                }
+                let mut kept = 0;
+                for j in 0..k {
+                    let i = strays[j];
+                    strays[kept] = i;
+                    kept += usize::from(xs[i as usize] > last);
+                }
+                k = kept;
+            }
+            for (slot, x) in block.iter_mut().zip(xs.iter()) {
+                *slot = *x as u128;
+            }
+        }
+    }
+
+    /// One pass of the network in 64-bit arithmetic, for `apply_narrow` and
+    /// `apply_run`.
+    #[inline(always)]
+    fn network_narrow(&self, x: u64) -> u64 {
+        let low = self.low;
+        let (low_mask, high_mask) = (mask64(low), mask64(self.high));
+        // Rounds in pairs: the first mixes the low half into the high one,
+        // the second the high into the low, so after each pair the halves
+        // are back where they started.
+        let mut left = x >> low;
+        let mut right = x & low_mask;
+        for [first, second] in self.keys.as_chunks::<2>().0 {
+            left ^= mix(right ^ first) & high_mask;
+            right ^= mix(left ^ second) & low_mask;
+        }
+        (left << low) | right
     }
 
     #[inline]
@@ -103,14 +160,33 @@ impl Permutation {
 
     #[inline]
     fn network(&self, x: u128) -> u128 {
-        let mut left = (x >> self.half) & self.mask;
-        let mut right = x & self.mask;
-        for key in &self.keys {
+        let (low_mask, high_mask) = (mask128(self.low), mask128(self.high));
+        let mut left = x >> self.low;
+        let mut right = x & low_mask;
+        for [first, second] in self.keys.as_chunks::<2>().0 {
             // A half is at most 64 bits, so it fits the round function whole.
-            let round = mix(right as u64 ^ key) as u128 & self.mask;
-            (left, right) = (right, left ^ round);
+            left ^= mix(right as u64 ^ first) as u128 & high_mask;
+            right ^= mix(left as u64 ^ second) as u128 & low_mask;
         }
-        (left << self.half) | right
+        (left << self.low) | right
+    }
+}
+
+#[inline]
+fn mask64(bits: u32) -> u64 {
+    if bits >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << bits) - 1
+    }
+}
+
+#[inline]
+fn mask128(bits: u32) -> u128 {
+    if bits >= 128 {
+        u128::MAX
+    } else {
+        (1u128 << bits) - 1
     }
 }
 
@@ -133,9 +209,9 @@ pub fn window(domain: u64, seed: u64, start: u64, n: u64) -> Result<Vec<u64>, St
         return Ok(Vec::new());
     }
     let permutation = Permutation::new(domain as u128, seed);
-    Ok((start..end)
-        .map(|i| permutation.apply(i as u128) as u64)
-        .collect())
+    let mut out = vec![0u128; (end - start) as usize];
+    permutation.apply_run(start as u128, &mut out);
+    Ok(out.into_iter().map(|i| i as u64).collect())
 }
 
 /// The splitmix64 finaliser: every input bit reaches every output bit.
@@ -208,6 +284,66 @@ mod tests {
     }
 
     #[test]
+    fn neighbouring_rows_are_not_neighbouring_values() {
+        // At four rounds, over an odd and an even bit width and a domain just
+        // past a power of two (the longest walks): consecutive rows'
+        // values are uncorrelated, and as rarely close as chance says.
+        for domain in [1u128 << 20, (1 << 21) - 7, (1 << 17) + 1, 10_000_019] {
+            for seed in [1, 99] {
+                let p = Permutation::new(domain, seed);
+                let rows = 200_000.min(domain) as usize;
+                let v: Vec<f64> = (0..rows as u128)
+                    .map(|r| p.apply(r) as f64 / domain as f64)
+                    .collect();
+                let mean = v.iter().sum::<f64>() / rows as f64;
+                let var = v.iter().map(|x| (x - mean).powi(2)).sum::<f64>();
+                let cov: f64 = v.windows(2).map(|w| (w[0] - mean) * (w[1] - mean)).sum();
+                let r = cov / var;
+                assert!(
+                    r.abs() < 5.0 / (rows as f64).sqrt(),
+                    "domain {domain}, seed {seed}: serial correlation {r}"
+                );
+                // |a - b| < 1% of the domain: about 2% of independent pairs.
+                let close = v.windows(2).filter(|w| (w[0] - w[1]).abs() < 0.01).count();
+                let expected = 0.0199 * (rows - 1) as f64;
+                assert!(
+                    (close as f64 - expected).abs() < 6.0 * expected.sqrt(),
+                    "domain {domain}, seed {seed}: {close} close pairs, expected {expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_walk_takes_under_two_steps_on_average() {
+        // The worst case, a domain one past a power of two: 2^bits < 2 * domain.
+        let domain = (1u128 << 20) + 1;
+        let p = Permutation::new(domain, 3);
+        let mut steps = 0u64;
+        for r in 0..100_000u64 {
+            let mut x = r;
+            loop {
+                steps += 1;
+                let mut left = x >> p.low;
+                let mut right = x & mask64(p.low);
+                for [first, second] in p.keys.as_chunks::<2>().0 {
+                    left ^= mix(right ^ first) & mask64(p.high);
+                    right ^= mix(left ^ second) & mask64(p.low);
+                }
+                x = (left << p.low) | right;
+                if (x as u128) < domain {
+                    break;
+                }
+            }
+            assert_eq!(x as u128, p.apply(r as u128));
+        }
+        assert!(
+            steps < 200_000 * 101 / 100,
+            "{steps} steps for 100,000 rows"
+        );
+    }
+
+    #[test]
     fn a_window_is_the_whole_ranges_slice() {
         let whole = window(1_000, 9, 0, 1_000).unwrap();
         let mut sorted = whole.clone();
@@ -249,7 +385,7 @@ mod tests {
         for domain in domains {
             for seed in [0, 7, u64::MAX] {
                 let p = Permutation::new(domain, seed);
-                assert!(p.half <= 32, "domain {domain} takes the narrow path");
+                assert!(p.high <= 32, "domain {domain} takes the narrow path");
                 let step = (domain / 997).max(1);
                 let mut i = 0u128;
                 while i < domain.min(5_000 * step) {
@@ -262,6 +398,29 @@ mod tests {
                 }
                 let last = domain - 1;
                 assert_eq!(p.apply_narrow(last as u64) as u128, p.apply_wide(last));
+            }
+        }
+    }
+
+    #[test]
+    fn a_run_is_apply_one_index_at_a_time() {
+        for domain in [
+            1u128,
+            2,
+            3,
+            1_000,
+            (1 << 20) + 1,
+            10_000_000_000,
+            1 << 64,
+            (1 << 70) + 9,
+        ] {
+            let p = Permutation::new(domain, 17);
+            let n = (RUN * 3 + 5).min(domain as usize);
+            let first = (domain - n as u128) / 2;
+            let mut out = vec![0u128; n];
+            p.apply_run(first, &mut out);
+            for (i, v) in out.iter().enumerate() {
+                assert_eq!(*v, p.apply(first + i as u128), "domain {domain}, index {i}");
             }
         }
     }
