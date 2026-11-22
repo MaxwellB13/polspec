@@ -24,6 +24,7 @@
 
 use polars::prelude::*;
 use polars_arrow::array::BooleanArray;
+use polars_arrow::array::Utf8ViewArray;
 use polars_arrow::bitmap::Bitmap;
 use polars_arrow::datatypes::ArrowDataType;
 use polars_core::chunked_array::builder::StringChunkedBuilder;
@@ -36,6 +37,7 @@ use crate::sample::{
     CHARSET, ColumnSeed, SEED_CHUNK, draws_nulls, fill_task_validity, null_bernoulli, null_mask,
     task_rows,
 };
+use crate::views::Views;
 
 /// A float grid's points sit this many units in the last place apart at the
 /// widest magnitude of its range, so rounding a point to the column's float
@@ -264,37 +266,29 @@ fn unique_strings(
         .transpose()?;
     let task = task_rows(n);
 
-    let arrays: Vec<StringChunked> = (0..n.div_ceil(task))
+    let arrays: Vec<Utf8ViewArray> = (0..n.div_ceil(task))
         .into_par_iter()
         .map(|t| {
             let start = t * task;
             let len = (start + task).min(n) - start;
-            let mut builder = StringChunkedBuilder::new(name.clone(), len);
+            let mut views = Views::with_capacity(len, validity.is_some(), 0);
             let mut scratch: Vec<u8> = Vec::with_capacity(template.max_bytes());
             for row in start..start + len {
                 if validity.as_ref().is_some_and(|v| !v.get_bit(row)) {
-                    builder.append_null();
+                    views.push_null();
                     continue;
                 }
                 template.decode(permutation.apply((first_row + row) as u128), &mut scratch);
                 // SAFETY: a template's parts are ASCII or a `String`, and a
                 // pattern's units are each a `str`, so the buffer is valid
                 // UTF-8 -- see `format::Template::compile` and `pattern.rs`.
-                builder.append_value(unsafe { std::str::from_utf8_unchecked(&scratch) });
+                views.push(unsafe { std::str::from_utf8_unchecked(&scratch) });
             }
-            builder.finish()
+            views.finish()
         })
         .collect();
 
-    Ok(StringChunked::from_chunk_iter(
-        name,
-        arrays.iter().map(|ca| {
-            ca.downcast_iter()
-                .next()
-                .expect("one array per task")
-                .clone()
-        }),
-    ))
+    Ok(StringChunked::from_chunk_iter(name, arrays))
 }
 
 /// Rows of a unique column, from where `seed`'s first chunk starts.
