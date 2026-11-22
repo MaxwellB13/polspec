@@ -110,10 +110,11 @@ release. Written down so the next major knows what it is changing.
 | Stream | Seeded from | Draws |
 |:--|:--|:--|
 | A column | `seed_for_column(frame seed, seed name)`: FNV-1a of the column's `seed_name`, or its name, mixed with the frame seed by a splitmix64 finaliser (`src/sample.rs`) | nothing itself; every stream below is keyed by it |
-| A seed chunk's values | `seed_for_chunk(column seed, i)` for rows `[4096·i, 4096·(i+1))`, as a Xoshiro256++ | one value per row, null or not, in row order: a number from its `Uniform` or distribution; a boolean from a Bernoulli; a category index, uniform or by `WeightedIndex`; a plain string's length and then six bits a character; a template's or a pattern's parts in order |
+| A seed chunk's values | `seed_for_chunk(column seed, i)` for rows `[4096·i, 4096·(i+1))`, as a Xoshiro256++ | one value per row, null or not, in row order: a number from its `Uniform` or distribution; a boolean from a Bernoulli; a category index, uniform or by `WeightedIndex`; a plain string's length; a template's widths and choices; a pattern's walk |
+| A seed chunk's characters | `seed_for_chunk(column seed ^ CHAR_STREAM, i)` | every character of the chunk's plain strings and template runs, in row order, as one run: 64-bit draws cut into lanes of the alphabet's width, a lane past the alphabet skipped (`src/chars.rs`) |
 | A seed chunk's nulls | `seed_for_chunk(column seed ^ NULL_STREAM, i)` | one Bernoulli per row of a nullable column with a non-zero rate |
 | A unique column | a Feistel permutation `π` keyed by `column seed ^ 0x5EED_0F5A_BE11_A5E5` (`src/permute.rs`) | row `r` holds the `π(r)`-th value of the column's space; nulls from the null stream above, a null row spending its index |
-| An overlay | an engine column of its own, under a seed name no user column can carry: `<name> nan`, `<name> extra` | which present rows of a float column are NaN; which rows of a format take one of its extra values |
+| An overlay | an engine column of its own, under a seed name no user column can carry: `<name>\0nan`, `<name>\0extra` | which present rows of a float column are NaN; which rows of a format take one of its extra values |
 | Each pass | `pass_seed(frame seed, what it is for)` (`generation/seeds.py`) | rules, a hierarchy, foreign keys, the composite-key repair, cartesian coverage, a list's elements past the first window, a bounded `Categorical`'s pool |
 
 Three properties follow, and `cargo test` holds each:

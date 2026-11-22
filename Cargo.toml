@@ -23,6 +23,7 @@ polars = { version = "0.55.2", features = [
     "dtype-u16",
 ] }
 polars-arrow = "0.55.2"
+polars-buffer = "0.55.2"
 polars-core = { version = "0.55.2", features = [
     "dtype-i8",
     "dtype-i16",

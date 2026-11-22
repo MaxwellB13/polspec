@@ -20,6 +20,8 @@ use rand::Rng;
 use rand::distr::{Distribution as _, Uniform};
 use rand_xoshiro::Xoshiro256PlusPlus;
 
+use crate::chars::{Alphabet, SLACK};
+
 /// A value space a unique string column can be a permutation of: numbered
 /// `[0, cardinality())`, each index decoding to a distinct value.
 pub trait Enumerable {
@@ -102,6 +104,12 @@ impl Template {
                     if !alphabet.is_ascii() {
                         return Err(format!(
                             "Column '{column}': template part {index} ('chars') alphabet must be ASCII"
+                        ));
+                    }
+                    if alphabet.len() > 128 {
+                        return Err(format!(
+                            "Column '{column}': template part {index} ('chars') alphabet has {}                              characters; ASCII has 128, so some repeat",
+                            alphabet.len()
                         ));
                     }
                     if *lo > *hi || *hi == 0 {
@@ -216,9 +224,9 @@ impl Template {
             .map(|part| match part {
                 Part::Literal(text) => PartSampler::Literal(text.as_bytes()),
                 Part::Chars { alphabet, min, max } => PartSampler::Chars {
-                    alphabet,
-                    // An alphabet is non-empty and ASCII, so these ranges are valid.
-                    index: Uniform::new(0, alphabet.len()).expect("non-empty alphabet"),
+                    // An alphabet is non-empty ASCII (`compile` checks), so
+                    // this and the range below are valid.
+                    alphabet: Alphabet::new(alphabet),
                     len: (min < max)
                         .then(|| Uniform::new_inclusive(*min, *max).expect("min <= max")),
                     min: *min,
@@ -252,8 +260,7 @@ impl Part {
 enum PartSampler<'a> {
     Literal(&'a [u8]),
     Chars {
-        alphabet: &'a [u8],
-        index: Uniform<usize>,
+        alphabet: Alphabet,
         len: Option<Uniform<usize>>,
         min: usize,
     },
@@ -264,6 +271,10 @@ enum PartSampler<'a> {
 }
 
 /// Fills a byte buffer with one value after another.
+///
+/// Two streams: `rng` decides each part's width and each choice, `chars` the
+/// characters of every run, in bulk (`chars.rs`). Each is drawn in order, so
+/// a shorter stretch of rows is a prefix of a longer one.
 pub struct TemplateSampler<'a> {
     parts: Vec<PartSampler<'a>>,
 }
@@ -271,21 +282,22 @@ pub struct TemplateSampler<'a> {
 impl TemplateSampler<'_> {
     /// Writes one value into `out`, which is cleared first.
     #[inline]
-    pub fn fill<R: Rng + ?Sized>(&self, rng: &mut R, out: &mut Vec<u8>) {
+    pub fn fill<R: Rng + ?Sized>(
+        &self,
+        rng: &mut R,
+        chars: &mut Xoshiro256PlusPlus,
+        out: &mut Vec<u8>,
+    ) {
         out.clear();
         for part in &self.parts {
             match part {
                 PartSampler::Literal(text) => out.extend_from_slice(text),
-                PartSampler::Chars {
-                    alphabet,
-                    index,
-                    len,
-                    min,
-                } => {
+                PartSampler::Chars { alphabet, len, min } => {
                     let width = len.as_ref().map_or(*min, |d| d.sample(rng));
-                    for _ in 0..width {
-                        out.push(alphabet[index.sample(rng)]);
-                    }
+                    let start = out.len();
+                    out.resize(start + width + SLACK, 0);
+                    alphabet.fill(chars, &mut out[start..], width);
+                    out.truncate(start + width);
                 }
                 PartSampler::OneOf { values, index } => {
                     out.extend_from_slice(values[index.sample(rng)].as_bytes());
@@ -295,8 +307,13 @@ impl TemplateSampler<'_> {
     }
 
     /// One value as a `String`.
-    pub fn draw(&self, rng: &mut Xoshiro256PlusPlus, scratch: &mut Vec<u8>) -> String {
-        self.fill(rng, scratch);
+    pub fn draw(
+        &self,
+        rng: &mut Xoshiro256PlusPlus,
+        chars: &mut Xoshiro256PlusPlus,
+        scratch: &mut Vec<u8>,
+    ) -> String {
+        self.fill(rng, chars, scratch);
         // Every part is ASCII or a String, so the buffer is valid UTF-8.
         String::from_utf8(scratch.clone()).expect("template output is UTF-8")
     }
@@ -329,9 +346,10 @@ mod tests {
         .unwrap();
         let sampler = t.sampler();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
+        let mut chars = Xoshiro256PlusPlus::seed_from_u64(2);
         let mut scratch = Vec::with_capacity(t.max_bytes());
         for _ in 0..50 {
-            let s = sampler.draw(&mut rng, &mut scratch);
+            let s = sampler.draw(&mut rng, &mut chars, &mut scratch);
             let (head, tail) = s.split_once('-').unwrap();
             assert_eq!(head.len(), 2);
             assert!(head.bytes().all(|b| b == b'a' || b == b'b'), "{s}");
@@ -429,9 +447,18 @@ mod tests {
     fn the_same_seed_gives_the_same_value() {
         let t = Template::compile(&[raw("chars", &["0123456789"], 4, 8)], "c").unwrap();
         let s = t.sampler();
-        let mut a = Xoshiro256PlusPlus::seed_from_u64(7);
-        let mut b = Xoshiro256PlusPlus::seed_from_u64(7);
+        let (mut a, mut b) = (
+            Xoshiro256PlusPlus::seed_from_u64(7),
+            Xoshiro256PlusPlus::seed_from_u64(7),
+        );
+        let (mut ca, mut cb) = (
+            Xoshiro256PlusPlus::seed_from_u64(8),
+            Xoshiro256PlusPlus::seed_from_u64(8),
+        );
         let mut buf = Vec::new();
-        assert_eq!(s.draw(&mut a, &mut buf), s.draw(&mut b, &mut buf));
+        assert_eq!(
+            s.draw(&mut a, &mut ca, &mut buf),
+            s.draw(&mut b, &mut cb, &mut buf)
+        );
     }
 }

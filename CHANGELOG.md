@@ -21,6 +21,14 @@ for all of 2.x.
   values no longer move when its `null_probability` does. Output is still
   the same on every thread count and platform, and a batch still holds the
   rows the whole frame holds there.
+- **Seeded output (2.0): strings are drawn in bulk.** A chunk's plain
+  strings draw every length first, then every character as one run from a
+  stream of their own; a template's runs of characters come from that
+  stream too. Every character is still equally likely. Plain strings,
+  `Binary`, `format=` values and the `Categorical` pools built from them
+  change; patterns and unique strings do not. A plain string costs about
+  11 ns on one thread, not 22, and is built straight into Polars' view
+  array.
 
 ## [1.7.0] - 2026-11-17
 

@@ -17,6 +17,7 @@
 //!   `Decimal` from its physical integers.
 
 mod assemble;
+mod chars;
 mod dist;
 mod format;
 mod math;
@@ -27,6 +28,7 @@ mod plan;
 mod sample;
 mod samplers;
 mod unique;
+mod views;
 mod ziggurat_tables;
 
 use polars::prelude::*;

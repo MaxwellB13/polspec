@@ -35,7 +35,7 @@
 //! never reshuffles its neighbours, and renaming one need not change it.
 
 use polars::prelude::*;
-use polars_arrow::array::BooleanArray;
+use polars_arrow::array::{BooleanArray, Utf8ViewArray, View};
 use polars_arrow::bitmap::Bitmap;
 use polars_arrow::datatypes::ArrowDataType;
 use polars_core::chunked_array::builder::StringChunkedBuilder;
@@ -45,9 +45,11 @@ use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 
+use crate::chars::{Alphabet, SLACK};
 use crate::dist::with_sampler;
 use crate::plan::{ColumnPlan, Kind};
 use crate::samplers::Portable;
+use crate::views::Views;
 
 pub const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 const DEFAULT_WIDE_INT_BOUND: i64 = 1_000_000;
@@ -78,6 +80,10 @@ const _: () = assert!(
 
 /// Mixed into a column seed to give its null stream a seed of its own.
 const NULL_STREAM: u64 = 0x6E75_6C6C_5EED_0001;
+
+/// Mixed into a column seed to give a plain string's characters a stream of
+/// their own, apart from its lengths.
+const CHAR_STREAM: u64 = 0x6368_6172_5EED_0002;
 
 /// The rows one parallel task fills for a column of `n` rows: whole seed
 /// chunks, `TASKS_PER_THREAD` tasks a thread, at most `MAX_TASK_ROWS`.
@@ -176,6 +182,15 @@ pub(crate) fn fill_task_validity(
             }
         }
     }
+}
+
+/// The generator one seed chunk draws a plain string's characters from.
+#[inline]
+fn char_rng(seed: ColumnSeed, chunk_index: usize) -> Xoshiro256PlusPlus {
+    Xoshiro256PlusPlus::seed_from_u64(seed_for_chunk(
+        seed.base ^ CHAR_STREAM,
+        seed.first_chunk + chunk_index,
+    ))
 }
 
 /// Whether row `row` of a seed chunk is null, for the builders that append a
@@ -495,55 +510,6 @@ fn gen_index_column(
     numeric_column::<UInt32Type, _>(plan, n, seed, move |rng| sampler.sample(rng))
 }
 
-/// One character index, drawn without bias, for the rare six-bit draw that
-/// lands past the end of the alphabet.
-///
-/// Kept out of line on purpose. Two draws in sixty-four reach it, and inlining
-/// it costs far more than it saves: an inner rejection loop around the whole
-/// per-character step measured four times slower over a column of twenty
-/// million strings, because the straight-line body below stops being
-/// straight-line. `#[cold]` says the same thing to the optimiser.
-///
-/// `bound` is the largest multiple of the alphabet size that fits in a `u32`,
-/// so `% len` over an accepted draw is exactly uniform. It rejects four values
-/// out of 2^32, which is to say never.
-#[cold]
-#[inline(never)]
-fn unbiased_index(rng: &mut Xoshiro256PlusPlus) -> usize {
-    let len = CHARSET.len() as u32;
-    let bound = (u32::MAX / len) * len;
-    loop {
-        let draw = rng.next_u32();
-        if draw < bound {
-            return (draw % len) as usize;
-        }
-    }
-}
-
-/// Writes a random alphanumeric string of `len` bytes into `scratch`.
-///
-/// Six bits a character, which covers a 62-character alphabet with two values
-/// to spare; those two go to `unbiased_index` rather than being folded back on
-/// to the alphabet, so no character is likelier than another.
-#[inline(always)]
-pub fn random_ascii(rng: &mut Xoshiro256PlusPlus, scratch: &mut [u8], len: usize) {
-    let mut rand_val = rng.next_u64();
-    let mut bits_left = 64;
-    for slot in scratch.iter_mut().take(len) {
-        if bits_left < 6 {
-            rand_val = rng.next_u64();
-            bits_left = 64;
-        }
-        let mut idx = (rand_val & 0x3F) as usize;
-        rand_val >>= 6;
-        bits_left -= 6;
-        if idx >= CHARSET.len() {
-            idx = unbiased_index(rng);
-        }
-        *slot = CHARSET[idx];
-    }
-}
-
 /// A string column, built task by task.
 ///
 /// Strings are the one kind that cannot be written into a preallocated buffer:
@@ -562,15 +528,16 @@ pub fn random_ascii(rng: &mut Xoshiro256PlusPlus, scratch: &mut [u8], len: usize
 /// does copy the views, sixteen bytes a row, and at twenty million rows that
 /// costs appreciably more than leaving the column split ever did.
 ///
-/// `draw` fills `scratch` with one row's string from the chunk's generator;
-/// it runs for every row, null or not, so the values stay where they are when
-/// the null rate moves. `text` reads the string back out of `scratch`.
+/// `draw` fills `scratch` with one row's string from the chunk's value
+/// stream and its character stream; it runs for every row, null or not, so
+/// the values stay where they are when the null rate moves. `text` reads the
+/// string back out of `scratch`.
 fn build_strings<S>(
     plan: &ColumnPlan,
     n: usize,
     seed: ColumnSeed,
     scratch: impl Fn() -> S + Sync,
-    draw: impl Fn(&mut Xoshiro256PlusPlus, &mut S) + Sync,
+    draw: impl Fn(&mut Xoshiro256PlusPlus, &mut Xoshiro256PlusPlus, &mut S) + Sync,
     text: impl Fn(&S) -> &str + Sync,
 ) -> Result<StringChunked, String> {
     let name = PlSmallStr::from(plan.name.as_str());
@@ -581,62 +548,121 @@ fn build_strings<S>(
         .then(|| null_bernoulli(plan))
         .transpose()?;
     let task = task_rows(n);
-    let arrays: Vec<StringChunked> = (0..n.div_ceil(task))
+    let arrays: Vec<Utf8ViewArray> = (0..n.div_ceil(task))
         .into_par_iter()
         .map(|t| {
             let rows = (t * task + task).min(n) - t * task;
-            let mut builder = StringChunkedBuilder::new(name.clone(), rows);
+            let mut views = Views::with_capacity(rows, bernoulli.is_some(), 0);
             let mut buffer = scratch();
             for (chunk, rows) in task_chunks(t, task, n) {
                 let mut rng = chunk_rng(seed, chunk);
+                let mut chars = char_rng(seed, chunk);
                 let mut nulls = bernoulli.map(|b| (b, null_rng(seed, chunk)));
                 for _ in 0..rows {
-                    draw(&mut rng, &mut buffer);
+                    draw(&mut rng, &mut chars, &mut buffer);
                     if is_null(&mut nulls) {
-                        builder.append_null();
+                        views.push_null();
                     } else {
-                        builder.append_value(text(&buffer));
+                        views.push(text(&buffer));
                     }
                 }
             }
-            builder.finish()
+            views.finish()
         })
         .collect();
-    Ok(StringChunked::from_chunk_iter(
-        name,
-        arrays.iter().map(|ca| {
-            ca.downcast_iter()
-                .next()
-                .expect("one array per task")
-                .clone()
-        }),
-    ))
+    Ok(StringChunked::from_chunk_iter(name, arrays))
 }
 
-/// A plain string column: a length, then that many characters.
+/// A plain string column, drawn in bulk a seed chunk at a time: every row's
+/// length from the chunk's value stream, then every character of those rows
+/// as one run from its character stream (`fill_ascii`). Two streams, so the
+/// first rows of a chunk hold the same strings however many of its rows are
+/// asked for. A null row's length and characters are drawn too, so the
+/// values stay where they are when the null rate moves.
 fn gen_string_column(
     plan: &ColumnPlan,
     n: usize,
     seed: ColumnSeed,
 ) -> Result<StringChunked, String> {
+    let name = PlSmallStr::from(plan.name.as_str());
+    if n == 0 {
+        return Ok(StringChunked::with_chunk(
+            name,
+            Views::with_capacity(0, false, 0).finish(),
+        ));
+    }
     let min_len = plan.str_min_len;
     let max_len = plan.str_max_len.max(min_len);
     let len_dist = match max_len > min_len {
         true => Some(uniform(min_len, max_len, plan)?),
         false => None,
     };
-    build_strings(
-        plan,
-        n,
-        seed,
-        || (vec![0u8; max_len], 0usize),
-        |rng, (bytes, len)| {
-            *len = len_dist.as_ref().map_or(min_len, |d| d.sample(rng));
-            random_ascii(rng, bytes, *len);
-        },
-        // SAFETY: CHARSET contains only ASCII bytes (A-Z, a-z, 0-9).
-        |(bytes, len)| unsafe { std::str::from_utf8_unchecked(&bytes[..*len]) },
-    )
+    let bernoulli = draws_nulls(plan)
+        .then(|| null_bernoulli(plan))
+        .transpose()?;
+    // Bytes of a task's strings that will not fit inline in their views; and
+    // whether none will, so the characters can be drawn where they are kept.
+    let long = if max_len > View::MAX_INLINE_SIZE as usize {
+        (min_len + max_len) / 2
+    } else {
+        0
+    };
+    let all_stored = min_len > View::MAX_INLINE_SIZE as usize;
+    let alphabet = Alphabet::new(CHARSET);
+    let task = task_rows(n);
+    let arrays: Vec<Utf8ViewArray> = (0..n.div_ceil(task))
+        .into_par_iter()
+        .map(|t| {
+            let rows = (t * task + task).min(n) - t * task;
+            let mut views = Views::with_capacity(rows, bernoulli.is_some(), rows * long);
+            let mut lengths = vec![0usize; SEED_CHUNK];
+            let mut chars: Vec<u8> = Vec::with_capacity(SEED_CHUNK * max_len + SLACK);
+            for (chunk, rows) in task_chunks(t, task, n) {
+                let mut rng = chunk_rng(seed, chunk);
+                let lengths = &mut lengths[..rows];
+                match &len_dist {
+                    Some(d) => lengths.iter_mut().for_each(|l| *l = d.sample(&mut rng)),
+                    None => lengths.fill(min_len),
+                }
+                let total: usize = lengths.iter().sum();
+                let mut chars_rng = char_rng(seed, chunk);
+                let mut nulls = bernoulli.map(|b| (b, null_rng(seed, chunk)));
+                // CHARSET is ASCII, so every run of it is UTF-8.
+                if all_stored {
+                    // Every string is too long to inline: draw the chunk's
+                    // characters into the data buffer itself, and point at
+                    // them. A null row's characters sit there unread.
+                    let (mut at, room) = views.reserve_stored(total + SLACK);
+                    alphabet.fill(&mut chars_rng, room, total);
+                    views.release_stored(SLACK);
+                    for &len in lengths.iter() {
+                        if is_null(&mut nulls) {
+                            views.push_null();
+                        } else {
+                            views.push_stored(at, len);
+                        }
+                        at += len;
+                    }
+                    continue;
+                }
+                // The fill's slack doubles as the sixteen bytes past the last
+                // string that `push_padded` reads.
+                chars.resize(total + SLACK, 0);
+                alphabet.fill(&mut chars_rng, &mut chars, total);
+                let mut at = 0;
+                for &len in lengths.iter() {
+                    if is_null(&mut nulls) {
+                        views.push_null();
+                    } else {
+                        views.push_padded(&chars, at, len);
+                    }
+                    at += len;
+                }
+            }
+            views.finish()
+        })
+        .collect();
+    Ok(StringChunked::from_chunk_iter(name, arrays))
 }
 
 /// A templated string column: each row filled from the plan's `Template`.
@@ -655,7 +681,7 @@ fn gen_template_column(
         n,
         seed,
         || Vec::<u8>::with_capacity(template.max_bytes()),
-        |rng, bytes| sampler.fill(rng, bytes),
+        |rng, chars, bytes| sampler.fill(rng, chars, bytes),
         // SAFETY: every template part is ASCII or a `String`, so the buffer
         // is valid UTF-8 -- see `format::Template::compile`.
         |bytes| unsafe { std::str::from_utf8_unchecked(bytes) },
@@ -678,7 +704,7 @@ fn gen_pattern_column(
         n,
         seed,
         || String::with_capacity(sampler.max_bytes()),
-        |rng, value| sampler.fill(rng, value),
+        |rng, _, value| sampler.fill(rng, value),
         |value| value.as_str(),
     )
 }
@@ -1129,5 +1155,162 @@ mod tests {
             generate_series(&p, 0, 1, 0).unwrap().dtype(),
             &DataType::UInt32
         );
+    }
+}
+
+#[cfg(test)]
+mod timing {
+    //! `cargo test --release -- --ignored --nocapture timing`: one thread,
+    //! ns per row, for the string kinds pass 3 of PLAN-2.0.0.md speeds up.
+    use super::*;
+    use crate::plan::PlanArgs;
+
+    fn ns_per_row(plan: &ColumnPlan, n: usize) -> f64 {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .unwrap();
+        pool.install(|| {
+            let _ = std::hint::black_box(generate_series(plan, n, 1, 0).unwrap());
+            let mut best = f64::MAX;
+            for _ in 0..7 {
+                let t = std::time::Instant::now();
+                let _ = std::hint::black_box(generate_series(plan, n, 1, 0).unwrap());
+                best = best.min(t.elapsed().as_secs_f64());
+            }
+            best * 1e9 / n as f64
+        })
+    }
+
+    #[test]
+    #[ignore]
+    fn timing_strings() {
+        let n = 1_000_000;
+        let template = [
+            (
+                "chars".to_string(),
+                vec!["abcdefghijklmnopqrstuvwxyz".to_string()],
+                3,
+                10,
+            ),
+            ("lit".to_string(), vec!["@example.".to_string()], 0, 0),
+            (
+                "one_of".to_string(),
+                vec!["com".to_string(), "org".to_string()],
+                0,
+                0,
+            ),
+        ];
+        for (label, args) in [
+            (
+                "string 5-15",
+                PlanArgs {
+                    name: "c".into(),
+                    kind: "string",
+                    str_min_len: Some(5),
+                    str_max_len: Some(15),
+                    ..Default::default()
+                },
+            ),
+            (
+                "string 5-15, 10% null",
+                PlanArgs {
+                    name: "c".into(),
+                    kind: "string",
+                    str_min_len: Some(5),
+                    str_max_len: Some(15),
+                    nullable: true,
+                    null_probability: 0.1,
+                    ..Default::default()
+                },
+            ),
+            (
+                "string 20-40",
+                PlanArgs {
+                    name: "c".into(),
+                    kind: "string",
+                    str_min_len: Some(20),
+                    str_max_len: Some(40),
+                    ..Default::default()
+                },
+            ),
+            (
+                "string 8",
+                PlanArgs {
+                    name: "c".into(),
+                    kind: "string",
+                    str_min_len: Some(8),
+                    str_max_len: Some(8),
+                    ..Default::default()
+                },
+            ),
+            (
+                "template email",
+                PlanArgs {
+                    name: "c".into(),
+                    kind: "template",
+                    template: Some(&template[..]),
+                    ..Default::default()
+                },
+            ),
+            (
+                "pattern ORD-[0-9]{6}",
+                PlanArgs {
+                    name: "c".into(),
+                    kind: "pattern",
+                    pattern: Some(r"^ORD-[0-9]{6}$"),
+                    ..Default::default()
+                },
+            ),
+            (
+                "pattern bench",
+                PlanArgs {
+                    name: "c".into(),
+                    kind: "pattern",
+                    pattern: Some(r"^[A-Z]{2}-\d{4,6}(-(EU|US|UK))?$"),
+                    ..Default::default()
+                },
+            ),
+        ] {
+            let plan = ColumnPlan::build(args).unwrap();
+            println!("{label:<24} {:>6.2} ns/row", ns_per_row(&plan, n));
+        }
+    }
+}
+
+#[cfg(test)]
+mod timing_parts {
+    use super::*;
+    use std::hint::black_box;
+
+    fn time(label: &str, n: usize, mut f: impl FnMut() -> usize) {
+        black_box(f());
+        let mut best = f64::MAX;
+        for _ in 0..7 {
+            let t = std::time::Instant::now();
+            black_box(f());
+            best = best.min(t.elapsed().as_secs_f64());
+        }
+        println!("{label:<34} {:>6.2} ns/row", best * 1e9 / n as f64);
+    }
+
+    #[test]
+    #[ignore]
+    fn timing_string_parts() {
+        let n = 1_000_000;
+        let mut scratch = vec![0u8; 64];
+        scratch.resize(n * 10 + crate::chars::SLACK, 0);
+        let alphabet = Alphabet::new(CHARSET);
+        time("chars only (Alphabet::fill), 10 a row", n, || {
+            let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
+            alphabet.fill(&mut rng, &mut scratch, n * 10);
+            scratch[n] as usize
+        });
+        time("next_u64 x2 per row (floor)", n, || {
+            let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
+            (0..n)
+                .map(|_| (rng.next_u64() ^ rng.next_u64()) as usize & 1)
+                .sum()
+        });
     }
 }
