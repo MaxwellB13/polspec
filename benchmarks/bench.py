@@ -186,6 +186,19 @@ class UniqueString(FrameSpec):
     c = ColSpec(pl.String, string_length=(8, 12), unique=True)
 
 
+class UniqueNullable(FrameSpec):
+    """A unique key with nulls: each null spends no value, so a batch has to
+    know how many nulls came before it."""
+
+    c = ColSpec(
+        pl.Int64,
+        bounds=(0, 10_000_000_000),
+        unique=True,
+        nullable=True,
+        null_probability=0.2,
+    )
+
+
 class Wide(FrameSpec):
     __columns__ = {f"c{i}": ColSpec(pl.Int64, bounds=(0, 1000)) for i in range(200)}
 
@@ -655,6 +668,20 @@ CASES: tuple[Case, ...] = (
     Case("string_t1", "regression", (1_000_000,), _polspec(OneString), threads=1),
     Case(
         "unique_int64_t1", "regression", (1_000_000,), _polspec(UniqueRoomy), threads=1
+    ),
+    Case(
+        "unique_string_t1",
+        "regression",
+        (1_000_000,),
+        _polspec(UniqueString),
+        threads=1,
+    ),
+    Case("unique_nullable", "regression", (1_000_000,), _polspec(UniqueNullable)),
+    Case(
+        "unique_nullable_batches_1k",
+        "regression",
+        (1_000_000,),
+        _batches_of(UniqueNullable, 1_000),
     ),
     Case("batches_100", "regression", (100_000,), _batches_of(DataSource, 100)),
     Case("batches_mixed11_1k", "regression", (1_000_000,), _batches_of(Mixed11, 1_000)),
