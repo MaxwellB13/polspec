@@ -39,12 +39,12 @@ use polars_arrow::array::{BooleanArray, Utf8ViewArray, View};
 use polars_arrow::bitmap::Bitmap;
 use polars_arrow::datatypes::ArrowDataType;
 use polars_core::chunked_array::builder::StringChunkedBuilder;
-use rand::distr::weighted::WeightedIndex;
 use rand::distr::{Bernoulli, Distribution as _, Uniform};
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
 use rayon::prelude::*;
 
+use crate::alias::Alias;
 use crate::chars::{Alphabet, SLACK};
 use crate::dist::with_sampler;
 use crate::plan::{ColumnPlan, Kind};
@@ -457,7 +457,7 @@ fn gen_bool_column(
 #[derive(Clone)]
 enum IndexSampler {
     Uniform(Uniform<u32>),
-    Weighted(WeightedIndex<f64>),
+    Weighted(Alias),
 }
 
 impl IndexSampler {
@@ -470,7 +470,7 @@ impl IndexSampler {
             ));
         }
         match &plan.weights {
-            Some(w) => WeightedIndex::new(w.clone())
+            Some(w) => Alias::new(w)
                 .map(IndexSampler::Weighted)
                 .map_err(|e| format!("Invalid weights for column '{}': {e}", plan.name)),
             None => Ok(IndexSampler::Uniform(uniform(0, n as u32 - 1, plan)?)),
@@ -481,7 +481,7 @@ impl IndexSampler {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> u32 {
         match self {
             IndexSampler::Uniform(u) => u.sample(rng),
-            IndexSampler::Weighted(w) => w.sample(rng) as u32,
+            IndexSampler::Weighted(w) => w.sample(rng),
         }
     }
 }

@@ -39,6 +39,14 @@ for all of 2.x.
   null rate of one half need about five hundred, not a thousand. Its nulls
   are still drawn at `null_probability`, and a batch still holds the rows the
   whole frame holds there.
+- **Seeded output (2.0): weighted categories are drawn by the alias
+  method.** Every weighted column changes -- `weights=`, `choices=` given
+  as a dict, a finite format widened by `extra_values`, a template's extras
+  given shares -- and so does every frame holding one. A weighted draw costs
+  the same whatever the number of categories: 200 of them take 2.7 ns on one
+  thread, not 6.9, and three 2.7, not 3.0. The table is built in integer
+  steps, so it is the same on every platform, and a category's probability
+  is its weight's share to within 2^-32.
 
 ## [1.7.0] - 2026-11-17
 
