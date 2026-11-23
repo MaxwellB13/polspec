@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
-from polspec.dtypes import dtype_value_limits, typed_values
+from polspec.dtypes import dtype_value_limits, typed_values, wide_decimals
 
 if TYPE_CHECKING:
     from polspec.bound import Bound
@@ -31,7 +31,16 @@ def out_of_bounds(column: pl.Expr, bounds: Bound, actual_dtype: pl.DataType) -> 
     """
 
     def limit(value: Any) -> Any:
-        return pl.lit(value).cast(actual_dtype) if actual_dtype.is_temporal() else value
+        if actual_dtype.is_temporal():
+            return pl.lit(value).cast(actual_dtype)
+        if isinstance(value, int) and not -(2**63) <= value < 2**64:
+            # Past 64 bits, a bare int is no literal Polars can make; one
+            # typed as the column is, when the column holds it -- the bound
+            # of a 128-bit integer column.
+            limits = dtype_value_limits(actual_dtype)
+            if limits is not None and limits[0] <= value <= limits[1]:
+                return pl.lit(value, dtype=actual_dtype)
+        return value
 
     violations = []
     if bounds.min is not None:
@@ -78,6 +87,7 @@ def in_values(
     return column.is_in(typed_values(values, declared).implode())
 
 
+@wide_decimals
 def unholdable_mask(
     column: pl.Expr,
     declared: pl.DataType,

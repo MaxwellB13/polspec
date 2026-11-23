@@ -12,7 +12,13 @@ import polars as pl
 import polspec
 import pytest
 from helpers import spec_for
-from polspec import ColSpec, FrameSpec, GenerationError, SpecError, TableSpec
+from polspec import (
+    ColSpec,
+    FrameSpec,
+    SpecError,
+    TableSpec,
+    ValidationError,
+)
 
 # ---------------------------------------------------------------------------
 # 128-bit integers
@@ -33,17 +39,35 @@ def test_a_128_bit_integer_generates_within_its_bounds(dtype):
     ("dtype", "bounds"),
     [(pl.Int128, (0, 2**100)), (pl.UInt128, (2**70, 2**71))],
 )
-def test_bounds_past_the_64_bit_draw_validate_but_do_not_generate(dtype, bounds):
+def test_bounds_past_64_bits_generate_and_validate(dtype, bounds):
+    """A 128-bit integer is drawn at full width: bounds past what 64 bits
+    hold generate, inside them, and validation reads them back."""
     spec_cls = spec_for(ColSpec(dtype, bounds=bounds))
-    wide = pl.DataFrame({"c": pl.Series([bounds[1]], dtype=dtype)})
-    spec_cls.validate(wide)
-    with pytest.raises(GenerationError, match="range generation draws in"):
-        spec_cls.generate(10, seed=1)
+    df = spec_cls.generate(2_000, seed=1)
+    assert df.schema["c"] == dtype
+    assert bounds[0] <= df["c"].min() and df["c"].max() <= bounds[1]
+    assert df["c"].max() > 2**64
+    spec_cls.validate(df)
+    outside = pl.DataFrame({"c": pl.Series([bounds[1]], dtype=dtype)}) + 1
+    with pytest.raises(ValidationError):
+        spec_cls.validate(outside)
+
+
+@pytest.mark.parametrize("dtype", [pl.Int128, pl.UInt128])
+def test_the_full_range_generates_and_a_unique_column_stays_unique(dtype):
+    low, high = (-(2**127), 2**127 - 1) if dtype == pl.Int128 else (0, 2**128 - 1)
+    for unique in (False, True):
+        spec_cls = spec_for(ColSpec(dtype, bounds=(low, high), unique=unique))
+        df = spec_cls.generate(3_000, seed=2)
+        assert df["c"].min() < low // 2 + 1 or df["c"].max() > high // 2
+        if unique:
+            assert df["c"].n_unique() == 3_000
+        spec_cls.validate(df)
 
 
 def test_an_open_end_widens_to_the_draw_not_the_dtype():
     """`(2_000_000, None)` lies past the default range; the open end widens
-    to what 64 bits hold, not to 2**127, which could not be drawn."""
+    to the dtype's own limit, which a 128-bit draw reaches."""
     df = spec_for(ColSpec(pl.Int128, bounds=(2_000_000, None))).generate(50, seed=1)
     assert df["c"].min() >= 2_000_000
 

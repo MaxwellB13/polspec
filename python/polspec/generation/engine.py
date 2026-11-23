@@ -30,7 +30,6 @@ from polspec.constants import (
     DEFAULT_LIST_LEN,
     DEFAULT_STRING_LEN,
     DEFAULT_WIDE_INT_BOUND,
-    I64_MAX,
     MAX_CARTESIAN_ROWS,
 )
 from polspec.dtypes import (
@@ -41,6 +40,7 @@ from polspec.dtypes import (
     field_dtypes,
     float16_inside,
     typed_values,
+    wide_decimals,
 )
 from polspec.errors import GenerationError
 from polspec.generation.seeds import pass_seed, stable_seed
@@ -133,10 +133,9 @@ def _resolve_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
 
 # A dtype the engine has no kind for is drawn as the nearest one it has and
 # cast back in `_finish`, the way a Decimal is drawn as its physical integer:
-# a 128-bit integer through 64 bits, a half-precision float as a single.
+# a half-precision float as a single. 128-bit integers have kinds of their
+# own since 2.0, and are drawn at full width.
 _DRAWN_AS: dict[DtypeLike, pl.DataType] = {
-    pl.Int128: pl.Int64(),
-    pl.UInt128: pl.UInt64(),
     pl.Float16: pl.Float32(),
 }
 
@@ -199,12 +198,11 @@ def _default_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
         return -DEFAULT_FLOAT_BOUND, DEFAULT_FLOAT_BOUND
     if kind == "decimal":
         # The float default, in physical units, unless the precision is
-        # narrower -- and never past what the engine's 64-bit draw can hold.
+        # narrower. Drawn at full width, so any precision up to 38 holds.
         assert isinstance(spec.dtype, pl.Decimal)  # noqa: S101 - kind says so
         widest = min(
             10**spec.dtype.precision - 1,
             int(DEFAULT_FLOAT_BOUND) * 10**spec.dtype.scale,
-            I64_MAX,
         )
         return -widest, widest
     if kind == "temporal":
@@ -234,6 +232,8 @@ _ENGINE_KINDS: dict[DtypeLike, str] = {
     pl.UInt16: "uint16",
     pl.UInt32: "uint32",
     pl.UInt64: "uint64",
+    pl.Int128: "int128",
+    pl.UInt128: "uint128",
     pl.Float32: "float32",
     pl.Float64: "float64",
 }
@@ -321,9 +321,9 @@ def plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None]
     if kind in ("int", "float", "temporal", "decimal"):
         engine_kind = _ENGINE_KINDS.get(_DRAWN_AS.get(spec.dtype, spec.dtype), kind)
         if kind == "decimal":
-            # A Decimal is filled as its physical integer and scaled back in
-            # `_finish`; the draw is 64-bit, whatever the declared precision.
-            engine_kind = "int64"
+            # A Decimal is filled as its physical integer, at full width, and
+            # scaled back in `_finish`.
+            engine_kind = "int128"
         if spec.dtype.is_temporal():
             # Temporal columns cross as their physical integer: Date is an
             # i32 day count, everything else an i64 in its own time unit.
@@ -334,12 +334,6 @@ def plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None]
             or spec.distribution == "uniform"
         ):
             options["min"], options["max"] = _resolve_numeric_bounds(spec)
-            if kind == "decimal":
-                _check_decimal_fits_the_draw(name, spec, options["min"], options["max"])
-            if spec.dtype in (pl.Int128, pl.UInt128):
-                _check_wide_int_fits_the_draw(
-                    name, spec, options["min"], options["max"]
-                )
         elif spec.dtype == pl.Float16:
             # A distribution with no bounds keeps its own shape, but not past
             # what a half holds: beyond it the cast is an infinity.
@@ -435,33 +429,6 @@ _ENGINE_NATIVE: frozenset = frozenset(
 )
 
 
-def _check_decimal_fits_the_draw(
-    name: str, spec: ColSpec, lo: float | int, hi: float | int
-) -> None:
-    if lo >= -I64_MAX - 1 and hi <= I64_MAX:
-        return
-    raise GenerationError(
-        f"Column {name!r}: bounds {spec.bounds} on {spec.dtype!r} need more "
-        "than 18 significant digits, which generation cannot draw. Validation "
-        "checks the full precision; narrow the bounds to generate."
-    )
-
-
-def _check_wide_int_fits_the_draw(
-    name: str, spec: ColSpec, lo: float | int, hi: float | int
-) -> None:
-    drawn = _DRAWN_AS[spec.dtype]
-    limits = dtype_value_limits(drawn)
-    assert limits is not None  # noqa: S101 - a 64-bit integer has limits
-    if limits[0] <= lo and hi <= limits[1]:
-        return
-    raise GenerationError(
-        f"Column {name!r}: bounds {spec.bounds} on {spec.dtype!r} reach past "
-        f"the {drawn!r} range generation draws in. Validation checks the full "
-        "range; narrow the bounds to generate."
-    )
-
-
 def _decimal_from_physical(raw: pl.Series, dtype: pl.Decimal) -> pl.Series:
     """An integer column as the Decimal it is the physical form of.
 
@@ -488,6 +455,7 @@ def _finish(raw: pl.Series, spec: ColSpec, domain: pl.Series | None) -> pl.Serie
     return raw.cast(spec.dtype)
 
 
+@wide_decimals
 def _coverage_values(spec: ColSpec, seed: int) -> list | None:
     """The finite set of representative values a coverage dimension takes.
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 import decimal
+import functools
 import math
 import struct
 from collections.abc import Sequence
@@ -194,6 +195,26 @@ def dtype_value_limits(dtype: pl.DataType) -> tuple[float, float] | None:
     return None
 
 
+# Python's default decimal context keeps 28 significant digits, and a
+# Decimal(38, s) holds 38: arithmetic on one under the default rounds it --
+# 10**38 - 1 becomes 1E+38. polspec's own Decimal arithmetic runs in a context
+# wide enough for any value a Decimal column holds, with room to spare.
+DECIMAL_DIGITS = 100
+
+
+def wide_decimals(function):
+    """Runs `function` under a decimal context of `DECIMAL_DIGITS` digits,
+    so its Decimal arithmetic is exact for any value a column holds."""
+
+    @functools.wraps(function)
+    def wrapped(*args, **kwargs):
+        with decimal.localcontext(prec=DECIMAL_DIGITS):
+            return function(*args, **kwargs)
+
+    return wrapped
+
+
+@wide_decimals
 def bound_endpoint_to_physical(value: object, dtype: pl.DataType) -> float | int:
     """Coerces a Bound endpoint to the physical (int) representation `dtype`
     stores internally, so real `date`/`datetime`/`time`/`timedelta` objects

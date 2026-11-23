@@ -47,7 +47,7 @@ use rayon::prelude::*;
 use crate::alias::Alias;
 use crate::chars::{Alphabet, SLACK};
 use crate::dist::with_sampler;
-use crate::plan::{ColumnPlan, Kind};
+use crate::plan::{ColumnPlan, Kind, Limit};
 use crate::samplers::Portable;
 use crate::views::Views;
 
@@ -360,6 +360,83 @@ impl_gen_int_column!(
     0,
     DEFAULT_WIDE_UINT_BOUND
 );
+
+/// A uniform offset in `[0, span]`, for a 128-bit column: one 64-bit draw
+/// when the span fits one, as almost every declared range does, and a full
+/// 128-bit draw only when it does not.
+#[derive(Clone, Copy)]
+enum WideOffset {
+    Narrow(Uniform<u64>),
+    Full(Uniform<u128>),
+}
+
+impl WideOffset {
+    fn new(span: u128, plan: &ColumnPlan) -> Result<Self, String> {
+        Ok(match u64::try_from(span) {
+            Ok(narrow) => WideOffset::Narrow(uniform(0, narrow, plan)?),
+            Err(_) => WideOffset::Full(uniform(0, span, plan)?),
+        })
+    }
+
+    #[inline(always)]
+    fn sample(&self, rng: &mut Xoshiro256PlusPlus) -> u128 {
+        match self {
+            WideOffset::Narrow(u) => u.sample(rng) as u128,
+            WideOffset::Full(u) => u.sample(rng),
+        }
+    }
+}
+
+/// An `Int128` column -- and a `Decimal`'s physical integers -- drawn at
+/// full width: any bounds an `i128` holds.
+fn gen_int128_column(
+    plan: &ColumnPlan,
+    n: usize,
+    seed: ColumnSeed,
+) -> Result<ChunkedArray<Int128Type>, String> {
+    let lo = plan
+        .min
+        .map_or(-(DEFAULT_WIDE_INT_BOUND as i128), Limit::as_i128);
+    let hi = plan
+        .max
+        .map_or(DEFAULT_WIDE_INT_BOUND as i128, Limit::as_i128);
+    let (lo, hi) = if lo <= hi { (lo, hi) } else { (hi, lo) };
+    let offset = WideOffset::new(hi.wrapping_sub(lo) as u128, plan)?;
+    with_sampler!(
+        plan.distribution,
+        numeric_column::<Int128Type, _>(plan, n, seed, move |rng| {
+            lo.wrapping_add(offset.sample(rng) as i128)
+        }),
+        |d| numeric_column::<Int128Type, _>(plan, n, seed, move |rng| {
+            let val = d.sample::<Portable, _>(rng);
+            let rounded = if val.is_nan() { lo as f64 } else { val.round() };
+            (rounded.clamp(lo as f64, hi as f64) as i128).clamp(lo, hi)
+        })
+    )
+}
+
+/// A `UInt128` column, drawn at full width.
+fn gen_uint128_column(
+    plan: &ColumnPlan,
+    n: usize,
+    seed: ColumnSeed,
+) -> Result<ChunkedArray<UInt128Type>, String> {
+    let lo = plan.min.map_or(0, Limit::as_u128);
+    let hi = plan
+        .max
+        .map_or(DEFAULT_WIDE_UINT_BOUND as u128, Limit::as_u128);
+    let (lo, hi) = if lo <= hi { (lo, hi) } else { (hi, lo) };
+    let offset = WideOffset::new(hi - lo, plan)?;
+    with_sampler!(
+        plan.distribution,
+        numeric_column::<UInt128Type, _>(plan, n, seed, move |rng| lo + offset.sample(rng)),
+        |d| numeric_column::<UInt128Type, _>(plan, n, seed, move |rng| {
+            let val = d.sample::<Portable, _>(rng);
+            let rounded = if val.is_nan() { lo as f64 } else { val.round() };
+            (rounded.clamp(lo as f64, hi as f64) as u128).clamp(lo, hi)
+        })
+    )
+}
 
 macro_rules! impl_gen_float_column {
     ($fn_name:ident, $polars_type:ident, $native_type:ty, $default_bound:expr) => {
@@ -735,6 +812,8 @@ fn generate_chunked(plan: &ColumnPlan, n: usize, seed: ColumnSeed) -> Result<Ser
         Kind::Int16 => gen_int16_column(plan, n, seed)?.into_series(),
         Kind::Int8 => gen_int8_column(plan, n, seed)?.into_series(),
         Kind::UInt64 => gen_uint64_column(plan, n, seed)?.into_series(),
+        Kind::Int128 => gen_int128_column(plan, n, seed)?.into_series(),
+        Kind::UInt128 => gen_uint128_column(plan, n, seed)?.into_series(),
         Kind::UInt32 => gen_uint32_column(plan, n, seed)?.into_series(),
         Kind::UInt16 => gen_uint16_column(plan, n, seed)?.into_series(),
         Kind::UInt8 => gen_uint8_column(plan, n, seed)?.into_series(),
@@ -980,6 +1059,68 @@ mod tests {
             ca.n_unique().unwrap() > 1,
             "a 16-value range must not collapse"
         );
+    }
+
+    #[test]
+    fn a_128_bit_column_is_drawn_at_full_width() {
+        // Past what 64 bits hold, up to the type's own limits, a window as
+        // every column is.
+        for (kind, lo, hi) in [
+            (
+                "int128",
+                Limit::Wide(-(1i128 << 100)),
+                Limit::Wide(1i128 << 100),
+            ),
+            ("int128", Limit::Wide(i128::MIN), Limit::Wide(i128::MAX)),
+            (
+                "uint128",
+                Limit::WideU(1u128 << 127),
+                Limit::WideU(u128::MAX),
+            ),
+            ("uint128", Limit::UInt(0), Limit::WideU(u128::MAX)),
+        ] {
+            let p = bounded(kind, lo, hi);
+            let n = SEED_CHUNK * 3 + 11;
+            let whole = generate_series(&p, n, 5, 0).unwrap();
+            let window = generate_series(&p, 500, 5, SEED_CHUNK + 7).unwrap();
+            assert!(
+                window.equals(&whole.slice((SEED_CHUNK + 7) as i64, 500)),
+                "{kind}"
+            );
+            if kind == "int128" {
+                let ca = whole.i128().unwrap();
+                let (min, max) = (ca.min().unwrap(), ca.max().unwrap());
+                assert!(lo.as_i128() <= min && max <= hi.as_i128(), "{kind}");
+                assert!(max > u64::MAX as i128 && min < i64::MIN as i128, "{kind}");
+            } else {
+                let ca = whole.u128().unwrap();
+                let (min, max) = (ca.min().unwrap(), ca.max().unwrap());
+                assert!(lo.as_u128() <= min && max <= hi.as_u128(), "{kind}");
+                assert!(max > (1u128 << 126) * 3, "{kind}: {max}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_128_bit_range_that_fits_64_bits_draws_what_a_64_bit_one_does() {
+        // One 64-bit offset from the low end, as `Uniform<i64>` draws: every
+        // range a 64-bit draw could take is unchanged by the wider kind.
+        let narrow = generate_series(
+            &bounded("int64", Limit::Int(-50), Limit::Int(9_000)),
+            5_000,
+            3,
+            0,
+        )
+        .unwrap();
+        let wide = generate_series(
+            &bounded("int128", Limit::Int(-50), Limit::Int(9_000)),
+            5_000,
+            3,
+            0,
+        )
+        .unwrap();
+        let wide = wide.cast(&DataType::Int64).unwrap();
+        assert!(narrow.equals(&wide));
     }
 
     #[test]

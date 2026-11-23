@@ -53,9 +53,9 @@ a dtype has to live outside the class.
 That is every dtype that holds data. `Null`, `Object`, `Unknown` and
 extension types declare and validate by dtype, but hold nothing polspec
 can draw, so `generate()` refuses each by name. A 128-bit integer is drawn
-through 64 bits and a `Float16` as a `Float32` rounded to the nearest half,
-so bounds past 64 bits are refused at `generate()` and bounds too close to
-hold a half at declaration; see
+at full width, any bounds it holds. A `Float16` is drawn as a `Float32`
+rounded to the nearest half, so bounds too close to hold a half are refused
+at declaration; see
 [Known limitations](../explanation/limitations.md#smaller-sharp-edges).
 
 ## Nullability
@@ -145,9 +145,8 @@ ColSpec(pl.Decimal(10, 2), bounds=(0, "1.005"))
 Generation draws a Decimal as the integer it physically is and scales it
 back, so the default range with no bounds is the float default
 (`±1,000,000`) or the widest the precision allows, whichever is narrower.
-The draw is 64-bit: bounds needing more than eighteen significant digits
-are refused at `generate()`, and only there — validation checks the full
-precision.
+The draw is 128-bit, so any bounds the precision holds generate, all 38
+digits of them. *Full precision since 2.0.*
 
 ### Open-ended bounds
 
