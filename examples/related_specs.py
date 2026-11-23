@@ -31,7 +31,7 @@ class Customers(FrameSpec):
     name = ColSpec(pl.String, string_length=(3, 40))
     email = ColSpec(
         pl.String,
-        string_length=(10, 60),
+        format="email",
         tags="pii",
         validators=[Check(col("email").str.contains("@"), name="email_has_at")],
     )
@@ -158,16 +158,21 @@ if __name__ == "__main__":
     )
     customers = frames["Customers"]
 
-    # validators and __checks__ wrap arbitrary predicates that generation
-    # never attempts to satisfy (see docs/how-to/constraints.md), so they're
-    # skipped here and proven separately below against real, compliant data.
-    registry.validate_all(frames, validators=False, checks=False)
+    # Generation keeps every spec's validators and __checks__ by default, so
+    # the frames pass the whole of every spec.
+    registry.validate_all(frames)
     print("Relationships drawn:", registry.to_mermaid().count("||--o{"))
 
     print("PII columns on Customers:", Customers.tag("pii"))
 
+    # A coverage set cannot keep checks -- taking rows out would leave
+    # combinations uncovered -- so it says so unless told it is expected.
     coverage_sample = Orders.generate(
-        500, method="cartesian", seed=6, references={Customers: customers}
+        500,
+        method="cartesian",
+        seed=6,
+        references={Customers: customers},
+        checks=False,
     )
     print("Cartesian coverage rows:", coverage_sample.height)
 

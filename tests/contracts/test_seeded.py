@@ -41,6 +41,7 @@ import polars as pl
 import pytest
 from cases import COLUMN_CASES, EVERY_DTYPE
 from polspec import (
+    Check,
     ColRule,
     ColSpec,
     ForeignKey,
@@ -135,6 +136,22 @@ def _cases() -> dict[str, Callable[[], pl.DataFrame]]:
     }
     for name, spec in tables.items():
         cases[f"table/{name}"] = lambda s=spec: generate(s, 400, seed=13)
+
+    # Checks kept by filtering: about half the free rows fail, so a kept
+    # frame is a longer read's passing rows -- whole, and batch by batch.
+    kept = TableSpec(
+        "K",
+        {
+            "subtotal": ColSpec(pl.Float64, bounds=(0, 100)),
+            "total": ColSpec(pl.Float64, bounds=(0, 110)),
+            "status": ColSpec(pl.Enum(["NEW", "PAID"])),
+        },
+        checks=[Check(col("total") >= col("subtotal"), name="total_covers")],
+    )
+    cases["checks/generate"] = lambda: generate(kept, 5_000, seed=31)
+    cases["checks/batches"] = lambda: pl.concat(
+        list(generate_batches(kept, 5_000, batch_size=777, seed=31))
+    )
     cartesian = TableSpec(
         "C",
         {

@@ -71,7 +71,7 @@ def _domain_size(columns: dict[str, ColSpec], members: Sequence[str]) -> int | N
     return total
 
 
-def _joint_spaces(
+def joint_spaces(
     columns: dict[str, ColSpec], members: list[str], rewritable: frozenset[str]
 ) -> dict[str, tuple[int, Callable[[pl.Series], pl.Series]]] | None:
     """Each member's space, when every member has one and the pass may
@@ -148,7 +148,7 @@ def apply_unique_together(
         return df
     if any(columns[m].unique for m in members):
         return df  # a member distinct on its own makes every combination so
-    spaces = _joint_spaces(columns, members, rewritable) if jointly else None
+    spaces = joint_spaces(columns, members, rewritable) if jointly else None
     if spaces is not None:
         return _draw_jointly(df, members, spaces, key_seed, row_offset)
 

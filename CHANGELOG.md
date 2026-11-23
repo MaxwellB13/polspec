@@ -83,6 +83,18 @@ for all of 2.x.
   a foreign key fills, or a cartesian frame's, is repaired per batch as
   before. A million rows of a two-member key take 23 ms, not 89, and
   139 MB at the peak, not 850.
+- **Generated data keeps a spec's checks by default (2.0).** `checks` now
+  defaults to `None`: `__checks__` and column validators are kept as
+  `checks=True` keeps them, so fake data passes its own spec unasked. Where
+  they cannot be kept -- `method="cartesian"`, a hierarchy, a key into the
+  spec's own rows, a pin of all `n` values, a check rejecting nearly every
+  row -- the frame is the one `checks=False` gives, and a warning says
+  why; `checks=True` still refuses, and `checks=False` asks for the frame
+  unfiltered and silently. Every generated frame of a spec with a check
+  some rows fail changes. Keeping a check now reads only the rows it has
+  not read: a check rejecting 10% of rows costs 2.0 times a plain
+  `generate`, not 2.9, and one rejecting half 3.5 times, not 5.0. A stream
+  that keeps checks holds `generate()`'s rows, a composite key's included.
 
 ### Fixed
 

@@ -471,7 +471,7 @@ class Registry:
         method: Literal["random", "cartesian"],
         references: Frames | None,
         fixed: Mapping[Any, Mapping[str, Any]] | None = None,
-        checks: bool = False,
+        checks: bool | None = None,
     ) -> dict[str, pl.DataFrame]:
         counts = self._counts(n, names)
         pins = self._pins(fixed, names)
@@ -533,7 +533,7 @@ class Registry:
         batch_size: int | None = None,
         references: Frames | None = None,
         fixed: Mapping[Any, Mapping[str, Any]] | None = None,
-        checks: bool = False,
+        checks: bool | None = None,
     ) -> dict[str, pl.LazyFrame]:
         """One `LazyFrame` per spec, each generating as it is collected.
 
@@ -589,7 +589,7 @@ class Registry:
         method: Literal["random", "cartesian"] = "random",
         references: Frames | None = None,
         fixed: Mapping[Any, Mapping[str, Any]] | None = None,
-        checks: bool = False,
+        checks: bool | None = None,
     ) -> dict[str, pl.DataFrame]:
         """One frame per spec, parents generated first and threaded into
         their children, so every foreign key is satisfied by construction.
@@ -604,9 +604,9 @@ class Registry:
         each as `generate()` takes it; a child's foreign key draws from its
         pinned parent's rows. *Added in 1.4.*
 
-        `checks=True` keeps each spec's checks, as `generate()` does; a
-        child's foreign key draws from its parent's kept rows. *Added in
-        1.7.*
+        `checks` keeps each spec's checks, as `generate()` does, by
+        default; a child's foreign key draws from its parent's kept rows.
+        *Kept by default since 2.0; added in 1.7.*
         """
         return self._generate(
             self.names,
@@ -627,7 +627,7 @@ class Registry:
         method: Literal["random", "cartesian"] = "random",
         references: Frames | None = None,
         fixed: Mapping[Any, Mapping[str, Any]] | None = None,
-        checks: bool = False,
+        checks: bool | None = None,
     ) -> dict[str, pl.DataFrame]:
         """`generate_all` restricted to one spec and everything it depends on."""
         root = as_spec_name(key)

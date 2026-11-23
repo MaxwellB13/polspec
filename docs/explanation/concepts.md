@@ -79,11 +79,11 @@ almost all of them: a generated frame validates against its own spec.
 - **Kept by construction:** dtypes, nulls, bounds, choices and weights,
   formats and patterns, `unique`, composite keys, rules, derived columns,
   hierarchies, row order — and foreign keys, given the parent's data.
-- **Kept when asked:** `__checks__` and column validators are arbitrary
-  expressions, which nothing can draw values to satisfy. `checks=True`
-  keeps the rows that pass them and reads on for more; without it, they
-  are left to validation. See
-  [Keeping checks](../how-to/generating.md#keeping-checks-checkstrue).
+- **Kept by filtering:** `__checks__` and column validators are arbitrary
+  expressions, which nothing can draw values to satisfy. Generation keeps
+  the rows that pass them and reads on for more; `checks=False` leaves
+  them to validation. See
+  [Keeping checks](../how-to/generating.md#keeping-checks).
 - **Only validated:** `__rows__`, since `generate()` makes the rows asked
   for.
 

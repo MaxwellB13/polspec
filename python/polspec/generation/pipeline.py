@@ -30,9 +30,8 @@ from polspec.frames import Method, References, to_eager
 from polspec.generation.engine import generate_cartesian, generate_random
 from polspec.generation.keeping import (
     KEY_ROOM,
-    holds_checks,
-    kept_window,
-    refuse_unkeepable,
+    kept_or_warned,
+    resolve_checks,
 )
 from polspec.generation.passes.derived import apply_derived
 from polspec.generation.passes.foreign_keys import (
@@ -205,7 +204,7 @@ def generate(
     self_references: int = 0,
     max_bytes: int | None = None,
     fixed: Mapping[str, Any] | None = None,
-    checks: bool = False,
+    checks: bool | None = None,
 ) -> pl.DataFrame:
     """Generates a DataFrame matching `spec`.
 
@@ -267,16 +266,20 @@ def generate(
     `order_by`, pinned rows move with the sort like any other.
     `method="cartesian"`, whose row count is not `n`, takes no pins.
 
-    `checks=True` keeps the spec's `__checks__` and column validators,
-    which are otherwise validation-only: the frame is drawn as always, the
-    rows every check passes are kept, and when fewer than `n` pass, a
-    larger frame is drawn from a seed of its own and its first `n` passing
-    rows taken. A spec whose rows all pass is the frame `checks=False`
-    gives. Rates a check reads -- a null rate, a weight -- become rates
-    among the rows that pass. A check that rejects nearly every row is
-    refused with a `GenerationError` naming it; a hierarchy, a key into the
-    spec's own rows, `method="cartesian"` and a pin of all `n` values
-    cannot be filtered, and are refused. *Added in 1.7.*
+    `checks` keeps the spec's `__checks__` and column validators: the frame
+    is drawn as always, the rows every check passes are kept, and when fewer
+    than `n` pass, more of the same frame is read -- only the rows past
+    those already read -- and its first `n` passing rows taken. A spec whose
+    rows all pass is the frame `checks=False` gives. Rates a check reads --
+    a null rate, a weight -- become rates among the rows that pass.
+
+    Some checks cannot be kept: beside a hierarchy or a key into the spec's
+    own rows, under `method="cartesian"`, with a pin of all `n` values, and
+    a check that rejects nearly every row. The default (`checks=None`) then
+    generates the frame `checks=False` gives and warns, naming why;
+    `checks=True` refuses instead -- a `SpecError`, or a `GenerationError`
+    naming the check. `checks=False` leaves them to validation. *Kept by
+    default since 2.0; added in 1.7.*
 
     The whole frame is built before this returns. `scan()` is the lazy
     verb: it generates as the plan is collected, so only the columns and
@@ -301,32 +304,44 @@ def generate(
     _check_size(spec, n, max_bytes)
     check_method(method)
     checked = checked_pins(spec, fixed, n, method) if fixed else None
-    if checks:
-        refuse_unkeepable(
-            spec,
-            method,
-            sequence_pins=checked is not None and checked.has_sequences,
-        )
-    keeping = checks and holds_checks(spec)
-    planned = room_keeping_checks(spec, n) if keeping else room_for_open_keys(spec, n)
+    keeping = resolve_checks(
+        spec,
+        checks,
+        method,
+        sequence_pins=checked is not None and checked.has_sequences,
+    )
     frame_seed = _frame_seed(seed)
 
-    def read(offset: int, rows: int) -> pl.DataFrame:
-        # The first `rows` rows of the one frame the seed describes: a
-        # longer read is the same rows and more.
+    def reader(planned: TableSpec) -> Callable[[int, int], pl.DataFrame]:
+        def read(offset: int, rows: int) -> pl.DataFrame:
+            # Rows `[offset, offset + rows)` of the one frame the seed
+            # describes: a longer read is the same rows and more.
+            return _read(planned, offset, rows)
+
+        return read
+
+    def _read(planned: TableSpec, offset: int, rows: int) -> pl.DataFrame:
         return _window(
             planned,
             rows,
             frame_seed,
             method=method,
             references=references,
+            row_offset=offset,
             cycles=cycles,
             self_references=self_references,
-            pins=checked.window(0, rows) if checked is not None else {},
+            pins=checked.window(offset, rows) if checked is not None else {},
         )
 
-    frame = kept_window(planned, n, 0, read)[0] if keeping else read(0, n)
-    return ordered(frame, planned)
+    if keeping:
+        planned = room_keeping_checks(spec, n)
+        kept = kept_or_warned(planned, n, 0, reader(planned), strict=checks is True)
+        if kept is not None:
+            return ordered(kept[0], planned)
+    # Not kept -- by choice, or because they cannot be: the frame
+    # `checks=False` gives.
+    planned = room_for_open_keys(spec, n)
+    return ordered(_read(planned, 0, n), planned)
 
 
 @dataclass(frozen=True)
@@ -708,7 +723,7 @@ def generate_batches(
     seed: int | None = None,
     references: References = None,
     fixed: Mapping[str, Any] | None = None,
-    checks: bool = False,
+    checks: bool | None = None,
 ) -> Iterator[pl.DataFrame]:
     """Yields chunks of generated rows without holding all `n` in memory.
 
@@ -732,11 +747,12 @@ def generate_batches(
     a sequence of all `n` values, which each batch takes its stretch of.
     *Added in 1.4.*
 
-    `checks=True` keeps the spec's checks, as `generate()` keeps them:
-    each batch is the first rows that pass from where the last batch
-    stopped reading, so a `unique=True` column stays unique across `n`.
-    Batches whose rows all pass are the batches `checks=False` gives.
-    *Added in 1.7.*
+    `checks` keeps the spec's checks, as `generate()` keeps them, by
+    default: each batch is the first rows that pass from where the last
+    batch stopped reading, so a `unique=True` column stays unique across
+    `n`, and the batches are `generate()`'s rows. Batches whose rows all
+    pass are the batches `checks=False` gives. *Kept by default since 2.0;
+    added in 1.7.*
 
     Examples
     --------
@@ -750,10 +766,9 @@ def generate_batches(
     check_counts(n, batch_size)
     check_method(method)
     pins = checked_pins(spec, fixed, n, method) if fixed else None
-    if checks:
-        refuse_unkeepable(
-            spec, method, sequence_pins=pins is not None and pins.has_sequences
-        )
+    keeping = resolve_checks(
+        spec, checks, method, sequence_pins=pins is not None and pins.has_sequences
+    )
     return batch_stream(
         spec,
         n,
@@ -762,7 +777,8 @@ def generate_batches(
         seed=seed,
         references=references,
         pins=pins,
-        checks=checks,
+        checks=keeping,
+        strict=checks is True,
     )
 
 
@@ -776,15 +792,18 @@ def batch_stream(
     references: References,
     pins: Pins | None,
     checks: bool = False,
+    strict: bool = False,
 ) -> Iterator[pl.DataFrame]:
     """`generate_batches` once its arguments are checked, as a generator --
     so the checks above run when it is called, not when it is first read.
-    `checks` keeps the spec's checks in each batch, refused beforehand
-    where it cannot be."""
+    `checks` is whether to keep the spec's checks in each batch, as
+    `resolve_checks` decided it beforehand; `strict` (`checks=True`) raises
+    if they reject nearly every row, where the default stops keeping them
+    from that batch on and says so."""
     if n == 0:
         return
     # The whole frame's `n`, so every batch draws from one key range.
-    keeping = checks and holds_checks(spec)
+    keeping = checks
     spec = room_keeping_checks(spec, n) if keeping else room_for_open_keys(spec, n)
 
     # A parent frame is the same frame for every batch, so collect it once.
@@ -857,9 +876,15 @@ def batch_stream(
     cursor = produced
     while produced < n:
         current = min(n - produced, batch_size)
-        if keeping:
-            batch, used = kept_window(spec, current, cursor, read)
+        kept = (
+            kept_or_warned(spec, current, cursor, read, strict=strict)
+            if keeping
+            else None
+        )
+        if kept is not None:
+            batch, used = kept
         else:
+            keeping = False
             batch, used = read(cursor, current), current
         yield batch
         produced += current

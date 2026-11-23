@@ -647,7 +647,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         self_references: int = 0,
         max_bytes: int | None = None,
         fixed: Mapping[str, Any] | None = None,
-        checks: bool = False,
+        checks: bool | None = None,
     ) -> pl.DataFrame:
         """Generates a DataFrame matching this spec.
 
@@ -692,7 +692,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         method: Literal["random", "cartesian"] = "random",
         references: References = None,
         fixed: Mapping[str, Any] | None = None,
-        checks: bool = False,
+        checks: bool | None = None,
     ) -> pl.LazyFrame:
         """A `LazyFrame` of `n` rows, generated as they are collected.
 
@@ -737,7 +737,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         seed: int | None = None,
         references: References = None,
         fixed: Mapping[str, Any] | None = None,
-        checks: bool = False,
+        checks: bool | None = None,
     ) -> Iterator[pl.DataFrame]:
         """Yields chunks of generated rows without holding all `n` in memory.
 
@@ -776,7 +776,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         seed: int | None = None,
         references: References = None,
         fixed: Mapping[str, Any] | None = None,
-        checks: bool = False,
+        checks: bool | None = None,
         **kwargs: Any,
     ) -> None:
         """Generates `n` rows and streams them to a Parquet file in batches.
@@ -811,7 +811,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         seed: int | None = None,
         references: References = None,
         fixed: Mapping[str, Any] | None = None,
-        checks: bool = False,
+        checks: bool | None = None,
         **kwargs: Any,
     ) -> None:
         """Generates `n` rows and streams them to a CSV file in batches.
@@ -846,7 +846,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         seed: int | None = None,
         references: References = None,
         fixed: Mapping[str, Any] | None = None,
-        checks: bool = False,
+        checks: bool | None = None,
         **kwargs: Any,
     ) -> None:
         """Generates `n` rows and streams them to an Arrow IPC file in batches.
@@ -880,7 +880,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         seed: int | None = None,
         references: References = None,
         fixed: Mapping[str, Any] | None = None,
-        checks: bool = False,
+        checks: bool | None = None,
         **kwargs: Any,
     ) -> None:
         """Generates `n` rows and streams them to an NDJSON file in batches.

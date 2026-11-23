@@ -43,8 +43,8 @@ and `null_probability` describe the cell itself.
 | `text_format` | `text_format` | a `Date`, `Datetime` or `Time` column | — in memory; a CSV or NDJSON file polspec writes holds the column as this text | with `parse_text=True`, and in `read()`, text is read with it; a value it does not read is a `dtype` finding |
 
 A — in the generation column is a claim generation does not act on; the
-round trip still holds, except for `validators`, which are validation-only
-by design, and a `pattern` the generator cannot follow. Validate generated
+round trip still holds, except for a `pattern` the generator cannot
+follow, and `validators` or checks generation cannot keep. Validate generated
 data with `validators=False` or `pattern=False`, or
 [pin](../how-to/generating.md#pinning-columns-fixed) the column to values
 that pass — see [Known limitations](../explanation/limitations.md).

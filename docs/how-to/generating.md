@@ -160,12 +160,13 @@ The command line takes `--fixed COLUMN=VALUE`, repeated for several pins,
 each value read as its column's dtype: see
 [`generate`](cli.md#generate-data-from-a-schema).
 
-## Keeping checks — `checks=True`
+## Keeping checks
 
 `__checks__` and column validators hold arbitrary expressions, so a
-free draw can break them. `checks=True` keeps them: the frame is read
-as always, the rows every check passes are kept, and when fewer than
-`n` pass, more of the same frame is read. *Added in 1.7.*
+free draw can break them. Generation keeps them: the frame is read as
+always, the rows every check passes are kept, and when fewer than `n`
+pass, more of the same frame is read — only the rows past those already
+read. *Kept by default since 2.0; `checks=True` added in 1.7.*
 
 ```python
 from polspec import Check, col
@@ -177,7 +178,7 @@ class Invoices(FrameSpec):
     __checks__ = [Check(col("total") >= col("subtotal"), name="total_covers_subtotal")]
 
 
-invoices = Invoices.generate(1_000, seed=1, checks=True)
+invoices = Invoices.generate(1_000, seed=1)
 Invoices.inspect(invoices).passed   # True
 ```
 
@@ -186,18 +187,22 @@ Every row kept is a row of the one frame the seed describes, so:
 - A frame whose rows all pass is the frame `checks=False` gives.
 - A `unique` column stays unique and a foreign key still points at its
   parent. `generate_batches`, `scan`, the sinks and a registry's
-  `generate_all`, `generate_related` and `scan_all` take `checks=True`
-  too, and each batch reads on from where the last stopped, so
-  uniqueness holds across batches.
+  `generate_all`, `generate_related` and `scan_all` keep them too, and
+  each batch reads on from where the last stopped, so uniqueness holds
+  across batches.
 - A rate a check reads becomes a rate among the rows that pass: keep
   `total >= subtotal` and fewer high subtotals are left.
 
-Some things cannot be kept, and each is a `SpecError` naming why:
-`method="cartesian"`, whose coverage set filtering would break; a
-`__hierarchy__` or a key into the spec's own rows, which link rows to
-rows that filtering removes; and a `fixed=` pin of all `n` values. A
-single-value pin works. A check that rejects nearly every row, so that
-more than fifty times `n` rows would be needed, is a `GenerationError`
+Some checks cannot be kept: under `method="cartesian"`, whose coverage
+set filtering would break; beside a `__hierarchy__` or a key into the
+spec's own rows, which link rows to rows that filtering removes; with a
+`fixed=` pin of all `n` values (a single-value pin works); and a check
+that rejects nearly every row, so that more than fifty times `n` rows
+would be needed. Then the frame is the one `checks=False` gives, and a
+warning says why. `checks=False` asks for that frame and says nothing;
+`checks=True` asks for the checks kept and refuses where they cannot be:
+a `SpecError` naming why, or for a check that rejects nearly every row,
+a `GenerationError`
 naming each check and how many rows it rejected. A spec with no
 checks is generated as it always is.
 
@@ -424,8 +429,7 @@ domains, `format`s, `pattern`s, weights, distributions, `unique=True`,
 `__unique_together__`, `ColRule`s, derived columns, hierarchies and — when
 given parent data — foreign keys.
 
-It does **not** attempt `ColSpec.validators` or `__checks__` unless asked:
-they hold arbitrary expressions, and nothing can draw data to satisfy one
-in general. [`checks=True`](#keeping-checks-checkstrue) keeps the rows
-that pass them. A `pattern` the generator cannot follow is filled with
+`ColSpec.validators` and `__checks__` hold arbitrary expressions, which
+nothing can draw data to satisfy in general; they are
+[kept](#keeping-checks) by keeping the rows that pass them. A `pattern` the generator cannot follow is filled with
 plain text, and says so. See [Known limitations](../explanation/limitations.md).

@@ -815,7 +815,7 @@ def test_the_passing_rows_are_a_frame_the_spec_accepts(spec, self_key, n, seed, 
     `failing_rows(once=True)` splits the frame exactly. 0.21's B1."""
     if self_key:
         spec = _with_self_key(spec)
-    df = generate(spec, n, seed=seed)
+    df = generate(spec, n, seed=seed, checks=False)
     rows = list(range(n))
     for i, pick in enumerate(picks[: max(1, n // 3)]):
         rows[(i * 7919) % n] = pick % n

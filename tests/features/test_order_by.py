@@ -164,7 +164,7 @@ def test_every_claim_across_a_row_holds_in_order():
         ref = ColSpec(pl.String, nullable=True, null_probability=0.3)
         __foreign_keys__ = [ForeignKey("ref", references="self", ref_columns="node")]
 
-    df = Tree.generate(800, seed=9)
+    df = Tree.generate(800, seed=9, checks=False)
     assert df.equals(_sorted(df, Tree.spec))
     validate(Tree.spec, df)
 

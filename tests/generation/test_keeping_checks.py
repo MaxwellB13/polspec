@@ -57,7 +57,7 @@ def _passes(spec: type[FrameSpec], frame: pl.DataFrame) -> bool:
 
 def test_without_checks_the_frame_breaks_them():
     """What the rest of this file fixes: a free draw fails its own checks."""
-    assert not _passes(Orders, Orders.generate(5_000, seed=SEED))
+    assert not _passes(Orders, Orders.generate(5_000, seed=SEED, checks=False))
 
 
 def test_kept_rows_pass_every_check_and_validator():
@@ -90,8 +90,82 @@ def test_kept_rows_are_rows_of_the_seeds_frame():
     """The first rows that pass, in order: each kept row is a row of a
     longer free draw from the same seed."""
     kept = Orders.generate(1_000, seed=SEED, checks=True)
-    longer = Orders.generate(4_000, seed=SEED)
+    longer = Orders.generate(4_000, seed=SEED, checks=False)
     assert longer.join(kept, on=kept.columns, how="semi").height == 1_000
+
+
+class PermutedKey(FrameSpec):
+    """A composite key drawn as one permutation: read in pieces."""
+
+    a = ColSpec(pl.Enum(["x", "y", "z"]))
+    b = ColSpec(pl.Int64, bounds=(1, 50_000))
+    __unique_together__ = [["a", "b"]]
+    __checks__ = [Check(col("b") > 20_000, name="b_above_20k")]
+
+
+class RepairedKey(FrameSpec):
+    """A composite key repaired per window: read whole, round by round. A
+    free two-character string has no space to permute, and 11,532
+    combinations repeat often enough in a thousand rows to need repairs."""
+
+    a = ColSpec(pl.Enum(["x", "y", "z"]))
+    b = ColSpec(pl.String, string_length=(2, 2))
+    __unique_together__ = [["a", "b"]]
+    __checks__ = [Check(col("a") != "x", name="a_not_x")]
+
+
+@pytest.mark.parametrize(
+    "spec", [Orders, PermutedKey, RepairedKey], ids=lambda s: s.__name__
+)
+def test_kept_rows_are_the_first_rows_of_the_seeds_frame_that_pass(spec):
+    """The definition, whatever the reading: a longer read of the frame
+    reads only the rows past the last when every pass is a window, and the
+    whole longer window otherwise -- the same rows either way."""
+    n = 1_000
+    kept = spec.generate(n, seed=SEED, checks=True)
+    free = spec.generate(6 * n, seed=SEED, checks=False)
+    passing = spec.inspect(free).passing_rows().collect().head(n)
+    assert kept.equals(passing)
+    spec.validate(kept)
+
+
+def test_the_default_keeps_the_checks():
+    assert Orders.generate(2_000, seed=SEED).equals(
+        Orders.generate(2_000, seed=SEED, checks=True)
+    )
+
+
+class _Tree(FrameSpec):
+    ref = ColSpec(pl.Int64)
+    parent = ColSpec(pl.Int64)
+    __hierarchy__ = Hierarchy(child="ref", parent="parent", max_depth=3)
+    __checks__ = [Check(col("ref") >= 0, name="non_negative")]
+
+
+class _Linked(FrameSpec):
+    id = ColSpec(pl.Int64, unique=True)
+    previous = ColSpec(pl.Int64, nullable=True)
+    __foreign_keys__ = [ForeignKey("previous", references="self", ref_columns="id")]
+    __checks__ = [Check(col("id") >= 0, name="non_negative")]
+
+
+@pytest.mark.parametrize(
+    ("spec", "kwargs", "why"),
+    [
+        (Orders, {"method": "cartesian"}, "coverage set"),
+        (_Tree, {}, "children without a parent"),
+        (_Linked, {}, "its own rows"),
+        (Orders, {"fixed": {"status": ["NEW", "PAID", "NEW"]}}, "pin a single value"),
+    ],
+    ids=["cartesian", "hierarchy", "self_key", "sequence_pin"],
+)
+def test_by_default_checks_that_cannot_be_kept_are_not_and_it_says_why(
+    spec, kwargs, why
+):
+    n = 3
+    with pytest.warns(UserWarning, match=why):
+        frame = spec.generate(n, seed=SEED, **kwargs)
+    assert frame.equals(spec.generate(n, seed=SEED, checks=False, **kwargs))
 
 
 def test_zero_rows_is_an_empty_typed_frame():
@@ -181,7 +255,7 @@ def test_a_domain_too_small_for_the_rows_read_says_checks_needed_them():
         code = ColSpec(pl.Int8, bounds=(0, 9), unique=True)
         __checks__ = [Check(col("code") != 3, name="not_three")]
 
-    with pytest.raises(GenerationError, match="checks=True read"):
+    with pytest.raises(GenerationError, match="Generation read"):
         Tight.generate(10, seed=SEED, checks=True)
 
 

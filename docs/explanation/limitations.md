@@ -25,15 +25,16 @@ to be updated.
 
 ## Generation does not enforce these
 
-### `__checks__` and `ColSpec.validators` are kept only when asked
+### `__checks__` and `ColSpec.validators` are kept by filtering
 
 Checks and validators wrap arbitrary Polars expressions, and nothing can
-draw data satisfying an arbitrary predicate. By default generation leaves
-them to validation. `checks=True` keeps them by keeping the rows that
-pass and reading on for more (*since 1.7*), which a check rejecting
-nearly every row defeats, and which refuses `method="cartesian"`, a
-hierarchy, a key into the spec's own rows, and a pin of all `n` values.
-See [Keeping checks](../how-to/generating.md#keeping-checks-checkstrue).
+draw data satisfying an arbitrary predicate. Generation keeps them by
+keeping the rows that pass and reading on for more (*by default since
+2.0*). A check rejecting nearly every row defeats that, and so do
+`method="cartesian"`, a hierarchy, a key into the spec's own rows, and a
+pin of all `n` values: the frame is then generated without them, with a
+warning, and `checks=True` refuses instead.
+See [Keeping checks](../how-to/generating.md#keeping-checks).
 
 ### A pattern the generator cannot follow
 
