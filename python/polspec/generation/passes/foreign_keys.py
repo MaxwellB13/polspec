@@ -11,7 +11,8 @@ from collections.abc import Mapping
 import polars as pl
 
 from polspec import frames
-from polspec._ffi import permuted_indices
+from polspec._ffi import column_plan, permuted_indices
+from polspec._ffi import generate_dataframe as _generate_dataframe
 from polspec.errors import GenerationError
 from polspec.foreign_key import ForeignKey
 from polspec.spec import ColSpec
@@ -100,8 +101,11 @@ def apply_foreign_key(
     `row_offset + i` of the whole frame takes the key at `π(row_offset + i)`,
     with `π` keyed by `key_seed`. So a batch's rows take the keys the whole
     frame's rows take there, and the column is unique across batches, not
-    only within one. With replacement, the draw is the window's own, from
-    `seed`.
+    only within one. With replacement is a window too, when a `key_seed` is
+    given: the row at `row_offset + i` takes the key an engine index column
+    keyed by `key_seed` holds there. Without one -- a key into this frame's
+    own rows, whose parent is the window itself -- the draw is the window's
+    own, from `seed`.
 
     `parent_df` for a self-referencing key is the frame as it stands when
     this pass runs, so a key reading a column another key rewrote draws from
@@ -134,6 +138,10 @@ def apply_foreign_key(
             row_offset,
             df.height,
         )
+        sampled_rows = parent_keys[picks]
+    elif key_seed is not None:
+        plan = column_plan("__pick", "index", n_categories=parent_keys.height)
+        picks = _generate_dataframe([plan], df.height, key_seed, row_offset)["__pick"]
         sampled_rows = parent_keys[picks]
     else:
         sampled_rows = parent_keys.sample(n=df.height, with_replacement=True, seed=seed)

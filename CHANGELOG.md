@@ -56,6 +56,16 @@ for all of 2.x.
   outer ones, which it shared. Streams draw nested columns a block at a
   time like the rest: a million rows of a list in batches of 1,000 take
   9 ms, not 194.
+- **Seeded output (2.0): rules and foreign keys are windows too.** A rule's
+  values are a column of their own, drawn in full and selected where the
+  rule matches, so a row's value depends on that row alone, not on how many
+  rows matched before it; a foreign key into another table draws its
+  parent's keys as an engine column. Both are keyed by the whole frame, so
+  a batch, a scan or a sink holds what `generate()` holds there. Every
+  ruled column and every many-to-one key changes. Only a composite key and
+  a key into the spec's own rows are still drawn per batch. Rules take 19 ms
+  a million rows, not 29; patterns half the time they did, with their
+  values unchanged.
 
 ## [1.7.0] - 2026-11-17
 

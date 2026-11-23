@@ -315,9 +315,11 @@ written at one batch size and re-read at another is the same data, and the
 third batch can be checked against `generate(n).slice(...)`. A `List`,
 `Array`, `Map` or nested `Struct` column is a window too, elements and all,
 and a `unique=True` column, whose values are a permutation of its value
-space, unique across every batch. What is drawn per batch instead,
-deterministic but not row for row the whole frame's, is a column with rules,
-a foreign key or a composite key. *Nested columns are windows since 2.0.*
+space, unique across every batch, and so is a column rules or a foreign
+key into another table rewrite. What is drawn per batch instead,
+deterministic but not row for row the whole frame's, is a composite key and
+a foreign key into the spec's own rows. *Nested columns, rules and foreign
+keys are windows since 2.0.*
 
 A small batch costs little. The columns a window draws are filled many
 batches at a time, up to about 64 MiB, in parallel, and each batch is a

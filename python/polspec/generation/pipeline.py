@@ -607,12 +607,16 @@ def _run_passes(
     """
     runners: dict[str, Callable[[pl.DataFrame], pl.DataFrame]] = {}
 
+    # Rules and a foreign key into another table are windows: seeded by the
+    # whole frame and drawn at the window's rows, so a batch holds what the
+    # frame holds there.
+    frame_key = whole_seed if whole_seed is not None else frame_seed
     for name, col in columns.items():
         if not col.rules:
             continue
-        seed = pass_seed(frame_seed, f"rules:{col.seed_name or name}")
+        seed = pass_seed(frame_key, f"rules:{col.seed_name or name}")
         runners[f"rules:{name}"] = lambda frame, name=name, col=col, seed=seed: (
-            apply_column_rules(frame, name, col, seed)
+            apply_column_rules(frame, name, col, seed, row_offset=row_offset)
         )
 
     for name, col in columns.items():
@@ -694,9 +698,10 @@ def generate_batches(
 
     Each batch is a window onto the one frame `seed` describes: a column no
     pass rewrites holds, batch by batch, exactly the rows `generate(n, seed=seed)`
-    would, whatever `batch_size` is. What is drawn per batch instead --
-    deterministic, but not row for row the whole frame's -- is a column with
-    rules, a foreign key, a composite key, and a List column's elements.
+    would, whatever `batch_size` is -- a nested column, and one rules or a
+    foreign key into another table rewrite, included. What is drawn per
+    batch instead -- deterministic, but not row for row the whole frame's --
+    is a composite key and a key into the spec's own rows.
 
     A `unique=True` column is a window too: its values are a permutation of
     its value space -- or, filled by a foreign key, of its parent's keys --
