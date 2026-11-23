@@ -10,8 +10,7 @@ what the streaming verbs promise:
 
 - what is streamed validates against its spec;
 - a column no pass rewrites holds, window by window, what `generate()` puts
-  there -- a nested column its lengths and nulls, its elements being drawn
-  per batch;
+  there -- a nested column included, its elements as well as its lengths;
 - no batch repeats another where the whole frame's rows at those places
   differ;
 - a scan is the batches, and projecting one cannot change a column's values,
@@ -38,8 +37,6 @@ from polspec import (
     validate,
 )
 
-# Polars 2's `Map`; on Polars 1, no dtype is one.
-MAP = getattr(pl, "Map", ())
 
 ROWS, BATCH, SEED = 300, 97, 11
 
@@ -48,22 +45,6 @@ def _batches(spec: TableSpec, references=None) -> list[pl.DataFrame]:
     return list(
         generate_batches(spec, ROWS, batch_size=BATCH, seed=SEED, references=references)
     )
-
-
-def _is_nested(dtype: pl.DataType) -> bool:
-    """Whether a column's elements are drawn per batch."""
-    return isinstance(dtype, (pl.List, pl.Array, MAP))
-
-
-def _shape(column: pl.Series) -> pl.DataFrame:
-    """What a nested column holds as a window: where it is null, and how long
-    each present value is."""
-    lengths = (
-        column.list.len()
-        if isinstance(column.dtype, pl.List)
-        else pl.Series([None] * len(column), dtype=pl.UInt32)
-    )
-    return pl.DataFrame({"null": column.is_null(), "len": lengths})
 
 
 def _assert_no_batch_repeats_another(
@@ -96,10 +77,7 @@ def test_every_column_streams(case):
     streamed.to_dicts()  # every value materialises
     validate(spec, streamed)
 
-    if _is_nested(spec["c"].dtype):
-        assert _shape(streamed["c"]).equals(_shape(whole["c"]))
-    else:
-        assert streamed.equals(whole)
+    assert streamed.equals(whole)
     _assert_no_batch_repeats_another(parts, whole)
 
     rerun = pl.concat(_batches(spec))

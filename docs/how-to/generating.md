@@ -312,20 +312,18 @@ Each batch is a **window onto the one frame the seed describes**: a column
 no pass rewrites holds, batch by batch, exactly the rows
 `Orders.generate(n, seed=1)` would, whatever `batch_size` is — so a stream
 written at one batch size and re-read at another is the same data, and the
-third batch can be checked against `generate(n).slice(...)`. What is drawn
-per batch instead, deterministic but not row for row the whole frame's, is
-a column with rules, a foreign key, a composite key, and the elements of a
-`List`, `Array` or `Map` column (a `List`'s lengths are a window) — each
-batch drawing its elements from a seed of its own. A `unique=True` column is a window
-too: its values are a permutation of its value space, unique across every
-batch.
+third batch can be checked against `generate(n).slice(...)`. A `List`,
+`Array`, `Map` or nested `Struct` column is a window too, elements and all,
+and a `unique=True` column, whose values are a permutation of its value
+space, unique across every batch. What is drawn per batch instead,
+deterministic but not row for row the whole frame's, is a column with rules,
+a foreign key or a composite key. *Nested columns are windows since 2.0.*
 
 A small batch costs little. The columns a window draws are filled many
 batches at a time, up to about 64 MiB, in parallel, and each batch is a
 slice of that: a million rows in batches of 1,000 take about twice as long
-as one `generate()` of them. A `List`, `Array` or `Map` column is the
-exception, drawn batch by batch, so many small batches of a spec with one
-cost more. *Faster since 1.6.*
+as one `generate()` of them, a `List`, `Array` or `Map` column among
+them. *Faster since 1.6; nested columns too since 2.0.*
 
 ## Writing straight to a file
 

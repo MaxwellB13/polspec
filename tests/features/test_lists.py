@@ -346,13 +346,14 @@ def test_a_rate_belongs_to_a_list_and_between_0_and_1():
         ColSpec(pl.List(pl.Int64), element_null_probability=1.5)
 
 
-def test_element_nulls_hold_their_rate_when_batched():
-    """A list's elements are drawn per batch -- only its lengths are a window
-    -- so what batching keeps is the rate, not the positions."""
+def test_element_nulls_are_where_the_whole_frame_puts_them_when_batched():
+    """A list's elements are a window onto the whole frame's, as its lengths
+    are: batching keeps every element and every null in its place."""
     spec_cls = spec_for(ColSpec(pl.List(pl.Int64), element_null_probability=0.3))
     batched = pl.concat(
         list(spec_cls.generate_batches(5_000, batch_size=1_111, seed=3))
     )
+    assert batched.equals(spec_cls.generate(5_000, seed=3))
     elements = _elements(batched["c"])
     assert 0.27 < elements.null_count() / len(elements) < 0.33
     spec_cls.validate(batched)
@@ -462,3 +463,15 @@ def test_a_bounded_array_of_a_type_stored_as_integers_validates(dtype, bounds, b
     validate(spec, df)
     bad = pl.concat([pl.DataFrame({"c": pl.Series([[below, below]], dtype=dtype)}), df])
     assert [f.key for f in inspect(spec, bad).findings] == ["c__bounds"]
+
+
+def test_an_inner_lists_lengths_are_its_own_not_the_outers():
+    """In a list of lists, the inner lists' lengths are drawn apart from the
+    outer's: they used to share a stream, so element `i` was as long as row
+    `i`."""
+    spec_cls = spec_for(ColSpec(pl.List(pl.List(pl.Int64)), list_length=(1, 6)))
+    column = spec_cls.generate(500, seed=4)["c"]
+    outer = column.list.len()
+    inner = column.explode(empty_as_null=False).list.len().head(len(outer))
+    assert not outer.equals(inner)
+    assert inner.min() >= 0

@@ -156,14 +156,34 @@ def test_a_batched_map_column_has_the_shape_of_a_whole_one():
 
 
 @needs_map
-def test_no_batch_repeats_anothers_entries():
-    """Entries are drawn per batch, each from a seed of its own -- not from
-    the first batch's, over and over."""
+def test_batches_hold_the_whole_frames_entries_and_no_batch_repeats_another():
+    """Entries are a window onto the whole frame's -- keys separated as the
+    whole frame separates them -- so no batch repeats the first's."""
     spec = TableSpec("T", {"m": ColSpec(_map(pl.Int64, pl.Int64), list_length=(3, 3))})
-    batches = [
-        b["m"].to_list() for b in generate_batches(spec, 30, batch_size=10, seed=5)
-    ]
+    parts = list(generate_batches(spec, 30, batch_size=10, seed=5))
+    batches = [b["m"].to_list() for b in parts]
     assert batches[0] != batches[1] != batches[2] != batches[0]
+    assert pl.concat(parts).equals(generate(spec, 30, seed=5))
+
+
+@needs_map
+def test_a_batch_separates_repeated_keys_as_the_whole_frame_does():
+    """Keys from a domain of three, four to a map: nearly every map repeats a
+    key and redraws it, and the redraws are where the whole frame's are."""
+    spec = TableSpec(
+        "T",
+        {
+            "m": ColSpec(
+                _map(pl.Int64, pl.Int64),
+                list_length=(3, 3),
+                fields={"key": ColSpec(pl.Int64, bounds=(1, 4))},
+            )
+        },
+    )
+    whole = generate(spec, 5_000, seed=2)
+    parts = pl.concat(list(generate_batches(spec, 5_000, batch_size=333, seed=2)))
+    assert parts.equals(whole)
+    assert (whole["m"].map.len() == 3).all()
 
 
 @needs_map

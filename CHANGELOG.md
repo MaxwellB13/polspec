@@ -47,6 +47,15 @@ for all of 2.x.
   thread, not 6.9, and three 2.7, not 3.0. The table is built in integer
   steps, so it is the same on every platform, and a category's probability
   is its weight's share to within 2^-32.
+- **Seeded output (2.0): a batch's lists are the whole frame's.** A `List`,
+  `Array` or `Map` column's batches, scans and sinks held the right lengths
+  but elements drawn afresh per batch; they now hold, row for row, what
+  `generate()` holds there, as every other column does, and *Known
+  limitations* loses its entry. `generate()` itself is unchanged, except
+  that a list of lists or of maps draws its inner lengths apart from its
+  outer ones, which it shared. Streams draw nested columns a block at a
+  time like the rest: a million rows of a list in batches of 1,000 take
+  9 ms, not 194.
 
 ## [1.7.0] - 2026-11-17
 
