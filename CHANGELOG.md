@@ -72,6 +72,17 @@ for all of 2.x.
   dtype holds now generate, unique columns included. A range 64 bits held
   draws exactly the values it did: no seeded output moves. A `Decimal`
   column fills in 1.8 ms a million rows, not 4.9.
+- **Seeded output (2.0): a composite key is distinct across batches.** A
+  `__unique_together__` group whose members all have a finite or bounded
+  space -- booleans, `choices`, an `Enum`, a finite format, bounded integers
+  and dates -- is drawn as one permutation of its members' combinations,
+  keyed by the whole frame: distinct over the whole frame and every batch,
+  scan and sink of it, each batch holding `generate()`'s rows. The trade:
+  such a member takes every value of its space equally often, its weights
+  and distribution not kept. A group with a float or free-text member, one
+  a foreign key fills, or a cartesian frame's, is repaired per batch as
+  before. A million rows of a two-member key take 23 ms, not 89, and
+  139 MB at the peak, not 850.
 
 ### Fixed
 

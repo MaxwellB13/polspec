@@ -237,9 +237,10 @@ def generate(
     distinct rows to cover `n`.
 
     A `unique=True` column is drawn without replacement by the engine itself,
-    and a `__unique_together__` group is separated afterwards by resampling
-    the rows that repeat a combination. Either refuses, naming the column or
-    the group, when the domain is too small to cover `n`.
+    and a `__unique_together__` group afterwards: as one permutation of its
+    members' combinations when each has a finite or bounded space, or by
+    resampling the rows that repeat a combination. Either refuses, naming the
+    column or the group, when the domain is too small to cover `n`.
 
     A spec declaring a `Hierarchy` has its two link columns rewritten as a
     forest of the declared depth. `cycles` and `self_references` then damage it
@@ -575,6 +576,7 @@ def _window(
         cycles=cycles,
         self_references=self_references,
         parent_keys=parent_keys,
+        cartesian=method == "cartesian",
     )
 
 
@@ -590,6 +592,7 @@ def _run_passes(
     cycles: int = 0,
     self_references: int = 0,
     parent_keys: Mapping[str, pl.DataFrame] | None = None,
+    cartesian: bool = False,
 ) -> pl.DataFrame:
     """Applies every rule and foreign-key pass, in dependency order.
 
@@ -670,10 +673,23 @@ def _run_passes(
 
     for index, group in enumerate(spec.unique_together):
         members, writable = tuple(group), rewritable_members(spec, group)
-        seed = pass_seed(frame_seed, f"unique_together:{','.join(sorted(members))}")
+        name = f"unique_together:{','.join(sorted(members))}"
+        seed = pass_seed(frame_seed, name)
+        # The permutation is keyed by the whole frame, so a window takes the
+        # combinations the whole frame takes there.
+        joint_seed = pass_seed(frame_key, name)
         key = f"unique_together:{index}"
-        runners[key] = lambda frame, m=members, w=writable, seed=seed: (
-            apply_unique_together(frame, columns, m, w, seed)
+        runners[key] = lambda frame, m=members, w=writable, seed=seed, j=joint_seed: (
+            apply_unique_together(
+                frame,
+                columns,
+                m,
+                w,
+                seed,
+                key_seed=j,
+                row_offset=row_offset,
+                jointly=not cartesian,
+            )
         )
 
     for step in ordered_passes(spec):
@@ -699,17 +715,18 @@ def generate_batches(
     Each batch is a window onto the one frame `seed` describes: a column no
     pass rewrites holds, batch by batch, exactly the rows `generate(n, seed=seed)`
     would, whatever `batch_size` is -- a nested column, and one rules or a
-    foreign key into another table rewrite, included. What is drawn per
+    foreign key into another table rewrite, and a composite key whose
+    members have a finite or bounded space, included. What is drawn per
     batch instead -- deterministic, but not row for row the whole frame's --
-    is a composite key and a key into the spec's own rows.
+    is any other composite key and a key into the spec's own rows.
 
     A `unique=True` column is a window too: its values are a permutation of
     its value space -- or, filled by a foreign key, of its parent's keys --
     unique across the whole `n` however it is batched; a parent too small
     for all `n` is refused before the first batch. A `__unique_together__`
-    group and a unique key into the spec's own rows are drawn afresh per
-    batch, so they are distinct within a batch and collide across batches
-    only by chance.
+    group it repairs rather than permutes, and a unique key into the spec's
+    own rows, are drawn afresh per batch, so they are distinct within a
+    batch and collide across batches only by chance.
 
     `fixed` pins columns as `generate()` takes it: a scalar for every row, or
     a sequence of all `n` values, which each batch takes its stretch of.

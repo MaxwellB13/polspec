@@ -102,6 +102,28 @@ fn permuted_indices(
     Ok(PySeries(series.into_series()))
 }
 
+/// Positions `start..start + n` of the permutation of a composite key's
+/// product space, as one `UInt64` index column per member.
+#[pyfunction]
+fn composite_indices(
+    py: Python<'_>,
+    sizes: Vec<u64>,
+    seed: u64,
+    start: u64,
+    n: u64,
+) -> PyResult<Vec<PySeries>> {
+    let members = py
+        .detach(|| permute::composite_window(&sizes, seed, start, n))
+        .map_err(PyValueError::new_err)?;
+    Ok(members
+        .into_iter()
+        .map(|indices| {
+            let series = UInt64Chunked::from_vec(PlSmallStr::from_static("index"), indices);
+            PySeries(series.into_series())
+        })
+        .collect())
+}
+
 /// A `List` column from each cell's length and every cell's elements, in
 /// order; a null length is a null cell. The elements keep their dtype.
 #[pyfunction]
@@ -198,6 +220,7 @@ fn chunk_size() -> usize {
 fn _polspec(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ColumnPlan>()?;
     m.add_function(wrap_pyfunction!(chunk_size, m)?)?;
+    m.add_function(wrap_pyfunction!(composite_indices, m)?)?;
     m.add_function(wrap_pyfunction!(decimal_from_physical, m)?)?;
     m.add_function(wrap_pyfunction!(list_from_lengths, m)?)?;
     m.add_function(wrap_pyfunction!(generate_dataframe, m)?)?;

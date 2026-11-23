@@ -232,8 +232,9 @@ column means.
 
 Rows arrive in batches, so a scan carries the terms
 [batching](#batching) does: a spec declaring a `__hierarchy__` is refused,
-and a composite key is distinct within each batch rather than across the
-scan; see [Known limitations](../explanation/limitations.md#smaller-sharp-edges).
+and a composite key that is repaired, not permuted, is distinct within each
+batch rather than across the scan; see
+[Composite uniqueness](constraints.md#composite-uniqueness-__unique_together__).
 Leaving `batch_size` unset lets polars ask for the size it wants; setting it
 pins the size.
 
@@ -316,10 +317,11 @@ third batch can be checked against `generate(n).slice(...)`. A `List`,
 `Array`, `Map` or nested `Struct` column is a window too, elements and all,
 and a `unique=True` column, whose values are a permutation of its value
 space, unique across every batch, and so is a column rules or a foreign
-key into another table rewrite. What is drawn per batch instead,
-deterministic but not row for row the whole frame's, is a composite key and
-a foreign key into the spec's own rows. *Nested columns, rules and foreign
-keys are windows since 2.0.*
+key into another table rewrite, and a composite key whose members have a
+finite or bounded space. What is drawn per batch instead, deterministic but
+not row for row the whole frame's, is any other composite key and a foreign
+key into the spec's own rows. *Nested columns, rules, foreign keys and
+composite keys are windows since 2.0.*
 
 A small batch costs little. The columns a window draws are filled many
 batches at a time, up to about 64 MiB, in parallel, and each batch is a

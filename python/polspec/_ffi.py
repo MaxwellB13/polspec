@@ -80,6 +80,20 @@ def permuted_indices(domain: int, seed: int, start: int, n: int) -> pl.Series:
         raise GenerationError(str(exc)) from exc
 
 
+def composite_indices(
+    sizes: list[int], seed: int, start: int, n: int
+) -> list[pl.Series]:
+    """Positions `start..start + n` of the permutation of a composite key's
+    combinations -- members of `sizes` values each -- that `seed` keys, as
+    one `UInt64` index column per member: distinct over the whole space, and
+    a window the whole space's slice. Too few combinations for the rows is a
+    `GenerationError`."""
+    try:
+        return _extension().composite_indices(sizes, seed, start, n)
+    except ValueError as exc:
+        raise GenerationError(str(exc)) from exc
+
+
 def list_from_lengths(name: str, lengths: pl.Series, elements: pl.Series) -> pl.Series:
     """A `List` column named `name`: `elements` cut into cells by `lengths`,
     a null length a null cell. The elements keep their dtype."""

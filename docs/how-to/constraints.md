@@ -248,11 +248,22 @@ class Assignments(FrameSpec):
     __unique_together__ = [["employee_id", "project_id"]]
 ```
 
-`generate()` satisfies it by resampling the rows that repeat a combination an
-earlier row already used. Only the repeats move, so on a roomy domain almost
-every row keeps the value it was generated with, along with whatever weights
-or bounds shaped it. Rows where any member is null are exempt, matching how
-the key is validated.
+`generate()` satisfies it one of two ways:
+
+- **One permutation of the combinations,** when every member has a finite or
+  bounded space — a boolean, `choices`, an `Enum`, a finite format, a bounded
+  integer or date. Row `r` of the frame takes the `r`-th combination of a
+  shuffle of them all, so the key is distinct across the whole frame and
+  across every batch, scan and sink of it. Each member then takes every value
+  of its space equally often: its `weights` and `distribution` are not kept.
+- **Redrawing the repeats,** otherwise — a float or free-text member, one a
+  foreign key fills, a `method="cartesian"` frame. Only the rows that repeat a
+  combination an earlier row already used move, so every other row keeps the
+  value it was generated with and whatever shaped it; but the key is distinct
+  within each batch only.
+
+Rows where any member is null are exempt either way, matching how the key is
+validated. *One permutation since 2.0.*
 
 A group whose columns cannot take enough distinct combinations between them is
 refused, naming the group:

@@ -242,15 +242,17 @@ def test_every_batch_of_a_rewritten_spec_validates(name):
     _assert_no_batch_repeats_another(parts, generate(spec, ROWS, seed=SEED))
 
 
-# The specs whose every pass is a window: rules, and foreign keys into
-# another table. A composite key (`__unique_together__`) and a key into the
-# spec's own rows are drawn per batch.
+# The specs whose every pass is a window: rules, foreign keys into another
+# table, and a composite key (`__unique_together__`) whose members all have a
+# finite or bounded space. A key into the spec's own rows is drawn per batch,
+# and so is a composite key one of whose members a foreign key fills.
 WINDOW_SPECS = (
     "rules",
     "drawing_rules",
     "chained_rules",
     "composite_key",
     "unique_key",
+    "unique_together",
 )
 
 

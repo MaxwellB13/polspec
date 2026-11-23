@@ -48,6 +48,8 @@ from polspec.spec import ColSpec, column_kind, drawn_entries_of, element_of, fie
 from polspec.string_formats import lookup as _lookup_format
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from polspec._polspec import ColumnPlan
 
 
@@ -268,6 +270,54 @@ def _domain(spec: ColSpec) -> pl.Series | None:
                 (*(fmt.values or ()), *(spec.extra_values or ())), dtype
             )
     return None
+
+
+def joint_space(spec: ColSpec) -> tuple[int, Callable[[pl.Series], pl.Series]] | None:
+    """How many values a composite key's member can take, and how to turn
+    an index in `[0, size)` into one -- for drawing a `__unique_together__`
+    group as one permutation of its members' combinations. None for a member
+    that cannot be drawn so: one a rule or a derivation writes, one with no
+    finite or bounded space (a float, a free string), and one whose space is
+    past what a 64-bit index and 64-bit arithmetic reach.
+
+    The index is uniform, so a member drawn this way takes each value of its
+    space equally often: its weights and distribution are not kept.
+    """
+    if spec.rules or spec.derive is not None:
+        return None
+    dtype = spec.value_dtype
+    domain = _domain(spec)
+    if domain is not None:
+        return len(domain), domain.gather
+    if dtype == pl.Boolean:
+        return 2, lambda index: (index == 1).alias(index.name)
+    kind = column_kind(dtype)
+    if kind not in ("int", "temporal") or dtype in (pl.Int128, pl.UInt128):
+        return None
+    lo, hi = (int(v) for v in _resolve_numeric_bounds(spec))
+    size = hi - lo + 1
+    if lo >= 0 and size <= 2**64 - 1:
+
+        def decode(index: pl.Series) -> pl.Series:
+            return (index + lo).cast(_physical(dtype)).cast(dtype)
+
+        return size, decode
+    if lo < 0 and size <= 2**63:
+
+        def decode(index: pl.Series) -> pl.Series:
+            return (index.cast(pl.Int64) + lo).cast(_physical(dtype)).cast(dtype)
+
+        return size, decode
+    return None
+
+
+def _physical(dtype: pl.DataType) -> pl.DataType:
+    """The integer type a temporal dtype stores, or the integer dtype itself."""
+    if dtype == pl.Date:
+        return pl.Int32()
+    if dtype.is_temporal():
+        return pl.Int64()
+    return dtype
 
 
 def _extended_weights(listed: int, shares: tuple[float, ...]) -> list[float]:
