@@ -66,6 +66,22 @@ for all of 2.x.
   a key into the spec's own rows are still drawn per batch. Rules take 19 ms
   a million rows, not 29; patterns half the time they did, with their
   values unchanged.
+- **`Decimal`, `Int128` and `UInt128` generate at full width.** They were
+  drawn through 64 bits, so bounds needing more -- eighteen significant
+  digits, for a `Decimal` -- were refused at `generate()`. Any bounds the
+  dtype holds now generate, unique columns included. A range 64 bits held
+  draws exactly the values it did: no seeded output moves. A `Decimal`
+  column fills in 1.8 ms a million rows, not 4.9.
+
+### Fixed
+
+- **A `Decimal` bound past 28 significant digits is read exactly.** Python's
+  default decimal context rounds to 28 digits, so a `Decimal(38, 0)` bounded
+  by its own limit, `10**38 - 1`, was refused as outside the range it can
+  hold. polspec's own decimal arithmetic now runs in a context of 100 digits.
+- **Validating a `UInt128` against a bound of `2**127` or more works.**
+  Polars cannot make a literal from a bare integer that wide; the bound is
+  now typed as the column is, so validation no longer raises.
 
 ## [1.7.0] - 2026-11-17
 

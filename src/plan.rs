@@ -60,6 +60,8 @@ declare_kinds! {
     UInt16 => "uint16",
     UInt32 => "uint32",
     UInt64 => "uint64",
+    Int128 => "int128",
+    UInt128 => "uint128",
     Float32 => "float32",
     Float64 => "float64",
     Bool => "bool",
@@ -81,14 +83,20 @@ impl Kind {
 /// One end of a numeric range, kept in the widest type that holds it exactly.
 ///
 /// A Python `int` extracts as `Int` when it fits an `i64`, as `UInt` when it
-/// only fits a `u64`, and a Python `float` as `Float`; so `Int64` and `UInt64`
-/// bounds reach the sampler without the rounding an `f64` channel would apply.
+/// only fits a `u64`, as `Wide` or `WideU` when it needs 128 bits, and a
+/// Python `float` as `Float` (pyo3 extracts no integer from a float); so
+/// integer bounds reach the sampler without the rounding an `f64` channel
+/// would apply, a `Decimal`'s and a 128-bit integer's included.
 #[derive(Clone, Copy, Debug, PartialEq, FromPyObject, IntoPyObject)]
 pub enum Limit {
     #[pyo3(transparent)]
     Int(i64),
     #[pyo3(transparent)]
     UInt(u64),
+    #[pyo3(transparent)]
+    Wide(i128),
+    #[pyo3(transparent)]
+    WideU(u128),
     #[pyo3(transparent)]
     Float(f64),
 }
@@ -98,16 +106,33 @@ impl Limit {
         match self {
             Limit::Int(v) => v as f64,
             Limit::UInt(v) => v as f64,
+            Limit::Wide(v) => v as f64,
+            Limit::WideU(v) => v as f64,
             Limit::Float(v) => v,
         }
     }
 
-    /// The value as an integer, truncating a float toward zero.
+    /// The value as an integer, truncating a float toward zero and
+    /// saturating past `i128`.
     pub fn as_i128(self) -> i128 {
         match self {
             Limit::Int(v) => v as i128,
             Limit::UInt(v) => v as i128,
+            Limit::Wide(v) => v,
+            Limit::WideU(v) => v.min(i128::MAX as u128) as i128,
             Limit::Float(v) => v as i128,
+        }
+    }
+
+    /// The value as an unsigned integer, truncating a float toward zero and
+    /// saturating below zero at zero.
+    pub fn as_u128(self) -> u128 {
+        match self {
+            Limit::Int(v) => v.max(0) as u128,
+            Limit::UInt(v) => v as u128,
+            Limit::Wide(v) => v.max(0) as u128,
+            Limit::WideU(v) => v,
+            Limit::Float(v) => v.max(0.0) as u128,
         }
     }
 

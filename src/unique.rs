@@ -38,7 +38,7 @@ use rayon::prelude::*;
 
 use crate::format::Enumerable;
 use crate::permute::Permutation;
-use crate::plan::{ColumnPlan, Kind};
+use crate::plan::{ColumnPlan, Kind, Limit};
 use crate::sample::{
     CHARSET, ColumnSeed, SEED_CHUNK, VALIDITY_BYTES_PER_CHUNK, draws_nulls, null_bernoulli,
     null_rng, task_rows,
@@ -387,6 +387,33 @@ impl_unique_int_column!(unique_uint16, UInt16Type, u16);
 impl_unique_int_column!(unique_uint32, UInt32Type, u32);
 impl_unique_int_column!(unique_uint64, UInt64Type, u64);
 
+/// A unique `Int128` column -- or a `Decimal`'s physical integers -- over any
+/// bounds an `i128` holds. The value space of the full range is one larger
+/// than a `u128` counts, so it stops one short of `i128::MAX`.
+fn unique_int128(
+    plan: &ColumnPlan,
+    n: usize,
+    seed: ColumnSeed,
+) -> Result<ChunkedArray<Int128Type>, String> {
+    let lo = plan.min.map_or(i128::MIN, Limit::as_i128);
+    let hi = plan.max.map_or(i128::MAX, Limit::as_i128);
+    let (lo, hi) = if lo <= hi { (lo, hi) } else { (hi, lo) };
+    let domain = (hi.wrapping_sub(lo) as u128).saturating_add(1);
+    permuted_column(plan, n, seed, domain, |i| lo.wrapping_add(i as i128))
+}
+
+/// A unique `UInt128` column, over any bounds a `u128` holds.
+fn unique_uint128(
+    plan: &ColumnPlan,
+    n: usize,
+    seed: ColumnSeed,
+) -> Result<ChunkedArray<UInt128Type>, String> {
+    let lo = plan.min.map_or(0, Limit::as_u128);
+    let hi = plan.max.map_or(u128::MAX, Limit::as_u128);
+    let (lo, hi) = if lo <= hi { (lo, hi) } else { (hi, lo) };
+    permuted_column(plan, n, seed, (hi - lo).saturating_add(1), |i| lo + i)
+}
+
 /// The grid a unique float column draws from: as many evenly spaced points
 /// over `[lo, hi]` as its widest magnitude keeps `GRID_ULPS` apart, capped at
 /// 2^53, and the point at an index as a convex combination of the ends -- which
@@ -681,6 +708,8 @@ pub fn generate_unique_series(
         Kind::Int16 => unique_int16(plan, n, seed)?.into_series(),
         Kind::Int8 => unique_int8(plan, n, seed)?.into_series(),
         Kind::UInt64 => unique_uint64(plan, n, seed)?.into_series(),
+        Kind::Int128 => unique_int128(plan, n, seed)?.into_series(),
+        Kind::UInt128 => unique_uint128(plan, n, seed)?.into_series(),
         Kind::UInt32 => unique_uint32(plan, n, seed)?.into_series(),
         Kind::UInt16 => unique_uint16(plan, n, seed)?.into_series(),
         Kind::UInt8 => unique_uint8(plan, n, seed)?.into_series(),
@@ -929,6 +958,40 @@ mod tests {
         let mut sorted = values.clone();
         sorted.sort_unstable();
         assert_ne!(values, sorted, "the draw came back in ascending order");
+    }
+
+    #[test]
+    fn a_unique_128_bit_column_is_distinct_over_its_full_range() {
+        for (kind, lo, hi) in [
+            (
+                "int128",
+                Some(Limit::Wide(i128::MIN)),
+                Some(Limit::Wide(i128::MAX)),
+            ),
+            ("uint128", None, None),
+            (
+                "uint128",
+                Some(Limit::WideU(u128::MAX - 99)),
+                Some(Limit::WideU(u128::MAX)),
+            ),
+        ] {
+            let p = plan(kind, lo, hi, None);
+            let n = if kind == "uint128" && lo.is_some() {
+                100
+            } else {
+                SEED_CHUNK * 2 + 9
+            };
+            let s = column(&p, n, 4).unwrap();
+            assert_eq!(distinct_count(&s), n, "{kind}");
+        }
+        // A hundred values hold a hundred rows and no more.
+        let p = plan(
+            "uint128",
+            Some(Limit::WideU(u128::MAX - 99)),
+            Some(Limit::WideU(u128::MAX)),
+            None,
+        );
+        assert!(column(&p, 101, 4).is_err());
     }
 
     #[test]

@@ -160,11 +160,6 @@ pinned by a passing test. A NaN, by contrast, is recorded as the column's
   categories are checked against a `CatSpec` only when one is given; and a
   single spec's `to_mermaid()` draws one entity, where
   `registry.to_mermaid()` draws them all.
-- **A `Decimal`, `Int128` or `UInt128` is drawn through 64 bits.**
-  Generation fills a Decimal as its physical integer and a 128-bit integer
-  as a 64-bit one, so bounds past what 64 bits hold — eighteen significant
-  digits, for a Decimal — are refused at `generate()`. Validation checks
-  the full range.
 - **A `Float16` is drawn as a `Float32` and rounded.** Values are drawn
   between the halves nearest each bound from inside, so rounding never
   carries one past a bound; bounds too close together to hold any half are

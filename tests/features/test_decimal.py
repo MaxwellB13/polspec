@@ -13,6 +13,7 @@ import json
 from decimal import Decimal
 
 import polars as pl
+import polspec
 import pytest
 from helpers import spec_for
 from polspec import (
@@ -79,10 +80,24 @@ def test_the_default_range_respects_a_narrow_precision():
     assert all(Decimal("-99.99") <= v <= Decimal("99.99") for v in df["c"].to_list())
 
 
-def test_bounds_needing_more_than_eighteen_digits_are_refused_at_generation():
-    spec_cls = spec_for(ColSpec(pl.Decimal(38, 10), bounds=(0, 10**20)))
-    with pytest.raises(Exception, match="more than 18 significant digits"):
-        spec_cls.generate(5, seed=1)
+@pytest.mark.parametrize(
+    ("dtype", "bounds"),
+    [
+        (pl.Decimal(38, 10), (0, 10**20)),
+        (pl.Decimal(38, 0), (-(10**38) + 1, 10**38 - 1)),
+        (pl.Decimal(30, 4), None),
+    ],
+    ids=str,
+)
+def test_a_decimal_is_drawn_at_its_full_precision(dtype, bounds):
+    """Its physical integer is drawn at 128 bits, so bounds needing more
+    than the eighteen digits 64 bits hold generate, inside the bounds."""
+    spec_cls = spec_for(ColSpec(dtype, bounds=bounds))
+    df = spec_cls.generate(2_000, seed=1)
+    spec_cls.validate(df)
+    if bounds is not None:
+        widest = Decimal(bounds[1]) / 1_000
+        assert df["c"].abs().max() > widest
 
 
 def test_cartesian_coverage_reaches_the_partitions():
@@ -170,3 +185,23 @@ def test_a_number_too_large_for_a_decimal_with_choices_is_its_dtype_finding(valu
     ):
         report = inspect(TableSpec("T", {"c": column}), pl.DataFrame({"c": [value]}))
         assert [f.code for f in report.findings] == ["dtype"]
+
+
+def test_a_38_digit_column_profiles_and_validates():
+    values = [Decimal("12345678901234567890123456789012.3456"), Decimal("-9.0001")]
+    frame = pl.DataFrame({"c": pl.Series(values, dtype=pl.Decimal(38, 4))})
+    for rounding in (None, "auto", 1):
+        spec = polspec.profile(frame, round_bounds=rounding)
+        polspec.validate(spec, frame)
+
+
+def test_bounds_at_a_decimals_full_precision_are_declared_and_covered():
+    """Python's default decimal context keeps 28 digits, and converting a
+    bound to its physical integer under it rounded 10**38 - 1 up to 10**38,
+    so a Decimal(38, 0) bounded by its own limits was refused where it was
+    declared. A cartesian frame covers those bounds exactly too."""
+    limit = 10**38 - 1
+    spec = TableSpec("T", {"c": ColSpec(pl.Decimal(38, 0), bounds=(-limit, limit))})
+    frame = polspec.generate(spec, 10, seed=1, method="cartesian")
+    polspec.validate(spec, frame)
+    assert (frame["c"] < 0).any() and (frame["c"] > 0).any()
