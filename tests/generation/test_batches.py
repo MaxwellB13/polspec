@@ -282,17 +282,16 @@ class PlainSource(FrameSpec):
 def test_batches_are_windows_onto_the_whole_frame(batch_size):
     """`pl.concat(generate_batches(n, batch_size=b, seed=s))` equals
     `generate(n, seed=s)` for every `b`, for a column no pass rewrites:
-    the engine numbers its chunks from the batch's offset. A List column's
-    lengths are a window too; its elements are drawn per batch.
+    the engine numbers its chunks from the batch's offset. A List column is
+    a window too: its lengths, and its elements from where the batch's
+    first row's start.
     """
     n = 300_000
     whole = PlainSource.generate(n, seed=5)
     parts = pl.concat(
         list(PlainSource.generate_batches(n, batch_size=batch_size, seed=5))
     )
-    scalar = [c for c in whole.columns if c != "tags"]
-    assert parts.select(scalar).equals(whole.select(scalar))
-    assert parts["tags"].list.len().equals(whole["tags"].list.len())
+    assert parts.equals(whole)
 
 
 def test_a_wide_frame_in_batches_is_still_the_whole_frame():
@@ -313,7 +312,7 @@ def test_a_wide_frame_in_batches_is_still_the_whole_frame():
 
 
 def test_a_batch_keeps_its_columns_order_and_names_beside_a_list():
-    """A list column is drawn per batch and the rest a block at a time; the
+    """A list column is drawn per window and the rest a block at a time; the
     batch is put back together in declaration order, under every name --
     the empty one, which Polars renames, included."""
     spec = TableSpec(
@@ -365,10 +364,11 @@ def test_what_is_drawn_per_batch_is_deterministic_but_not_the_whole_frames():
     ids=str,
 )
 def test_no_batch_repeats_anothers_elements(dtype):
-    """A nested column's elements are drawn per batch, from a seed of the
-    batch's own: every batch used to draw them from the first batch's, so a
-    stream repeated its opening rows' elements over and over. The first
-    batch still draws exactly what `generate()` does."""
+    """A nested column's batches are windows onto the whole frame, so none
+    repeats another: every batch once drew its elements from the first
+    batch's seed, and a stream repeated its opening rows' elements over and
+    over. Nested inside a list, an inner list's lengths are its own, not the
+    outer's."""
     fixed = {} if isinstance(dtype, pl.Array) else {"list_length": (3, 3)}
     spec = TableSpec("Nested", {"xs": ColSpec(dtype, **fixed)})
     batches = list(generate_batches(spec, 40, batch_size=10, seed=1))
@@ -378,7 +378,7 @@ def test_no_batch_repeats_anothers_elements(dtype):
         for i in range(len(elements))
         for j in range(i + 1, len(elements))
     )
-    assert batches[0].equals(generate(spec, 10, seed=1))
+    assert pl.concat(batches).equals(generate(spec, 40, seed=1))
     rerun = list(generate_batches(spec, 40, batch_size=10, seed=1))
     assert all(a.equals(b) for a, b in zip(batches, rerun, strict=True))
 

@@ -697,6 +697,28 @@ def _generate_with_extras(
     return base.zip_with(keep, replacement)
 
 
+def _per_spec(build):
+    """Caches `build(name, spec, seed_key)` per spec object, not per value:
+    a stream hands the same `ColSpec` to every window, and a spec need not
+    be hashable. The spec is held beside its value, so its id is not reused
+    while the entry lives."""
+    cache: dict[tuple[int, str, str], tuple[ColSpec, object]] = {}
+
+    @functools.wraps(build)
+    def cached(name: str, spec: ColSpec, seed_key: str):
+        key = (id(spec), name, seed_key)
+        hit = cache.get(key)
+        if hit is not None and hit[0] is spec:
+            return hit[1]
+        if len(cache) >= 256:
+            cache.clear()
+        value = build(name, spec, seed_key)
+        cache[key] = (spec, value)
+        return value
+
+    return cached
+
+
 def _field_spec(spec: ColSpec, name: str, seed_key: str) -> ColSpec:
     """The declaration one struct field is generated from.
 
@@ -706,6 +728,11 @@ def _field_spec(spec: ColSpec, name: str, seed_key: str) -> ColSpec:
     that renaming the column moves every field with it and adding a field
     beside one moves nothing.
     """
+    return _field_spec_of(name, spec, seed_key)
+
+
+@_per_spec
+def _field_spec_of(name: str, spec: ColSpec, seed_key: str) -> ColSpec:
     return dataclasses.replace(field_of(spec, name), seed_name=f"{seed_key}.{name}")
 
 
@@ -766,55 +793,111 @@ def _generate_list_column(
     its data across a rename like any other, and its elements are drawn by
     the same code as a scalar column of the inner dtype would be.
     """
-    lengths, elements = _list_parts(name, spec, n, seed, row_offset)
+    lengths, elements, _ = _list_parts(name, spec, n, seed, row_offset)
     return _wrap_list(name, spec, lengths, elements)
 
 
 def _list_parts(
     name: str, spec: ColSpec, n: int, seed: int | None, row_offset: int
-) -> tuple[pl.Series, pl.Series]:
+) -> tuple[pl.Series, pl.Series, int]:
     """A `List` column before it is wrapped: each cell's length, null for a
-    null cell, and every element of every cell in one flat column."""
+    null cell, every element of every cell in one flat column, and where
+    the first of those elements sits in the whole frame's element column.
+
+    Both are windows onto the whole frame's. The lengths are an engine
+    column; the elements are the frame's element column from the element
+    the window's first row starts at -- the number the rows before it hold
+    -- so a batch or a scan holds exactly the lists `generate()` holds there.
+    """
     assert isinstance(spec.dtype, (pl.List, pl.Array))  # noqa: S101 - the caller checked
     seed_key = spec.seed_name or name
-
-    if isinstance(spec.dtype, pl.Array):
-        width = spec.dtype.size
-        length_bounds: tuple[int, int] = (width, width)
-    else:
-        length_bounds = (
-            spec.list_length.closed() if spec.list_length else DEFAULT_LIST_LEN
-        )
-
-    # The lengths carry the list's own nullability: a null length is a null cell.
-    lengths_plan = column_plan(
-        name,
-        "int64",
-        min=length_bounds[0],
-        max=length_bounds[1],
-        nullable=spec.nullable,
-        null_probability=spec.null_probability if spec.nullable else 0.0,
-        seed_name=f"{seed_key}\x00len",
-    )
+    lengths_plan, key = _lengths_plan(name, spec, seed_key)
     lengths = _generate_dataframe([lengths_plan], n, seed, row_offset)[name]
     total = int(lengths.fill_null(0).sum())
-
-    # A column named "" seeds its elements by that name, as `None` does: a
-    # `seed_name` cannot be empty.
-    element_spec = dataclasses.replace(element_of(spec), seed_name=seed_key or None)
-    # The elements are drawn per window, not as a window: which element a
-    # row starts at depends on every earlier row's length. Each window after
-    # the first draws them from a seed of its own, so two batches never
-    # repeat each other's elements, and the first -- the whole frame, for
-    # `generate()` -- draws exactly what it always did.
-    element_seed = (
-        seed
-        if seed is None or row_offset == 0
-        else pass_seed(seed, f"elements:{seed_key}:{row_offset}")
-    )
+    start = 0
+    if seed is not None:
+        start = _elements_before(lengths_plan, key, seed, row_offset)
+        # The next window of a stream starts where this one ends.
+        _remember(seed, key, row_offset + n, start + total)
     # The element is a column in its own right, so a list of structs -- or
-    # of lists -- is the same recursion one level down.
-    return lengths, _generate_column(name, element_spec, total, element_seed)
+    # of lists -- is the same recursion one level down, a window onto its
+    # own element column.
+    elements = _generate_column(
+        name, _element_spec(name, spec, seed_key), total, seed, start
+    )
+    return lengths, elements, start
+
+
+@_per_spec
+def _lengths_plan(name: str, spec: ColSpec, seed_key: str) -> tuple[ColumnPlan, tuple]:
+    """The engine column a list's lengths are, and a key naming everything
+    the lengths depend on. Built once per column, not once per window."""
+    if isinstance(spec.dtype, pl.Array):
+        width = spec.dtype.size
+        bounds: tuple[int, int] = (width, width)
+    else:
+        bounds = spec.list_length.closed() if spec.list_length else DEFAULT_LIST_LEN
+    rate = spec.null_probability if spec.nullable else 0.0
+    # The lengths carry the list's own nullability: a null length is a null
+    # cell. Seeded as a name no user column can carry.
+    plan = column_plan(
+        name,
+        "int64",
+        min=bounds[0],
+        max=bounds[1],
+        nullable=spec.nullable,
+        null_probability=rate,
+        seed_name=f"{seed_key}\x00len",
+    )
+    return plan, (seed_key, bounds, spec.nullable, rate)
+
+
+@_per_spec
+def _element_spec(_name: str, spec: ColSpec, seed_key: str) -> ColSpec:
+    """The declaration a list's elements are drawn from, built once per
+    column. A scalar element is seeded as the column itself, so a list keeps
+    its data across a rename like any other column; a nested one under a
+    name of its own, so an inner list's lengths are not the outer's. A
+    column named "" seeds its elements by that name, as `None` does: a
+    `seed_name` cannot be empty."""
+    element = element_of(spec)
+    nested = column_kind(element.dtype) in ("list", "map")
+    key = f"{seed_key}\x00item" if nested else (seed_key or None)
+    return dataclasses.replace(element, seed_name=key)
+
+
+# How many elements the rows before a window hold, per list column and seed:
+# the last offset each was asked at. A stream asks for its windows in order,
+# so each extends the last by one batch's lengths, not the frame's.
+_ELEMENTS_BEFORE: dict[tuple, tuple[int, int]] = {}
+_MAX_REMEMBERED = 256
+# Rows of lengths summed at a time, when the gap to a window is long.
+_LENGTHS_PER_STEP = 1 << 22
+
+
+def _elements_before(plan: ColumnPlan, key: tuple, seed: int, row_offset: int) -> int:
+    """The elements rows `[0, row_offset)` of a list column hold."""
+    if row_offset == 0:
+        return 0
+    remembered = (seed, key)
+    at, total = _ELEMENTS_BEFORE.get(remembered, (0, 0))
+    if at > row_offset:
+        at, total = 0, 0
+    while at < row_offset:
+        rows = min(row_offset - at, _LENGTHS_PER_STEP)
+        lengths = _generate_dataframe([plan], rows, seed, at).to_series()
+        total += int(lengths.fill_null(0).sum())
+        at += rows
+    _remember(seed, key, row_offset, total)
+    return total
+
+
+def _remember(seed: int, key: tuple, row_offset: int, elements: int) -> None:
+    """That rows `[0, row_offset)` of the list column `key` names hold
+    `elements` elements under `seed`."""
+    if len(_ELEMENTS_BEFORE) >= _MAX_REMEMBERED:
+        _ELEMENTS_BEFORE.clear()
+    _ELEMENTS_BEFORE[(seed, key)] = (row_offset, elements)
 
 
 def _row_of_element(lengths: pl.Series) -> pl.Series:
@@ -862,10 +945,8 @@ def _generate_map_column(
     `list_length`. The repeats are separated first, and only they move.
     """
     entries = drawn_entries_of(spec)
-    lengths, elements = _list_parts(name, entries, n, seed, row_offset)
-    elements = _separate_repeated_keys(
-        name, entries, lengths, elements, seed, row_offset
-    )
+    lengths, elements, start = _list_parts(name, entries, n, seed, row_offset)
+    elements = _separate_repeated_keys(name, entries, lengths, elements, seed, start)
     return _wrap_list(name, entries, lengths, elements).cast(spec.dtype)
 
 
@@ -875,14 +956,17 @@ def _separate_repeated_keys(
     lengths: pl.Series,
     elements: pl.Series,
     seed: int | None,
-    row_offset: int,
+    start: int,
 ) -> pl.Series:
     """The flat entries of a map column with no key repeated within a map.
 
     As `generation.passes.unique_together.apply_unique_together` separates a composite
     key: the first entry to use a key keeps it, every later one in the same
-    map draws a fresh key from the key's declaration, and that repeats until
-    none are left. Its value stays -- only the key was the problem.
+    map takes a fresh key, and that repeats until none are left. Its value
+    stays -- only the key was the problem. Round `r`'s fresh key for an entry
+    is that entry's value in a key column of round `r`'s own, a window from
+    `start`, so it depends on where the entry sits in the whole frame and a
+    batch separates its keys as the frame does.
     """
     if elements.len() == 0:
         return elements
@@ -898,12 +982,10 @@ def _separate_repeated_keys(
     if rows.len() == 0:
         return elements
     seed_key = entries.seed_name or name
-    key_spec = dataclasses.replace(
-        field_of(entries, "key"), seed_name=f"{seed_key}\x00key"
-    )
-    rng = random.Random(None if seed is None else f"{seed}:{row_offset}:{seed_key}")
-    for _ in range(_MAX_KEY_ROUNDS):
-        fresh = _generate_column(name, key_spec, rows.len(), rng.randrange(2**63))
+    key = field_of(entries, "key")
+    for round_ in range(_MAX_KEY_ROUNDS):
+        spec = dataclasses.replace(key, seed_name=f"{seed_key}\x00key{round_}")
+        fresh = _generate_column(name, spec, elements.len(), seed, start).gather(rows)
         frame = frame.with_columns(frame["key"].scatter(rows, fresh))
         rows = repeated(frame)
         if rows.len() == 0:

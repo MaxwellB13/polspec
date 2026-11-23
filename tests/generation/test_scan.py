@@ -3,8 +3,8 @@
 The property that makes the projection pushdown free rather than a trade:
 every column is seeded by its name and every pass by what it is for, so
 dropping a column's neighbours cannot move it. A scan is batched, so it
-carries `generate_batches`' terms -- no hierarchy, uniqueness within a
-batch, and passes drawn per batch.
+carries `generate_batches`' terms -- no hierarchy, a composite key distinct
+within a batch, and the passes that rewrite a column drawn per batch.
 """
 
 from __future__ import annotations

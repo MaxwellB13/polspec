@@ -196,12 +196,6 @@ pinned by a passing test. A NaN, by contrast, is recorded as the column's
   batch of `generate_batches`, a `scan()` or a `sink_*`, so they collide
   across batches only by chance; generate the frame whole when that
   matters.
-- **A nested column's elements are drawn per batch.** A `List`'s lengths
-  are a window onto the whole frame, but which element a row starts at
-  depends on every earlier row's length, so the elements of a `List`,
-  `Array` or `Map` column are drawn afresh in each batch of
-  `generate_batches`, a `scan()` or a `sink_*` — deterministic for a seed,
-  but not the values `generate()` would put there past the first batch.
 - **On Polars 1.39, a nullable struct with no fields holds no nulls.**
   Polars 1.39 cannot hold a null in a `Struct({})`; 1.40 and later can. Such
   a column generates every row present there, which its spec still accepts,
