@@ -214,6 +214,47 @@ pub fn window(domain: u64, seed: u64, start: u64, n: u64) -> Result<Vec<u64>, St
     Ok(out.into_iter().map(|i| i as u64).collect())
 }
 
+/// Positions `start..start + n` of the permutation of a product space --
+/// every combination of members with `sizes` values each -- that `seed`
+/// keys, decoded into one index per member, the first member varying
+/// slowest. Distinct positions give distinct combinations, so a composite
+/// key drawn this way is distinct over the whole frame, and a window takes
+/// the combinations the whole frame takes there.
+pub fn composite_window(
+    sizes: &[u64],
+    seed: u64,
+    start: u64,
+    n: u64,
+) -> Result<Vec<Vec<u64>>, String> {
+    let domain = sizes
+        .iter()
+        .try_fold(1u128, |total, &size| total.checked_mul(size as u128))
+        .ok_or("the members' combinations number more than 2^128")?;
+    let end = (start as u128) + (n as u128);
+    if end > domain {
+        return Err(format!(
+            "rows {start}..{end} need {end} distinct combinations, but the members take {domain}"
+        ));
+    }
+    let mut members: Vec<Vec<u64>> = sizes
+        .iter()
+        .map(|_| Vec::with_capacity(n as usize))
+        .collect();
+    if n == 0 {
+        return Ok(members);
+    }
+    let permutation = Permutation::new(domain, seed);
+    let mut positions = vec![0u128; n as usize];
+    permutation.apply_run(start as u128, &mut positions);
+    for mut position in positions {
+        for (member, &size) in members.iter_mut().zip(sizes).rev() {
+            member.push((position % size as u128) as u64);
+            position /= size as u128;
+        }
+    }
+    Ok(members)
+}
+
 /// The splitmix64 finaliser: every input bit reaches every output bit.
 #[inline]
 fn mix(mut z: u64) -> u64 {
@@ -225,6 +266,29 @@ fn mix(mut z: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_composite_window_is_distinct_and_the_whole_spaces_slice() {
+        let sizes = [3u64, 1, 7, 5];
+        let all = composite_window(&sizes, 9, 0, 105).unwrap();
+        let mut seen: Vec<(u64, u64, u64, u64)> = (0..105)
+            .map(|i| (all[0][i], all[1][i], all[2][i], all[3][i]))
+            .collect();
+        for (k, member) in all.iter().enumerate() {
+            assert!(member.iter().all(|&v| v < sizes[k]));
+        }
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), 105, "every combination, once");
+        let part = composite_window(&sizes, 9, 40, 30).unwrap();
+        for k in 0..sizes.len() {
+            assert_eq!(part[k], all[k][40..70]);
+        }
+        assert!(composite_window(&sizes, 9, 100, 6).is_err());
+        // Two members of 2^64 values: a space past 2^64.
+        let wide = composite_window(&[u64::MAX, u64::MAX], 3, 0, 1000).unwrap();
+        assert_eq!(wide[0].len(), 1000);
+    }
     use std::collections::HashSet;
 
     fn image(domain: u128, seed: u64) -> Vec<u128> {

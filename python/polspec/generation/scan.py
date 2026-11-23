@@ -21,10 +21,9 @@ makes the pushdown free rather than a trade -- except under
 and so every column is generated, then projected.
 
 Rows come in batches, so a scan carries `generate_batches`' terms: a
-`Hierarchy` is refused, uniqueness holds within a batch rather than across
-`n`, and a column holds the rows `generate(n, seed=s)` would except where a
-composite key or a key into the spec's own rows rewrites it, which is
-drawn per batch.
+`Hierarchy` is refused, and a column holds the rows `generate(n, seed=s)`
+would except where a repaired composite key or a key into the spec's own
+rows rewrites it, which is drawn per batch.
 
 Internal: not part of the public API.
 """

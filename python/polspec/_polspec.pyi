@@ -105,5 +105,10 @@ def pattern_status(
 ) -> tuple[str, str | None]:
     """How a `pattern` column is generated: `("generate", None)` from the pattern; `("keep", None)` as plain text, every value of which already passes it at `plain_lengths` characters; or `("unreachable", reason)`."""
 
+def composite_indices(
+    sizes: list[int], seed: int, start: int, n: int
+) -> list[pl.Series]:
+    """Positions `start..start + n` of the permutation of a product space of members with `sizes` values each, as one `UInt64` index column per member. Raises `ValueError` when the space holds fewer than `start + n` combinations."""
+
 def permuted_indices(domain: int, seed: int, start: int, n: int) -> pl.Series:
     """Positions `start..start + n` of the permutation of `[0, domain)` that `seed` keys, as `UInt64` indices; any window is the whole range's slice. Raises `ValueError` for a window past the domain."""

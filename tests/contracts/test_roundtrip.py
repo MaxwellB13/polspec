@@ -334,10 +334,62 @@ def test_unique_together_roundtrips():
     assert_roundtrip(ThreeWayUniqueSpec)
 
 
-def test_unique_together_only_moves_the_rows_that_repeat():
-    """A roomy domain keeps almost everything it generated."""
+def test_unique_together_is_distinct():
     df = UniqueTogetherSpec.generate(300, seed=SEED)
     assert df.select(["a", "b"]).n_unique() == 300
+
+
+@pytest.mark.parametrize("batch_size", [1, 97, 4_096, 9_999])
+def test_a_composite_key_is_distinct_across_batches_as_the_whole_frame_is(batch_size):
+    """Members with a finite or bounded space are drawn as one permutation of
+    their combinations, keyed by the whole frame: every batch, a scan and a
+    sink hold `generate()`'s rows, so no combination repeats across them."""
+    n = 10_000
+    whole = UniqueTogetherSpec.generate(n, seed=SEED)
+    streamed = pl.concat(
+        list(UniqueTogetherSpec.generate_batches(n, batch_size=batch_size, seed=SEED))
+    )
+    assert streamed.equals(whole)
+    assert whole.select(["a", "b"]).n_unique() == n
+    scanned = UniqueTogetherSpec.scan(n, batch_size=batch_size, seed=SEED).collect()
+    assert scanned.equals(whole)
+
+
+def test_a_jointly_drawn_member_is_uniform_over_its_space():
+    """The trade a permutation makes: a member's weights are not kept."""
+
+    class Weighted(FrameSpec):
+        a = ColSpec(pl.String, choices={"common": 0.9, "rare": 0.1})
+        b = ColSpec(pl.Int64, bounds=(1, 100_000))
+        __unique_together__ = [["a", "b"]]
+
+    share = Weighted.generate(20_000, seed=SEED)["a"].eq("rare").mean()
+    assert 0.45 < share < 0.55
+
+
+def test_a_member_without_a_bounded_space_is_still_repaired_per_batch():
+    """A float member has no finite space to permute, so the repeats are
+    redrawn as before: distinct within a batch, and its own draw kept."""
+
+    class Floating(FrameSpec):
+        a = ColSpec(pl.Enum(["x", "y"]))
+        b = ColSpec(pl.Float64, bounds=(0, 1))
+        __unique_together__ = [["a", "b"]]
+
+    for batch in Floating.generate_batches(2_000, batch_size=500, seed=SEED):
+        Floating.validate(batch)
+
+
+def test_a_cartesian_frame_keeps_its_coverage_beside_a_composite_key():
+    class Covered(FrameSpec):
+        a = ColSpec(pl.Enum(["x", "y", "z"]))
+        b = ColSpec(pl.Int64, bounds=(-5, 5))
+        __unique_together__ = [["a", "b"]]
+
+    df = Covered.generate(30, seed=SEED, method="cartesian")
+    assert set(df["a"]) == {"x", "y", "z"}
+    assert (df["b"] < 0).any() and (df["b"] == 0).any() and (df["b"] > 0).any()
+    Covered.validate(df)
 
 
 def test_unique_together_with_no_room_refuses_by_name():

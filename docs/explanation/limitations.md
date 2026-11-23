@@ -183,14 +183,15 @@ pinned by a passing test. A NaN, by contrast, is recorded as the column's
   `distribution` or `weights` declared on either is not what you get: the
   references have to come from one pool for the two columns to join at all.
   So `drift()` does not hold either column to them.
-- **A composite key is distinct within a batch, not across batches.** A
-  `unique=True` column is a permutation of its value space, unique across a
-  whole frame however it is batched — including one a foreign key fills,
-  which takes a permutation of its parent's keys. A `__unique_together__`
-  group, and a unique key that references its own spec, are drawn afresh per
-  batch of `generate_batches`, a `scan()` or a `sink_*`, so they collide
-  across batches only by chance; generate the frame whole when that
-  matters.
+- **Some composite keys are distinct within a batch, not across
+  batches.** A `__unique_together__` group whose members all have a finite
+  or bounded space is one permutation of their combinations, distinct across
+  the whole frame however it is batched, at the cost of its members' weights
+  and distributions. A group with a float or free-text member, or one a
+  foreign key fills, is repaired per batch of `generate_batches`, a `scan()`
+  or a `sink_*` instead, and so is a unique key that references its own
+  spec: they collide across batches only by chance; generate the frame whole
+  when that matters.
 - **On Polars 1.39, a nullable struct with no fields holds no nulls.**
   Polars 1.39 cannot hold a null in a `Struct({})`; 1.40 and later can. Such
   a column generates every row present there, which its spec still accepts,

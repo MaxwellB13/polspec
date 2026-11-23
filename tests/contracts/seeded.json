@@ -340,7 +340,7 @@
  "table/hierarchy": "672df0742a4f5c2fcd503a0fc794bae199cb069c64e54d042aaab2ceebddbb9b",
  "table/rules": "a69ec090b96ca435ec332f688c7ded36698d3cf820363bd2f50e012fc273b7c4",
  "table/self_key": "846875ec1e7ac2a4bd1df4a5c09025684b3285314ca087083b6290adedd439fe",
- "table/unique_together": "cc453d45ba2a87e7b84f936ba1fefa38b3e42ca5a176eaba0edcfe93c123e9dd",
+ "table/unique_together": "2627ed9e8e283157f586d01eafac05839ce84b8e760eb63cd48385a65e221061",
  "time/batches": "37abc5340a3240ab219a6821f4a266c6de6bc285bf34d8667babd79e70ecc07a",
  "time/generate": "960462c4c852415f76fcebc1639a7d679fbf229b92bb164aa043411d29ab25d3",
  "time/scan": "1163585e644f46c3e04ffe7b43c4c7c6d73be947d57a0beef825aaae5d892433",
