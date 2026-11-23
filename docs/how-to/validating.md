@@ -574,11 +574,12 @@ values to decide their type.
 ### Turning checks off
 
 Each switch disables a whole category of check. Most exist for what
-generation cannot satisfy — `__checks__`, validators and `pattern` are
-validated but not generated, and `__rows__` is not a limit on `generate()`:
+generation cannot satisfy — a `pattern` it cannot follow, `__checks__`
+and validators it cannot keep, and `__rows__`, which is not a limit on
+`generate()`:
 
 ```python
-Orders.validate(Orders.generate(1_000, seed=1), checks=False)
+Orders.validate(Orders.generate(1_000, seed=1, checks=False), checks=False)
 ```
 
 `bounds=False` is the other way round: generation always stays in

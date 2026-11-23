@@ -50,11 +50,12 @@ and a projection never changes what a column holds. See
 will hold before anything is allocated, and `max_bytes=` refuses one too
 large; see [Memory](generating.md#memory).
 
-### Keeping checks costs re-reads
+### Keeping checks
 
-`checks=True` keeps the rows every check passes and reads more of the
-frame for the rest, so its cost grows with how many rows the checks
-reject:
+Generation keeps the rows every check passes and reads more of the frame
+for the rest, so its cost grows with how many rows the checks reject.
+These are 1.7's numbers; 2.0 reads only the rows it has not read, and
+this page is re-measured for it:
 
 | A million rows of the eleven columns | Time |
 |:--|--:|
@@ -62,11 +63,10 @@ reject:
 | `checks=True`, a check rejecting 10% of rows | 143 ms |
 | `checks=True`, a check rejecting 50% of rows | 328 ms |
 
-A longer read regenerates the rows it read before, which keeps the result
-the first rows of one seeded frame whatever the batch size. A check most
-rows pass is cheap to keep; for one that rejects most of them, narrow the
-columns it reads — bounds, choices, a rule — so fewer rows fail. See
-[Keeping checks](generating.md#keeping-checks-checkstrue).
+A check most rows pass is cheap to keep; for one that rejects most of
+them, narrow the columns it reads — bounds, choices, a rule — so fewer
+rows fail. See
+[Keeping checks](generating.md#keeping-checks).
 
 ## Validating
 

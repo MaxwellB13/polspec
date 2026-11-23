@@ -37,7 +37,7 @@ def _scan(
     seed: int | None,
     references: References,
     fixed: Mapping[str, Any] | None = None,
-    checks: bool = False,
+    checks: bool | None = None,
 ) -> tuple[pl.LazyFrame, Path]:
     """The lazy frame a sink writes, and where it writes it.
 
@@ -75,7 +75,7 @@ def sink_parquet(
     seed: int | None = None,
     references: References = None,
     fixed: Mapping[str, Any] | None = None,
-    checks: bool = False,
+    checks: bool | None = None,
     **kwargs: Any,
 ) -> None:
     """Generates `n` rows and streams them to a Parquet file in batches.
@@ -111,7 +111,7 @@ def sink_ipc(
     seed: int | None = None,
     references: References = None,
     fixed: Mapping[str, Any] | None = None,
-    checks: bool = False,
+    checks: bool | None = None,
     **kwargs: Any,
 ) -> None:
     """Generates `n` rows and streams them to an Arrow IPC / Feather file in batches.
@@ -147,7 +147,7 @@ def sink_csv(
     seed: int | None = None,
     references: References = None,
     fixed: Mapping[str, Any] | None = None,
-    checks: bool = False,
+    checks: bool | None = None,
     **kwargs: Any,
 ) -> None:
     """Generates `n` rows and streams them to a CSV file in batches.
@@ -183,7 +183,7 @@ def sink_ndjson(
     seed: int | None = None,
     references: References = None,
     fixed: Mapping[str, Any] | None = None,
-    checks: bool = False,
+    checks: bool | None = None,
     **kwargs: Any,
 ) -> None:
     """Generates `n` rows and streams them to a newline-delimited JSON file in batches.

@@ -41,8 +41,7 @@ from polspec import frames
 from polspec.frames import Method, References
 from polspec.generation.keeping import (
     check_columns,
-    holds_checks,
-    refuse_unkeepable,
+    resolve_checks,
 )
 from polspec.generation.pipeline import (
     batch_stream,
@@ -99,7 +98,7 @@ def scan(
     method: Method = "random",
     references: References = None,
     fixed: Mapping[str, Any] | None = None,
-    checks: bool = False,
+    checks: bool | None = None,
 ) -> pl.LazyFrame:
     """A `LazyFrame` of `n` generated rows, produced as they are collected.
 
@@ -112,11 +111,11 @@ def scan(
     a composite key only within each batch. `fixed` pins columns as
     `generate_batches` takes it. *`fixed` added in 1.4.*
 
-    `checks=True` keeps the spec's checks batch by batch, as
-    `generate_batches` does. Which rows are kept depends on every column a
+    `checks` keeps the spec's checks batch by batch, as `generate_batches`
+    does, by default. Which rows are kept depends on every column a
     check reads, so those are generated whatever the plan projects, and a
     `head` takes the first rows of the batches the whole scan would make.
-    *Added in 1.7.*
+    *Kept by default since 2.0; added in 1.7.*
 
     Examples
     --------
@@ -136,11 +135,9 @@ def scan(
     # Checked against the whole spec, now: a pin on a column the plan never
     # reads is still a pin that has to make sense.
     pins = checked_pins(spec, fixed, n, method) if fixed else None
-    if checks:
-        refuse_unkeepable(
-            spec, method, sequence_pins=pins is not None and pins.has_sequences
-        )
-    keeping = checks and holds_checks(spec)
+    keeping = resolve_checks(
+        spec, checks, method, sequence_pins=pins is not None and pins.has_sequences
+    )
     # Which rows a check keeps depends on every column it reads, so those
     # are generated whatever the plan asks for.
     kept_by = check_columns(spec) if keeping else frozenset()
@@ -175,6 +172,7 @@ def scan(
             references=references,
             pins=pins.restricted(source.columns) if pins is not None else None,
             checks=keeping,
+            strict=checks is True,
         ):
             if left <= 0:
                 return

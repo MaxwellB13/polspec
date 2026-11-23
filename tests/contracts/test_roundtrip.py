@@ -680,21 +680,28 @@ class CheckedSpec(FrameSpec):
     __checks__ = [Check(pl.col("hi") >= pl.col("lo"), name="hi_gte_lo")]
 
 
-def test_frame_checks_are_validation_only():
-    """__checks__ constrain validation; generation makes no attempt to satisfy them."""
-    df = CheckedSpec.generate(ROWS, seed=SEED)
+def test_frame_checks_are_kept_by_default_and_only_validated_without():
+    """A spec's __checks__ are kept in what it generates; `checks=False`
+    generates as if they were validation's alone."""
+    CheckedSpec.validate(CheckedSpec.generate(ROWS, seed=SEED))
+    df = CheckedSpec.generate(ROWS, seed=SEED, checks=False)
     CheckedSpec.validate(df, checks=False)
     with pytest.raises(Exception, match="hi_gte_lo"):
         CheckedSpec.validate(df)
 
 
-def test_column_validators_are_validation_only():
-    """ColSpec.validators behave the same way: honoured on validate, not on generate."""
+def test_a_validator_no_row_can_pass_is_generated_without_and_says_so():
+    """A validator no generated row passes cannot be kept: the default
+    generates as `checks=False` does and warns; `checks=True` refuses."""
     spec_cls = _spec_for(
         "unsatisfiable_validator",
         ColSpec(pl.Int64, bounds=(1, 10), validators=[pl.col("c") > 100]),
     )
-    df = spec_cls.generate(ROWS, seed=SEED)
+    with pytest.warns(UserWarning, match="checks are not kept"):
+        df = spec_cls.generate(ROWS, seed=SEED)
+    assert df.equals(spec_cls.generate(ROWS, seed=SEED, checks=False))
+    with pytest.raises(GenerationError, match="could not keep"):
+        spec_cls.generate(ROWS, seed=SEED, checks=True)
     spec_cls.validate(df, validators=False)
     with pytest.raises(Exception, match="validator"):
         spec_cls.validate(df)
@@ -979,10 +986,12 @@ def test_a_column_named_as_a_polars_pattern_round_trips(method):
     expression. Through 0.15.1 a column named either was out of reach of
     polspec's own references to it; found by the awkward-names property."""
     spec = _pattern_named()
-    df = generate(spec, ROWS, seed=SEED, method=method)
+    df = generate(spec, ROWS, seed=SEED, method=method, checks=False)
     assert df.columns == list(spec.columns)
     assert validate(spec, df).equals(df)
-    batched = pl.concat(list(generate_batches(spec, ROWS, batch_size=70, seed=SEED)))
+    batched = pl.concat(
+        list(generate_batches(spec, ROWS, batch_size=70, seed=SEED, checks=False))
+    )
     validate(spec, batched)
 
 
@@ -990,7 +999,7 @@ def test_a_pattern_named_column_is_judged_alone():
     """Each claim on a pattern-named column is about that column: breaking
     one is one finding, with that column's rows -- not every column's."""
     spec = _pattern_named()
-    df = generate(spec, ROWS, seed=SEED)
+    df = generate(spec, ROWS, seed=SEED, checks=False)
     bad = df.with_columns(
         pl.when(pl.int_range(pl.len()) < 3).then(-1).otherwise(pl.col("c")).alias("c")
     )
@@ -1012,7 +1021,7 @@ def test_a_pattern_named_column_is_judged_alone():
 
 def test_pattern_named_columns_profile_drift_and_survive_a_file(tmp_path):
     spec = _pattern_named()
-    df = generate(spec, ROWS, seed=SEED)
+    df = generate(spec, ROWS, seed=SEED, checks=False)
     profiled = profile(df)
     assert list(profiled.columns) == list(df.columns)
     validate(profiled, df)

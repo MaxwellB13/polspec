@@ -12,13 +12,12 @@ validation; a few are only checked:
 | `__order_by__` | yes | yes |
 | `__hierarchy__` — see [Hierarchies](hierarchies.md) | yes | yes |
 | `__rows__` | no: `generate()` makes the rows asked for | yes |
-| `ColSpec.validators`, `__checks__` | with `checks=True` | yes |
+| `ColSpec.validators`, `__checks__` | yes, by keeping the rows that pass | yes |
 
 Validators and checks wrap arbitrary expressions, and nothing can draw
-data that satisfies an arbitrary predicate. So generation leaves them to
-validation unless asked: `generate(..., checks=True)` keeps the rows
-that pass them, and reads on for more — see
-[Keeping checks](generating.md#keeping-checks-checkstrue).
+data that satisfies an arbitrary predicate. So generation keeps the rows
+that pass them, and reads on for more; `checks=False` leaves them to
+validation — see [Keeping checks](generating.md#keeping-checks).
 
 ## Writing conditions — `col()`
 

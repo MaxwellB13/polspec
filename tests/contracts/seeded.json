@@ -38,6 +38,8 @@
  "categorical_u8/batches": "2ed6b2c7d303ef32278f4f01d52918940eb09d487715a1b9fb03ec8aef4490d6",
  "categorical_u8/generate": "766f1abdf977f81cf473cae4cd3d8d5d37b354e09dbf864b7cbb6b755f62aa23",
  "categorical_u8/scan": "d341c1abfb138d0f18d6f24d5cf18403d4fa8153e467466bd04f89dc8b2c1539",
+ "checks/batches": "b2ea83d05fe8be8df755a6d2752c523cacfbac9f9f48118800e6edb59981eaf6",
+ "checks/generate": "b2ea83d05fe8be8df755a6d2752c523cacfbac9f9f48118800e6edb59981eaf6",
  "date/batches": "f678ab133141511ed850a76cc540b32729431054759b1f79065456e0adc42c0f",
  "date/generate": "b7b55585784ffe59e4e8d58f1bc2b6ec9c196331b697ec317b4ec46a223ff4eb",
  "date/scan": "de072cfbebb1a7e565880b61a4d9769bab7e30b6178769ac765ef2d8602464cd",
