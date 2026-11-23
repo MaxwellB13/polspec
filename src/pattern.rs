@@ -67,6 +67,9 @@ struct Group {
 #[derive(Debug)]
 pub struct PatternSampler {
     units: Vec<Box<str>>,
+    /// Each unit's one byte, when every unit is a single ASCII character --
+    /// almost every pattern -- so a step writes a byte, not a string.
+    ascii: Option<Vec<u8>>,
     /// Per state, the groups of units out of it, in a fixed order.
     groups: Vec<Vec<Group>>,
     /// `viable[k]`: the states from which exactly `k` more units can end in
@@ -133,15 +136,30 @@ impl PatternSampler {
     }
 
     /// Writes one value into `out`.
-    pub fn fill(&self, rng: &mut Xoshiro256PlusPlus, out: &mut String) {
+    /// `out` holds valid UTF-8 afterwards: every unit is a `str`.
+    pub fn fill(&self, rng: &mut Xoshiro256PlusPlus, out: &mut Vec<u8>) {
         out.clear();
         let length = match self.lengths.len() {
             1 => self.lengths[0],
             n => self.lengths[rng.random_range(0..n as u32) as usize],
         } as usize;
+        let write = |out: &mut Vec<u8>, unit: u16| match &self.ascii {
+            Some(bytes) => out.push(bytes[unit as usize]),
+            None => out.extend_from_slice(self.units[unit as usize].as_bytes()),
+        };
         let mut state = self.start;
         for remaining in (0..length).rev() {
             let groups = &self.groups[state as usize];
+            // A state the walk reaches has a group that can still finish in
+            // `remaining` steps -- the step before chose it for that -- so a
+            // state with one group needs no viability check: the draw is
+            // the one the general path below makes.
+            if let [group] = groups.as_slice() {
+                let pick = rng.random_range(0..group.units.len() as u32);
+                write(out, group.units[pick as usize]);
+                state = group.next;
+                continue;
+            }
             let total: u32 = groups
                 .iter()
                 .filter(|g| self.viable(remaining, g.next))
@@ -151,7 +169,7 @@ impl PatternSampler {
             for group in groups.iter().filter(|g| self.viable(remaining, g.next)) {
                 let size = group.units.len() as u32;
                 if pick < size {
-                    out.push_str(&self.units[group.units[pick as usize] as usize]);
+                    write(out, group.units[pick as usize]);
                     state = group.next;
                     break;
                 }
@@ -421,9 +439,14 @@ fn build_over(
         ));
     }
     let widest = units.iter().map(|u| u.len()).max().unwrap_or(1);
+    let ascii = units
+        .iter()
+        .all(|u| u.len() == 1)
+        .then(|| units.iter().map(|u| u.as_bytes()[0]).collect());
     Ok(PatternSampler {
         max_bytes: hi * widest,
         units,
+        ascii,
         groups,
         viable,
         lengths: fits,
@@ -535,11 +558,11 @@ mod tests {
     fn draws(pattern: &str, lengths: Option<(usize, usize)>, n: usize) -> Vec<String> {
         let sampler = sampler(pattern, lengths).unwrap();
         let mut rng = Xoshiro256PlusPlus::seed_from_u64(7);
-        let mut out = String::new();
+        let mut out = Vec::new();
         (0..n)
             .map(|_| {
                 sampler.fill(&mut rng, &mut out);
-                out.clone()
+                String::from_utf8(out.clone()).expect("a pattern's value is UTF-8")
             })
             .collect()
     }
@@ -663,5 +686,44 @@ mod tests {
         assert!(!plain_text_always_passes(r"^[A-Za-z0-9]{5,14}$", 5, 15));
         assert!(!plain_text_always_passes(r"[a-z]", 5, 15));
         assert!(!plain_text_always_passes(r"^ORD-\d{6}$", 5, 15));
+    }
+}
+
+#[cfg(test)]
+mod timing {
+    //! `cargo test --release --lib pattern::timing -- --ignored --nocapture`:
+    //! a pattern row's cost on one thread.
+    use super::*;
+    use rand::SeedableRng;
+    use std::hint::black_box;
+
+    #[test]
+    #[ignore]
+    fn timing_pattern_parts() {
+        let n = 1_000_000;
+        for pattern in [r"^ORD-[0-9]{6}$", r"^[A-Z]{2}-\d{4,6}(-(EU|US|UK))?$"] {
+            let s = sampler(pattern, None).unwrap();
+            let time = |f: &mut dyn FnMut() -> u64| {
+                black_box(f());
+                (0..5)
+                    .map(|_| {
+                        let t = std::time::Instant::now();
+                        black_box(f());
+                        t.elapsed().as_secs_f64() * 1e9 / n as f64
+                    })
+                    .fold(f64::MAX, f64::min)
+            };
+            let mut out = Vec::new();
+            let full = time(&mut || {
+                let mut rng = Xoshiro256PlusPlus::seed_from_u64(1);
+                (0..n)
+                    .map(|_| {
+                        s.fill(&mut rng, &mut out);
+                        out.len() as u64
+                    })
+                    .sum()
+            });
+            println!("{pattern:<36} fill {full:>6.2} ns/row");
+        }
     }
 }

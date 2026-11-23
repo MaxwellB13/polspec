@@ -458,9 +458,9 @@ def test_a_parent_too_small_is_refused_before_the_first_batch():
         Profile.generate(60, seed=5, references=refs)
 
 
-def test_a_many_to_one_foreign_key_is_still_drawn_per_batch():
-    """With replacement, a key's draw is the window's own: it is a key into
-    the parent in every batch, but not the whole frame's row for row."""
+def test_a_many_to_one_foreign_key_is_a_window_onto_the_whole_frame():
+    """With replacement, a key's draw is a window too: a batch's rows take
+    the parent keys the whole frame's rows take there."""
     refs = {GenCustomerSpec: GenCustomerSpec.generate(50, seed=1)}
     whole = GenOrderSpec.generate(3_000, seed=5, references=refs)
     batched = pl.concat(
@@ -470,5 +470,5 @@ def test_a_many_to_one_foreign_key_is_still_drawn_per_batch():
             )
         )
     )
-    assert not batched["customer_id"].equals(whole["customer_id"])
+    assert batched.equals(whole)
     GenOrderSpec.validate(batched, references=refs)

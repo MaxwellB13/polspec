@@ -10,7 +10,8 @@ what the streaming verbs promise:
 
 - what is streamed validates against its spec;
 - a column no pass rewrites holds, window by window, what `generate()` puts
-  there -- a nested column included, its elements as well as its lengths;
+  there -- a nested column included, its elements as well as its lengths --
+  and so does a column rules or a foreign key into another table rewrite;
 - no batch repeats another where the whole frame's rows at those places
   differ;
 - a scan is the batches, and projecting one cannot change a column's values,
@@ -36,7 +37,6 @@ from polspec import (
     scan,
     validate,
 )
-
 
 ROWS, BATCH, SEED = 300, 97, 11
 
@@ -116,6 +116,26 @@ STREAM_SPECS: dict[str, tuple[TableSpec, dict | None]] = {
                     ],
                 ),
                 "tags": ColSpec(pl.List(pl.Int64), list_length=(1, 3)),
+            },
+        ),
+        None,
+    ),
+    "drawing_rules": (
+        TableSpec(
+            "DrawingRules",
+            {
+                "g": ColSpec(pl.Enum(["x", "y", "z"])),
+                "v": ColSpec(
+                    pl.Int64,
+                    bounds=(0, 100),
+                    rules=[
+                        ColRule(when=col("g") == "x", choices=[1, 2, 3, 4]),
+                        ColRule(
+                            when=col("g") == "y",
+                            choices={10: 0.7, 20: 0.2, 30: 0.1},
+                        ),
+                    ],
+                ),
             },
         ),
         None,
@@ -220,6 +240,35 @@ def test_every_batch_of_a_rewritten_spec_validates(name):
     assert {f.code for f in report} <= {"unique_together"}
     assert pl.concat(_batches(spec, references)).equals(streamed)
     _assert_no_batch_repeats_another(parts, generate(spec, ROWS, seed=SEED))
+
+
+# The specs whose every pass is a window: rules, and foreign keys into
+# another table. A composite key (`__unique_together__`) and a key into the
+# spec's own rows are drawn per batch.
+WINDOW_SPECS = (
+    "rules",
+    "drawing_rules",
+    "chained_rules",
+    "composite_key",
+    "unique_key",
+)
+
+
+@pytest.mark.parametrize("name", WINDOW_SPECS)
+def test_a_stream_of_window_passes_is_the_whole_frame(name):
+    """Rules and foreign keys are drawn as windows onto the whole frame, so a
+    stream of a spec holding only them is `generate()`'s frame, row for row,
+    at any batch size, and so is a scan."""
+    spec, references = STREAM_SPECS[name]
+    whole = generate(spec, ROWS, seed=SEED, references=references)
+    assert pl.concat(_batches(spec, references)).equals(whole)
+    for batch_size in (1, 50, 299):
+        streamed = generate_batches(
+            spec, ROWS, batch_size=batch_size, seed=SEED, references=references
+        )
+        assert pl.concat(list(streamed)).equals(whole), batch_size
+    lf = scan(spec, ROWS, seed=SEED, batch_size=BATCH, references=references)
+    assert lf.collect().equals(whole)
 
 
 @pytest.mark.parametrize("method", ["random", "cartesian"])

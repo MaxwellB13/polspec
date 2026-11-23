@@ -689,9 +689,11 @@ fn gen_pattern_column(
         plan,
         n,
         seed,
-        || String::with_capacity(sampler.max_bytes()),
-        |rng, _, value| sampler.fill(rng, value),
-        |value| value.as_str(),
+        || Vec::<u8>::with_capacity(sampler.max_bytes()),
+        |rng, _, bytes| sampler.fill(rng, bytes),
+        // SAFETY: every unit of a pattern is a `str`, so a value made of
+        // them is valid UTF-8 -- see `PatternSampler::fill`.
+        |bytes| unsafe { std::str::from_utf8_unchecked(bytes) },
     )
 }
 
