@@ -1,7 +1,8 @@
 # Stability
 
-What polspec promises, from 1.0 on. Each promise names the test that holds
-it, so a release cannot break one without a test failing first.
+What polspec promises, from 1.0 on, and within 2.x since 2.0. Each promise
+names the test that holds it, so a release cannot break one without a test
+failing first. What 2.0 changed is in [Moving to 2.0](../how-to/moving-to-2.md).
 
 ## What is promised
 
@@ -19,8 +20,10 @@ across releases as a [spec file](../how-to/files.md).
 
 A public name is never renamed or removed in place. It is deprecated first:
 it keeps working, and each use warns with a `DeprecationWarning` naming what
-to use instead. In 1.x a deprecated name is removed only at the next major
-release, after at least two minor releases of warning.
+to use instead. A deprecated name is removed only at the next major
+release, after at least two minor releases of warning. 2.0 is the one
+exception: it renamed and removed names with no 1.x warning, and each old
+spelling raises an error naming its replacement (see *Deprecated*).
 
 *Held by* `tests/contracts/test_boundary.py`, which holds the line between
 public and internal, `tests/contracts/test_pickling.py`, which pickles every
@@ -48,7 +51,7 @@ byte.
 ### Seeded output
 
 The same call — spec, seed, row count and method — gives the same frame
-on every supported operating system and Polars, and on every later 1.x
+on every supported operating system and Polars, and on every later 2.x
 release. A minor release changes what a seed produces
 only to fix output that broke its own spec, since data that never met its
 declaration is not worth preserving; the changelog names each such fix.
@@ -77,6 +80,13 @@ above:
 |:--|:--|
 | 1.4.0 | A `pattern` column whose plain text broke its own pattern, now generated from the pattern. A pattern every plain string passes, and one the generator cannot follow, kept their output exactly |
 
+2.0 changed what a seed produces once more, as a major release may, and
+holds the new output for every 2.x release:
+
+| Release | What a seed produced differently |
+|:--|:--|
+| 2.0.0 | Nearly every frame: columns seeded every 4,096 rows, nulls drawn from a stream of their own, strings in bulk, unique columns through a cheaper permutation, weighted categories by the alias method, lists, rules and foreign keys as windows onto the whole frame, a composite key distinct across batches, and a spec's checks kept by default. Each is in the changelog, and a frame that must stay as 1.x made it is kept as a file, or made by polspec 1.x |
+
 What 1.4 added is held to the promise from 1.4 on: a column generated from
 its pattern, a unique one, a derived column, and the `uuid7`, `ulid`,
 `url` and `iso_country3` formats are in the catalogue `test_seeded.py`
@@ -89,7 +99,7 @@ The plugin polspec registers with pytest is named `polspec`, so
 **options)`, taking what `generate()` takes, and its option is
 `--polspec-seed`, a number or `random`, 0 by default. A test's frames, for
 one session seed, are those of its name, its spec and the order of its
-calls, and stay the same in every later 1.x release, as seeded output does.
+calls, and stay the same in every later 2.x release, as seeded output does.
 
 *Held by* `tests/features/test_pytest_plugin.py`, which runs pytest on
 generated tests and holds the fixture, the option and the seeding to it.
@@ -116,7 +126,7 @@ code to the case that produces it.
 Every finding `inspect()` reports, and every move `drift()` and `diff()`
 report, has a code: the full lists are in [Errors and
 findings](../reference/errors.md#finding-codes). A code is added only in a
-minor release, and is never renamed or removed in 1.x, so code that groups
+minor release, and is never renamed or removed within a major, so code that groups
 or filters by one keeps working.
 
 *Held by* `tests/contracts/test_contract.py`, which holds the codes polspec
@@ -124,10 +134,19 @@ produces and the tables on that page to each other, in both directions.
 
 ### Deprecated
 
-Nothing is deprecated. A name deprecated in 1.x is listed here, warns with a
+Nothing is deprecated. A name deprecated in 2.x is listed here, warns with a
 `DeprecationWarning` naming its replacement, and keeps working until the
 next major release removes it. To find what your code uses, run its tests
 with deprecations as errors: `pytest -W error::DeprecationWarning`.
+
+2.0 renamed and removed names without deprecating them in 1.x first: one
+release of breaks rather than a 1.8 of warnings. Each old spelling raises
+an `AttributeError` or a `TypeError` that names what to write instead and
+says "since 2.0" — `FrameSpec.col` says to use `FrameSpec.column`,
+`weights=` says to use `choices={value: weight}` — and
+[Moving to 2.0](../how-to/moving-to-2.md) lists every one.
+`tests/contracts/test_removed.py` calls each old spelling as 1.x code
+would.
 
 1.0 removed what 0.x had deprecated: `profile_dataframe`,
 `polspec.serialization`'s five `*_FIELDS` tables, and `FrameSpec.checks()`,

@@ -17,14 +17,15 @@ hand back a usable frame," not raw loop speed in isolation.
 
 | n_rows     | polspec (Rust) |     NumPy |    Python |
 |-----------:|---------------:|----------:|----------:|
-|      1,000 |        0.0002s |   0.0006s |   0.0014s |
-|     10,000 |        0.0003s |   0.0049s |   0.0140s |
-|    100,000 |        0.0020s |   0.0482s |   0.1483s |
-|  1,000,000 |        0.0067s |   0.4874s |   1.4815s |
-|  5,000,000 |        0.0288s |   2.4138s |   skipped |
-| 20,000,000 |        0.1130s |   9.7606s |   skipped |
+|      1,000 |        0.0002s |   0.0007s |   0.0014s |
+|     10,000 |        0.0003s |   0.0046s |   0.0140s |
+|    100,000 |        0.0012s |   0.0477s |   0.1450s |
+|  1,000,000 |        0.0066s |   0.4809s |   1.8849s |
+|  5,000,000 |        0.0255s |   4.1031s |   skipped |
+| 20,000,000 |        0.1078s |  16.4049s |   skipped |
 
-Measured 2026-11-16 with polspec 1.6 (before release) on an Intel 13900K with 64GB DDR5; yours will differ, and
+Measured 2026-11-24 with polspec 2.0 (before release) and Polars 2.1 on an
+Intel 13900K with 64GB DDR5; yours will differ, and
 the shape matters more than the absolute numbers. Three things worth reading
 off it:
 
@@ -92,15 +93,21 @@ warm up.
 
 | Orders      | polspec eager | polspec lazy | dataframely eager | dataframely lazy | pandera eager | pandera lazy |
 |------------:|--------------:|-------------:|------------------:|-----------------:|--------------:|-------------:|
-|   1,000,000 |       0.0318s |      0.0283s |           0.0461s |          0.0463s |       0.0560s |      0.0556s |
-|  10,000,000 |       0.3538s |      0.3569s |           0.6701s |          0.6859s |       0.7371s |      0.6704s |
+|   1,000,000 |       0.0358s |      0.0288s |           0.0566s |          0.0944s |       0.0925s |      0.0950s |
+|  10,000,000 |       0.6999s |      0.7312s |           1.0671s |          2.0710s |       0.7995s |      0.7259s |
 
-Measured 2026-11-16 with polspec 1.6 (before release), Polars 1.44.2,
+Measured 2026-11-24 with polspec 2.0 (before release), Polars 2.1.0,
 dataframely 3.1.2 and pandera 0.36.0, on the same machine as above. All
-three tools hand the work to Polars, so the gap is narrow: polspec is
-between 1.4 and 2.1 times as fast. It is the gap between one aggregation and
-several passes, not between Rust and Python. A different frame — more
-columns, more patterns, failures to report — will move it. Rerun it:
+three tools hand the work to Polars, so the gap is narrow, and it is the
+gap between one aggregation and several passes, not between Rust and
+Python. At a million orders polspec is 1.6 to 3.3 times as fast. At ten
+million, dataframely takes 1.5 to 3 times as long, and pandera on Polars 2
+is level with polspec: across runs its time ranged from 0.39 to 0.80
+seconds, against polspec's 0.70 to 0.73. polspec 1.7 measures the same
+here today, on Polars 1.44 or 2.1, so the 10-million row moved with the
+machine and Polars, not with polspec 2.0; 1.6's table showed 0.35 seconds.
+A different frame — more columns, more patterns, failures to report — will
+move it. Rerun it:
 
 ```bash
 uv run --group bench python benchmarks/validation.py

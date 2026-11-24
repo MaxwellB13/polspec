@@ -12,6 +12,11 @@ page promises; before 1.0, a minor version could break any of them.
 Toward 2.0, which changes what a seed generates once, and then keeps it
 for all of 2.x.
 
+### Added
+
+- **[Moving to 2.0](https://maxwellb13.github.io/polspec/how-to/moving-to-2/)**:
+  every change 2.0 makes, with what to write instead.
+
 ### Changed
 
 - **Seeded output (2.0): columns are seeded every 4,096 rows, and nulls
@@ -149,6 +154,11 @@ for all of 2.x.
 
 ### Fixed
 
+- **A few rows, or batches of one, keep a spec's checks.** Asked for one
+  row, generation read one, and when it failed judged the check by a pass
+  rate of 0%: a check half the rows pass was refused as one rejecting nearly
+  every row -- and, under 2.0's default `checks=None`, silently not kept. A
+  pass rate is now judged on at least 1,000 rows read.
 - **A `Decimal` bound past 28 significant digits is read exactly.** Python's
   default decimal context rounds to 28 digits, so a `Decimal(38, 0)` bounded
   by its own limit, `10**38 - 1`, was refused as outside the range it can

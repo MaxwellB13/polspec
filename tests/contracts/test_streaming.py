@@ -24,7 +24,7 @@ import itertools
 
 import polars as pl
 import pytest
-from cases import COLUMN_CASES
+from cases import COLUMN_CASES, KEPT, PER_BATCH, STREAMED, STREAMED_PARENT, TABLE_CASES
 from polspec import (
     ColRule,
     ColSpec,
@@ -83,6 +83,45 @@ def test_every_column_streams(case):
     rerun = pl.concat(_batches(spec))
     assert rerun.equals(streamed)
     assert scan(spec, ROWS, seed=SEED, batch_size=BATCH).collect().equals(streamed)
+
+
+# ---------------------------------------------------------------------------
+# Every table case in the catalogue
+# ---------------------------------------------------------------------------
+
+_STREAMED_REFERENCES = {"P": generate(STREAMED_PARENT, 500, seed=19)}
+
+# Each batchable table case of the seeded catalogue, with what it needs:
+# the references, and whether a spec's checks are kept.
+_TABLES = {
+    **{
+        name: (spec, None, None)
+        for name, spec in TABLE_CASES.items()
+        if name not in PER_BATCH
+    },
+    "checks_kept": (KEPT, None, True),
+    "streamed": (STREAMED, _STREAMED_REFERENCES, None),
+}
+
+
+@pytest.mark.parametrize("batch_size", [1, 77, 1_000])
+@pytest.mark.parametrize("name", sorted(_TABLES))
+def test_every_table_case_streams_as_its_whole_frame(name, batch_size):
+    """The exit criterion of 2.0: for every case in the catalogue, ruled,
+    keyed, derived and checked ones included, the batches concatenate to
+    `generate`'s frame, at any batch size."""
+    spec, references, checks = _TABLES[name]
+    rows = 2_500
+    whole = generate(spec, rows, seed=SEED, references=references, checks=checks)
+    streamed = generate_batches(
+        spec,
+        rows,
+        batch_size=batch_size,
+        seed=SEED,
+        references=references,
+        checks=checks,
+    )
+    assert pl.concat(list(streamed)).equals(whole)
 
 
 # ---------------------------------------------------------------------------

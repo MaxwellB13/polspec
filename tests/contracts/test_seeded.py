@@ -29,7 +29,6 @@ and says so in the changelog.
 
 from __future__ import annotations
 
-import datetime as dt
 import hashlib
 import json
 import os
@@ -39,15 +38,17 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from cases import COLUMN_CASES, EVERY_DTYPE
+from cases import (
+    COLUMN_CASES,
+    EVERY_DTYPE,
+    KEPT,
+    STREAMED,
+    STREAMED_PARENT,
+    TABLE_CASES,
+)
 from polspec import (
-    Check,
-    ColRule,
     ColSpec,
-    ForeignKey,
-    Hierarchy,
     TableSpec,
-    col,
     generate,
     generate_batches,
     scan,
@@ -77,77 +78,11 @@ def _cases() -> dict[str, Callable[[], pl.DataFrame]]:
         spec = TableSpec("Every", {"c": ColSpec(dtype)})
         cases[f"every/{dtype}"] = lambda s=spec: generate(s, 200, seed=11)
 
-    d1, d2 = dt.date(2020, 1, 1), dt.date(2020, 1, 2)
-    tables = {
-        "rules": TableSpec(
-            "R",
-            {
-                "d": ColSpec(pl.Date, choices=[d1, d2]),
-                "k": ColSpec(pl.Enum(["a", "b", "c"])),
-                "v": ColSpec(
-                    pl.Int64,
-                    choices=[1, 2, 3],
-                    rules=[
-                        ColRule(when=col("d").is_in([d1]), choices=[1]),
-                        ColRule(when=col("k") == "b", choices=[2, 3]),
-                    ],
-                ),
-            },
-        ),
-        "self_key": TableSpec(
-            "N",
-            {
-                "ref": ColSpec(pl.String, unique=True, string_length=(8, 8)),
-                "parent": ColSpec(pl.String, nullable=True, null_probability=0.2),
-            },
-            foreign_keys=[ForeignKey("parent", references="self", ref_columns="ref")],
-        ),
-        "hierarchy": TableSpec(
-            "H",
-            {"child": ColSpec(pl.String), "parent": ColSpec(pl.String)},
-            hierarchy=Hierarchy(child="child", parent="parent", max_depth=4),
-        ),
-        "derived": TableSpec(
-            "D",
-            {
-                "qty": ColSpec(pl.Int64, bounds=(1, 20)),
-                "price": ColSpec(pl.Float64, bounds=(0.5, 100), nullable=True),
-                "total": ColSpec(
-                    pl.Float64, derive=col("qty") * col("price"), nullable=True
-                ),
-            },
-        ),
-        "unique_together": TableSpec(
-            "U",
-            {
-                "a": ColSpec(pl.Int8, bounds=(0, 50)),
-                "b": ColSpec(pl.Int8, bounds=(0, 50)),
-            },
-            unique_together=[("a", "b")],
-        ),
-        "extras": TableSpec(
-            "X",
-            {
-                "c": ColSpec(
-                    pl.String, format="iso_country", extra_values={"UK (ISO)": 0.2}
-                )
-            },
-        ),
-    }
+    tables = TABLE_CASES
     for name, spec in tables.items():
         cases[f"table/{name}"] = lambda s=spec: generate(s, 400, seed=13)
 
-    # Checks kept by filtering: about half the free rows fail, so a kept
-    # frame is a longer read's passing rows -- whole, and batch by batch.
-    kept = TableSpec(
-        "K",
-        {
-            "subtotal": ColSpec(pl.Float64, bounds=(0, 100)),
-            "total": ColSpec(pl.Float64, bounds=(0, 110)),
-            "status": ColSpec(pl.Enum(["NEW", "PAID"])),
-        },
-        checks=[Check(col("total") >= col("subtotal"), name="total_covers")],
-    )
+    kept = KEPT
     cases["checks/generate"] = lambda: generate(kept, 5_000, seed=31)
     cases["checks/batches"] = lambda: pl.concat(
         list(generate_batches(kept, 5_000, batch_size=777, seed=31))
@@ -164,37 +99,7 @@ def _cases() -> dict[str, Callable[[], pl.DataFrame]]:
         cartesian, 30, method="cartesian", seed=17
     )
 
-    # Batches and a scan across the engine's first chunk boundary, at 65,536
-    # rows: the column cases above stay inside one chunk. One column of
-    # every kind a window draws, a list among them, with a rule, a derived
-    # column and a foreign key, so the passes run on every window too.
-    parent = TableSpec("P", {"id": ColSpec(pl.Int64, bounds=(1, 500), unique=True)})
-    streamed = TableSpec(
-        "S",
-        {
-            "id": ColSpec(pl.Int64, bounds=(1, 10**8), unique=True),
-            "ref": ColSpec(pl.String, pattern=r"^ORD-[0-9]{6}$"),
-            "status": ColSpec(pl.String, choices={"NEW": 0.2, "PAID": 0.8}),
-            "region": ColSpec(pl.Enum(["UK", "US"])),
-            "carrier": ColSpec(
-                pl.Enum(["RM", "UPS"]),
-                rules=[ColRule(when=col("region") == "UK", choices=["RM"])],
-            ),
-            "qty": ColSpec(pl.Int64, bounds=(1, 20)),
-            "price": ColSpec(pl.Float64, bounds=(0.5, 100), nullable=True),
-            "total": ColSpec(
-                pl.Float64, derive=col("qty") * col("price"), nullable=True
-            ),
-            "placed": ColSpec(
-                pl.Date, bounds=(dt.date(2025, 1, 1), dt.date(2026, 1, 1))
-            ),
-            "email": ColSpec(pl.String, format="email"),
-            "tags": ColSpec(pl.List(pl.String), nullable=True),
-            "pair": ColSpec(pl.Struct({"a": pl.Int32, "b": pl.Boolean}), nullable=True),
-            "account": ColSpec(pl.Int64, bounds=(1, 500)),
-        },
-        foreign_keys=[ForeignKey("account", references="P", ref_columns="id")],
-    )
+    parent, streamed = STREAMED_PARENT, STREAMED
     references = {"P": generate(parent, 500, seed=19)}
     for batch_size in (30_000, 1_000):
         cases[f"stream/batches/{batch_size}"] = lambda b=batch_size: pl.concat(

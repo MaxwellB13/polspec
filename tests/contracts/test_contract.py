@@ -67,7 +67,9 @@ def _golden(name: str, actual: str) -> None:
 
 def test_the_public_api_is_the_golden_list():
     """An addition is a deliberate edit of `golden/public_api.json`; a
-    removal waits for a deprecation, and then the next major release."""
+    removal waits for a deprecation, and then the next major release.
+    2.0's renames were methods and keywords, so the list did not move;
+    `test_removed.py` holds each old spelling to its error."""
     import importlib
 
     names = {m: sorted(importlib.import_module(m).__all__) for m in PUBLIC}
@@ -75,12 +77,12 @@ def test_the_public_api_is_the_golden_list():
 
 
 # ---------------------------------------------------------------------------
-# Spec files: every version reads, today's is written byte for byte
+# Spec files: today's version reads and is written byte for byte; older are refused
 # ---------------------------------------------------------------------------
 
 # One spec, in every format version. Each old file is what that version
-# wrote for it: version 1 spelt tags `category`, conditions as one-column
-# dicts, and distribution parameters by alias.
+# wrote for it -- version 1 spelt tags `category`, conditions as one-column
+# dicts, and distribution parameters by alias -- and 2.0 refuses it.
 EVERY_VERSION = TableSpec(
     "Orders",
     {

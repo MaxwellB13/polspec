@@ -55,6 +55,11 @@ MAX_ROUNDS = 5
 # for, to keep a check that is all but impossible.
 MIN_PASS_RATE = 0.02
 
+# The fewest rows a pass rate is judged on: a window of one row that fails
+# says nothing of the rate, so a window smaller than this that keeps too
+# few is read again at this length before the check is called too strict.
+RATE_SAMPLE_ROWS = 1_000
+
 # How much more a window reads than the pass rate says, so one re-read
 # usually suffices.
 _MARGIN = 1.2
@@ -242,7 +247,10 @@ def kept_window(
             return _first_passing(pieces, passing, need)
         rate = kept / read_so_far
         if rate < MIN_PASS_RATE:
-            break
+            if read_so_far >= RATE_SAMPLE_ROWS:
+                break
+            rows = max(RATE_SAMPLE_ROWS, rows + 1)
+            continue
         rows = math.ceil(need / rate * _MARGIN)
     raise ChecksTooStrict(_too_few(spec, need, pl.concat(pieces), failing))
 
