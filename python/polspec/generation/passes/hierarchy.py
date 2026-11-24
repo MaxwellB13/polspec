@@ -119,7 +119,7 @@ def _reference_pool(spec: ColSpec, name: str, count: int, seed: int) -> pl.Serie
         unique=True,
         nullable=False,
         null_probability=0.0,
-        weights=None,
+        _weights=None,
         distribution=None,
         distribution_params=None,
         rules=(),

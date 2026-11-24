@@ -236,7 +236,9 @@ def test_cardinality_moved_lists_the_values_never_seen():
 def test_an_unseen_value_is_weighed_at_its_declared_share():
     """A category of weight 1% is missing from a hundred rows a third of the
     time; one of weight 49.5% never is."""
-    spec = ColSpec(pl.Enum(["a", "b", "rare"]), weights=[49.5, 49.5, 1])
+    spec = ColSpec(
+        pl.Enum(["a", "b", "rare"]), choices={"a": 49.5, "b": 49.5, "rare": 1}
+    )
     frame = pl.DataFrame({"c": pl.Series(["a", "b"] * 50, dtype=spec.dtype)})
     assert drift(TableSpec("T", {"c": spec}), frame).unchanged
     half = pl.DataFrame({"c": pl.Series(["a"] * 100, dtype=spec.dtype)})

@@ -62,8 +62,8 @@ def _failure(report: ValidationReport) -> str:
 
 @overload
 def assert_valid(
-    df: pl.DataFrame,
     spec: SpecLike,
+    df: pl.DataFrame,
     *,
     references: References = None,
     options: ValidationOptions | None = None,
@@ -73,8 +73,8 @@ def assert_valid(
 
 @overload
 def assert_valid(
-    df: pl.LazyFrame,
     spec: SpecLike,
+    df: pl.LazyFrame,
     *,
     references: References = None,
     options: ValidationOptions | None = None,
@@ -83,8 +83,8 @@ def assert_valid(
 
 
 def assert_valid(
-    df: pl.DataFrame | pl.LazyFrame,
     spec: SpecLike,
+    df: pl.DataFrame | pl.LazyFrame,
     *,
     references: References = None,
     options: ValidationOptions | None = None,
@@ -98,12 +98,15 @@ def assert_valid(
     failed test rather than an error. The message names the spec, each
     finding by its key, and up to ten of the rows that fail, as a table.
 
+    The spec comes first, as for every verb. *Since 2.0; 1.x took
+    `(df, spec)`, which raises a `TypeError` saying so.*
+
     Parameters
     ----------
-    df : pl.DataFrame | pl.LazyFrame
-        What the code under test produced. A `LazyFrame` comes back lazy.
     spec : TableSpec | FrameSpec class
         What it should meet.
+    df : pl.DataFrame | pl.LazyFrame
+        What the code under test produced. A `LazyFrame` comes back lazy.
     references : mapping, optional
         Parent frames for `spec`'s foreign keys, as `validate()` takes them.
     options : ValidationOptions, optional
@@ -117,10 +120,10 @@ def assert_valid(
     Examples
     --------
     >>> spec = TableSpec("Totals", {"total": ColSpec(pl.Float64, bounds=(0, 100))})
-    >>> assert_valid(pl.DataFrame({"total": [10.0, 20.0]}), spec).height
+    >>> assert_valid(spec, pl.DataFrame({"total": [10.0, 20.0]})).height
     2
     >>> try:
-    ...     assert_valid(pl.DataFrame({"total": [10.0, 250.0]}), spec)
+    ...     assert_valid(spec, pl.DataFrame({"total": [10.0, 250.0]}))
     ... except AssertionError as failure:
     ...     print(failure)
     Totals: 1 finding(s) in 2 row(s)...
@@ -132,6 +135,11 @@ def assert_valid(
     │ 250.0 ┆ total__bounds     │
     └───────┴───────────────────┘
     """
+    if isinstance(spec, (pl.DataFrame, pl.LazyFrame)):
+        raise TypeError(
+            "assert_valid takes the spec first since 2.0: "
+            "assert_valid(spec, df), not assert_valid(df, spec)."
+        )
     try:
         return validate(spec, df, references=references, options=options, **keywords)
     except ValidationError as error:
@@ -237,7 +245,7 @@ def check_pipeline(
     result = fn(**frames)
     parents: dict[Any, Any] = {**(references or {}), **generated}
     checked = assert_valid(
-        result, output, references=parents, options=options, **keywords
+        output, result, references=parents, options=options, **keywords
     )
     return checked, frames
 

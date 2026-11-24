@@ -63,7 +63,7 @@ def test_class_body_builds_a_table_spec():
 def test_columns_are_not_class_attributes_but_still_reachable():
     assert "order_id" not in vars(Orders)
     assert Orders.order_id == ColSpec(pl.Int64, unique=True)
-    assert Orders.col("order_id") is Orders.spec["order_id"]
+    assert Orders.column("order_id") is Orders.spec["order_id"]
     with pytest.raises(AttributeError):
         Orders.not_a_column  # noqa: B018
 

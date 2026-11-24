@@ -10,9 +10,9 @@
 
 The metaclass takes the `ColSpec` attributes and the dunder declarations out
 of the class namespace *before* the class exists, so a column can be named
-`schema` or `tag` without shadowing the method of the same name. Column
+`schema` or `tagged` without shadowing the method of the same name. Column
 attributes are still reachable as `Orders.order_id`, through a fallback that
-only runs when ordinary attribute lookup fails; `Orders.col("schema")` and
+only runs when ordinary attribute lookup fails; `Orders.column("schema")` and
 `Orders.spec["schema"]` reach a column whatever it is called.
 
 Internal: not part of the public API.
@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, Unpack, cast, overload
 
 import polars as pl
 
+from polspec._removed import removed, renamed_keywords
 from polspec.catspec import CatSpec
 from polspec.checks import Check, DeclaredCheck
 from polspec.errors import SpecError
@@ -466,7 +467,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     The class body builds `DataSource.spec`, a `TableSpec`; every classmethod
     here forwards to a function over it. A column may take any name: one that
     collides with a method (`schema`, `tag`, ...) is reachable as
-    `DataSource.col("schema")` while the method keeps working. Names that
+    `DataSource.column("schema")` while the method keeps working. Names that
     cannot be attributes at all -- a leading underscore, or one straight from
     data -- go through `__columns__`:
 
@@ -505,16 +506,17 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         return cast("type[FrameSpec]", cls_)
 
     @classmethod
+    @renamed_keywords(categories="catspec")
     def from_yaml(
         cls,
         source: str | Path,
         *,
-        categories: CatSpec | type[CatSpec] | str | Path | None = None,
+        catspec: CatSpec | type[CatSpec] | str | Path | None = None,
         strict: bool = True,
     ) -> type[FrameSpec]:
         """Builds a new FrameSpec subclass from a YAML file written by `to_yaml`.
 
-        `categories` is a CatSpec registry, or a path to one, used to resolve
+        `catspec` is a CatSpec registry, or a path to one, used to resolve
         shared Enums and Categoricals; when omitted, a `categories:` key in
         the file is loaded automatically. An unknown key in the file is an
         error unless `strict=False`, which downgrades it to a warning.
@@ -522,7 +524,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         from polspec import serialization
 
         return cls.from_spec(
-            serialization.from_yaml(source, categories=categories, strict=strict)
+            serialization.from_yaml(source, catspec=catspec, strict=strict)
         )
 
     @classmethod
@@ -571,9 +573,13 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     # ------------------------------------------------------------------
 
     @classmethod
-    def col(cls, name: str) -> ColSpec:
-        """The declaration of one column, whatever it is called."""
+    def column(cls, name: str) -> ColSpec:
+        """The declaration of one column, whatever it is called. *Named
+        `col` before 2.0, which `polspec.col` -- a predicate -- shared.*"""
         return cls.spec[name]
+
+    col = classmethod(removed("FrameSpec", "col", "column"))
+    tag = classmethod(removed("FrameSpec", "tag", "tagged"))
 
     @classmethod
     def schema(cls) -> pl.Schema:
@@ -581,13 +587,13 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         return cls.spec.schema()
 
     @classmethod
-    def tag(
+    def tagged(
         cls,
         *tags: str | Sequence[str],
         match: Literal["any", "all"] = "any",
     ) -> list[str]:
         """Column names carrying any (or all) of the tags, in declaration order."""
-        return cls.spec.tag(*tags, match=match)
+        return cls.spec.tagged(*tags, match=match)
 
     # ------------------------------------------------------------------
     # Shared categories
@@ -596,7 +602,7 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     @classmethod
     def catspec(cls) -> CatSpec:
         """The CatSpec registry this spec's Enum and Categorical columns imply."""
-        return CatSpec.from_framespec(cls.spec)
+        return CatSpec.from_spec(cls.spec)
 
     @classmethod
     def with_catspec(
@@ -615,18 +621,17 @@ class FrameSpec(metaclass=_FrameSpecMeta):
     # ------------------------------------------------------------------
 
     @classmethod
-    def to_yaml(cls, path: str | Path | None = None) -> str | None:
-        """This spec as human-readable YAML: written to the file `path`, or,
-        with no `path`, returned as text."""
+    def to_yaml(cls, path: str | Path | None = None) -> str:
+        """This spec as human-readable YAML, written to the file `path` too
+        when one is given."""
         from polspec import serialization
 
         return serialization.to_yaml(cls.spec, path)
 
     @classmethod
-    def to_python(cls, path: str | Path | None = None) -> str | None:
-        """This spec as an importable Python module defining a subclass:
-        written to the file `path`, or, with no `path`, returned as
-        text."""
+    def to_python(cls, path: str | Path | None = None) -> str:
+        """This spec as an importable Python module defining a subclass,
+        written to the file `path` too when one is given."""
         from polspec import serialization
 
         return serialization.to_python(cls.spec, path)

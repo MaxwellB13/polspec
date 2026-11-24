@@ -61,7 +61,7 @@ def test_validation_foreign_key_accepts_lazyframe_reference():
 
 def test_validation_foreign_key_missing_references_raises_value_error():
     df = pl.DataFrame({"order_id": [1], "customer_id": [1]})
-    with pytest.raises(ValueError, match="no DataFrame for it was supplied"):
+    with pytest.raises(ValidationError, match="no DataFrame for it was supplied"):
         OrderSpec2.validate(df)
 
 
@@ -120,5 +120,7 @@ def test_validation_foreign_key_composite():
 def test_validation_foreign_key_missing_ref_columns_in_parent_raises():
     bad_parent = pl.DataFrame({"other_col": [1, 2]})
     df = pl.DataFrame({"order_id": [1], "customer_id": [1]})
-    with pytest.raises(ValueError, match="not present in the referenced DataFrame"):
+    with pytest.raises(
+        ValidationError, match="not present in the referenced DataFrame"
+    ):
         OrderSpec2.validate(df, references={CustomerSpec: bad_parent})

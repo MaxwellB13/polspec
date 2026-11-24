@@ -185,7 +185,7 @@ def test_values_where_the_dtype_goes_say_how_to_declare_an_enum_of_them():
     was an unhashable-type error; it names the Enum it was meant to be."""
     with pytest.raises(
         SpecError,
-        match=re.escape("use ColSpec(pl.Enum(['A', 'B']), weights=[0.7, 0.3])"),
+        match=re.escape("use ColSpec(pl.Enum, choices={'A': 0.7, 'B': 0.3})"),
     ):
         ColSpec({"A": 0.7, "B": 0.3})
     with pytest.raises(SpecError, match=re.escape("use ColSpec(pl.Enum(['A', 'B']))")):

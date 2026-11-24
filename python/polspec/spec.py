@@ -23,6 +23,7 @@ from polspec._colspec.common import distinct_values, value_dtype_of
 from polspec._colspec.common import is_categorical_dtype as is_categorical_dtype
 from polspec._colspec.common import is_dtype as is_dtype
 from polspec._colspec.masks import in_values, measure_length, out_of_bounds
+from polspec._removed import refuse_keyword
 from polspec.bound import Bound
 from polspec.checks import Check, failure_mask
 from polspec.constants import (
@@ -198,9 +199,11 @@ class ColSpec:
     distribution_params : dict[str, float] | None, optional
         Parameters specific to the chosen distribution.
     choices : tuple | list | dict | None, optional
-        A finite set of allowed values. A dict maps each choice to its weight.
-    weights : tuple[float, ...] | list[float] | None, optional
-        Weights associated with `choices`, biasing selection probabilities.
+        A finite set of allowed values. A dict maps each choice to its weight,
+        biasing selection: `{"a": 3, "b": 1}`. A weighted Enum maps its
+        categories, and a weighted Boolean both its values. The weights are
+        read back as `weights`. *Since 2.0 the only way to give weights:
+        1.x also took `weights=[...]` beside `choices`.*
     rules : tuple[ColRule, ...], optional
         Rules (`ColRule`) that overwrite the column's values on the rows their
         condition matches.
@@ -263,7 +266,8 @@ class ColSpec:
     distribution: str | None = None
     distribution_params: dict[str, float] | None = None
     choices: tuple[Any, ...] | None = None
-    weights: tuple[float, ...] | None = None
+    # Read as `weights`; declared through `choices={value: weight}`.
+    _weights: tuple[float, ...] | None = dataclasses.field(default=None, repr=False)
     rules: tuple[ColRule, ...] = ()
     validators: tuple[Check, ...] = ()
     derive: Pred | None = None
@@ -296,7 +300,6 @@ class ColSpec:
             distribution: str | None = None,
             distribution_params: dict[str, float] | None = None,
             choices: Sequence[Any] | dict[Any, float] | None = None,
-            weights: Sequence[float] | None = None,
             rules: Sequence[ColRule] = (),
             validators: Check
             | pl.Expr
@@ -306,6 +309,14 @@ class ColSpec:
             derive: Pred | None = None,
             text_format: str | None = None,
         ) -> None: ...
+
+    @property
+    def weights(self) -> tuple[float, ...] | None:
+        """Each value's weight, in the order of `choices` -- or of an Enum's
+        categories, or `[p_false, p_true]` for a Boolean -- or None when
+        every value is as likely. Declared as `choices={value: weight}`.
+        *Since 2.0 there is no `weights=` keyword.*"""
+        return self._weights
 
     def __post_init__(self) -> None:
         # Order matters: normalization first, so every check below sees the
@@ -376,6 +387,16 @@ class ColSpec:
             # Its categories are its choices: the spelling it accepts.
             values = tuple(dtype.categories.to_list())
             first = "Enum"
+        elif values is None and weights is not None:
+            # A weighted List of an Enum, or a Boolean (its two values,
+            # false first).
+            value_dtype = self.value_dtype
+            values = (
+                tuple(value_dtype.categories.to_list())
+                if isinstance(value_dtype, pl.Enum)
+                else (False, True)
+            )
+            first = repr(dtype)
         elif values is not None and weights is not None:
             first = repr(dtype)
         else:
@@ -387,7 +408,7 @@ class ColSpec:
                 f"{v!r}: {w!r}" for v, w in zip(values, weights, strict=True)
             )
             shown = f"choices={{{pairs}}}"
-        return [first, shown], frozenset({"choices", "weights"})
+        return [first, shown], frozenset({"choices", "_weights"})
 
     def __eq__(self, other: object) -> bool:
         """Field by field, as a dataclass compares -- a `col()` expression
@@ -405,7 +426,7 @@ class ColSpec:
 
     def replace(self, **changes: Any) -> ColSpec:
         """This column with `changes` made, checked as a new declaration is:
-        `Orders.col("total").replace(bounds=None)`."""
+        `Orders.column("total").replace(bounds=None)`."""
         return dataclasses.replace(self, **changes)
 
     @property
@@ -414,6 +435,9 @@ class ColSpec:
         column, the column's own otherwise. Every field that describes a
         value is checked against this."""
         return value_dtype_of(self.dtype)
+
+
+refuse_keyword(ColSpec, "weights", "choices={value: weight}")
 
 
 def claims_refused(spec: ColSpec, values: pl.Series) -> list[str]:

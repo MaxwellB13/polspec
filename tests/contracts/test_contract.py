@@ -128,7 +128,7 @@ RICH = TableSpec(
         ),
         "status": ColSpec(
             pl.Enum(["NEW", "SENT", "LOST"]),
-            weights=[0.5, 0.45, 0.05],
+            choices={"NEW": 0.5, "SENT": 0.45, "LOST": 0.05},
             tags="state",
             default="NEW",
         ),
@@ -166,7 +166,7 @@ def test_everything_a_spec_file_says_is_written_byte_for_byte():
 
 
 def test_a_registry_file_is_written_byte_for_byte():
-    registry = Registry(RICH, TREE, categories=polspec.CatSpec(enums={"STATE": ["A"]}))
+    registry = Registry(RICH, TREE, catspec=polspec.CatSpec(enums={"STATE": ["A"]}))
     _golden("registry.yaml", registry.to_yaml())
 
 
@@ -242,7 +242,9 @@ def project(tmp_path):
         "Orders",
         {
             "total": ColSpec(pl.Float64, bounds=(0.0, 10.0)),
-            "status": ColSpec(pl.Enum(["NEW", "PAID"]), weights=[0.5, 0.5]),
+            "status": ColSpec(
+                pl.Enum(["NEW", "PAID"]), choices={"NEW": 0.5, "PAID": 0.5}
+            ),
         },
     )
     specs, data = tmp_path / "specs", tmp_path / "data"

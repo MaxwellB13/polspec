@@ -70,7 +70,7 @@ COLUMN_FIELDS: dict[str, tuple[ColSpec, ColSpec]] = {
     "choices": (ColSpec(pl.String), ColSpec(pl.String, choices=["a", "b"])),
     "weights": (
         ColSpec(pl.String, choices=["a", "b"]),
-        ColSpec(pl.String, choices=["a", "b"], weights=[1, 3]),
+        ColSpec(pl.String, choices={"a": 1, "b": 3}),
     ),
     "rules": (
         ColSpec(pl.Int64, bounds=(0, 9)),
@@ -156,7 +156,7 @@ TABLE_FIELDS: dict[type, dict[str, tuple[TableSpec, TableSpec]]] = {
     ColRule: {
         "when": (_ruled(), _ruled(when=col("a") > 6)),
         "choices": (_ruled(), _ruled(choices=(1, 3))),
-        "weights": (_ruled(), _ruled(weights=(1.0, 3.0))),
+        "weights": (_ruled(), _ruled(choices={1: 1.0, 3: 3.0})),
     },
     ForeignKey: {
         "columns": (_keyed(), _keyed(columns="parent2")),

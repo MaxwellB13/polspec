@@ -192,11 +192,10 @@ _REWRITTEN = {
     "rules": TableSpec(
         "R",
         {
-            "k": ColSpec(pl.Enum(["a", "b", "c"]), weights=[5, 3, 2]),
+            "k": ColSpec(pl.Enum(["a", "b", "c"]), choices={"a": 5, "b": 3, "c": 2}),
             "v": ColSpec(
                 pl.Int64,
-                choices=[1, 2, 3],
-                weights=[1, 1, 1],
+                choices={1: 1, 2: 1, 3: 1},
                 rules=[ColRule(when=col("k") == "a", choices=[1])],
             ),
         },
@@ -254,7 +253,7 @@ _REWRITTEN = {
                 distribution="normal",
                 distribution_params={"mean": 100_000, "std": 30_000},
             ),
-            "b": ColSpec(pl.Enum(["x", "y"]), weights=[3, 1]),
+            "b": ColSpec(pl.Enum(["x", "y"]), choices={"x": 3, "y": 1}),
         },
         unique_together=[("a", "b")],
     ),
@@ -275,8 +274,11 @@ def test_a_column_a_pass_rewrites_is_not_held_to_its_weights(name, rows):
 _WIDE = TableSpec(
     "Wide",
     {
-        "status": ColSpec(pl.Enum(["NEW", "PAID", "SHIPPED"]), weights=[0.7, 0.2, 0.1]),
-        "flag": ColSpec(pl.Boolean, weights=[0.8, 0.2]),
+        "status": ColSpec(
+            pl.Enum(["NEW", "PAID", "SHIPPED"]),
+            choices={"NEW": 0.7, "PAID": 0.2, "SHIPPED": 0.1},
+        ),
+        "flag": ColSpec(pl.Boolean, choices={False: 0.8, True: 0.2}),
         "amount": ColSpec(
             pl.Float64,
             bounds=(0, 1_000),
@@ -374,7 +376,9 @@ def test_a_small_move_over_many_rows_is_within_tolerance():
     worth reporting until the tolerance says so."""
     rows = 1_000_000
     rng = np.random.default_rng(1)
-    spec = TableSpec("T", {"s": ColSpec(pl.Enum(["a", "b"]), weights=[0.7, 0.3])})
+    spec = TableSpec(
+        "T", {"s": ColSpec(pl.Enum(["a", "b"]), choices={"a": 0.7, "b": 0.3})}
+    )
     frame = pl.DataFrame(
         {"s": pl.Series(rng.choice(["a", "b"], rows, p=[0.69, 0.31]))}
     ).cast({"s": spec["s"].dtype})

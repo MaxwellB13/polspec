@@ -161,12 +161,12 @@ property this project's own test suite is built around:
 ```python
 def test_orders_roundtrip(polspec_frames):
     frame = polspec_frames(Orders, 500)
-    assert_valid(frame, Orders)
+    assert_valid(Orders, frame)
 
 
 def test_orders_cartesian_coverage(polspec_frames):
     frame = polspec_frames(Orders, 500, method="cartesian")
-    assert_valid(frame, Orders)
+    assert_valid(Orders, frame)
 ```
 
 The frames come from the [`polspec_frames` fixture](testing.md#a-frame-for-a-test-polspec_frames),
@@ -191,7 +191,7 @@ def test_invoices_roundtrip(polspec_frames):
     # __checks__ wraps arbitrary expressions that generation cannot be made
     # to satisfy
     frame = polspec_frames(Invoices, 500)
-    assert_valid(frame, Invoices, checks=False)
+    assert_valid(Invoices, frame, checks=False)
 ```
 
 A spec with a foreign key into another spec declared in the same file
@@ -204,7 +204,7 @@ def test_lines_roundtrip(polspec_frames):
     parents[Customers] = polspec_frames(Customers, 500)
     parents[Orders] = polspec_frames(Orders, 500, references=parents)
     frame = polspec_frames(Lines, 500, references=parents)
-    assert_valid(frame, Lines, references=parents)
+    assert_valid(Lines, frame, references=parents)
 ```
 
 One whose parent is declared in another file — or left out by `--class` —

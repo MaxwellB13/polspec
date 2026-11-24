@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 
 from polspec.bound import Bound
+from polspec.errors import PolspecError
 from polspec.string_formats import Format
 from polspec.string_formats import lookup as _lookup_format
 
@@ -151,7 +152,11 @@ class Domain:
             return None
         try:
             return self._rejects(other)
-        except (TypeError, ValueError):  # incomparable declarations prove nothing
+        except (
+            TypeError,
+            ValueError,
+            PolspecError,
+        ):  # incomparable declarations prove nothing
             return None
 
     def _rejects(self, other: Domain) -> str | None:

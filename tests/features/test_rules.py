@@ -12,6 +12,7 @@ from polspec import (
     ColRule,
     ColSpec,
     FrameSpec,
+    SpecError,
     TableSpec,
     col,
     inspect,
@@ -109,7 +110,7 @@ def test_rule_with_zero_rows():
 
 
 def test_colrule_rejects_choices_outside_enum_categories():
-    with pytest.raises(ValueError, match="not among this column's Enum categories"):
+    with pytest.raises(SpecError, match="not among this column's Enum categories"):
         ColSpec(
             dtype=pl.Enum(["X", "Y", "Z"]),
             rules=(ColRule(when=col("enum_1") == "A", choices=["NOT_A_CATEGORY"]),),
@@ -117,7 +118,7 @@ def test_colrule_rejects_choices_outside_enum_categories():
 
 
 def test_colrule_rejects_malformed_when():
-    with pytest.raises(TypeError, match="must be a predicate"):
+    with pytest.raises(SpecError, match="must be a predicate"):
         ColRule(when="not a dict", choices=["X"])
 
 
@@ -125,14 +126,14 @@ def test_colrule_rejects_the_removed_dict_condition():
     """The one-column dict was the only other spelling; `col()` is the one
     that survived, and the refusal says so.
     """
-    with pytest.raises(ValueError, match="must be a predicate built with col") as info:
+    with pytest.raises(SpecError, match="must be a predicate built with col") as info:
         ColRule(when={"column": "x", "equals": 1}, choices=["X"])
     assert "col('x') == ..." in str(info.value)
     assert "still loads" in str(info.value)  # a file written earlier is fine
 
 
 def test_colrule_rejects_empty_choices():
-    with pytest.raises(ValueError, match="must not be empty"):
+    with pytest.raises(SpecError, match="must not be empty"):
         ColRule(when=col("x") == 1, choices=[])
 
 
@@ -192,7 +193,7 @@ def test_expanded_rule_operations():
 
 
 def test_rule_referencing_unknown_column_raises():
-    with pytest.raises(ValueError, match="references unknown column"):
+    with pytest.raises(SpecError, match="references unknown column"):
 
         class BadRule(FrameSpec):
             x = ColSpec(
@@ -213,8 +214,7 @@ def test_colrule_weighted_choices():
                 ),
                 ColRule(
                     when=col("segment") == "premium",
-                    choices=["gift", "vip_pass"],
-                    weights=[0.3, 0.7],
+                    choices={"gift": 0.3, "vip_pass": 0.7},
                 ),
             ),
         )

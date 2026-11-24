@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Literal
 import polars as pl
 
 from polspec import FrameSpec
-from polspec.errors import CliError
+from polspec.errors import CliError, PolspecError
 from polspec.foreign_key import ForeignKey
 from polspec.frames import json_casts, sample_rows, text_format_casts
 from polspec.profiler import STAYS_TEXT_NOTE, TEXT_NOTE
@@ -81,7 +81,7 @@ def _read_data_file(
         raise CliError(f"could not read {path}: {exc}") from exc
     try:
         df = sample_rows(df, sample)
-    except ValueError as exc:
+    except (ValueError, PolspecError) as exc:
         raise CliError(str(exc)) from exc
     return parse_declared_text(df, spec) if spec is not None else df
 

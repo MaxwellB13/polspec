@@ -316,13 +316,19 @@ def test_a_frame_concatenated_from_batches_validates_however_it_is_chunked():
                 nullable=True,
                 null_probability=0.15793906434049723,
                 list_length=(2, 3),
-                weights=[1 / 3, 4.857979561927767, 3.2679425436102743, 1.9, 1 / 3],
+                choices={
+                    "LhCB": 1 / 3,
+                    "UX": 4.857979561927767,
+                    "lfaz": 3.2679425436102743,
+                    "dMixyX": 1.9,
+                    "f": 1 / 3,
+                },
             ),
             "c2": ColSpec(
                 pl.Boolean,
                 nullable=True,
                 null_probability=3.8116806693526224e-15,
-                weights=[6.713186804849229, 8.318356618249505],
+                choices={False: 6.713186804849229, True: 8.318356618249505},
             ),
         },
     )

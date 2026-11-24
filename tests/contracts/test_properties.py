@@ -283,6 +283,27 @@ _VALUE = st.one_of(
 # ---------------------------------------------------------------------------
 
 
+def _weighted(fields: dict[str, Any]) -> dict[str, Any]:
+    """Drawn `weights` declared as 2.0 takes them: inside `choices`, each
+    value -- a choice, an Enum's category, or a Boolean's -- beside its
+    weight."""
+    if "weights" not in fields:
+        return fields
+    fields = dict(fields)
+    weights = fields.pop("weights")
+    value = fields["dtype"]
+    while isinstance(value, (pl.List, pl.Array)):
+        value = value.inner
+    if "choices" in fields:
+        values = fields["choices"]
+    elif isinstance(value, pl.Enum):
+        values = value.categories.to_list()
+    else:
+        values = [False, True]
+    fields["choices"] = dict(zip(values, weights, strict=True))
+    return fields
+
+
 def _uniquely_drawable(fields: dict[str, Any]) -> bool:
     """Whether a unique column has room for every row, and nothing a unique
     column refuses."""
@@ -324,7 +345,7 @@ def columns(draw: st.DrawFn) -> ColSpec:
         fields["null_probability"] = draw(st.floats(0.0, 1.0))
     if wrap == "none" and _uniquely_drawable(fields) and draw(st.booleans()):
         fields["unique"] = True
-    return ColSpec(**fields)
+    return ColSpec(**_weighted(fields))
 
 
 def _check_that_holds(name: str, column: ColSpec) -> Check | None:
@@ -1015,7 +1036,7 @@ def _lone_number(draw: st.DrawFn) -> TableSpec:
         fields.pop("bounds", None)
     if draw(st.booleans()):
         fields["nullable"] = True
-    return TableSpec("Drawn", {"c0": ColSpec(**fields)})
+    return TableSpec("Drawn", {"c0": ColSpec(**_weighted(fields))})
 
 
 @st.composite

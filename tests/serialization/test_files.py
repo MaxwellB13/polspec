@@ -19,6 +19,7 @@ from polspec import (
     FrameSpec,
     Registry,
     SerializationError,
+    SpecError,
     TableSpec,
     ValidationError,
     col,
@@ -92,14 +93,14 @@ def test_to_yaml_requires_columns(tmp_path):
     class Empty(FrameSpec):
         pass
 
-    with pytest.raises(ValueError, match="declares no ColSpec columns"):
+    with pytest.raises(SpecError, match="declares no ColSpec columns"):
         Empty.to_yaml(path=tmp_path / "spec.yaml")
 
 
 def test_from_yaml_requires_columns(tmp_path):
     yaml_path = tmp_path / "empty.yaml"
     yaml_path.write_text(yaml.safe_dump({"name": "Empty", "columns": {}}))
-    with pytest.raises(ValueError, match="declares no columns"):
+    with pytest.raises(SerializationError, match="declares no columns"):
         FrameSpec.from_yaml(source=yaml_path)
 
 
@@ -125,15 +126,14 @@ def test_distributions_and_weights_yaml_roundtrip(tmp_path):
         )
         enum_col = ColSpec(
             dtype=pl.Enum(["X", "Y", "Z"]),
-            weights=[0.5, 0.3, 0.2],
+            choices={"X": 0.5, "Y": 0.3, "Z": 0.2},
         )
         rule_col = ColSpec(
             dtype=pl.String,
             rules=(
                 ColRule(
                     when=col("enum_col") == "X",
-                    choices=["A", "B"],
-                    weights=[0.8, 0.2],
+                    choices={"A": 0.8, "B": 0.2},
                 ),
             ),
         )
@@ -326,7 +326,7 @@ def test_to_python_requires_columns(tmp_path):
     class Empty(FrameSpec):
         pass
 
-    with pytest.raises(ValueError, match="declares no ColSpec columns"):
+    with pytest.raises(SpecError, match="declares no ColSpec columns"):
         Empty.to_python(tmp_path / "spec.py")
 
 
@@ -582,9 +582,9 @@ def test_the_top_level_file_functions_take_either_kind_of_spec(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_with_no_path_a_spec_comes_back_as_text(tmp_path):
-    """`to_yaml` and `to_python` return what they would write, for a test, a
-    notebook or a review; `catspec_to_yaml` and `to_markdown` already did."""
+def test_every_writer_returns_its_text_with_a_path_or_without(tmp_path):
+    """`to_yaml` and `to_python` return what they write, as `to_markdown`
+    always has -- with a path too, since 2.0, where 1.x returned None."""
     from polspec import FrameSpec, Registry
 
     class Orders(FrameSpec):
@@ -592,17 +592,20 @@ def test_with_no_path_a_spec_comes_back_as_text(tmp_path):
         id = ColSpec(pl.Int64, unique=True)
 
     text = to_yaml(Orders)
-    assert to_yaml(Orders, tmp_path / "o.yaml") is None
+    assert to_yaml(Orders, tmp_path / "o.yaml") == text
     assert text == (tmp_path / "o.yaml").read_text(encoding="utf-8")
     assert Orders.to_yaml() == text
 
     source = to_python(Orders)
-    to_python(Orders, tmp_path / "o.py")
+    assert to_python(Orders, tmp_path / "o.py") == source
     assert source == (tmp_path / "o.py").read_text(encoding="utf-8")
     assert Orders.to_python() == source
 
     registry = Registry(Orders)
     assert "specs:" in registry.to_yaml()
+    assert registry.to_yaml(tmp_path / "r.yaml") == registry.to_yaml()
+    categories = CatSpec(enums={"S": ["a"]})
+    assert categories.to_yaml(tmp_path / "c.yaml") == categories.to_yaml()
 
 
 # ---------------------------------------------------------------------------

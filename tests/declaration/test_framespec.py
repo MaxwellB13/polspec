@@ -14,6 +14,7 @@ from polspec import (
     Check,
     ColSpec,
     FrameSpec,
+    SpecError,
 )
 
 # ---------------------------------------------------------------------------
@@ -61,7 +62,7 @@ def test_colspec_and_framespec_tags(tmp_path):
     c6 = ColSpec(pl.Time, tags=["dup", "dup", "unique"])
     assert c6.tags == ("dup", "unique")
 
-    with pytest.raises(TypeError, match=r"ColSpec\.tags must be a string or sequence"):
+    with pytest.raises(SpecError, match=r"ColSpec\.tags must be a string or sequence"):
         ColSpec(pl.Int64, tags=123)  # type: ignore[arg-type]
 
     # 2. FrameSpec.tag query
@@ -73,43 +74,47 @@ def test_colspec_and_framespec_tags(tmp_path):
         untagged = ColSpec(pl.Boolean)
 
     # Single tag
-    assert TaggedSpec.tag("aggregate") == ["agg_val", "total_sum"]
-    assert TaggedSpec.tag("index") == ["id_col", "total_sum"]
-    assert TaggedSpec.tag("feature") == ["feature_1"]
-    assert TaggedSpec.tag("non_existent") == []
+    assert TaggedSpec.tagged("aggregate") == ["agg_val", "total_sum"]
+    assert TaggedSpec.tagged("index") == ["id_col", "total_sum"]
+    assert TaggedSpec.tagged("feature") == ["feature_1"]
+    assert TaggedSpec.tagged("non_existent") == []
 
     # Sequence of tags (match="any" by default)
-    assert TaggedSpec.tag(["aggregate", "feature"]) == [
+    assert TaggedSpec.tagged(["aggregate", "feature"]) == [
         "agg_val",
         "total_sum",
         "feature_1",
     ]
-    assert TaggedSpec.tag(["index", "feature"]) == ["id_col", "total_sum", "feature_1"]
+    assert TaggedSpec.tagged(["index", "feature"]) == [
+        "id_col",
+        "total_sum",
+        "feature_1",
+    ]
 
     # Multiple positional arguments (match="any" by default)
-    assert TaggedSpec.tag("aggregate", "feature") == [
+    assert TaggedSpec.tagged("aggregate", "feature") == [
         "agg_val",
         "total_sum",
         "feature_1",
     ]
-    assert TaggedSpec.tag("index", "feature") == ["id_col", "total_sum", "feature_1"]
+    assert TaggedSpec.tagged("index", "feature") == ["id_col", "total_sum", "feature_1"]
 
     # Multiple tags with match="all"
-    assert TaggedSpec.tag(["aggregate", "index"], match="all") == ["total_sum"]
-    assert TaggedSpec.tag("aggregate", "index", match="all") == ["total_sum"]
-    assert TaggedSpec.tag(["aggregate", "feature"], match="all") == []
-    assert TaggedSpec.tag("aggregate", "feature", match="all") == []
+    assert TaggedSpec.tagged(["aggregate", "index"], match="all") == ["total_sum"]
+    assert TaggedSpec.tagged("aggregate", "index", match="all") == ["total_sum"]
+    assert TaggedSpec.tagged(["aggregate", "feature"], match="all") == []
+    assert TaggedSpec.tagged("aggregate", "feature", match="all") == []
 
     # Empty tags returns empty list
-    assert TaggedSpec.tag() == []
+    assert TaggedSpec.tagged() == []
 
     # Invalid tag type
     with pytest.raises(TypeError, match="Tag must be a string or sequence"):
-        TaggedSpec.tag(123)  # type: ignore[arg-type]
+        TaggedSpec.tagged(123)  # type: ignore[arg-type]
 
     # Invalid match mode
     with pytest.raises(ValueError, match="Invalid match mode"):
-        TaggedSpec.tag(["aggregate"], match="invalid")  # type: ignore[arg-type]
+        TaggedSpec.tagged(["aggregate"], match="invalid")  # type: ignore[arg-type]
 
     # FrameSpec.tags should not exist
     assert not hasattr(TaggedSpec, "tags")
@@ -118,8 +123,8 @@ def test_colspec_and_framespec_tags(tmp_path):
     yaml_file = tmp_path / "tagged_spec.yaml"
     TaggedSpec.to_yaml(yaml_file)
     LoadedTagged = FrameSpec.from_yaml(yaml_file)
-    assert LoadedTagged.tag("aggregate") == ["agg_val", "total_sum"]
-    assert LoadedTagged.tag(["index", "feature"]) == [
+    assert LoadedTagged.tagged("aggregate") == ["agg_val", "total_sum"]
+    assert LoadedTagged.tagged(["index", "feature"]) == [
         "id_col",
         "total_sum",
         "feature_1",
@@ -134,12 +139,12 @@ def test_colspec_and_framespec_tags(tmp_path):
 
 
 def test_check_construction_rejects_non_expr():
-    with pytest.raises(TypeError, match="Check expr must be a polars Expr"):
+    with pytest.raises(SpecError, match="Check expr must be a polars Expr"):
         Check("col(a) > col(b)")  # type: ignore[arg-type]
 
 
 def test_checks_declaration_rejects_non_check_items():
-    with pytest.raises(TypeError, match="Items in __checks__ must be Check instances"):
+    with pytest.raises(SpecError, match="Items in __checks__ must be Check instances"):
 
         class BadSpec(FrameSpec):
             x = ColSpec(pl.Int64)
@@ -158,7 +163,7 @@ def test_check_anonymous_naming_defaults_to_expr_repr():
 
 
 def test_checks_declaration_rejects_duplicate_names():
-    with pytest.raises(ValueError, match="Duplicate Check name 'positive'"):
+    with pytest.raises(SpecError, match="Duplicate Check name 'positive'"):
 
         class DupCheckSpec(FrameSpec):
             a = ColSpec(pl.Int64)
@@ -184,7 +189,7 @@ def test_unique_together_declaration_variations_and_validation():
     assert SingleTupleSpec.spec.unique_together == (("tenant_id", "account_id"),)
 
     # Reference to non-existent column raises ValueError
-    with pytest.raises(ValueError, match="references unknown column 'missing_col'"):
+    with pytest.raises(SpecError, match="references unknown column 'missing_col'"):
 
         class BadUniqueSpec(FrameSpec):
             a = ColSpec(pl.Int64)
@@ -234,12 +239,12 @@ def test_colspec_validators_default_empty():
 
 
 def test_colspec_validators_rejects_invalid_item_type():
-    with pytest.raises(TypeError, match="must be a polars Expr, a predicate"):
+    with pytest.raises(SpecError, match="must be a polars Expr, a predicate"):
         ColSpec(pl.Int64, validators=["not an expr"])  # type: ignore[list-item]
 
 
 def test_colspec_validators_rejects_duplicate_names():
-    with pytest.raises(ValueError, match="Duplicate validator name 'dup'"):
+    with pytest.raises(SpecError, match="Duplicate validator name 'dup'"):
         ColSpec(
             pl.Int64,
             validators=[
@@ -266,7 +271,7 @@ def test_colspec_collapses_a_validator_written_twice():
 
 
 def test_framespec_rejects_validator_referencing_another_column():
-    with pytest.raises(ValueError, match="references other column"):
+    with pytest.raises(SpecError, match="references other column"):
 
         class BadSpec(FrameSpec):
             a = ColSpec(pl.Int64, validators=[pl.col("b") > 0])

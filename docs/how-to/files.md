@@ -44,8 +44,9 @@ Loaded = FrameSpec.from_yaml("orders.yaml")
 Loaded.generate(1_000, seed=1)
 ```
 
-With no path, `to_yaml()` and `to_python()` return the text instead of
-writing it — for a test, a notebook or a review. `polspec.to_dict(spec)`
+`to_yaml()` and `to_python()` return the text they write, and with no path
+only return it — for a test, a notebook or a review. *Returned with a path
+too since 2.0.* `polspec.to_dict(spec)`
 and `polspec.from_dict(data)` are the same file as plain Python data, for
 storing a spec somewhere other than a file.
 
@@ -172,8 +173,8 @@ Or pass a registry explicitly, which wins over anything the file names:
 
 <!-- docs: skip -->
 ```python
-FrameSpec.from_yaml("orders.yaml", categories=CatSpec.from_yaml("categories.yaml"))
-FrameSpec.from_yaml("orders.yaml", categories="categories.yaml")
+FrameSpec.from_yaml("orders.yaml", catspec=CatSpec.from_yaml("categories.yaml"))
+FrameSpec.from_yaml("orders.yaml", catspec="categories.yaml")
 ```
 
 A spec can also emit the registry its own columns imply:
@@ -257,7 +258,7 @@ categories = CatSpec(
     categoricals={"CURRENCY": pl.Categories("CURRENCY", physical=pl.UInt8)},
 )
 
-Registry(Customers, Orders, OrderLines, categories=categories).to_yaml("specs.yaml")
+Registry(Customers, Orders, OrderLines, catspec=categories).to_yaml("specs.yaml")
 registry = Registry.from_yaml("specs.yaml").resolve()
 ```
 

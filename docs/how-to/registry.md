@@ -130,7 +130,7 @@ whose declaration disagrees with it:
 
 <!-- docs: skip -->
 ```python
-registry = Registry(Orders, Products, categories=categories)
+registry = Registry(Orders, Products, catspec=categories)
 registry.resolve()   # RegistryError if Orders.status and categories.STATUS differ
 ```
 

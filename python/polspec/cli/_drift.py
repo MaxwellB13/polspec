@@ -16,7 +16,7 @@ from polspec.cli._io import (
 )
 from polspec.compare import DriftOptions, DriftReport, diff, drift
 from polspec.compare.report import SCHEMA_VERSION as REPORT_SCHEMA_VERSION
-from polspec.errors import CliError
+from polspec.errors import CliError, PolspecError
 
 _FAIL_ON = ("breaking", "any", "none")
 
@@ -82,7 +82,7 @@ def _drift_options(args: argparse.Namespace) -> DriftOptions:
             strict_dtypes=args.strict_dtypes,
             **given,
         )
-    except ValueError as exc:  # a tolerance outside 0..1, and the like
+    except (ValueError, PolspecError) as exc:  # a tolerance outside 0..1, and the like
         raise CliError(str(exc)) from exc
 
 

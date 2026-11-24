@@ -47,7 +47,9 @@ _NOT_A_DIFFERENCE = {(TableSpec, "name")}
 
 def _constructed(cls: type) -> set[str]:
     """The fields a caller gives: one filled in from another is not."""
-    return {f.name for f in dataclasses.fields(cls) if f.init}
+    # `_weights` is held as `weights`, under that key in a file, and
+    # declared inside `choices` (2.0).
+    return {f.name.removeprefix("_") for f in dataclasses.fields(cls) if f.init}
 
 
 def _through_a_file(spec: TableSpec, tmp_path) -> TableSpec:
@@ -132,7 +134,10 @@ def test_the_declared_constructor_matches_the_fields(cls):
     positional = [a.arg for a in stub.args.args if a.arg != "self"]
     keyword_only = [a.arg for a in stub.args.kwonlyargs]
     # What the constructor takes; a field filled in for it (`init=False`) is not.
-    fields = [f for f in dataclasses.fields(cls) if f.init]
+    # A private field (`_weights`) is declared through another (`choices`).
+    fields = [
+        f for f in dataclasses.fields(cls) if f.init and not f.name.startswith("_")
+    ]
     assert positional + keyword_only == [f.name for f in fields]
     # Keyword-only from the same field on (0.23): what identifies the thing
     # is positional, the rest is named.

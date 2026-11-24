@@ -169,13 +169,13 @@ def test_a_unique_finite_format_covers_its_list_exactly_once():
 )
 def test_bounds_wider_than_dtype_raise_cleanly(dtype, bounds):
     """C1: an unrepresentable bound is a declaration error, not a process abort."""
-    with pytest.raises(ValueError, match="outside the range"):
+    with pytest.raises(SpecError, match="outside the range"):
         ColSpec(dtype, bounds=bounds)
 
 
 @pytest.mark.parametrize("bounds", [(float("nan"), 1.0), (0.0, float("inf"))])
 def test_non_finite_bounds_raise_cleanly(bounds):
-    with pytest.raises(ValueError, match="finite"):
+    with pytest.raises(SpecError, match="finite"):
         ColSpec(pl.Float64, bounds=bounds)
 
 
@@ -590,7 +590,7 @@ def test_with_catspec_drops_weights_it_cannot_carry():
     """Weights are positional over a domain the re-type just resized."""
 
     class Weighted(FrameSpec):
-        code = ColSpec(pl.String, choices=["a", "b", "c"], weights=[1.0, 1.0, 2.0])
+        code = ColSpec(pl.String, choices={"a": 1.0, "b": 1.0, "c": 2.0})
 
     with pytest.warns(UserWarning) as caught:
         retyped = Weighted.with_catspec(CatSpec(enums={"code": ["a", "b"]}))
@@ -625,7 +625,7 @@ def test_with_catspec_keeps_choices_the_new_dtype_still_covers():
 
 def test_with_catspec_keeps_weights_that_still_fit():
     class Weighted(FrameSpec):
-        code = ColSpec(pl.String, choices=["a", "b", "c"], weights=[1.0, 1.0, 2.0])
+        code = ColSpec(pl.String, choices={"a": 1.0, "b": 1.0, "c": 2.0})
 
     retyped = Weighted.with_catspec(CatSpec(enums={"code": ["a", "b", "c"]}))
     assert retyped.spec.columns["code"].weights == (1.0, 1.0, 2.0)

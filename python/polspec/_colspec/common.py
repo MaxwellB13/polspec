@@ -64,12 +64,14 @@ def not_a_dtype(value: object) -> str:
     if isinstance(value, (Mapping, list, tuple, set)):
         # The values a column holds, written where its dtype goes.
         values = list(value)
-        shares = (
-            f", weights={list(value.values())!r}" if isinstance(value, Mapping) else ""
+        written = (
+            f"pl.Enum, choices={dict(value)!r}"
+            if isinstance(value, Mapping)
+            else f"pl.Enum({values!r})"
         )
         return (
             f"ColSpec.dtype must be a Polars dtype, got the values {values!r}: for a "
-            f"column of them, use ColSpec(pl.Enum({values!r}){shares})."
+            f"column of them, use ColSpec({written})."
         )
     spelling = POLARS_SPELLING.get(value) if isinstance(value, type) else None
     if spelling is None and isinstance(value, str):

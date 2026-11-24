@@ -90,9 +90,9 @@ def test_schema_only_reports_a_wrong_or_missing_column():
 def test_schema_only_runs_through_validate_and_assert_valid():
     bad_values = FRAME.lazy()  # the values fail; the schema does not
     assert isinstance(validate(SPEC, bad_values, schema_only=True), pl.LazyFrame)
-    assert_valid(bad_values, SPEC, schema_only=True)
+    assert_valid(SPEC, bad_values, schema_only=True)
     with pytest.raises(AssertionError):
-        assert_valid(bad_values, SPEC)
+        assert_valid(SPEC, bad_values)
 
 
 def test_schema_only_does_not_combine_with_parse_text():

@@ -42,6 +42,7 @@ they can change in any release, so code outside polspec should use only
 | `compare` | `diff` and `drift`: what changed between two specs, or between a spec and data. `fields.py` holds one comparator per `ColSpec` field, `data.py` measures a frame in the declaration's terms |
 | `asserting` | `assert_valid` and `check_pipeline`: `validate()` as an assertion whose message holds the findings and the first failing rows, and a pipeline test -- inputs generated together through a `Registry`, the call, the check -- in one call |
 | `_pytest` | The pytest plugin, registered under `pytest11`: the `polspec_frames` fixture and `--polspec-seed`, each test's seed derived from the session's and its node id, and a failing test's report naming the seed. The only module that imports pytest |
+| `_removed` | The names 2.0 renamed, each raising an error that names its replacement: `renamed_keywords` for a keyword, `removed` for a method |
 | `_session` | The seed of the test the plugin is running now, which `assert_valid` names in a failure and `check_pipeline` generates from -- apart from both, so the plugin loads nothing heavy |
 | `strategies` | `strategy`: frames a spec accepts as a Hypothesis strategy -- a drawn row count and seed through `generate()`, so valid by construction and shrinking to fewer rows; Hypothesis imported only when asked for |
 | `sizing` | `estimated_size`: a frame's memory, read off the declaration |

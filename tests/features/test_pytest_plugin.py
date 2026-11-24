@@ -156,7 +156,7 @@ def test_assert_valid_names_the_seed_under_pytest(pytester):
         + """
 def test_checked(polspec_frames):
     orders = polspec_frames(Orders, 50)
-    polspec.assert_valid(orders.with_columns(total=pl.lit(500.0)), Orders)
+    polspec.assert_valid(Orders, orders.with_columns(total=pl.lit(500.0)))
 """
     )
     result = _run(pytester)
@@ -205,7 +205,7 @@ def test_polspec_runs_without_pytest():
     probe = (
         "import sys; sys.modules['pytest'] = None; import polars as pl, polspec; "
         "spec = polspec.TableSpec('T', {'a': pl.Int64}); "
-        "polspec.assert_valid(polspec.generate(spec, 5, seed=1), spec); print('ok')"
+        "polspec.assert_valid(spec, polspec.generate(spec, 5, seed=1)); print('ok')"
     )
     out = subprocess.run(
         [sys.executable, "-c", probe], capture_output=True, text=True, check=True

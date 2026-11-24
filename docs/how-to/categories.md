@@ -46,7 +46,7 @@ An unnamed `pl.Categorical()` is rejected outright, since a registry entry with
 no name can't act as a shared key.
 
 `Categories.spec` is the `CatSpec` value the class body declares. Anywhere a
-registry is expected — `with_catspec`, `Registry(categories=...)` — the class
+registry is expected — `with_catspec`, `Registry(catspec=...)` — the class
 and the value are interchangeable.
 
 ## The dict constructor
@@ -130,7 +130,7 @@ two specs sharing it draw from the same domain.
 ```python
 df = Orders.generate(100, seed=1)
 CatSpec.from_dataframe(df)      # existing Enum/Categorical columns
-CatSpec.from_framespec(Orders)  # a spec's declared columns
+CatSpec.from_spec(Orders)  # a spec's declared columns
 ```
 
 ## Inferring one
@@ -138,10 +138,10 @@ CatSpec.from_framespec(Orders)  # a spec's declared columns
 `infer` picks a representation per column by cardinality:
 
 ```python
-categories = CatSpec.infer(df, max_enum_cardinality=30)
+categories = CatSpec.infer(df, max_unique_enum=30)
 ```
 
-- at most `max_enum_cardinality` distinct values → `Enum`
+- at most `max_unique_enum` distinct values → `Enum`
 - otherwise, up to `max_categorical_cardinality` and either a low unique ratio
   or under 256 values → `Categorical` with the narrowest physical dtype that fits
 - otherwise, left as `String`

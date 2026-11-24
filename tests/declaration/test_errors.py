@@ -59,13 +59,18 @@ def test_every_error_is_reachable_from_the_package():
         assert cls.__name__ in polspec.__all__
 
 
-def test_subclasses_keep_the_builtin_types_they_replaced():
-    assert issubclass(SpecError, ValueError)
-    assert issubclass(SpecError, TypeError)
-    assert issubclass(ValidationError, ValueError)
-    assert issubclass(GenerationError, ValueError)
-    assert issubclass(SerializationError, ValueError)
-    assert issubclass(RegistryError, LookupError)
+def test_a_polspec_error_is_no_builtin_error():
+    """Since 2.0: `except ValueError` meant for a bad argument does not catch
+    a spec's own complaint, as it did when each also inherited a built-in."""
+    for cls in (
+        SpecError,
+        ValidationError,
+        GenerationError,
+        SerializationError,
+        RegistryError,
+    ):
+        assert issubclass(cls, PolspecError)
+        assert not issubclass(cls, (ValueError, TypeError, LookupError)), cls
 
 
 def test_bad_declaration_is_a_spec_error():

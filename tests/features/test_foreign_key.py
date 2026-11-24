@@ -11,6 +11,7 @@ from polspec import (
     ForeignKey,
     FrameSpec,
     GenerationError,
+    SpecError,
     ValidationError,
 )
 
@@ -84,17 +85,17 @@ def test_foreign_key_declaration_variations():
 
 
 def test_foreign_key_mismatched_ref_columns_length_raises():
-    with pytest.raises(ValueError, match="must have the same length"):
+    with pytest.raises(SpecError, match="must have the same length"):
         ForeignKey(["a", "b"], references=CustomerFkSpec, ref_columns=["id"])
 
 
 def test_foreign_key_rejects_invalid_references_type():
-    with pytest.raises(TypeError, match="must be a FrameSpec subclass"):
+    with pytest.raises(SpecError, match="must be a FrameSpec subclass"):
         ForeignKey("a", references=123)  # type: ignore[arg-type]
 
 
 def test_foreign_key_declaration_rejects_unknown_local_column():
-    with pytest.raises(ValueError, match="unknown local column 'missing'"):
+    with pytest.raises(SpecError, match="unknown local column 'missing'"):
 
         class BadLocal(FrameSpec):
             a = ColSpec(pl.Int64)
@@ -102,9 +103,7 @@ def test_foreign_key_declaration_rejects_unknown_local_column():
 
 
 def test_foreign_key_declaration_rejects_unknown_ref_column():
-    with pytest.raises(
-        ValueError, match="unknown column 'missing' on 'CustomerFkSpec'"
-    ):
+    with pytest.raises(SpecError, match="unknown column 'missing' on 'CustomerFkSpec'"):
 
         class BadRef(FrameSpec):
             a = ColSpec(pl.Int64)
@@ -114,7 +113,7 @@ def test_foreign_key_declaration_rejects_unknown_ref_column():
 
 
 def test_foreign_key_declaration_rejects_dtype_mismatch():
-    with pytest.raises(ValueError, match="not dtype-compatible"):
+    with pytest.raises(SpecError, match="not dtype-compatible"):
 
         class BadDtype(FrameSpec):
             a = ColSpec(pl.String)
@@ -135,7 +134,7 @@ def test_foreign_key_declaration_allows_string_enum_categorical_bucket():
 
 
 def test_foreign_key_declaration_rejects_duplicate_names():
-    with pytest.raises(ValueError, match="Duplicate ForeignKey name 'dup'"):
+    with pytest.raises(SpecError, match="Duplicate ForeignKey name 'dup'"):
 
         class DupFk(FrameSpec):
             a = ColSpec(pl.Int64)
@@ -356,7 +355,7 @@ def test_generate_foreign_key_unique_column_samples_without_replacement():
 
 def test_generate_foreign_key_empty_parent_raises():
     empty_customers = pl.DataFrame({"id": pl.Series([], dtype=pl.Int64)})
-    with pytest.raises(ValueError, match="cannot generate values"):
+    with pytest.raises(GenerationError, match="cannot generate values"):
         GenOrderSpec.generate(10, references={GenCustomerSpec: empty_customers})
 
 
@@ -385,7 +384,7 @@ def test_generate_foreign_key_parent_all_nulls_raises():
             ForeignKey("customer_id", references=GenCustomerSpec, ref_columns="id")
         ]
 
-    with pytest.raises(ValueError, match="cannot generate values"):
+    with pytest.raises(GenerationError, match="cannot generate values"):
         ChildGenSpec.generate(10, references={GenCustomerSpec: all_null_parent})
 
 

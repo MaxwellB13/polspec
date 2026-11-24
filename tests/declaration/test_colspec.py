@@ -70,14 +70,14 @@ def test_yaml_roundtrip_keeps_underscore_columns(tmp_path):
 
 
 def test_explicit_declarations_must_be_colspecs():
-    with pytest.raises(TypeError, match="must be a ColSpec"):
+    with pytest.raises(SpecError, match="must be a ColSpec"):
 
         class Spec(FrameSpec):
             __columns__ = {"a": "not a colspec"}
 
 
 def test_explicit_declarations_must_be_a_mapping():
-    with pytest.raises(TypeError, match="must be a mapping"):
+    with pytest.raises(SpecError, match="must be a mapping"):
 
         class Spec(FrameSpec):
             __columns__ = [ColSpec(pl.Int64)]
@@ -103,7 +103,7 @@ def test_column_named_after_a_method_keeps_both():
     assert Spec.generate(5, seed=1).columns == ["schema", "other"]
     # The method wins on attribute access; the column is reachable by name.
     assert Spec.schema() == pl.Schema({"schema": pl.Int64, "other": pl.Int64})
-    assert Spec.col("schema") == ColSpec(pl.Int64)
+    assert Spec.column("schema") == ColSpec(pl.Int64)
     assert Spec.spec["schema"] == ColSpec(pl.Int64)
     # An ordinary column is still an attribute.
     assert Spec.other == ColSpec(pl.Int64)
@@ -115,7 +115,7 @@ def test_declaring_a_method_name_via_explicit_declaration_keeps_both():
 
     assert Spec.generate(5, seed=1).columns == ["schema", "tag"]
     assert Spec.schema() == pl.Schema({"schema": pl.Int64, "tag": pl.String})
-    assert Spec.tag("anything") == []
+    assert Spec.tagged("anything") == []
 
 
 def test_no_column_name_warns(recwarn):
@@ -160,12 +160,12 @@ def test_unknown_attribute_is_still_an_attribute_error():
     ],
 )
 def test_choices_that_collapse_to_one_value_are_rejected(choices):
-    with pytest.raises(ValueError, match="same once cast to String"):
+    with pytest.raises(SpecError, match="same once cast to String"):
         ColSpec(pl.String, choices=choices)
 
 
 def test_rule_choices_repeated_as_written_are_rejected():
-    with pytest.raises(ValueError, match="duplicate values"):
+    with pytest.raises(SpecError, match="duplicate values"):
         ColRule(when=col("g") == "x", choices=[1, 1])
 
 
@@ -251,8 +251,8 @@ def test_duplicate_choices_would_have_misapplied_weights():
     """The reason this is an error and not a de-duplication: weights are
     positional, so a repeated choice quietly doubles its share.
     """
-    with pytest.raises(ValueError, match="same once cast"):
-        ColSpec(pl.String, choices=[1, "1", 2], weights=[10.0, 10.0, 1.0])
+    with pytest.raises(SpecError, match="same once cast"):
+        ColSpec(pl.String, choices={1: 10.0, "1": 10.0, 2: 1.0})
 
 
 # ---------------------------------------------------------------------------
@@ -331,13 +331,13 @@ def test_closed_end_beyond_the_default_still_generates_above_it():
 
 def test_string_length_still_requires_both_endpoints():
     """Open ends are scoped to `bounds`; string_length says so rather than crashing."""
-    with pytest.raises(ValueError, match="requires both endpoints"):
+    with pytest.raises(SpecError, match="requires both endpoints"):
         ColSpec(pl.String, string_length=(3, None))
 
 
 def test_choices_are_checked_against_the_constrained_side_only():
     ColSpec(pl.Int64, choices=[5, 50], bounds=(0, None))  # no ceiling to exceed
-    with pytest.raises(ValueError, match=r"fall outside this column's bounds >= 10"):
+    with pytest.raises(SpecError, match=r"fall outside this column's bounds >= 10"):
         ColSpec(pl.Int64, choices=[5, 50], bounds=(10, None))
 
 
@@ -392,7 +392,7 @@ def test_col_name_overrides_the_attribute_name():
 
 
 def test_col_name_rejects_empty_string():
-    with pytest.raises(ValueError, match="must not be an empty string"):
+    with pytest.raises(SpecError, match="must not be an empty string"):
         ColSpec(pl.Int64, col_name="")
 
 
@@ -440,7 +440,7 @@ def test_a_rule_cannot_sit_on_a_composite_key_column():
 
 
 def test_colliding_col_names_are_rejected():
-    with pytest.raises(ValueError, match="both resolve to the column name 'x'"):
+    with pytest.raises(SpecError, match="both resolve to the column name 'x'"):
 
         class Spec(FrameSpec):
             a = ColSpec(pl.Int64, col_name="x")
@@ -448,7 +448,7 @@ def test_colliding_col_names_are_rejected():
 
 
 def test_col_name_conflicting_with_explicit_declaration_key_is_rejected():
-    with pytest.raises(ValueError, match="conflicts with its __columns__ key"):
+    with pytest.raises(SpecError, match="conflicts with its __columns__ key"):
 
         class Spec(FrameSpec):
             __columns__ = {"foo": ColSpec(pl.Int64, col_name="bar")}

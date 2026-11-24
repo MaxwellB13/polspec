@@ -23,8 +23,10 @@ from polspec import (
     ColRule,
     ColSpec,
     ForeignKey,
+    PolspecError,
     Registry,
     SerializationError,
+    SpecError,
     TableSpec,
     col,
     from_dict,
@@ -88,9 +90,7 @@ V2_SPEC = TableSpec(
             bounds=(Decimal("0.00"), Decimal("999.99")),
             validators=[Check(col("total") >= 0, name="total_non_negative")],
         ),
-        "status": ColSpec(
-            pl.Enum(["NEW", "PAID"]), choices=["NEW", "PAID"], weights=[3.0, 1.0]
-        ),
+        "status": ColSpec(pl.Enum(["NEW", "PAID"]), choices={"NEW": 3.0, "PAID": 1.0}),
     },
     foreign_keys=[ForeignKey("customer_id", references="Customers", ref_columns="id")],
     checks=[
@@ -187,7 +187,7 @@ def test_a_legacy_tag_spelling_gives_way_to_tags():
 
 
 def test_an_unknown_version_1_distribution_is_refused_by_name():
-    with pytest.raises(ValueError, match="cauchy"):
+    with pytest.raises(SpecError, match="cauchy"):
         from_dict({"columns": {"c": {"dtype": "Float64", "distribution": "cauchy"}}})
 
 
@@ -213,7 +213,7 @@ def test_a_malformed_version_1_condition_is_refused_by_name(condition, complaint
             "v": {"dtype": "String", "rules": [{"when": condition, "choices": ["x"]}]},
         },
     }
-    with pytest.raises(ValueError, match=complaint):
+    with pytest.raises(PolspecError, match=complaint):
         from_dict(data)
 
 

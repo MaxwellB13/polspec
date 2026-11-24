@@ -73,7 +73,7 @@ from polspec import assert_valid
 def test_summarize_spend_keeps_its_contract(polspec_frames):
     customers = polspec_frames(Customers, 200)
     orders = polspec_frames(Orders, 2_000, references={Customers: customers})
-    assert_valid(summarize_spend(customers, orders), CustomerSpend)
+    assert_valid(CustomerSpend, summarize_spend(customers, orders))
 ```
 
 `polspec_frames(spec, n, ...)` is `generate()` with a seed of the test's own,
@@ -104,7 +104,7 @@ Pass `seed=` to pin one frame yourself. `-p no:polspec` turns the plugin off.
 
 ## Checking what comes out — `assert_valid`
 
-`assert_valid(df, spec)` is `validate()` as an assertion. It returns the
+`assert_valid(spec, df)` is `validate()` as an assertion. It returns the
 validated frame, so it chains, and takes `validate()`'s options. A failure
 is an `AssertionError` — a failed test in any runner, not an error — whose
 message names the spec, each finding, and the first rows that fail:
