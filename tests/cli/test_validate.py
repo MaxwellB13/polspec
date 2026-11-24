@@ -372,7 +372,7 @@ def test_validate_reports_a_column_a_check_needs_rather_than_a_traceback(
     down with Polars' `ColumnNotFoundError`."""
     spec = tmp_path / "totals.yaml"
     spec.write_text(
-        "version: 3\n"
+        "version: 4\n"
         "name: Totals\n"
         "columns:\n"
         "  subtotal: {dtype: Float64}\n"

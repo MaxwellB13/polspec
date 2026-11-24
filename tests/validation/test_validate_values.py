@@ -468,7 +468,6 @@ def test_an_unholdable_value_is_found_inside_lists_and_structs():
     ]
 
 
-@pytest.mark.skipif(not hasattr(pl, "Map"), reason="Map is a Polars 2 dtype")
 def test_an_unholdable_value_is_found_in_a_map():
     spec = TableSpec("T", {"m": ColSpec(pl.Map(pl.String, pl.Int8))})
     frame = pl.DataFrame(

@@ -221,10 +221,8 @@ def _reference() -> dict[str, str]:
     not WRITE, reason="set POLSPEC_WRITE_SEEDED=1 to rewrite seeded.json"
 )
 def test_write_the_reference():
-    """Not a check: writes `seeded.json` from the installed Polars, keeping
-    the digests of cases this Polars cannot generate (`Map` needs Polars 2)."""
-    written = _reference() if REFERENCE.exists() else {}
-    written.update({name: _digest(make()) for name, make in CASES.items()})
+    """Not a check: writes `seeded.json` from the installed Polars."""
+    written = {name: _digest(make()) for name, make in CASES.items()}
     REFERENCE.write_text(
         json.dumps(written, indent=1, sort_keys=True) + "\n", encoding="utf-8"
     )

@@ -368,13 +368,13 @@ def test_registry_round_trips_through_one_yaml_file(tmp_path):
 
 def test_registry_file_rejects_unknown_keys_and_disagreeing_names(tmp_path):
     with pytest.raises(Exception, match=r"'spec' \(did you mean 'specs'\?\)"):
-        Registry.from_dict({"version": 2, "spec": {}})
+        Registry.from_dict({"version": 4, "spec": {}})
     with pytest.raises(Exception, match="needs a non-empty 'specs' mapping"):
-        Registry.from_dict({"version": 2})
+        Registry.from_dict({"version": 4})
     with pytest.raises(Exception, match=r"specs\.Orders carries name 'Other'"):
         Registry.from_dict(
             {
-                "version": 2,
+                "version": 4,
                 "specs": {
                     "Orders": {"name": "Other", "columns": {"a": {"dtype": "Int64"}}}
                 },
@@ -387,7 +387,7 @@ def test_registry_file_may_point_at_a_categories_file(tmp_path):
     (tmp_path / "specs.yaml").write_text(
         yaml.safe_dump(
             {
-                "version": 2,
+                "version": 4,
                 "categories": "cats.yaml",
                 "specs": {
                     "Orders": {"columns": {"status": {"dtype": {"Enum": "STATUS"}}}}

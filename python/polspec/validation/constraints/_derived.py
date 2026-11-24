@@ -59,8 +59,7 @@ def derived_constraint(
     expected = derived_values(spec)
     if actual_dtype.is_float() or spec.dtype.is_float():
         # NaN and infinity first: a tolerance relative to either is no
-        # tolerance (on Polars 1.39 `NaN <= NaN` holds, and `inf <= inf`
-        # everywhere), so each matches only itself.
+        # tolerance (`inf <= inf` holds), so each matches only itself.
         either_nan = column.is_nan() | expected.is_nan()
         either_infinite = column.is_infinite() | expected.is_infinite()
         close = (column - expected).abs() <= RELATIVE_TOLERANCE * pl.max_horizontal(

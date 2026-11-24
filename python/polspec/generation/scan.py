@@ -30,8 +30,6 @@ Internal: not part of the public API.
 
 from __future__ import annotations
 
-import functools
-import inspect
 from collections.abc import Callable, Iterator, Mapping
 from typing import TYPE_CHECKING, Any
 
@@ -210,14 +208,8 @@ def _explain_labels(
     source say anything: `PYTHON[polspec: Orders] SCAN`, and an `INFO:` line
     with how many rows, from which seed, in what batches.
 
-    Polars 2 added `explain_name` and `explain_detail` to
-    `register_io_source`; Polars 1 has neither and would refuse them. Whether
-    to pass them is read off the function's own signature, not a version
-    number, so a Polars that has them gets them and one that does not sees
-    exactly the call it always did.
+    `register_io_source`'s `explain_name` and `explain_detail`.
     """
-    if not _takes_explain_labels(register):
-        return {}
     detail = [
         f"{n:,} rows",
         f"seed={seed}" if seed is not None else "unseeded",
@@ -229,14 +221,3 @@ def _explain_labels(
         "explain_name": f"polspec: {spec.name}",
         "explain_detail": ", ".join(detail),
     }
-
-
-@functools.cache
-def _takes_explain_labels(register: Callable[..., pl.LazyFrame]) -> bool:
-    """Whether `register` accepts both explain labels -- asked once per
-    function, since a signature does not change under a running process."""
-    try:
-        parameters = inspect.signature(register).parameters
-    except (TypeError, ValueError):  # a builtin or C function with no signature
-        return False
-    return "explain_name" in parameters and "explain_detail" in parameters

@@ -265,10 +265,6 @@ PROJECT 1/18 COLUMNS
 INFO: 1,000,000 rows, seed=100, batches chosen by polars
 ```
 
-Polars 1 gives a Python source nowhere to put a name, so there the header
-stays `PYTHON SCAN` — polspec asks `register_io_source` what it accepts and
-passes the labels only where they are taken.
-
 `Registry.scan_all()` is the same for a set of specs: parents are generated
 eagerly — a foreign key needs the whole parent column to sample from — and
 the children are lazy.

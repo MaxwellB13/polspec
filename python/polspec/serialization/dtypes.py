@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 
 from polspec.catspec import categories_of, dtype_of, enum_categories
-from polspec.dtypes import MAP, DtypeLike, element_dtype, field_dtypes, map_parts
+from polspec.dtypes import DtypeLike, element_dtype, field_dtypes, map_parts
 from polspec.errors import SerializationError
 from polspec.spec import is_categorical_dtype
 
@@ -231,12 +231,7 @@ def _map_from_data(payload: Any, categories: CatSpec | None) -> pl.DataType:
             "A Map dtype is written as {Map: {key: <dtype>, value: <dtype>}}, "
             f"got {payload!r}"
         )
-    if MAP is None:
-        raise SerializationError(
-            f"This spec declares a Map column, a dtype Polars 2 introduced; "
-            f"this is Polars {pl.__version__}. Upgrade Polars to read it."
-        )
-    return MAP(
+    return pl.Map(
         dtype_from_data(payload["key"], categories),
         dtype_from_data(payload["value"], categories),
     )

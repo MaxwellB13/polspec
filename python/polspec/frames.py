@@ -59,8 +59,8 @@ def plain(series: pl.Series) -> pl.Series:
 
     Many `Series` methods run as a selection of the Series by its own name,
     so one named `^c$` -- a pattern that does not match itself -- loses
-    itself: `fill_null`, `is_null`, `unique` and `explode` all fail on it, in
-    Polars 1 and 2. Code that measures a column's values, rather than naming
+    itself: `fill_null`, `is_null`, `unique` and `explode` all fail on it.
+    Code that measures a column's values, rather than naming
     it, takes the Series through here first.
     """
     return series.alias(PLAIN) if is_pattern(series.name) else series
@@ -179,9 +179,7 @@ def json_casts(schema: Mapping[str, Any], *, error: type[Exception]) -> list[pl.
     JSON holds a category as its text, so an `Enum` or `Categorical` -- at
     any depth -- is cast to `String` first: the file is the same, and a list
     of them no longer panics Polars' writer (it does past a few hundred
-    values, in 1.x and 2.0 alike). An `Array` is written as the `List` it is
-    in JSON, which Polars before 1.43 writes correctly and an `Array` with
-    null rows not. JSON has no bytes, and a `Binary` column panics the
+    values). JSON has no bytes, and a `Binary` column panics the
     writer outright, so it is refused before anything is written.
     """
     casts = []
@@ -191,17 +189,9 @@ def json_casts(schema: Mapping[str, Any], *, error: type[Exception]) -> list[pl.
                 f"Column {name!r} is {dtype}, and JSON has no bytes: write it "
                 "to Parquet or Arrow IPC instead"
             )
-        # Two casts, not one: cast at once, an `Array` of `Enum` becomes a
-        # `List` of the categories' indices rather than their text.
         text = _categories_as_text(dtype)
-        listed = _arrays_as_lists(text)
-        expr = column(name)
         if text != dtype:
-            expr = expr.cast(text)
-        if listed != text:
-            expr = expr.cast(listed)
-        if listed != dtype:
-            casts.append(expr)
+            casts.append(column(name).cast(text))
     return casts
 
 
@@ -230,18 +220,5 @@ def _categories_as_text(dtype: Any) -> Any:
     if isinstance(dtype, pl.Struct):
         return pl.Struct(
             [pl.Field(f.name, _categories_as_text(f.dtype)) for f in dtype.fields]
-        )
-    return dtype
-
-
-def _arrays_as_lists(dtype: Any) -> Any:
-    """`dtype` with every `Array` in it as a `List`: an array is a list in
-    JSON anyway, and Polars before 1.43 writes an `Array` with null rows
-    wrongly -- a null row as `[null, null]`, the rows after it shifted."""
-    if isinstance(dtype, (pl.List, pl.Array)):
-        return pl.List(_arrays_as_lists(dtype.inner))
-    if isinstance(dtype, pl.Struct):
-        return pl.Struct(
-            [pl.Field(f.name, _arrays_as_lists(f.dtype)) for f in dtype.fields]
         )
     return dtype

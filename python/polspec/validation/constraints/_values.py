@@ -16,8 +16,6 @@ import polars as pl
 from polspec import frames
 from polspec.domain import Domain, is_textual
 from polspec.dtypes import (
-    ARRAY_EVAL_ANY,
-    ARRAY_EVAL_FILTERS,
     element_dtype,
     field_dtypes,
     map_entries,
@@ -43,7 +41,6 @@ from polspec.spec import element_of, entries_of, field_of
 from polspec.validation.constraints._base import (
     Constraint,
     as_strings,
-    sample_source,
 )
 from polspec.validation.constraints._derived import derived_constraint
 from polspec.validation.constraints._rules import rule_constraints
@@ -347,7 +344,7 @@ def column_constraints(
             _ColumnValidator(
                 key=f"{name}__validator_{index}",
                 mask=failure_mask(validator),
-                sample_expr=sample_source(column, actual_dtype),
+                sample_expr=column,
                 column=name,
                 validator=validator,
             )
@@ -648,7 +645,7 @@ def _list_constraints(
     does. The samples are the offending lists.
     """
     present = column.is_not_null()
-    sample_expr = sample_source(column, actual_dtype)
+    sample_expr = column
     constraints: list[Constraint] = []
 
     if spec.list_length is not None and isinstance(actual_dtype, pl.List):
@@ -666,19 +663,14 @@ def _list_constraints(
         )
 
     is_array = isinstance(actual_dtype, pl.Array)
-    # An Array's elements are checked through a list where `arr.eval` would
-    # refuse the expression (before Polars 1.42) or panic on it (a bounds
-    # claim's values, filtered, on an Array of Decimal or Duration, before
-    # 1.43). Otherwise `arr.eval`, which is the faster.
-    listed = column.arr.to_list() if is_array else column
 
     def any_element(mask: pl.Expr) -> pl.Expr:
-        if is_array and ARRAY_EVAL_ANY:
+        if is_array:
             # An Array of booleans, which has its own `any`.
             return column.arr.eval(mask).arr.any()
-        return listed.list.eval(mask).list.any()
+        return column.list.eval(mask).list.any()
 
-    elements = column.arr if is_array and ARRAY_EVAL_FILTERS else listed.list
+    elements = column.arr if is_array else column.list
     if not spec.element_null_probability:
         # A declared element null rate says nulls belong inside the list.
         constraints.append(

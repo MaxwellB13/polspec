@@ -41,10 +41,13 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class Ctx:
-    """What a reader needs beyond the data: the registry, and how strict to be."""
+    """What a reader needs beyond the data: the registry, how strict to be,
+    and whether the file left out `version:` -- a file from before the key,
+    or one written by hand."""
 
     categories: CatSpec | None = None
     strict: bool = True
+    versionless: bool = False
 
 
 def _identity(value: Any) -> Any:
@@ -80,7 +83,6 @@ class Field:
     to_data: Callable[[Any], Any] = _identity
     from_data: Callable[[Any, Ctx, str], Any] = _read_identity
     to_source: Callable[[Any], str] = repr
-    since: int = 1
     # The constructor keyword, when it is not the key: `weights:` is read
     # into `_weights`, since 2.0 declares weights inside `choices`.
     keyword: str | None = None
@@ -123,8 +125,14 @@ def check_unknown_keys(
         parts.append(f"{where!r}" + (f" (did you mean {close[0]!r}?)" if close else ""))
     message = f"Unknown key(s) in spec file: {', '.join(parts)}"
     if ctx.strict:
+        old = (
+            " A file with no 'version:' key may be format 1, from polspec 0.x: "
+            "polspec 1.x reads one and writes it back as version 4."
+            if ctx.versionless
+            else ""
+        )
         raise SerializationError(
-            message + ". Pass strict=False to ignore unknown keys."
+            message + ". Pass strict=False to ignore unknown keys." + old
         )
     warnings.warn(message + "; ignored.", stacklevel=4)
 
@@ -263,13 +271,13 @@ def _tags_to_source(value: tuple[str, ...]) -> str:
 
 def _when_from_data(value: Any, ctx: Ctx, path: str) -> Any:
     if isinstance(value, dict) and "column" in value:
-        # A version 1 condition in a file claiming to be version 2: the
-        # migration converts these, so reaching here means the version key
-        # is wrong rather than the condition.
+        # Format 1's one-column condition, which 2.0 no longer migrates.
+        column = value["column"]
         raise SerializationError(
-            f"{path}: {value!r} is a version 1 rule condition, but the file "
-            "declares a later version. Remove the `version:` key to have it "
-            "migrated, or write the condition with col()."
+            f"{path}: {value!r} is a format 1 rule condition, which polspec 2.0 "
+            f"does not read: write it as a predicate, as col({column!r}) == ... "
+            "writes one, or read the file with polspec 1.x, which writes it back "
+            "as version 4."
         )
     return pred_from_data(value)
 
@@ -381,10 +389,9 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
     Field("nullable", omit_if=_if_false),
     # Added optional keys on version 4: a file without them claims nothing
     # it did not before.
-    Field("optional", omit_if=_if_false, since=4),
+    Field("optional", omit_if=_if_false),
     Field(
         "default",
-        since=4,
         to_data=_value_to_data,
         from_data=_value_from_data,
     ),
@@ -396,7 +403,7 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
     ),
     Field("tags", omit_if=_if_falsy, to_data=_tags_to_data, to_source=_tags_to_source),
     # An added optional key on version 4: nothing reads it but a person.
-    Field("description", omit_if=_if_none, since=4),
+    Field("description", omit_if=_if_none),
     Field("unique", omit_if=_if_false),
     Field(
         "null_probability",
@@ -404,10 +411,9 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
     ),
     Field(
         "element_null_probability",
-        since=3,
         omit_if=lambda v, obj: not v,
     ),
-    Field("nan_probability", since=4, omit_if=lambda v, obj: not v),
+    Field("nan_probability", omit_if=lambda v, obj: not v),
     Field(
         "string_length",
         to_data=_bound_to_data,
@@ -416,14 +422,12 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
     ),
     Field(
         "list_length",
-        since=3,
         to_data=_bound_to_data,
         from_data=_bound_from_data,
         to_source=_bound_to_source,
     ),
     Field(
         "fields",
-        since=3,
         to_data=lambda v: {name: colspec_to_data(cs) for name, cs in v.items()},
         from_data=_fields_from_data,
         to_source=lambda v: (
@@ -432,15 +436,14 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
             + "}"
         ),
     ),
-    Field("format", since=3),
+    Field("format"),
     Field(
         "extra_values",
-        since=3,
         to_data=_extras_to_data,
         to_source=lambda v: repr(_extras_to_data(v)),
     ),
-    Field("pattern", since=3),
-    Field("seed_name", since=3),
+    Field("pattern"),
+    Field("seed_name"),
     Field("distribution"),
     Field(
         "distribution_params",
@@ -476,20 +479,18 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
         to_source=lambda v: (
             "[" + ", ".join(check_to_source(c) for c in _persistable(v)) + "]"
         ),
-        since=2,
     ),
     # An added optional key on version 4: a file without one claims nothing
     # it did not before, and 1.3 refuses one by name.
     Field(
         "derive",
-        since=4,
         to_data=lambda pred: pred.to_data(),
         from_data=lambda v, ctx, path: pred_from_data(v),
         to_source=lambda pred: pred.to_source(),
     ),
     # Added in 1.6 on version 4, as `derive` was in 1.4: written only when
     # set, and refused by name by a release that does not know it.
-    Field("text_format", since=4),
+    Field("text_format"),
 )
 
 
@@ -624,7 +625,7 @@ def _columns_from_data(value: Any, ctx: Ctx, path: str) -> dict[str, ColSpec]:
 TABLESPEC_FIELDS: tuple[Field, ...] = (
     Field("name", omit_if=_never),
     # An added optional key on version 4: nothing reads it but a person.
-    Field("description", omit_if=_if_none, since=4),
+    Field("description", omit_if=_if_none),
     Field(
         "columns",
         omit_if=_never,
@@ -651,24 +652,21 @@ TABLESPEC_FIELDS: tuple[Field, ...] = (
         from_data=lambda v, ctx, path: [
             check_from_data(c, ctx, f"{path}[{i}]") for i, c in enumerate(v)
         ],
-        since=2,
     ),
     Field(
         "hierarchy",
         omit_if=_if_none,
         to_data=lambda h: encode(h, HIERARCHY_FIELDS),
         from_data=lambda v, ctx, path: hierarchy_from_data(v, ctx, path),
-        since=3,
     ),
     # An added optional key on version 4: a file without it declares no
     # order, which is what an older reader assumes of it.
-    Field("order_by", omit_if=_if_falsy, to_data=list, since=4),
+    Field("order_by", omit_if=_if_falsy, to_data=list),
     Field(
         "descending",
         omit_if=lambda flags, spec: not any(flags),
         # One flag for every column when they agree, as `sort` takes it.
         to_data=lambda flags: flags[0] if len(set(flags)) == 1 else list(flags),
-        since=4,
     ),
     # An added optional key on version 4: a file without it allows any number
     # of rows, which is what an older reader assumes of it.
@@ -677,7 +675,6 @@ TABLESPEC_FIELDS: tuple[Field, ...] = (
         omit_if=_if_none,
         to_data=_bound_to_data,
         from_data=_bound_from_data,
-        since=4,
     ),
 )
 

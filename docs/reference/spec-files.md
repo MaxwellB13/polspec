@@ -6,9 +6,10 @@ the format. A test holds every table here to the reader's own field
 registry, so a key the reader accepts cannot be missing from this page.
 
 Every file starts with `version: 4` — `polspec.FORMAT_VERSION`, the format
-version that wrote it. A
-file from an older version is migrated as it is read; one from a newer
-polspec is refused, naming the version it needs. A key the reader does not
+version that wrote it, and the only one polspec 2.0 reads. A file of an
+older version is refused, naming it — polspec 1.x reads one and writes it
+back as version 4 — and one from a newer polspec is refused, naming the
+version it needs. A mapping with no `version` key is read as version 4. A key the reader does not
 know is an error naming the closest known key; `strict=False` downgrades it
 to a warning. A key left out takes its default, and a writer leaves out
 every key still at its default.
@@ -151,7 +152,7 @@ of one key:
 | `List` | `{List: <dtype>}` |
 | `Array` | `{Array: {inner: <dtype>, width: 3}}` |
 | `Struct` | `{Struct: {field: <dtype>, ...}}` |
-| `Map` | `{Map: {key: <dtype>, value: <dtype>}}` — Polars 2 only |
+| `Map` | `{Map: {key: <dtype>, value: <dtype>}}` |
 
 A bare name a category registry declares — `STATUS`, or
 `$categories.STATUS` — is that registry's `Enum` or `Categorical`.
@@ -218,3 +219,4 @@ not declare it holds no NaN — that a reader too old to know the key would
 not check: version 4 has that reader refuse the file by name instead of
 reading it more loosely than it was written. Every file carries the current
 version, so polspec 0.13 and earlier refuse every file 0.14.0 writes.
+Since 2.0, versions 1 to 3 are refused in turn; 1.x migrates them.

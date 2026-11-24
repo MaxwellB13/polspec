@@ -30,18 +30,20 @@ removal fails until it has been through a deprecation.
 
 ### Spec files
 
-A spec file any 1.x release writes, every later 1.x release reads, as the
-same spec. Each file carries a format `version:`. A new version is added
-only with a migration from every earlier one, so an old file is read as
-what it declared. A file written by a newer polspec than the reader is
-refused rather than misread: one of a newer format version by that version,
-and one that uses a key the reader does not know — `default`, say, read by
-1.0 — by the key.
+A spec file any 2.x release writes, every later 2.x release reads, as the
+same spec. Each file carries a format `version:`; 2.x writes and reads
+version 4, which every release since 0.14.0 has written. A file of an
+older version — from polspec 0.13 or earlier — is refused, naming its
+version: polspec 1.x reads it and writes it back as version 4. A file
+written by a newer polspec than the reader is refused rather than misread:
+one of a newer format version by that version, and one that uses a key the
+reader does not know — `default`, say, read by 1.0 — by the key. *Since
+2.0: 1.x migrated versions 1 to 3 as it read them.*
 
-*Held by* `tests/serialization/test_migrations.py`, which reads a file of
+*Held by* `tests/serialization/test_versions.py`, which refuses a file of
 every earlier version, and `tests/contracts/test_contract.py`, which holds
-a golden file of each version to the spec it declares and the current
-version's file byte for byte.
+the current version's golden file to the spec it declares and byte for
+byte.
 
 ### Seeded output
 
@@ -155,8 +157,8 @@ listed here is exactly what warns.
 - **Python:** every CPython release from 3.12 until its end of life, and
   each new release within one minor polspec release of its final. Today
   that is 3.12 to 3.15.
-- **Polars:** 1.39 through 2.x. On Python 3.15, Polars 2 only: Polars 1
-  does not run there. The floor moves only in a minor release, announced in
+- **Polars:** 2.x. *Since 2.0: 1.x supported Polars 1.39 onwards.* The
+  floor moves only in a minor release, announced in
   the changelog of the release before. A new Polars major is supported in a
   minor release once the suite passes on it.
 - **Operating systems:** wheels are built, and tested, for Linux (x86-64 and

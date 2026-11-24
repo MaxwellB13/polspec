@@ -9,7 +9,6 @@ within a batch, and the passes that rewrite a column drawn per batch.
 
 from __future__ import annotations
 
-import inspect
 import itertools
 
 import polars as pl
@@ -142,10 +141,7 @@ def test_a_column_projected_away_is_not_generated():
     spec = Source.spec.with_columns({"tight": _TIGHT})
     lf = scan(spec, 1_000, seed=SEED)
     assert lf.select("plain").collect().height == 1_000
-    # Polars 1 wraps the source's error in its own; Polars 2 raises it.
-    with pytest.raises(
-        (pl.exceptions.ComputeError, GenerationError), match="'tight' is unique"
-    ):
+    with pytest.raises(GenerationError, match="'tight' is unique"):
         lf.collect()
 
 
@@ -270,69 +266,42 @@ class Named(FrameSpec):
     total = ColSpec(pl.Float64)
 
 
-def _register_standing_in(monkeypatch, accepts_labels: bool) -> dict:
-    """A `register_io_source` that records what it was given, with or
-    without the explain parameters Polars 2 added -- so both branches run on
-    whichever Polars is installed."""
+def _register_standing_in(monkeypatch) -> dict:
+    """A `register_io_source` that records the explain labels it was given."""
     seen: dict = {}
 
-    if accepts_labels:
-
-        def register(
-            io_source,
-            *,
-            schema,
-            validate_schema=False,
-            is_pure=False,
-            explain_name=None,
-            explain_detail=None,
-        ):
-            seen.update(explain_name=explain_name, explain_detail=explain_detail)
-            return pl.LazyFrame(schema=schema)
-
-    else:
-
-        def register(io_source, *, schema, validate_schema=False, is_pure=False):
-            seen["called"] = True
-            return pl.LazyFrame(schema=schema)
+    def register(
+        io_source,
+        *,
+        schema,
+        validate_schema=False,
+        is_pure=False,
+        explain_name=None,
+        explain_detail=None,
+    ):
+        seen.update(explain_name=explain_name, explain_detail=explain_detail)
+        return pl.LazyFrame(schema=schema)
 
     monkeypatch.setattr(pl.io.plugins, "register_io_source", register)
     return seen
 
 
-def test_a_polars_that_takes_explain_labels_is_given_them(monkeypatch):
-    seen = _register_standing_in(monkeypatch, accepts_labels=True)
+def test_the_scan_is_given_explain_labels(monkeypatch):
+    seen = _register_standing_in(monkeypatch)
     Named.scan(1_000_000, seed=100, batch_size=50_000)
     assert seen["explain_name"] == "polspec: Named"
     assert seen["explain_detail"] == "1,000,000 rows, seed=100, batches of 50,000"
 
 
-def test_a_polars_without_them_is_called_exactly_as_before(monkeypatch):
-    """Polars 1 has no explain parameters and would refuse them; the call
-    made there is the one polspec has always made."""
-    seen = _register_standing_in(monkeypatch, accepts_labels=False)
-    Named.scan(10, seed=1)
-    assert seen == {"called": True}
-
-
 def test_the_detail_says_what_was_asked_for(monkeypatch):
-    seen = _register_standing_in(monkeypatch, accepts_labels=True)
+    seen = _register_standing_in(monkeypatch)
     Named.scan(12_345, method="cartesian")
     assert seen["explain_detail"] == (
         "12,345 rows, unseeded, batches chosen by polars, method=cartesian"
     )
 
 
-def _polars_takes_explain_labels() -> bool:
-    parameters = inspect.signature(pl.io.plugins.register_io_source).parameters
-    return "explain_name" in parameters and "explain_detail" in parameters
-
-
-@pytest.mark.skipif(
-    not _polars_takes_explain_labels(),
-    reason="this Polars gives an IO source no name in explain()",
-)
-def test_explain_names_the_scan_where_polars_can():
+def test_explain_names_the_scan():
     plan = Named.scan(1_000_000, seed=100).select("id").explain()
     assert plan.startswith("PYTHON[polspec: Named] SCAN")
     assert "INFO: 1,000,000 rows, seed=100, batches chosen by polars" in plan

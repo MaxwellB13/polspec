@@ -193,10 +193,6 @@ pinned by a passing test. A NaN, by contrast, is recorded as the column's
   or a `sink_*` instead, and so is a unique key that references its own
   spec: they collide across batches only by chance; generate the frame whole
   when that matters.
-- **On Polars 1.39, a nullable struct with no fields holds no nulls.**
-  Polars 1.39 cannot hold a null in a `Struct({})`; 1.40 and later can. Such
-  a column generates every row present there, which its spec still accepts,
-  and `null_probability` is not met.
 - **A `unique` column ignores `weights` and a non-uniform `distribution`** —
   both are refused at declaration rather than silently dropped, since neither
   has anything to say about a draw without replacement.

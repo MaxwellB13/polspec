@@ -122,7 +122,7 @@ def test_a_duration_field_left_out_is_zero():
 
 
 def test_the_golden_file_reads_as_the_spec_it_declares():
-    spec = from_yaml(FIXTURES / "spec_v3_temporal.yaml")
+    spec = from_yaml(FIXTURES / "spec_temporal.yaml")
     assert spec == SHIFTS
     (rule,) = spec["starts"].rules
     assert rule.choices == (dt.time(22),)

@@ -113,7 +113,6 @@ map as that list, so it takes what a `List(Struct)` takes: `list_length`
 is how many entries a map holds, and `fields` says what its `key` and its
 `value` are.
 
-<!-- docs: polars2 -->
 ```python
 ColSpec(
     pl.Map(pl.String, pl.Int64),
@@ -146,6 +145,5 @@ the usual rules; a `List(Struct)` does not, since it is not a map. Drift,
 
 `choices`, `weights` and `element_null_probability` have no meaning on the
 map itself (an entry is never null) and are refused; say what a key or
-a value may be in `fields`. Polars 1 has no `Map`: a spec file that
-declares one says which Polars it needs.
+a value may be in `fields`.
 

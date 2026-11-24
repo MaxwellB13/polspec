@@ -374,7 +374,6 @@ def inspect(
     # lazy query on its streaming engine by default, and that engine panics
     # on validation's aggregation over a list column -- `list.eval` beside a
     # `filter` -- for some frames (scripts/deep/polars2_eval_chunks_repro.py).
-    # On Polars 1 this is the engine a lazy query already ran on.
     collect_kwargs: dict[str, Any] = {
         "engine": "streaming" if opts.streaming else "in-memory"
     }

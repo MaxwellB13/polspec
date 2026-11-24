@@ -18,9 +18,6 @@ from decimal import Decimal
 import polars as pl
 from polspec import ColSpec, col
 
-# Polars 2's `Map`, or None on Polars 1.
-MAP = getattr(pl, "Map", None)
-
 # ---------------------------------------------------------------------------
 # Column matrix -- one declared column per case, round-tripped in isolation.
 # ---------------------------------------------------------------------------
@@ -287,11 +284,8 @@ EVERY_DTYPE = [
     pl.Struct({"xs": pl.List(pl.Int64)}),
     pl.Struct({"inner": pl.Struct({"a": pl.Int64})}),
 ]
-# Polars 2's `Map`, only where it exists: it is covered there, and on Polars
-# 1 there is no such dtype for the census to find.
-if MAP is not None:
-    EVERY_DTYPE += [
-        MAP(pl.String, pl.Int64),
-        MAP(pl.Int64, pl.Struct({"a": pl.List(pl.Int8)})),
-        pl.List(MAP(pl.Boolean, pl.String)),
-    ]
+EVERY_DTYPE += [
+    pl.Map(pl.String, pl.Int64),
+    pl.Map(pl.Int64, pl.Struct({"a": pl.List(pl.Int8)})),
+    pl.List(pl.Map(pl.Boolean, pl.String)),
+]

@@ -1094,8 +1094,7 @@ def generate_cartesian(
     if filler_columns:
         filler_df = generate_random(filler_columns, coverage_n, rng.randrange(2**63))
         # Drawn at the coverage frame's height, so the two line up row for
-        # row. `hstack`, not `concat`: Polars < 1.42 has no
-        # `how="horizontal_extend"`, and 1.42+ deprecates `how="horizontal"`.
+        # row.
         coverage_df = coverage_df.hstack(filler_df)
 
     spread = [name for name in columns if name not in unique_columns]

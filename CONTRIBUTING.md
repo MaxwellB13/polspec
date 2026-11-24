@@ -174,8 +174,9 @@ POLSPEC_WRITE_GOLDEN=1 uv run pytest tests/contracts/test_contract.py
 - A removed one has been through a deprecation first (see *Deprecations*).
 - A `--json` key renamed, removed or changing type raises that report's
   `SCHEMA_VERSION`; one added does not.
-- A new spec-file format version adds `spec_v<N>.yaml` and a migration; the
-  older files are never rewritten.
+- A new spec-file format version adds `spec_v<N>.yaml` and, within a
+  major, a migration from the one before; a major may drop old versions, as
+  2.0 dropped 1 to 3. The older files are never rewritten.
 
 ## The public API
 

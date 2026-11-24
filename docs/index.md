@@ -42,7 +42,7 @@ production will reject.
     Every dtype, generated and validated — integers, floats, `Decimal`,
     booleans, strings, binary, all four temporal types, `Enum`,
     `Categorical`, and a `List`, `Array` or `Struct` of any of them, nested
-    to any depth, and on Polars 2 a `Map` — plus nullability, bounds, string
+    to any depth, and a `Map` — plus nullability, bounds, string
     lengths, value domains, named string formats such as `uuid4` and
     `email`, and regex patterns, which are generated from.
 
@@ -133,8 +133,7 @@ The generator is a compiled Rust extension, but wheels are published for Linux
 (x86_64, aarch64), macOS (Intel and Apple silicon) and Windows (x86_64), so
 installing needs no Rust toolchain. At runtime polspec needs:
 
-- **Polars**, any release from 1.39, Polars 2 included (Python 3.15 needs
-  Polars 2). The same seed generates the same data on each, and on every
+- **Polars** 2, any release. The same seed generates the same data on each, and on every
   operating system.
 - **PyYAML**.
 - **tzdata**, on Windows only, for time-zone data.

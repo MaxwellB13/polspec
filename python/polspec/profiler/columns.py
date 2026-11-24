@@ -17,7 +17,7 @@ from polspec import frames
 from polspec._text import infer as infer_text
 from polspec.bound import Bound
 from polspec.constants import DEFAULT_NULL_PROBABILITY
-from polspec.dtypes import MAP, field_dtypes, map_entries
+from polspec.dtypes import field_dtypes, map_entries
 from polspec.profiler.formats import (
     FORMAT_MIN_DISTINCT,
     FORMAT_PROBE_ROWS,
@@ -161,7 +161,7 @@ def _map(c: _Column) -> ColSpec:
         return c.spec(dtype=c.dtype)
     return dataclasses.replace(
         as_list,
-        dtype=MAP(parts["key"].dtype, parts["value"].dtype),
+        dtype=pl.Map(parts["key"].dtype, parts["value"].dtype),
         element_null_probability=0.0,
     )
 

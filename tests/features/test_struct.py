@@ -703,11 +703,5 @@ def test_a_struct_with_no_fields_is_still_a_struct():
     spec_cls = spec_for(ColSpec(pl.Struct({}), nullable=True, null_probability=0.5))
     df = spec_cls.generate(200, seed=1)
     assert df.schema["c"] == pl.Struct({})
-    # limitations.md: Polars 1.39 cannot hold a null in a struct with no
-    # fields, so there the column is every row present.
-    empty = pl.select(pl.repeat(None, 2, dtype=pl.Struct({})).alias("s")).to_series()
-    if empty.null_count():
-        assert 0 < df["c"].null_count() < 200
-    else:
-        assert df["c"].null_count() == 0
+    assert 0 < df["c"].null_count() < 200
     spec_cls.validate(df)

@@ -16,7 +16,6 @@ which renders as nothing:
     <!-- docs: skip -->      an illustrative fragment, not a runnable example
     <!-- docs: raises -->    demonstrates an error, and must actually raise
     <!-- docs: warns -->     demonstrates a warning, and must actually warn
-    <!-- docs: polars2 -->   uses a Polars 2 dtype; runs only where it exists
 
 A shell block runs too when it says so, `<!-- docs: run -->` on the line
 above its ```bash fence: each line a `polspec` command, run by the CLI in
@@ -44,7 +43,6 @@ import shlex
 import shutil
 from pathlib import Path
 
-import polars as pl
 import pytest
 
 DOCS = Path(__file__).resolve().parents[2] / "docs"
@@ -56,7 +54,7 @@ BLOCK = re.compile(
     re.S | re.M,
 )
 
-MARKERS = {"skip", "raises", "warns", "polars2"}
+MARKERS = {"skip", "raises", "warns"}
 
 # A ```bash fence marked to run: a page's command-line examples.
 RUN = re.compile(
@@ -76,10 +74,6 @@ CARRIED = re.compile(r"^[ \t]*#[ \t]?(?P<rest>.*)$")
 
 # An output block straight after a Python one: a ```text fence, or a bare one.
 OUTPUT = re.compile(r"\s*```(?:text)?\n(?P<shown>.*?)^```", re.S | re.M)
-
-# `Map` is the Polars 2 dtype a `polars2` block uses; on Polars 1 the block
-# is skipped, and it runs -- and must pass -- everywhere else.
-HAS_POLARS_2 = hasattr(pl, "Map")
 
 # The imports pages take for granted. Specs and frames are not among them:
 # a page declares those itself, where a reader can see them.
@@ -221,7 +215,7 @@ def test_a_pages_examples_run(page: Path, tmp_path: Path, monkeypatch) -> None:
         if marker == "run":
             _run_commands(code, f"{page.relative_to(DOCS).as_posix()}:{line}")
             continue
-        if marker == "skip" or (marker == "polars2" and not HAS_POLARS_2):
+        if marker == "skip":
             continue
         where = f"{page.relative_to(DOCS).as_posix()}:{line}"
         compiled = compile(code, where, "exec")

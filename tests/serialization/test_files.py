@@ -536,7 +536,8 @@ def test_raw_expressions_still_warn_and_drop(tmp_path):
     assert len(loaded.spec["b"].validators) == 1
 
 
-def test_legacy_dict_rules_in_yaml_still_load(tmp_path):
+def test_a_dict_rule_in_a_file_is_refused_naming_col(tmp_path):
+    """Format 1's one-column condition; 1.x migrated it, 2.0 refuses it."""
     path = tmp_path / "legacy.yaml"
     path.write_text(
         yaml.safe_dump(
@@ -557,10 +558,8 @@ def test_legacy_dict_rules_in_yaml_still_load(tmp_path):
             }
         )
     )
-    loaded = FrameSpec.from_yaml(path)
-    assert loaded.spec["carrier"].rules[0].when.equals(col("region") == "UK")
-    df = loaded.generate(100, seed=1)
-    assert df.filter(pl.col("region") == "UK")["carrier"].unique().to_list() == ["RM"]
+    with pytest.raises(SerializationError, match=r"col\('region'\) == \.\.\."):
+        FrameSpec.from_yaml(path)
 
 
 def test_the_top_level_file_functions_take_either_kind_of_spec(tmp_path):

@@ -95,7 +95,7 @@ def test_validate_reports_a_time_of_day_on_a_date_column_rather_than_a_traceback
     `InvalidOperationError`."""
     spec = tmp_path / "shifts.yaml"
     spec.write_text(
-        "version: 3\n"
+        "version: 4\n"
         "name: Shifts\n"
         "columns:\n"
         "  day: {dtype: Date, bounds: [2020-01-01, 2021-01-01]}\n",
