@@ -24,7 +24,7 @@ hand back a usable frame," not raw loop speed in isolation.
 |  5,000,000 |        0.0255s |   4.1031s |   skipped |
 | 20,000,000 |        0.1078s |  16.4049s |   skipped |
 
-Measured 2026-11-24 with polspec 2.0 (before release) and Polars 2.1 on an
+Measured 2026-11-24 with polspec 2.0 and Polars 2.1 on an
 Intel 13900K with 64GB DDR5; yours will differ, and
 the shape matters more than the absolute numbers. Three things worth reading
 off it:
@@ -96,7 +96,7 @@ warm up.
 |   1,000,000 |       0.0358s |      0.0288s |           0.0566s |          0.0944s |       0.0925s |      0.0950s |
 |  10,000,000 |       0.6999s |      0.7312s |           1.0671s |          2.0710s |       0.7995s |      0.7259s |
 
-Measured 2026-11-24 with polspec 2.0 (before release), Polars 2.1.0,
+Measured 2026-11-24 with polspec 2.0, Polars 2.1.0,
 dataframely 3.1.2 and pandera 0.36.0, on the same machine as above. All
 three tools hand the work to Polars, so the gap is narrow, and it is the
 gap between one aggregation and several passes, not between Rust and
