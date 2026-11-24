@@ -47,10 +47,10 @@ polspec schema infer orders.parquet -o - > orders.yaml
 ```
 
 ```console
-$ polspec schema infer orders.parquet -o orders.yaml --weights
+$ polspec schema infer orders.parquet -o orders.yaml
 Inferred 3 column(s) from 12,483 row(s) of orders.parquet -> orders.yaml
 
-$ polspec schema infer orders.parquet -o orders.py --weights
+$ polspec schema infer orders.parquet -o orders.py
 Inferred 3 column(s) from 12,483 row(s) of orders.parquet -> orders.py
 ```
 
@@ -63,25 +63,27 @@ from polspec import ColSpec, FrameSpec
 
 class Orders(FrameSpec):
     __columns__ = {
-        "order_id": ColSpec(pl.Int64, bounds=(0, 13000)),
-        "status": ColSpec(pl.Enum, choices={"NEW": 0.4, "PAID": 0.3, "SHIPPED": 0.3}),
-        "total": ColSpec(pl.Float64, bounds=(10.0, 500.0)),
+        "order_id": ColSpec(pl.Int64, bounds=(1, 12483), unique=True),
+        "status": ColSpec(
+            pl.Enum, choices={"NEW": 0.4021, "PAID": 0.3008, "SHIPPED": 0.2971}
+        ),
+        "total": ColSpec(pl.Float64, bounds=(10.05, 499.9)),
     }
 ```
 
-`order_id` ran from 1 to 12,483, and `status` was 40.2% `NEW`: bounds are
-written rounded outward and frequencies to two significant figures, as the
-options below describe. A column with no nulls says nothing about them, as
-one written by hand would not.
+`order_id` ran from 1 to 12,483, every value distinct, and `status` was
+40.21% `NEW`. These are `polspec.profile()`'s defaults: what was observed,
+exactly, with each category's frequency, each column's fitted
+distribution, keys and row order, so the spec generates a stand-in for
+the data. A column with no nulls says nothing about them, as one written
+by hand would not.
 
-These are not `polspec.profile()`'s defaults, on purpose. `schema infer`
-*describes* data, as `FrameSpec.from_dataframe` does, for a person to read
-and edit: no frequencies, keys or row order unless asked (`--weights`,
-`--keys`, `--order`), and rounded numbers, so ids from 1 to 150 are written
-`[0, 150]`. `profile()` *imitates* data, for generating a stand-in, and
-records everything, exactly. `--round-bounds exact --round-rates exact`
-writes what was observed. See [How the pieces
-fit](../explanation/concepts.md#describe-or-imitate).
+`--describe` writes a draft for a person to read and edit: no
+frequencies, distributions, keys or row order unless asked (`--weights`,
+`--shape`, `--keys`, `--order`). `--round-bounds auto --round-rates auto`
+writes numbers as a person would, so ids from 1 to 150 become `[0, 150]`.
+See [How the pieces fit](../explanation/concepts.md#describe-or-imitate).
+*Since 2.0. In 1.x, `schema infer` described, and rounded, by default.*
 
 Columns are declared through `__columns__` rather than as class attributes,
 same as `from_yaml` — see [Column names that are not
@@ -91,8 +93,9 @@ new`.
 
 Every option, with its default, is in the
 [command-line reference](../reference/cli.md#polspec-schema-infer): what to
-record (`--weights`, `--shape`, `--keys`, `--order`), what to leave out
-(`--no-bounds`, `--no-formats`, `--replace`), and how finely to write it
+record (`--describe`, and `--weights`, `--shape`, `--keys`, `--order`,
+each with a `--no-` form), what to leave out (`--no-bounds`,
+`--no-formats`, `--replace`), and how finely to write it
 (`--round-bounds`, `--round-rates`). [Infer a spec from data](profiling.md)
 explains each from Python.
 
@@ -125,12 +128,13 @@ flags and dates it holds, in the format it is written in, saying why a
 column that nearly parses stays text. See
 [Data read as text](profiling.md#data-read-as-text).
 
-The draft is written as a person would write it: bounds rounded outward and
-rates rounded up, to two significant figures — `amount: [3.17, 9871.23]`
-becomes `[0, 9900]` and a 2.37% null rate `0.024` — so the file reads as a
-choice rather than a measurement. Rounding outward and up keeps the data
-valid against it. `--round-bounds 1k --round-rates 0.01` picks the
-precision, and `exact` writes what was observed:
+`--round-bounds` and `--round-rates` write the draft as a person would.
+`auto` rounds bounds outward and rates up, to two significant figures:
+`amount: [3.17, 9871.23]` becomes `[0, 9900]`, and a 2.37% null rate
+becomes `0.024`. The file then reads as a choice rather than a
+measurement, and rounding outward and up keeps the data valid against it.
+A step such as `1k` or `0.01` picks the precision, and `exact`, the
+default, writes what was observed:
 
 ```bash
 polspec schema infer orders.parquet -o orders.yaml --round-bounds 10k --round-rates 0.01
@@ -175,6 +179,11 @@ seeded per test from `--polspec-seed`, and a failure says how to rerun it.
 `--seed`, `--no-cartesian`, `--class` — are in the
 [command-line reference](../reference/cli.md#polspec-test). *Changed in 1.3:*
 the tests used to call `generate()` and `validate()` with seed 42.
+
+A test asks for `--rows` rows (500), or fewer when a `unique` column holds
+fewer distinct values. A key `schema infer` profiled from a 200-row file
+spans the 200 values it was seen with, so its test generates 200 rows,
+with a comment saying why. *Added in 2.0.*
 
 ### It will not hand you a test that fails on the spot
 

@@ -23,7 +23,7 @@ One command profiles all three:
 
 <!-- docs: run -->
 ```bash
-polspec schema infer shop/customers.csv shop/orders.csv shop/lines.csv -o shop.yaml --weights
+polspec schema infer shop/customers.csv shop/orders.csv shop/lines.csv -o shop.yaml --round-rates auto
 ```
 
 It prints a line saying it inferred 3 specs, with 2 foreign keys between them.
@@ -34,11 +34,13 @@ support:
 - **Its dtype and extremes:** `qty` is an `Int64` from 1 to 5, and
   `placed_on` a `Date` within 2025.
 - **Its values, where there are few:** `status` is an `Enum` of four values,
-  and `--weights` records how often each occurs.
+  with how often each occurs. `--round-rates auto` writes those shares,
+  and the null rates, to two significant figures.
 - **Its shape, where it has one:** `email` names the `email` format, and
   `ref` and `sku` get the pattern their values share, `^ORD-[0-9]{6}$` and
   `^SKU-[0-9]{4}$`.
-- **Its key, where it is one:** every `Orders.customer_id` is a
+- **Its key, where it is one:** `Orders.ref` holds no value twice, so it
+  is declared `unique`. Every `Orders.customer_id` is a
   `Customers.id`, and its name says so, so it becomes a
   [foreign key](../how-to/registry.md). The same goes for `Lines.order_id`
   into `Orders.id`.
@@ -78,17 +80,16 @@ print(registry["Orders"]["ref"])
 
 ```text
 ColSpec(Enum, choices={'NEW': 0.085, 'PAID': 0.27, 'RETURNED': 0.055, 'SHIPPED': 0.59})
-ColSpec(String, string_length=(10, 10), pattern='^ORD-[0-9]{6}$')
+ColSpec(String, unique=True, string_length=(10, 10), pattern='^ORD-[0-9]{6}$')
 ```
 
 ## Edit what is too exact
 
-A profile says what this data held, not what the data may hold. The
-command line rounds bounds outward to two significant figures — so
-`Customers.id`, from 1 to 150, is written `[0, 150]` — where
-`polspec.profile_all` in Python writes them exactly; the command describes
-data for a person to read, and the function imitates it. A few claims
-still need a person to decide. Here, an order line may hold up to
+A profile says what this data held, not what the data may hold: bounds
+are written exactly as observed, so `Customers.id`, from 1 to 150, is
+`[1, 150]`. `--round-bounds auto` would write `[0, 150]`, rounded outward
+to two significant figures as a person might. A few claims still need a
+person to decide. Here, an order line may hold up to
 20 of an item, and a price has no upper limit:
 
 ```python

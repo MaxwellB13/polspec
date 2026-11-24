@@ -91,22 +91,22 @@ The full table is in [Constraints](../how-to/constraints.md).
 
 ## Describe, or imitate
 
-Data becomes a spec in one of two ways, which record different things by
-default because they are for different readers:
+Data becomes a spec through `polspec.profile(source)`,
+`FrameSpec.from_dataframe(df)` or `polspec schema infer`, and all three
+record the same things by default: enough for a stand-in, fake data that
+looks like this data. That is each column's dtype, extremes, nulls and
+values, plus its category frequencies, fitted distribution and
+uniqueness, and the order the rows come in, written exactly as observed.
 
-| | Describe | Imitate |
-|:--|:--|:--|
-| Python | `FrameSpec.from_dataframe(df)` | `polspec.profile(source)` |
-| Command line | `polspec schema infer` | `polspec synthesize --spec` |
-| For | a contract a person reads and edits | a stand-in: fake data that looks like this data |
-| Records | what each column is | that, plus category frequencies, fitted distributions, keys and row order |
-| Bounds and rates | `schema infer` rounds them outward, to two significant figures | exact, as observed |
+A contract a person reads and edits needs less. `describe=True`, or
+`--describe`, records what each column is: no frequencies, distributions,
+keys or row order unless asked for each. Rounding makes the numbers read
+as a person would write them: `round_bounds="auto"` (`--round-bounds auto`)
+writes ids from 1 to 150 as `[0, 150]`, rounded outward so the data stays
+inside. See [Infer a spec from data](../how-to/profiling.md).
 
-So `schema infer` on ids from 1 to 150 writes bounds `[0, 150]`: rounded
-outward, so the data stays inside and the number reads as a person would
-write it. `--round-bounds exact` keeps `[1, 150]`. Either way can record
-anything the other does; only the defaults differ. See
-[Infer a spec from data](../how-to/profiling.md).
+*Since 2.0. In 1.x, `from_dataframe` and `schema infer` described by
+default, and `schema infer` rounded.*
 
 ## Seeds
 

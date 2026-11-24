@@ -533,14 +533,17 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         df: pl.DataFrame,
         *,
         name: str = "Profiled",
+        describe: bool = False,
         options: ProfileOptions | None = None,
         **keywords: Unpack[ProfileKeywords],
     ) -> type[FrameSpec]:
         """Infers a spec by profiling an existing DataFrame.
 
-        `polspec.profile` with less recorded by default -- `weights`,
-        `shape`, `detect_unique` and `detect_order` off -- so it describes
-        what each column is rather than a stand-in for the data. A string or
+        `polspec.profile` as a `FrameSpec`, with its defaults: weights,
+        shapes, keys and order recorded. `describe=True` leaves those four
+        out unless asked, so it describes what each column is rather than a
+        stand-in for the data. *Since 2.0: 1.x left them out by default.*
+        A frame with no rows still describes its columns' dtypes. A string or
         categorical column with at most `max_unique_enum` distinct values,
         repeating, becomes an `Enum`; one whose values have a `format` -- an
         email, a UUID, a country code -- names it, unless `formats=False`;
@@ -551,18 +554,14 @@ class FrameSpec(metaclass=_FrameSpecMeta):
 
         `options` is a `ProfileOptions`, or pass its fields as keywords:
         `round_bounds` and `round_rates` write bounds and rates at a
-        person's precision, as `polspec schema infer` does by default.
+        person's precision.
         """
         if not isinstance(df, pl.DataFrame):
             raise TypeError(f"Expected pl.DataFrame, got {type(df).__name__}")
         from polspec.frames import sample_rows
-        from polspec.profiler import (
-            DESCRIBE_DEFAULTS,
-            profile_options,
-            profiled_table,
-        )
+        from polspec.profiler import profile_options, profiled_table
 
-        opts = profile_options(options, keywords, defaults=DESCRIBE_DEFAULTS)
+        opts = profile_options(options, keywords, describe=describe)
         # The columns directly, not through `profile`: a frame with no rows
         # still describes its columns' dtypes, which `profile` refuses.
         frame = sample_rows(df, opts.sample, opts.seed)

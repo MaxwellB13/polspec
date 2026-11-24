@@ -120,15 +120,16 @@ existing_df = pl.DataFrame(
     }
 )
 
-Profiled = FrameSpec.from_dataframe(existing_df, weights=True)
+Profiled = FrameSpec.from_dataframe(existing_df)
 print(Profiled.to_markdown())
 ```
 
 It infers nullability and the observed null rates, and turns a text column
 whose few values repeat into an `Enum` of them; a column of distinct names
-stays text. With `weights=True` it also records how often each category
-occurred, so regenerated data keeps the observed mix rather than a uniform
-one.
+stays text. It also records how often each category occurred, so
+regenerated data keeps the observed mix rather than a uniform one, and,
+given enough rows, the column that is a key and the order the rows come in.
+`describe=True` leaves those out.
 
 Treat the result as a first draft to edit, not a finished contract: it
 describes the sample it saw, which may be narrower than the rule you actually

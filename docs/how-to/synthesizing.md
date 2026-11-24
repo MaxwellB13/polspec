@@ -249,9 +249,9 @@ polspec synthesize customers.parquet -o fake_customers.parquet \
 
 `--spec` writes the profiled spec beside the data, so the fake data can be
 reproduced — `polspec generate fake_customers.yaml -n 1000000 --seed 1`
-— and the spec reviewed. `polspec schema infer` takes the same profiling
-steps one at a time, as `--shape`, `--keys`, `--order` and `--replace`; see
-[Command line](cli.md).
+— and the spec reviewed. `polspec schema infer` profiles the same way, and
+`--describe` leaves out the frequencies, shapes, keys and order a stand-in
+needs; see [Command line](cli.md).
 
 Several sources make a related set, written into a directory, one fake file
 per source:

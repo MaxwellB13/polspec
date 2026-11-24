@@ -171,7 +171,8 @@ def test_a_registry_file_is_written_byte_for_byte():
 
 
 def test_schema_infer_writes_its_golden_draft(tmp_path, capsys):
-    """What `polspec schema infer` writes, rounding and all, for one frame."""
+    """What `polspec schema infer` writes by default for one frame: since 2.0,
+    `profile()`'s defaults -- weights, shapes, keys and order, exactly."""
     n = 1_000
     frame = pl.DataFrame(
         {
@@ -184,7 +185,6 @@ def test_schema_infer_writes_its_golden_draft(tmp_path, capsys):
     )
     frame.write_parquet(tmp_path / "orders.parquet")
     out = tmp_path / "orders.yaml"
-    flags = ["--weights", "--keys", "--order"]
     assert (
         main(
             [
@@ -193,7 +193,6 @@ def test_schema_infer_writes_its_golden_draft(tmp_path, capsys):
                 str(tmp_path / "orders.parquet"),
                 "-o",
                 str(out),
-                *flags,
             ]
         )
         == 0

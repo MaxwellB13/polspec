@@ -228,9 +228,12 @@ class ProfileOptions:
 
     `profile`, `FrameSpec.from_dataframe` and `synthesize` take these as an
     `options=` object or as the keywords themselves -- one or the other, as
-    `validate` takes `ValidationOptions`. `FrameSpec.from_dataframe`
-    records less by default: `weights`, `shape`, `detect_unique` and
-    `detect_order` off.
+    `validate` takes `ValidationOptions`. Every one of them, and
+    `polspec schema infer`, has these defaults; `describe=True` (`--describe`)
+    records less unless asked: `weights`, `shape`, `detect_unique` and
+    `detect_order` off. *Since 2.0: 1.x's `FrameSpec.from_dataframe` and
+    `schema infer` recorded less by default, and `schema infer` rounded
+    bounds and rates.*
 
     Parameters
     ----------
@@ -370,17 +373,23 @@ def profile_options(
     options: ProfileOptions | None,
     keywords: Mapping[str, Any],
     *,
-    defaults: Mapping[str, Any] | None = None,
+    describe: bool = False,
 ) -> ProfileOptions:
-    """The options for one call: the object, or the keywords over
-    `defaults` -- a caller whose defaults differ from `ProfileOptions`'."""
-    if options is None and defaults:
-        keywords = {**defaults, **keywords}
+    """The options for one call: the object, or the keywords -- over
+    `DESCRIBE_DEFAULTS` when `describe`, the lean form."""
+    if describe:
+        if options is not None:
+            raise TypeError(
+                "describe=True sets what the keywords default to; with "
+                "options=, set its fields instead: ProfileOptions(weights=False, "
+                "shape=False, detect_unique=False, detect_order=False)."
+            )
+        keywords = {**DESCRIBE_DEFAULTS, **keywords}
     return options_from(ProfileOptions, options, keywords, what="profiling")
 
 
-# What `profile_columns` -- and so `FrameSpec.from_dataframe` -- records
-# unless asked: the shape of the data, not a stand-in for it.
+# What `describe=True` leaves out unless asked: the shape of the data, not
+# a stand-in for it. *1.x's defaults for `FrameSpec.from_dataframe`.*
 DESCRIBE_DEFAULTS: Mapping[str, Any] = MappingProxyType(
     {"weights": False, "shape": False, "detect_unique": False, "detect_order": False}
 )
@@ -449,20 +458,11 @@ def _sorted_ways(df: pl.DataFrame, names: Sequence[str]) -> dict[str, list[bool]
     }
 
 
-def profile_columns(
-    df: pl.DataFrame,
-    given: ProfileOptions | None = None,
-    /,
-    **keywords: Any,
-) -> dict[str, ColSpec]:
+def profile_columns(df: pl.DataFrame, opts: ProfileOptions) -> dict[str, ColSpec]:
     """Infers ColSpec column definitions by profiling an existing DataFrame.
 
     Internal: `polspec.profile` is the public way in, and returns these
-    columns as a `TableSpec`. Its defaults record weights, shapes and
-    uniqueness, which these leave off.
-
-    `given` is a `ProfileOptions`, or pass its fields as keywords, over
-    `DESCRIBE_DEFAULTS`: what a column is, not a stand-in for it.
+    columns as a `TableSpec`.
 
     Warns
     -----
@@ -473,7 +473,6 @@ def profile_columns(
     """
     if not isinstance(df, pl.DataFrame):
         raise TypeError(f"Expected pl.DataFrame, got {type(df).__name__}")
-    opts = profile_options(given, keywords, defaults=DESCRIBE_DEFAULTS)
     replace = opts.replace
     replaced = set(replace)
     unknown = sorted(replaced - set(df.columns))

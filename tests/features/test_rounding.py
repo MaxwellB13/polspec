@@ -230,7 +230,8 @@ def test_from_dataframe_rounds_only_when_asked():
     assert asked.spec["amount"].bounds == Bound(0.0, 9900.0)
 
 
-def test_schema_infer_rounds_auto_unless_told_exact(tmp_path):
+def test_schema_infer_writes_exact_unless_told_to_round(tmp_path):
+    """2.0: exact, as `profile()` writes; 1.x's `schema infer` rounded auto."""
     from polspec.cli import main
 
     source = tmp_path / "orders.parquet"
@@ -243,7 +244,7 @@ def test_schema_infer_rounds_auto_unless_told_exact(tmp_path):
     auto, exact, stepped = (
         tmp_path / f"{n}.yaml" for n in ("auto", "exact", "stepped")
     )
-    assert main(["schema", "infer", str(source), "-o", str(auto)]) == 0
+    assert main(["schema", "infer", str(source), "-o", str(exact)]) == 0
     assert (
         main(
             [
@@ -251,11 +252,11 @@ def test_schema_infer_rounds_auto_unless_told_exact(tmp_path):
                 "infer",
                 str(source),
                 "-o",
-                str(exact),
+                str(auto),
                 "--round-bounds",
-                "exact",
+                "auto",
                 "--round-rates",
-                "exact",
+                "auto",
             ]
         )
         == 0

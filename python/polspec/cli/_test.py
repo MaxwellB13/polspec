@@ -24,6 +24,7 @@ from polspec.cli._io import (
 )
 from polspec.errors import CliError, PolspecError
 from polspec.generation.engine import pattern_generation
+from polspec.spec import distinct_values
 
 
 def _skip_reasons(spec_cls: type[FrameSpec]) -> tuple[dict[str, bool], list[str]]:
@@ -80,6 +81,27 @@ def _skip_reasons(spec_cls: type[FrameSpec]) -> tuple[dict[str, bool], list[str]
         )
 
     return flags, reasons
+
+
+def _rows_that_fit(spec_cls: type[FrameSpec], rows: int) -> tuple[int, str | None]:
+    """`rows`, or fewer when a unique column holds fewer distinct values --
+    a key `schema infer` profiled from a 200-row file spans 200 -- and why.
+
+    The spec states what the data held, so the test asks for what it can
+    give rather than widening it, as `synthesize` does for a stand-in.
+    """
+    fits, reason = rows, None
+    for name, column in spec_cls.spec.columns.items():
+        if not column.unique:
+            continue
+        room = distinct_values(column)
+        if room is not None and room < fits:
+            fits = room
+            reason = (
+                f"{fits:,} rows, not {rows:,}: {name!r} is unique and holds "
+                f"only {fits:,} distinct values"
+            )
+    return fits, reason
 
 
 def _parents_in_order(
@@ -146,6 +168,10 @@ def _render_test_case(
         )
 
     flags, reasons = _skip_reasons(spec_cls)
+    asked = rows
+    rows, fitted = _rows_that_fit(spec_cls, asked)
+    if fitted is not None:
+        reasons.append(fitted)
     kwargs = "".join(f", {name}={value}" for name, value in flags.items())
     comment = "".join(f"    # {reason}\n" for reason in reasons)
     seeded = "" if seed is None else f", seed={seed}"
@@ -154,7 +180,8 @@ def _render_test_case(
     setup = ""
     if parents:
         setup = "    parents = {}\n" + "".join(
-            f"    parents[{parent}] = polspec_frames({parent}, {rows}{seeded}"
+            f"    parents[{parent}] = polspec_frames({parent}, "
+            f"{_rows_that_fit(by_class[parent], asked)[0]}{seeded}"
             + (", references=parents" if _has_parents(by_class[parent]) else "")
             + ")\n"
             for parent in parents

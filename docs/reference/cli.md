@@ -24,11 +24,13 @@ Create or infer a FrameSpec.
 Profile a data file into a YAML schema.
 
 ```
-polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
-                            [--max-unique-enum N] [--no-formats] [--no-patterns]
-                            [--parse-text] [--no-bounds] [--sample N] [--shape]
-                            [--keys] [--order] [--round-bounds STEP]
-                            [--round-rates STEP] [--replace COL [COL ...]]
+polspec schema infer [-h] -o OUTPUT [--name NAME] [--describe]
+                            [--weights | --no-weights] [--max-unique-enum N]
+                            [--no-formats] [--no-patterns] [--parse-text]
+                            [--no-bounds] [--sample N] [--shape | --no-shape]
+                            [--keys | --no-keys] [--order | --no-order]
+                            [--round-bounds STEP] [--round-rates STEP]
+                            [--replace COL [COL ...]]
                             [--foreign-key SPEC.COLUMN=SPEC.COLUMN]
                             [--no-foreign-keys]
                             source [source ...]
@@ -39,18 +41,19 @@ polspec schema infer [-h] -o OUTPUT [--name NAME] [--weights]
 | `source` | Path to a CSV, Parquet, NDJSON or IPC file; several are related tables, profiled into a registry with the foreign keys between them |
 | `-o`, `--output` `OUTPUT` | **Required.** File to write: .yaml/.yml, or .py for a FrameSpec subclass (one per source, and a Registry, with several); '-' prints the YAML instead |
 | `--name` `NAME` | Spec class name (default: derived from source) |
-| `--weights` | Record each category's observed frequency |
+| `--describe` | Record what each column is, not a stand-in for the data: no weights, shapes, keys or order unless their flags ask |
+| `--weights`, `--no-weights` | Record each category's observed frequency (default: on, off with --describe) |
 | `--max-unique-enum` `N` | Max distinct values for a text column to keep its values, as an Enum, when they repeat (default: 50) |
 | `--no-formats` | Do not name the format a text column's values have (email, uuid4, ...) |
 | `--no-patterns` | Do not write the pattern a code-like text column's values share (ORD-[0-9]{6}, ...) |
 | `--parse-text` | Read a text column as the number, flag or date every value holds (Boolean, Int64, Float64, Date, Datetime) |
 | `--no-bounds` | Skip computing numeric/temporal bounds and string lengths |
 | `--sample` `N` | Profile a random sample of N rows (seeded, so the same every run) |
-| `--shape` | Fit the distribution each numeric or temporal column follows |
-| `--keys` | Declare an all-distinct integer or text column unique |
-| `--order` | Declare order_by when the rows come sorted by a column |
-| `--round-bounds` `STEP` | Round each numeric column's bounds outward to STEP (1000, 1k, 10k, 1M, 0.01), within its dtype, so the data stays inside; 'auto' keeps two significant figures of the span and whole seconds; 'exact' writes them as observed (default: auto) |
-| `--round-rates` `STEP` | Round each null and NaN rate up to STEP (0.01), and each --weights frequency to its nearest STEP; 'auto' keeps two significant figures; 'exact' writes them as observed. A rate of 0 stays 0 (default: auto) |
+| `--shape`, `--no-shape` | Fit the distribution each numeric or temporal column follows (default: on, off with --describe) |
+| `--keys`, `--no-keys` | Declare an all-distinct integer or text column unique (default: on, off with --describe) |
+| `--order`, `--no-order` | Declare order_by when the rows come sorted by a column (default: on, off with --describe) |
+| `--round-bounds` `STEP` | Round each numeric column's bounds outward to STEP (1000, 1k, 10k, 1M, 0.01), within its dtype, so the data stays inside; 'auto' keeps two significant figures of the span and whole seconds; 'exact' writes them as observed (default: exact) |
+| `--round-rates` `STEP` | Round each null and NaN rate up to STEP (0.01), and each category frequency to its nearest STEP; 'auto' keeps two significant figures; 'exact' writes them as observed. A rate of 0 stays 0 (default: exact) |
 | `--replace` `COL` | Columns whose values must not be carried over: text in them is described by its lengths, never by the values the source holds |
 | `--foreign-key` `SPEC.COLUMN=SPEC.COLUMN` | With several sources, declare a foreign key, child then parent, each under its file's spec name: Orders.buyer=Customers.id |
 | `--no-foreign-keys` | With several sources, find no foreign keys between them |

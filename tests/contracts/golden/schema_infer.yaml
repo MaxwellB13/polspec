@@ -4,7 +4,7 @@ columns:
   order_id:
     dtype: Int64
     bounds:
-    - 0
+    - 1
     - 1000
     unique: true
   status:
@@ -20,8 +20,8 @@ columns:
   total:
     dtype: Float64
     bounds:
-    - 0.0
-    - 9900.0
+    - 3.17
+    - 9833.69
   email:
     dtype: String
     format: email
@@ -29,7 +29,7 @@ columns:
     dtype: String
     nullable: true
     unique: true
-    null_probability: 0.89
+    null_probability: 0.888
     string_length:
     - 6
     - 8
