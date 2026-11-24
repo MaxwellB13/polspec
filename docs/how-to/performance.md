@@ -5,8 +5,8 @@ validation is one Polars query. A few choices still decide whether a job
 takes milliseconds or minutes, and whether it fits in memory. This page
 gathers them, with what each costs.
 
-The numbers are medians on an Intel 13900K with 64 GB of DDR5, Polars 1.44,
-polspec 1.7, for a million rows unless a row says otherwise. Yours will
+The numbers are medians on an Intel 13900K with 64 GB of DDR5, Polars 2.1,
+polspec 2.0, for a million rows unless a row says otherwise. Yours will
 differ; the ratios matter more than the absolute times.
 `benchmarks/bench.py` measures every case below.
 
@@ -15,18 +15,21 @@ differ; the ratios matter more than the absolute times.
 | A million rows of | Time |
 |:--|--:|
 | a four-column frame (string, enum, int, float) | 7 ms |
-| the same, 20 million rows | 115 ms |
-| an eleven-column frame of every kind a real table has | 49 ms |
-| one `unique` integer key | 4 ms |
-| one column with rules | 29 ms |
-| a composite unique key (`__unique_together__`) | 95 ms |
-| a hierarchy | 60 ms |
+| the same, 20 million rows | 109 ms |
+| an eleven-column frame of every kind a real table has | 40 ms |
+| one `unique` integer key | 2 ms |
+| one column with rules | 15 ms |
+| a composite unique key (`__unique_together__`) | 23 ms |
+| a hierarchy | 45 ms |
 
 Plain columns cost almost nothing; the claims that relate rows to other
-rows cost most. A composite key is resampled until its combinations are
-distinct, and holds several copies of the frame while it does — about
-850 MB at a million rows — so it is the claim to leave out of a spec that
-does not need it.
+rows cost most. A composite key whose members all have a finite or
+bounded space — the one above — is drawn as one permutation of their
+combinations, at 143 MB for a million rows. One with a float or free-text
+member is resampled until its combinations are distinct instead, and holds
+several copies of the frame while it does, so it is the claim to leave out
+of a spec that does not need it. *2.0: 1.7 took 95 ms and 850 MB for the
+key above.*
 
 ### Memory: generate, batches, scan or a sink
 
@@ -35,11 +38,11 @@ frame above peaks near 1 GB. For more than fits, stream it:
 
 | A million rows | Holds | Four columns | Eleven columns |
 |:--|:--|--:|--:|
-| `generate(n)` | the whole frame | 7 ms | 49 ms |
-| `generate_batches(n, batch_size=10_000)` | one batch | 8 ms | |
+| `generate(n)` | the whole frame | 7 ms | 40 ms |
+| `generate_batches(n, batch_size=10_000)` | one batch | 7 ms | |
 | `generate_batches(n, batch_size=1_000)` | one batch | 12 ms | |
-| `scan(n)`, collected | what the plan asks for | | 76 ms |
-| `sink_parquet(path, n)`, written | one batch | 27 ms | |
+| `scan(n)`, collected | what the plan asks for | | 68 ms |
+| `sink_parquet(path, n)`, written | one batch | 25 ms | |
 
 A small batch costs little: the columns are drawn many batches at a time
 and sliced. `scan()` generates only the columns and rows a plan
@@ -53,15 +56,15 @@ large; see [Memory](generating.md#memory).
 ### Keeping checks
 
 Generation keeps the rows every check passes and reads more of the frame
-for the rest, so its cost grows with how many rows the checks reject.
-These are 1.7's numbers; 2.0 reads only the rows it has not read, and
-this page is re-measured for it:
+for the rest, reading only the rows it has not read, so its cost grows
+with how many rows the checks reject. Checks are kept by default since
+2.0:
 
 | A million rows of the eleven columns | Time |
 |:--|--:|
-| `generate(n)` | 49 ms |
-| `checks=True`, a check rejecting 10% of rows | 143 ms |
-| `checks=True`, a check rejecting 50% of rows | 328 ms |
+| `generate(n, checks=False)` | 40 ms |
+| a check rejecting 10% of rows | 71 ms |
+| a check rejecting 50% of rows | 125 ms |
 
 A check most rows pass is cheap to keep; for one that rejects most of
 them, narrow the columns it reads — bounds, choices, a rule — so fewer
@@ -75,9 +78,9 @@ frame is read once however many claims there are:
 
 | A million rows | Time |
 |:--|--:|
-| the eleven-column frame, validated | 64 ms |
-| the same, as a `LazyFrame` validated and collected | 61 ms |
-| one bounded column | 1.5 ms |
+| the eleven-column frame, validated | 41 ms |
+| the same, as a `LazyFrame` validated and collected | 35 ms |
+| one bounded column | 1.7 ms |
 
 A `LazyFrame` is validated by running its query, and collecting what
 `validate()` hands back runs it again; `report.failing_rows()` and
@@ -99,24 +102,25 @@ larger than memory. See
 ## Profiling
 
 Profiling reads every value of every column: the eleven-column frame
-takes 370 ms at a million rows. `sample=` profiles a random sample instead,
+takes 180 ms at a million rows. `sample=` profiles a random sample instead,
 seeded so it is the same every run:
 
 | A million rows of the eleven columns | Time |
 |:--|--:|
-| `profile(frame)` | 370 ms |
-| `profile(frame, sample=100_000)` | 89 ms |
+| `profile(frame)` | 180 ms |
+| `profile(frame, sample=100_000)` | 55 ms |
 
 A sample sees most of what the whole column holds, and misses its rare
 values and extremes: bounds come from the sample, so a few real values may
 fall outside them. Profile the whole frame for a contract, and a sample to
 get started on a large one. Columns are profiled in parallel from 50,000
 rows. `parse_text=True` reads text as numbers and dates first: a frame
-whose numbers and dates arrive as text takes about twice as long to
-profile as the same frame typed.
+whose numbers and dates arrive as text takes about three times as long
+to profile as the same frame typed.
 
 ## Importing
 
-`import polspec` takes about half a second cold, most of it Polars itself.
+`import polspec` takes about half a second cold, nearly all of it Polars
+itself: polspec's own share is about 50 ms.
 Generation, validation, drift and profiling load on first use, so a script
 that only declares specs pays for none of them.

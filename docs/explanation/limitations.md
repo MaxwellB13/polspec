@@ -23,6 +23,13 @@ that is deliberate is pinned by an ordinary passing test instead. Either way
 this page cannot quietly go stale — changing what polspec does forces the test
 to be updated.
 
+*2.0 closed five entries 1.x listed:* a batch's lists were drawn afresh
+rather than being the whole frame's; `Decimal` and 128-bit bounds past 64
+bits were refused; a composite key of finite or bounded members was
+distinct only within a batch; a unique string nearly always took its
+longest length; and, on Polars 1.39, a struct with no fields held no
+nulls. See [Moving to 2.0](../how-to/moving-to-2.md).
+
 ## Generation does not enforce these
 
 ### `__checks__` and `ColSpec.validators` are kept by filtering

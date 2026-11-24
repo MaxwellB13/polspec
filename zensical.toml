@@ -16,6 +16,7 @@ nav = [
   { "How-to guides" = [
     { "Recipes" = "how-to/recipes.md" },
     { "Coming from another tool" = "how-to/coming-from.md" },
+    { "Moving to 2.0" = "how-to/moving-to-2.md" },
     { "Declaring a spec" = [
       { "Declare columns" = "how-to/columns.md" },
       { "Nested columns" = "how-to/nested.md" },

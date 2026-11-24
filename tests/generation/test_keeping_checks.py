@@ -230,6 +230,31 @@ def test_a_scalar_pin_is_kept():
 # ---------------------------------------------------------------------------
 
 
+class _Half(FrameSpec):
+    """A check about half the free rows fail."""
+
+    subtotal = ColSpec(pl.Float64, bounds=(0, 100))
+    total = ColSpec(pl.Float64, bounds=(0, 110))
+    __checks__ = [Check(col("total") >= col("subtotal"), name="total_covers")]
+
+
+@pytest.mark.parametrize("seed", range(20))
+def test_a_few_rows_keep_a_check_half_the_rows_fail(seed):
+    """Asked for one row, generation read one; when it failed, the rate it
+    judged the check by was 0%, and a check half the rows pass was refused
+    as one that rejects nearly every row. The rate is judged on 1,000 rows."""
+    for n in (1, 2, 5):
+        frame = _Half.generate(n, seed=seed, checks=True)
+        assert frame.height == n
+        assert _passes(_Half, frame)
+
+
+def test_batches_of_one_keep_the_checks_the_whole_frame_keeps():
+    whole = _Half.generate(200, seed=SEED, checks=True)
+    batches = _Half.generate_batches(200, batch_size=1, seed=SEED, checks=True)
+    assert pl.concat(list(batches)).equals(whole)
+
+
 def test_a_check_that_rejects_nearly_every_row_is_refused_by_name():
     class Impossible(FrameSpec):
         a = ColSpec(pl.Int64, bounds=(0, 10))
