@@ -43,6 +43,7 @@ import polars as pl
 
 from polspec import frames
 from polspec._frozen import FrozenDict
+from polspec._removed import removed, renamed_keywords
 from polspec.dtypes import DtypeLike
 from polspec.errors import SpecError
 from polspec.spec import is_categorical_dtype
@@ -447,8 +448,9 @@ class CatSpec(metaclass=_CatSpecMeta):
         return CatSpec(enums=enums, categoricals=categoricals, choices=choices)
 
     @classmethod
-    def from_framespec(cls, spec: TableSpec | type[FrameSpec]) -> CatSpec:
-        """The `Enum` and `Categorical` columns a spec already declares."""
+    def from_spec(cls, spec: TableSpec | type[FrameSpec]) -> CatSpec:
+        """The `Enum` and `Categorical` columns a spec already declares.
+        *Named `from_framespec` before 2.0.*"""
         table = as_table_spec(spec)
         enums: dict[str, list[str]] = {}
         categoricals: dict[str, Any] = {}
@@ -467,12 +469,15 @@ class CatSpec(metaclass=_CatSpecMeta):
 
         return CatSpec(enums=enums, categoricals=categoricals, choices=choices)
 
+    from_framespec = classmethod(removed("CatSpec", "from_framespec", "from_spec"))
+
     @classmethod
+    @renamed_keywords(max_enum_cardinality="max_unique_enum")
     def infer(
         cls,
         target: pl.DataFrame | pl.LazyFrame | TableSpec | type[FrameSpec],
         *,
-        max_enum_cardinality: int = 30,
+        max_unique_enum: int = 30,
         max_categorical_cardinality: int = 10_000,
         max_categorical_ratio: float = 0.20,
         include_columns: Sequence[str] | None = None,
@@ -490,8 +495,10 @@ class CatSpec(metaclass=_CatSpecMeta):
         ----------
         target : pl.DataFrame | pl.LazyFrame | TableSpec | type[FrameSpec]
             Data to measure, or a spec to read declarations from.
-        max_enum_cardinality : int
-            At most this many distinct values makes a column an `Enum`.
+        max_unique_enum : int
+            At most this many distinct values makes a column an `Enum`, as
+            `ProfileOptions.max_unique_enum` and `--max-unique-enum` say.
+            *Named `max_enum_cardinality` before 2.0.*
         max_categorical_cardinality : int
             Beyond this many, a column is left as String.
         max_categorical_ratio : float
@@ -510,7 +517,7 @@ class CatSpec(metaclass=_CatSpecMeta):
         if isinstance(target, (pl.DataFrame, pl.LazyFrame)):
             return _infer_from_frame(
                 _as_frame(target),
-                max_enum_cardinality=max_enum_cardinality,
+                max_unique_enum=max_unique_enum,
                 max_categorical_cardinality=max_categorical_cardinality,
                 max_categorical_ratio=max_categorical_ratio,
                 include_columns=include_columns,
@@ -519,7 +526,7 @@ class CatSpec(metaclass=_CatSpecMeta):
             )
         return _infer_from_spec(
             as_table_spec(target),
-            max_enum_cardinality=max_enum_cardinality,
+            max_unique_enum=max_unique_enum,
             max_categorical_cardinality=max_categorical_cardinality,
             include_columns=include_columns,
             exclude_patterns=exclude_patterns,
@@ -554,8 +561,8 @@ class CatSpec(metaclass=_CatSpecMeta):
 
         return catspec_to_dict(self)
 
-    def to_yaml(self, path: str | Path | None = None) -> str | None:
-        """Writes this registry as YAML to `path`, or returns the text."""
+    def to_yaml(self, path: str | Path | None = None) -> str:
+        """This registry as YAML, written to `path` too when one is given."""
         from polspec.serialization import catspec_to_yaml
 
         return catspec_to_yaml(self, path)
@@ -631,7 +638,7 @@ def _skipped(
 def _infer_from_frame(
     df: pl.DataFrame,
     *,
-    max_enum_cardinality: int,
+    max_unique_enum: int,
     max_categorical_cardinality: int,
     max_categorical_ratio: float,
     include_columns: Sequence[str] | None,
@@ -671,7 +678,7 @@ def _infer_from_frame(
         n_unique = non_null.n_unique()
         ratio = n_unique / total_rows if total_rows > 0 else 1.0
 
-        if 0 < n_unique <= max_enum_cardinality:
+        if 0 < n_unique <= max_unique_enum:
             enums[col_name] = [str(x) for x in non_null.unique().sort().to_list()]
         elif n_unique <= max_categorical_cardinality and (
             include is not None or ratio <= max_categorical_ratio or n_unique <= 256
@@ -687,7 +694,7 @@ def _infer_from_frame(
 def _infer_from_spec(
     table: TableSpec,
     *,
-    max_enum_cardinality: int,
+    max_unique_enum: int,
     max_categorical_cardinality: int,
     include_columns: Sequence[str] | None,
     exclude_patterns: Sequence[str] | None,
@@ -730,7 +737,7 @@ def _infer_from_spec(
 
         declared = list(col_spec.choices)
         n_unique = len(declared)
-        if 0 < n_unique <= max_enum_cardinality:
+        if 0 < n_unique <= max_unique_enum:
             enums[col_name] = [str(x) for x in declared]
         elif n_unique <= max_categorical_cardinality:
             categoricals[col_name] = pl.Categories(

@@ -216,15 +216,16 @@ print(ColSpec(pl.Enum, choices={"x": 0.1, "y": 0.2, "z": 0.7}))
 ColSpec(Enum, choices={'x': 0.1, 'y': 0.2, 'z': 0.7})
 ```
 
-The same weights can be given apart, as `weights=`, in the order of the
-choices or of an `Enum`'s categories; the two spellings are the same spec.
-A `Boolean` has no choices to map, so it takes them that way, as
-`[p_false, p_true]`:
+A `Boolean` is weighted the same way, both its values mapped; the column
+reads its weights back as `[p_false, p_true]`:
 
 ```python
-ColSpec(pl.Enum(["x", "y", "z"]), weights=[0.1, 0.2, 0.7])   # the Enum above
-ColSpec(pl.Boolean, weights=[0.9, 0.1])                        # 10% true
+ColSpec(pl.Boolean, choices={True: 0.1, False: 0.9})   # 10% true
 ```
+
+`choices={value: weight}` is the only way to give weights. *Since 2.0: 1.x
+also took them apart, as `weights=[...]`, which now raises an error naming
+this spelling. A spec file still writes them under its `weights:` key.*
 
 *`choices` as a mapping on a bare `Enum` added in 1.2.*
 
@@ -412,8 +413,8 @@ class Events(FrameSpec):
     email    = ColSpec(pl.String, tags="pii")
     duration = ColSpec(pl.Int64, tags="metric")
 
-Events.tag("pii")                      # ['user_id', 'email']
-Events.tag("pii", "key", match="all")  # ['user_id']
+Events.tagged("pii")                      # ['user_id', 'email']
+Events.tagged("pii", "key", match="all")  # ['user_id']
 ```
 
 ## Column names that are not identifiers
@@ -456,7 +457,7 @@ producing the data it did under the old name. See
 A leading underscore is skipped by the class-body scan, so a column called
 `_id` needs the explicit mapping. A name that matches one of `FrameSpec`'s
 methods (`schema`, `tag`, …) is fine either way: the method keeps working and
-the column is reachable as `Spec.col("schema")` — see
+the column is reachable as `Spec.column("schema")` — see
 [Specs as values](tablespec.md#column-names-and-method-names).
 
 ```python

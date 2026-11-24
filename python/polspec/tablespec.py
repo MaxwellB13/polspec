@@ -207,6 +207,10 @@ def _fk_kind_bucket(kind: str) -> str:
     return "string" if kind in ("string", "enum", "categorical") else kind
 
 
+# Methods 2.0 renamed, each old name answered with the new.
+RENAMED = {"tag": "tagged"}
+
+
 # The public functions that take a spec: what a `TableSpec` is asked
 # for as a method, and answered with the function to call. A test holds it
 # to `polspec`'s own functions.
@@ -708,6 +712,10 @@ class TableSpec:
         # every verb is a function over it, so the declarations import no
         # verb; `profile(df).validate(df)` is told which function to call
         # rather than only that there is no such attribute.
+        if name in RENAMED:
+            raise AttributeError(
+                f"TableSpec.{name} is TableSpec.{RENAMED[name]} since 2.0."
+            )
         if name in SPEC_VERBS:
             raise AttributeError(
                 f"TableSpec has no method {name!r}: a spec is a value, and "
@@ -822,7 +830,7 @@ class TableSpec:
         interface take a spec where they take a schema."""
         return self.schema().__arrow_c_schema__()
 
-    def tag(
+    def tagged(
         self,
         *tags: str | Sequence[str],
         match: Literal["any", "all"] = "any",
@@ -1256,7 +1264,7 @@ def _retype_column(
             "distribution mattered.",
             stacklevel=4,
         )
-        updates["weights"] = None
+        updates["_weights"] = None
 
     return dataclasses.replace(spec, **updates)
 

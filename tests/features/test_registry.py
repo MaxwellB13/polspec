@@ -328,15 +328,15 @@ def test_catspec_refuses_two_specs_that_disagree():
         Registry(Orders, Products).catspec()
 
     settled = CatSpec(enums={"STATUS": ["NEW", "PAID"]})
-    assert Registry(Orders, Products, categories=settled).catspec() is settled
+    assert Registry(Orders, Products, catspec=settled).catspec() is settled
 
 
 def test_resolve_checks_columns_against_declared_categories():
     shared = CatSpec(enums={"STATUS": ["NEW", "PAID", "SHIPPED"]})
     with pytest.raises(RegistryError, match=r"Orders\.status declares Enum"):
-        Registry(Customers, Orders, categories=shared).resolve()
+        Registry(Customers, Orders, catspec=shared).resolve()
     agreeing = CatSpec(enums={"STATUS": ["NEW", "PAID"]})
-    Registry(Customers, Orders, categories=agreeing).resolve()
+    Registry(Customers, Orders, catspec=agreeing).resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -346,7 +346,7 @@ def test_resolve_checks_columns_against_declared_categories():
 
 def test_registry_round_trips_through_one_yaml_file(tmp_path):
     shared = CatSpec(enums={"STATUS": ["NEW", "PAID"]})
-    registry = Registry(Customers, Orders, OrderLines, categories=shared)
+    registry = Registry(Customers, Orders, OrderLines, catspec=shared)
     path = tmp_path / "specs.yaml"
     registry.to_yaml(path)
 
@@ -358,7 +358,7 @@ def test_registry_round_trips_through_one_yaml_file(tmp_path):
 
     loaded = Registry.from_yaml(path)
     assert loaded.names == registry.names
-    assert loaded.categories.enums == {"STATUS": ["NEW", "PAID"]}
+    assert loaded.catspec().enums == {"STATUS": ["NEW", "PAID"]}
     for name in registry:
         assert loaded[name] == registry[name]
     resolved = loaded.resolve()
@@ -397,7 +397,7 @@ def test_registry_file_may_point_at_a_categories_file(tmp_path):
     )
     loaded = Registry.from_yaml(tmp_path / "specs.yaml")
     assert loaded["Orders"]["status"].dtype == pl.Enum(["NEW", "PAID"])
-    assert loaded.categories is not None
+    assert loaded.catspec().enums == {"STATUS": ["NEW", "PAID"]}
 
 
 def test_discover_walks_python_and_yaml(tmp_path):
@@ -561,11 +561,11 @@ def test_replace_swaps_one_spec_in_place_and_leaves_the_registry_as_it_was():
     orders = TableSpec("Orders", {"qty": ColSpec(pl.Int64, bounds=(1, 5))})
     last = TableSpec("Last", {"b": ColSpec(pl.Int64)})
     cats = CatSpec(enums={"tier": ["free", "pro"]})
-    registry = Registry(first, orders, last, categories=cats)
+    registry = Registry(first, orders, last, catspec=cats)
     wider = orders.with_columns({"qty": ColSpec(pl.Int64, bounds=(1, 20))})
     replaced = registry.replace(wider)
     assert replaced.names == ("First", "Orders", "Last")
-    assert replaced["Orders"] == wider and replaced.categories == registry.categories
+    assert replaced["Orders"] == wider and replaced.catspec() == registry.catspec()
     assert registry["Orders"] == orders
     with pytest.raises(RegistryError, match="no spec named 'Nope'"):
         registry.replace(TableSpec("Nope", {"a": ColSpec(pl.Int64)}))

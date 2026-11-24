@@ -184,10 +184,10 @@ pl.col(Invoices.names.unit_price) * pl.col(Invoices.names.quantity)
 
 A `TableSpec` has `names` too, each column under its own name. A column
 called `names` is reached the way any column named like a method is, with
-`Invoices.col("names")`. *Added in 1.2.*
+`Invoices.column("names")`. *Added in 1.2.*
 
 To change one field of a column, `replace` makes a new one, checked as a
-new declaration is: `Invoices.col("quantity").replace(nullable=True)`.
+new declaration is: `Invoices.column("quantity").replace(nullable=True)`.
 
 ## Column names and method names
 
@@ -201,7 +201,7 @@ class Raw(FrameSpec):
     tag    = ColSpec(pl.String)
 
 Raw.schema()            # the method: Schema({'schema': String, 'tag': String})
-Raw.col("schema")       # the column
+Raw.column("schema")       # the column
 Raw.spec["tag"]         # also the column
 ```
 

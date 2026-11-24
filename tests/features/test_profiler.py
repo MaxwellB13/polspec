@@ -303,7 +303,7 @@ def test_no_bounds_asked_for_means_no_warning():
 
 def test_from_dataframe_records_a_nan_share_and_warns_only_for_an_infinity():
     spec = FrameSpec.from_dataframe(pl.DataFrame({"f": [1.0, float("nan")]}))
-    assert (spec.col("f").bounds, spec.col("f").nan_probability) == (
+    assert (spec.column("f").bounds, spec.column("f").nan_probability) == (
         Bound(1.0, 1.0),
         0.5,
     )

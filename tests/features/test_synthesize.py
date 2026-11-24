@@ -27,6 +27,7 @@ from helpers import spec_for
 from polspec import (
     ColSpec,
     FrameSpec,
+    GenerationError,
     TableSpec,
     drift,
     generate,
@@ -254,7 +255,7 @@ def test_a_key_widens_to_hold_more_rows_than_the_source(real):
 
 def test_a_key_that_cannot_widen_enough_is_refused():
     small = pl.DataFrame({"k": pl.Series(range(200), dtype=pl.UInt8)})
-    with pytest.raises(ValueError, match="cannot hold 1,000 distinct values"):
+    with pytest.raises(GenerationError, match="cannot hold 1,000 distinct values"):
         synthesize(small, 1_000, seed=1)
 
 

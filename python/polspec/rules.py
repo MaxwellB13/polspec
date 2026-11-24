@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 import polars as pl
 
+from polspec._removed import refuse_keyword
 from polspec.dtypes import typed_values
 from polspec.errors import SpecError
 from polspec.expr import Pred, root_names
@@ -86,7 +87,14 @@ class ColRule:
 
     when: Pred
     choices: tuple
-    weights: tuple[float, ...] | None = None
+    # Read as `weights`; declared through `choices={value: weight}`.
+    _weights: tuple[float, ...] | None = None
+
+    @property
+    def weights(self) -> tuple[float, ...] | None:
+        """Each choice's weight, in order, or None when each is as likely.
+        Declared as `choices={value: weight}`."""
+        return self._weights
 
     def __post_init__(self) -> None:
         if not isinstance(self.when, Pred):
@@ -107,19 +115,15 @@ class ColRule:
                 f"ColRule.when must reference at least one column, got {self.when!r}"
             )
         if isinstance(self.choices, dict):
-            if self.weights is not None:
-                raise SpecError(
-                    "Cannot specify both a dict for choices and an explicit weights parameter"
-                )
             object.__setattr__(
-                self, "weights", tuple(float(w) for w in self.choices.values())
+                self, "_weights", tuple(float(w) for w in self.choices.values())
             )
             object.__setattr__(self, "choices", tuple(self.choices.keys()))
         else:
             object.__setattr__(self, "choices", tuple(self.choices))
             if self.weights is not None:
                 object.__setattr__(
-                    self, "weights", tuple(float(w) for w in self.weights)
+                    self, "_weights", tuple(float(w) for w in self.weights)
                 )
         if not self.choices:
             raise SpecError("ColRule.choices must not be empty")
@@ -146,6 +150,19 @@ class ColRule:
 
     def __hash__(self) -> int:
         return hash((self.when, self.choices, self.weights))
+
+    def __repr__(self) -> str:
+        """`ColRule(when=..., choices=...)`, weighted choices each beside its
+        weight -- the spelling that declares it."""
+        if self.weights is None:
+            shown = repr(list(self.choices))
+        else:
+            pairs = zip(self.choices, self.weights, strict=True)
+            shown = "{" + ", ".join(f"{v!r}: {w!r}" for v, w in pairs) + "}"
+        return f"ColRule(when={self.when!r}, choices={shown})"
+
+
+refuse_keyword(ColRule, "weights", "choices={value: weight}")
 
 
 def rule_condition(rule: ColRule) -> pl.Expr:

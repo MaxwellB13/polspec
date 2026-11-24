@@ -25,7 +25,7 @@ from polspec.cli._io import (
     frames_named_after_specs,
 )
 from polspec.constants import LARGE_FRAME_BYTES
-from polspec.errors import CliError
+from polspec.errors import CliError, PolspecError
 from polspec.generation.pipeline import describe_bytes
 from polspec.sizing import estimated_size
 from polspec.tablespec import TableSpec
@@ -170,7 +170,10 @@ def _write_split(
     if args.output:
         try:
             passing = report.passing_rows().collect()
-        except ValueError as exc:  # too few rows pass for the spec's `rows`
+        except (
+            ValueError,
+            PolspecError,
+        ) as exc:  # too few rows pass for the spec's `rows`
             raise CliError(str(exc)) from exc
         typed = validate(spec, passing, references=references, cast=True, **options)
         _write_data_file(typed, Path(args.output), spec)

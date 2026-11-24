@@ -81,6 +81,9 @@ class Field:
     from_data: Callable[[Any, Ctx, str], Any] = _read_identity
     to_source: Callable[[Any], str] = repr
     since: int = 1
+    # The constructor keyword, when it is not the key: `weights:` is read
+    # into `_weights`, since 2.0 declares weights inside `choices`.
+    keyword: str | None = None
 
     @property
     def attribute(self) -> str:
@@ -145,7 +148,7 @@ def decode(
         if f.name in data:
             # The key is also the constructor keyword; `attr` is only where
             # the value lives once constructed (Check reads `pred`, takes `expr`).
-            kwargs[f.name] = f.from_data(
+            kwargs[f.keyword or f.name] = f.from_data(
                 data[f.name], ctx, f"{path}.{f.name}" if path else f.name
             )
     try:
@@ -339,7 +342,7 @@ COLRULE_FIELDS: tuple[Field, ...] = (
         from_data=lambda v, ctx, path: _values_from_data(v, path),
         to_source=lambda v: repr(list(v)),
     ),
-    Field("weights", to_data=list, to_source=lambda v: repr(list(v))),
+    Field("weights", to_data=list, keyword="_weights"),
 )
 
 
@@ -451,7 +454,7 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
         from_data=lambda v, ctx, path: _values_from_data(v, path),
         to_source=lambda v: repr(list(v)),
     ),
-    Field("weights", to_data=list, to_source=lambda v: repr(list(v))),
+    Field("weights", to_data=list, keyword="_weights"),
     Field(
         "rules",
         omit_if=_if_falsy,
@@ -460,9 +463,7 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
             _rule_from_data(r, ctx, f"{path}[{i}]") for i, r in enumerate(v)
         ),
         to_source=lambda rules: (
-            "["
-            + ", ".join(to_source(r, COLRULE_FIELDS, "ColRule") for r in rules)
-            + "]"
+            "[" + ", ".join(_rule_to_source(r) for r in rules) + "]"
         ),
     ),
     Field(
@@ -492,6 +493,16 @@ COLSPEC_FIELDS: tuple[Field, ...] = (
 )
 
 
+def _rule_to_source(rule: ColRule) -> str:
+    if rule.weights is None:
+        return to_source(rule, COLRULE_FIELDS, "ColRule")
+    written = {
+        "choices": _weighted_source(rule.choices, rule.weights),
+        "weights": None,
+    }
+    return to_source(rule, COLRULE_FIELDS, "ColRule", written)
+
+
 def colspec_to_data(spec: ColSpec) -> dict[str, Any]:
     return encode(spec, COLSPEC_FIELDS)
 
@@ -504,19 +515,30 @@ def colspec_from_data(value: Any, ctx: Ctx, path: str) -> ColSpec:
     return decode(ColSpec, value, COLSPEC_FIELDS, ctx, path)
 
 
+def _weighted_source(choices: Sequence[Any], weights: Sequence[float]) -> str:
+    """Weighted choices as the `{value: weight}` dict that declares them."""
+    pairs = zip(choices, weights, strict=True)
+    return "{" + ", ".join(f"{v!r}: {w!r}" for v, w in pairs) + "}"
+
+
 def colspec_to_source(spec: ColSpec) -> str:
-    """A column as Python. A weighted Enum is written with each category
-    beside its share -- `ColSpec(pl.Enum, choices={"A": 0.5, ...})` --
-    which declares the same spec as `pl.Enum([...])` and `weights=`."""
-    if (
-        isinstance(spec.dtype, pl.Enum)
-        and spec.weights is not None
-        and spec.choices is None
-    ):
-        shares = dict(zip(spec.dtype.categories.to_list(), spec.weights, strict=True))
-        written = {"dtype": "pl.Enum", "choices": repr(shares), "weights": None}
-        return to_source(spec, COLSPEC_FIELDS, "ColSpec", written)
-    return to_source(spec, COLSPEC_FIELDS, "ColSpec")
+    """A column as Python. Weights are written inside `choices`, each value
+    beside its share -- `choices={"A": 0.5, ...}` -- the only spelling
+    since 2.0: an Enum's as `ColSpec(pl.Enum, choices=...)`, a Boolean's as
+    `choices={False: ..., True: ...}`."""
+    if spec.weights is None:
+        return to_source(spec, COLSPEC_FIELDS, "ColSpec")
+    written: dict[str, str | None] = {"weights": None}
+    if spec.choices is not None:
+        written["choices"] = _weighted_source(spec.choices, spec.weights)
+    elif isinstance(spec.value_dtype, pl.Enum):
+        categories = spec.value_dtype.categories.to_list()
+        if isinstance(spec.dtype, pl.Enum):
+            written["dtype"] = "pl.Enum"
+        written["choices"] = _weighted_source(categories, spec.weights)
+    else:
+        written["choices"] = _weighted_source((False, True), spec.weights)
+    return to_source(spec, COLSPEC_FIELDS, "ColSpec", written)
 
 
 # ---------------------------------------------------------------------------

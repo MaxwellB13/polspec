@@ -8,12 +8,15 @@ keys and serialization each have their own file.
 import datetime as dt
 
 import polars as pl
+import polspec
 import pytest
 from polspec import (
     Bound,
     ColRule,
     ColSpec,
     FrameSpec,
+    GenerationError,
+    SpecError,
     col,
 )
 
@@ -156,7 +159,8 @@ def test_cartesian_requires_at_least_one_coverage_column():
         a = ColSpec(dtype=pl.String, nullable=False)
 
     with pytest.raises(
-        ValueError, match="at least one non-unique Enum, Boolean, or bounded numeric"
+        GenerationError,
+        match="at least one non-unique Enum, Boolean, or bounded numeric",
     ):
         StringsOnly.generate(n=10, method="cartesian")
 
@@ -168,7 +172,7 @@ def test_cartesian_size_cap_raises_before_allocating():
         e3 = ColSpec(dtype=pl.Enum([f"v{i}" for i in range(200)]))
         e4 = ColSpec(dtype=pl.Enum([f"v{i}" for i in range(200)]))
 
-    with pytest.raises(ValueError, match="safety cap"):
+    with pytest.raises(GenerationError, match="safety cap"):
         Huge.generate(n=10, method="cartesian")
 
 
@@ -357,16 +361,16 @@ def test_statistical_distributions():
 
 
 def test_distribution_validation_and_errors():
-    with pytest.raises(ValueError, match="Unsupported distribution"):
+    with pytest.raises(SpecError, match="Unsupported distribution"):
         ColSpec(dtype=pl.Float64, distribution="invalid_dist")
 
-    with pytest.raises(ValueError, match="Normal distribution std must be positive"):
+    with pytest.raises(SpecError, match="Normal distribution std must be positive"):
         ColSpec(
             dtype=pl.Float64, distribution="normal", distribution_params={"std": -1.0}
         )
 
     with pytest.raises(
-        ValueError, match="Exponential distribution scale must be positive"
+        SpecError, match="Exponential distribution scale must be positive"
     ):
         ColSpec(
             dtype=pl.Float64,
@@ -379,7 +383,7 @@ def test_weighted_choices_enum_and_categorical():
     class WeightedSpec(FrameSpec):
         enum_col = ColSpec(
             dtype=pl.Enum(["rare", "common"]),
-            weights=[0.1, 0.9],
+            choices={"rare": 0.1, "common": 0.9},
         )
         cat_dict_col = ColSpec(
             dtype=pl.Categorical,
@@ -387,17 +391,15 @@ def test_weighted_choices_enum_and_categorical():
         )
         str_choices_col = ColSpec(
             dtype=pl.String,
-            choices=["first", "second"],
-            weights=[0.75, 0.25],
+            choices={"first": 0.75, "second": 0.25},
         )
         int_choices_col = ColSpec(
             dtype=pl.Int64,
-            choices=[100, 200, 300],
-            weights=[0.7, 0.2, 0.1],
+            choices={100: 0.7, 200: 0.2, 300: 0.1},
         )
         bool_col = ColSpec(
             dtype=pl.Boolean,
-            weights=[0.8, 0.2],  # [p_false, p_true] -> 20% True
+            choices={False: 0.8, True: 0.2},  # [p_false, p_true] -> 20% True
         )
 
     df = WeightedSpec.generate(50_000, seed=42)
@@ -437,38 +439,38 @@ def test_weighted_choices_enum_and_categorical():
 
 
 def test_weights_validation_errors():
-    with pytest.raises(ValueError, match="must match length of choices"):
-        ColSpec(dtype=pl.String, choices=["a", "b"], weights=[1.0])
+    with pytest.raises(SpecError, match="Weights must all be non-negative"):
+        ColSpec(dtype=pl.Enum(["a", "b"]), choices={"a": -0.1, "b": 1.1})
 
-    with pytest.raises(ValueError, match="must match number of Enum categories"):
-        ColSpec(dtype=pl.Enum(["a", "b", "c"]), weights=[0.5, 0.5])
+    with pytest.raises(SpecError, match="Sum of weights must be positive"):
+        ColSpec(dtype=pl.Enum(["a", "b"]), choices={"a": 0.0, "b": 0.0})
 
-    with pytest.raises(
-        ValueError, match="Boolean weights must be a 2-element sequence"
-    ):
-        ColSpec(dtype=pl.Boolean, weights=[0.5, 0.3, 0.2])
+    with pytest.raises(SpecError, match="Weights must all be non-negative"):
+        ColRule(when=col("x") == 1, choices={"a": -1.0, "b": 1.0})
 
-    with pytest.raises(ValueError, match="Weights must all be non-negative"):
-        ColSpec(dtype=pl.Enum(["a", "b"]), weights=[-0.1, 1.1])
 
-    with pytest.raises(ValueError, match="Sum of weights must be positive"):
-        ColSpec(dtype=pl.Enum(["a", "b"]), weights=[0.0, 0.0])
-
-    with pytest.raises(
-        ValueError,
-        match="Cannot specify both a dict for choices and an explicit weights parameter",
-    ):
-        ColSpec(dtype=pl.String, choices={"a": 0.5, "b": 0.5}, weights=[0.5, 0.5])
-
-    with pytest.raises(
-        ValueError,
-        match="Cannot specify both a dict for choices and an explicit weights parameter",
-    ):
-        ColRule(
-            when=col("x") == 1,
-            choices={"a": 0.5, "b": 0.5},
-            weights=[0.5, 0.5],
-        )
+@pytest.mark.parametrize(
+    ("column", "message"),
+    [
+        (
+            {"dtype": "String", "choices": ["a", "b"], "weights": [1.0]},
+            "must match length of choices",
+        ),
+        (
+            {"dtype": {"Enum": ["a", "b", "c"]}, "weights": [0.5, 0.5]},
+            "must match number of Enum categories",
+        ),
+        (
+            {"dtype": "Boolean", "weights": [0.5, 0.3, 0.2]},
+            "Boolean weights must be a 2-element sequence",
+        ),
+    ],
+)
+def test_a_spec_files_weights_must_fit_its_domain(column, message):
+    """A file keeps `weights:` beside its domain, so a count that does not
+    fit it is still refused, as `choices={...}` cannot be."""
+    with pytest.raises(SpecError, match=message):
+        polspec.from_dict({"version": 4, "name": "T", "columns": {"c": column}})
 
 
 def test_cartesian_with_custom_choices():
@@ -572,7 +574,7 @@ def test_seeds_follow_column_names_not_positions():
 
 def test_rules_only_sample_what_they_scatter():
     class Spec(FrameSpec):
-        region = ColSpec(pl.Enum(["UK", "US"]), weights=[1.0, 99.0])
+        region = ColSpec(pl.Enum(["UK", "US"]), choices={"UK": 1.0, "US": 99.0})
         carrier = ColSpec(
             pl.Enum(["RM", "UPS", "DHL"]),
             rules=[

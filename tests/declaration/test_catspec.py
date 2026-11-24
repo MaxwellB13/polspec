@@ -18,6 +18,7 @@ from polspec import (
     ForeignKey,
     FrameSpec,
     Registry,
+    SpecError,
 )
 
 
@@ -196,7 +197,7 @@ columns:
         assert df.schema["currency"] == cat_spec.CURRENCY
 
         # 2. Explicit categories passed as parameter
-        LoadedSpec2 = FrameSpec.from_yaml(spec_yaml, categories=cat_spec)
+        LoadedSpec2 = FrameSpec.from_yaml(spec_yaml, catspec=cat_spec)
         df2 = LoadedSpec2.generate(10, seed=1)
         assert df2.schema["tier"] == pl.Enum(["BRONZE", "SILVER", "GOLD"])
 
@@ -226,7 +227,7 @@ def test_catspec_from_dataframe_and_framespec():
     cats_from_lazy = CatSpec.from_dataframe(df.lazy())
     assert cats_from_lazy.status == pl.Enum(["OPEN", "CLOSED"])
 
-    # from_framespec & FrameSpec.catspec
+    # from_spec & FrameSpec.catspec
     class MySpec(FrameSpec):
         status = ColSpec(dtype=pl.Enum(["PENDING", "COMPLETED"]))
         currency = ColSpec(
@@ -242,7 +243,7 @@ def test_catspec_from_dataframe_and_framespec():
     assert cats_from_spec.choices.get("currency") == ["USD", "EUR"]
 
     # The same registry, from the TableSpec rather than the class
-    assert CatSpec.from_framespec(MySpec.spec).enums == cats_from_spec.enums
+    assert CatSpec.from_spec(MySpec.spec).enums == cats_from_spec.enums
 
     # persisting the registry a spec implies
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -302,7 +303,7 @@ def test_catspec_heuristic_inference():
 
 def test_framespec_infer_catspec_and_transformation():
     class RawOrders(FrameSpec):
-        # 'tag' collides with FrameSpec.tag(), so it is declared through
+        # 'tag' is a FrameSpec attribute (1.x's tag(), now tagged()), so it is declared through
         # __columns__ to keep both the column and the method.
         __columns__ = {
             "tag": ColSpec(dtype=pl.String, choices=[f"TAG_{i}" for i in range(40)])
@@ -313,7 +314,7 @@ def test_framespec_infer_catspec_and_transformation():
         plain_str = ColSpec(dtype=pl.String)
 
     # 1. Infer CatSpec from FrameSpec schema
-    cats = CatSpec.infer(RawOrders, max_enum_cardinality=10)
+    cats = CatSpec.infer(RawOrders, max_unique_enum=10)
     assert "status" in cats.enums
     assert cats.status == pl.Enum(["NEW", "PAID", "CANCELLED"])
 
@@ -378,13 +379,13 @@ def test_framespec_infer_with_live_dataframe():
         uuid = ColSpec(dtype=pl.String)
 
     # Infer from live data
-    cats = CatSpec.infer(df, max_enum_cardinality=3)
+    cats = CatSpec.infer(df, max_unique_enum=3)
     assert "status" in cats.enums
-    assert "region" in cats.categoricals  # 4 unique > max_enum_cardinality (3)
+    assert "region" in cats.categoricals  # 4 unique > max_unique_enum (3)
     assert "uuid" not in cats
 
     # Apply a registry inferred from live data
-    Optimized = SchemaSpec.with_catspec(CatSpec.infer(df, max_enum_cardinality=3))
+    Optimized = SchemaSpec.with_catspec(CatSpec.infer(df, max_unique_enum=3))
     assert isinstance(Optimized.schema()["status"], pl.Enum)
     assert isinstance(Optimized.schema()["region"], pl.Categorical)
     assert Optimized.schema()["uuid"] == pl.String
@@ -649,7 +650,7 @@ def test_class_body_inheritance_collects_base_and_subclass_entries():
 
 
 def test_class_body_rejects_an_unnamed_categorical():
-    with pytest.raises(ValueError, match="has no name"):
+    with pytest.raises(SpecError, match="has no name"):
 
         class Categories(CatSpec):
             X = pl.Categorical()
@@ -710,7 +711,7 @@ def test_the_class_form_is_accepted_wherever_the_value_is():
     assert from_class.spec == from_value.spec
     assert from_class.schema()["status"] == pl.Enum(["NEW", "PAID"])
 
-    assert Registry(from_class, categories=Categories).categories == Categories.spec
+    assert Registry(from_class, catspec=Categories).catspec() == Categories.spec
 
 
 def test_a_registry_is_a_value_whichever_form_built_it():

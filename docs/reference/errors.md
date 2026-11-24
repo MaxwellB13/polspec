@@ -34,17 +34,20 @@ except PolspecError as exc:
     log.warning("rejected: %s", exc)
 ```
 
-| Exception | Raised when | Also a |
-|:--|:--|:--|
-| `PolspecError` | Base class; never raised directly | `Exception` |
-| `SpecError` | A declaration cannot mean anything: bounds a dtype cannot hold, a rule naming a column that does not exist, two attributes resolving to one column name | `ValueError`, `TypeError` |
-| `ValidationError` | Data does not meet its spec. `err.report` is the `ValidationReport`; `err.errors` lists its messages | `ValueError` |
-| `GenerationError` | A spec that declares fine cannot be turned into data as asked: no column for `method="cartesian"` to cover, a coverage set past the size cap, a foreign key with an empty parent. Errors from the Rust engine surface as this | `ValueError` |
-| `SerializationError` | A spec file cannot be written or read: a dtype with no file representation, an unrecognised dtype name, a category reference the registry does not hold | `ValueError` |
-| `RegistryError` | A `Registry` is inconsistent: an unknown or duplicated spec name, a key whose target is not in it, a cycle, two specs disagreeing about a shared category | `LookupError` |
+| Exception | Raised when |
+|:--|:--|
+| `PolspecError` | Base class; never raised directly |
+| `SpecError` | A declaration cannot mean anything: bounds a dtype cannot hold, a rule naming a column that does not exist, two attributes resolving to one column name |
+| `ValidationError` | Data does not meet its spec. `err.report` is the `ValidationReport`; `err.errors` lists its messages |
+| `GenerationError` | A spec that declares fine cannot be turned into data as asked: no column for `method="cartesian"` to cover, a coverage set past the size cap, a foreign key with an empty parent. Errors from the Rust engine surface as this |
+| `SerializationError` | A spec file cannot be written or read: a dtype with no file representation, an unrecognised dtype name, a category reference the registry does not hold |
+| `RegistryError` | A `Registry` is inconsistent: an unknown or duplicated spec name, a key whose target is not in it, a cycle, two specs disagreeing about a shared category |
 
-Each subclass keeps the built-in type it replaced, so `except ValueError`
-written against an earlier version still catches it.
+None is also a built-in error, so an `except ValueError` written for
+argument misuse does not swallow one. *Since 2.0; in 1.x each also
+inherited `ValueError`, `TypeError` or `LookupError`, and an `except
+ValueError` caught a spec's own complaint too. Catch `PolspecError`, or the
+subclass, instead.*
 
 Ordinary argument misuse is not a `PolspecError`. A negative row count, an
 unknown `method=`, a `batch_size` of zero, or the wrong object passed where a

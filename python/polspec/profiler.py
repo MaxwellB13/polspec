@@ -718,7 +718,7 @@ def _profile_column(
             # Frequencies are written at the precision rates are.
             return dataclasses.replace(
                 described,
-                weights=rounded_weights(described.weights, options.round_rates),
+                _weights=rounded_weights(described.weights, options.round_rates),
             )
     # A dtype with nothing to measure (an `Object`): recorded faithfully so
     # validation still reads it.
@@ -731,7 +731,7 @@ def _enum(c: _Column) -> ColSpec:
     categories = dtype.categories.to_list()
     return c.spec(
         dtype=c.dtype,
-        weights=_empirical_weights(c.non_null, categories) if c.with_weights else None,
+        _weights=_empirical_weights(c.non_null, categories) if c.with_weights else None,
     )
 
 
@@ -815,7 +815,7 @@ def _text(c: _Column) -> ColSpec:
 def _boolean(c: _Column) -> ColSpec:
     return c.spec(
         dtype=pl.Boolean,
-        weights=_boolean_weights(c.non_null) if c.with_weights else None,
+        _weights=_boolean_weights(c.non_null) if c.with_weights else None,
     )
 
 
@@ -1010,7 +1010,7 @@ def _profile_textual(c: _Column, distinct: int) -> ColSpec:
         categories = non_null.unique().sort().to_list()
         return spec(
             dtype=pl.Enum(categories),
-            weights=_empirical_weights(non_null, categories)
+            _weights=_empirical_weights(non_null, categories)
             if c.with_weights
             else None,
         )

@@ -9,11 +9,12 @@ catch the library's own complaints in one clause and let genuine bugs through:
     except PolspecError as exc:
         ...
 
-Each subclass also inherits the built-in its failure is a kind of
-(`ValueError`, `TypeError`, `LookupError`), so an ordinary
-`except ValueError` still catches a bad declaration without knowing polspec's
-hierarchy. Plain argument misuse -- a negative row count, an unknown
-`method=` -- stays a bare `ValueError`, as it would in any Python API.
+A polspec error is a `PolspecError` and nothing else: `except ValueError`
+does not catch one. *Since 2.0; in 1.x each also inherited `ValueError`,
+`TypeError` or `LookupError`, so an `except ValueError` meant for a bad
+argument caught a spec's own complaint too.* Plain argument misuse -- a
+negative row count, an unknown `method=` -- stays a bare `ValueError`, as it
+would in any Python API.
 
 Internal: not part of the public API.
 """
@@ -27,17 +28,16 @@ class PolspecError(Exception):
     """Base class for every error polspec raises on its own behalf."""
 
 
-class SpecError(PolspecError, ValueError, TypeError):
+class SpecError(PolspecError):
     """A declaration that cannot mean anything.
 
     Raised while a `ColSpec`, `ColRule`, `Check`, `ForeignKey`, `FrameSpec`
     or `CatSpec` is being built: bounds a dtype cannot hold, a rule pointing
     at a column that does not exist, two columns resolving to one name.
-    Inherits both `ValueError` and `TypeError` because it replaces both.
     """
 
 
-class ValidationError(PolspecError, ValueError):
+class ValidationError(PolspecError):
     """Data does not meet its spec.
 
     Carries the `ValidationReport` of every violation found as `report`.
@@ -82,7 +82,7 @@ class MultiValidationError(ValidationError):
         self.reports: dict[str, Any] = failed
 
 
-class GenerationError(PolspecError, ValueError):
+class GenerationError(PolspecError):
     """A spec that declares fine cannot be turned into data as asked.
 
     A dtype the engine cannot fill, a cartesian coverage set past the size
@@ -91,7 +91,7 @@ class GenerationError(PolspecError, ValueError):
     """
 
 
-class SerializationError(PolspecError, ValueError):
+class SerializationError(PolspecError):
     """A spec file cannot be written or read.
 
     A dtype with no file representation, a key the reader does not know, a
@@ -99,7 +99,7 @@ class SerializationError(PolspecError, ValueError):
     """
 
 
-class RegistryError(PolspecError, LookupError):
+class RegistryError(PolspecError):
     """A collection of specs is inconsistent.
 
     An unknown or duplicated spec name, a cycle in the foreign-key graph, two

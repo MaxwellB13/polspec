@@ -25,7 +25,7 @@ def test_a_bare_enum_takes_its_categories_from_its_choices():
 def test_the_three_spellings_of_a_weighted_enum_are_one_spec():
     spellings = [
         ColSpec(pl.Enum, choices=WEIGHTED),
-        ColSpec(pl.Enum(["A", "B", "C"]), weights=[0.5, 0.3, 0.2]),
+        ColSpec(pl.Enum(["A", "B", "C"]), choices={"A": 0.5, "B": 0.3, "C": 0.2}),
         ColSpec(pl.Enum(["A", "B", "C"]), choices=WEIGHTED),
     ]
     assert spellings[0] == spellings[1] == spellings[2]
@@ -59,7 +59,9 @@ def test_a_bare_enum_that_cannot_take_categories_says_why(given, message):
 
 def test_a_weighted_enum_is_written_as_python_beside_its_shares():
     class Loans(FrameSpec):
-        grade = ColSpec(pl.Enum(["A", "B", "C"]), weights=[0.5, 0.3, 0.2])
+        grade = ColSpec(
+            pl.Enum(["A", "B", "C"]), choices={"A": 0.5, "B": 0.3, "C": 0.2}
+        )
         product = ColSpec(pl.Enum(["mortgage", "card"]))
 
     source = Loans.to_python()
@@ -184,7 +186,7 @@ def test_a_tablespec_names_each_column_as_itself_and_names_are_read_only():
         ),
         (
             ColSpec(pl.Int8, rules=[ColRule(when=col("x") > 1, choices=[1])]),
-            "ColSpec(Int8, rules=(ColRule(when=col('x') > 1, choices=(1,), weights=None),))",
+            "ColSpec(Int8, rules=(ColRule(when=col('x') > 1, choices=[1]),))",
         ),
     ],
 )

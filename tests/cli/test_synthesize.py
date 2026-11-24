@@ -49,7 +49,7 @@ def test_synthesize_writes_a_fake_file_like_the_real_one(tmp_path, capsys):
     assert fake["id"].is_unique().all()
     assert not set(fake["name"]) & set(real["name"])
     loaded = FrameSpec.from_yaml(spec)
-    assert loaded.col("id").unique and loaded.col("name").dtype == pl.String
+    assert loaded.column("id").unique and loaded.column("name").dtype == pl.String
     assert "synthesized row(s)" in capsys.readouterr().out
 
 
@@ -79,9 +79,9 @@ def test_schema_infer_profiles_shape_keys_and_replaced_columns_when_asked(tmp_pa
         == 0
     )
     before, after = FrameSpec.from_yaml(plain), FrameSpec.from_yaml(full)
-    assert not before.col("id").unique and after.col("id").unique
-    assert isinstance(before.col("name").dtype, pl.Enum)
-    assert after.col("name").dtype == pl.String
+    assert not before.column("id").unique and after.column("id").unique
+    assert isinstance(before.column("name").dtype, pl.Enum)
+    assert after.column("name").dtype == pl.String
 
 
 def test_validate_reports_a_time_of_day_on_a_date_column_rather_than_a_traceback(

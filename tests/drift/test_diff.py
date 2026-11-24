@@ -43,7 +43,7 @@ def _one(report: DriftReport, code: str) -> DriftFinding:
 def test_a_spec_does_not_drift_from_itself():
     spec = _spec(
         a=ColSpec(pl.Int64, bounds=(0, 10), nullable=True, tags="x"),
-        b=ColSpec(pl.Enum(["p", "q"]), weights=[1.0, 2.0]),
+        b=ColSpec(pl.Enum(["p", "q"]), choices={"p": 1.0, "q": 2.0}),
         c=ColSpec(pl.String, format="email", validators=[col("c").str.contains("@")]),
     )
     report = diff(spec, spec)
@@ -281,7 +281,11 @@ def test_rules_are_matched_by_their_condition():
     "field, old, new",
     [
         ("tags", ColSpec(pl.Int64), ColSpec(pl.Int64, tags="pii")),
-        ("weights", ColSpec(pl.Boolean), ColSpec(pl.Boolean, weights=[0.2, 0.8])),
+        (
+            "weights",
+            ColSpec(pl.Boolean),
+            ColSpec(pl.Boolean, choices={False: 0.2, True: 0.8}),
+        ),
         (
             "distribution",
             ColSpec(pl.Float64),

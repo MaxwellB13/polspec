@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any, Literal, Unpack
 import polars as pl
 
 from polspec import generation, serialization, validation
+from polspec._removed import removed, renamed_keywords
 from polspec.catspec import (
     CatSpec,
     as_catspec,
@@ -116,7 +117,7 @@ class Registry:
     *specs : TableSpec | type[FrameSpec]
         The specs, in any order. Each is stored under its name; two different
         specs with one name are an error.
-    categories : CatSpec | None
+    catspec : CatSpec | None
         A shared category registry the specs are expected to agree with.
         When given, `resolve()` checks every `Enum`/`Categorical` column that
         binds to one of its entries against it, and the registry file carries
@@ -135,13 +136,14 @@ class Registry:
     ['Customers', 'Orders']
     """
 
+    @renamed_keywords(categories="catspec")
     def __init__(
         self,
         *specs: TableSpec | type,
-        categories: CatSpec | type[CatSpec] | None = None,
+        catspec: CatSpec | type[CatSpec] | None = None,
     ) -> None:
         self._specs: dict[str, TableSpec] = {}
-        self._categories = None if categories is None else as_catspec(categories)
+        self._categories = None if catspec is None else as_catspec(catspec)
         for spec in specs:
             self.add(spec)
 
@@ -183,7 +185,7 @@ class Registry:
                 "with add()."
             )
         specs = [table if name == table.name else s for name, s in self._specs.items()]
-        return Registry(*specs, categories=self._categories)
+        return Registry(*specs, catspec=self._categories)
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -194,10 +196,7 @@ class Registry:
     def specs(self) -> tuple[TableSpec, ...]:
         return tuple(self._specs.values())
 
-    @property
-    def categories(self) -> CatSpec | None:
-        """The shared category registry this one was declared with, if any."""
-        return self._categories
+    categories = property(removed("Registry", "categories", "catspec()"))
 
     def __getitem__(self, key: Any) -> TableSpec:
         name = as_spec_name(key)
@@ -214,7 +213,7 @@ class Registry:
     def __contains__(self, key: object) -> bool:
         try:
             return as_spec_name(key) in self._specs
-        except TypeError:
+        except (TypeError, PolspecError):
             return False
 
     def __iter__(self) -> Iterator[str]:
@@ -231,19 +230,20 @@ class Registry:
     # ------------------------------------------------------------------
 
     @classmethod
+    @renamed_keywords(categories="catspec")
     def from_module(
         cls,
         module: ModuleType,
         *,
         own_only: bool = False,
-        categories: CatSpec | type[CatSpec] | None = None,
+        catspec: CatSpec | type[CatSpec] | None = None,
     ) -> Registry:
         """Every `FrameSpec` subclass and `TableSpec` bound in a module.
 
         `own_only=True` keeps only classes the module itself defines, leaving
         out ones it imported.
         """
-        registry = cls(categories=categories)
+        registry = cls(catspec=catspec)
         for value in vars(module).values():
             table = _spec_of(value)
             if table is None:
@@ -258,10 +258,11 @@ class Registry:
         return registry
 
     @classmethod
+    @renamed_keywords(categories="catspec")
     def discover(
         cls,
         *paths: str | Path,
-        categories: CatSpec | type[CatSpec] | None = None,
+        catspec: CatSpec | type[CatSpec] | None = None,
         strict: bool = True,
     ) -> Registry:
         """Every spec found under the given files and directories.
@@ -272,7 +273,7 @@ class Registry:
         it, so point this only at files you would import anyway.
         """
 
-        registry = cls(categories=categories)
+        registry = cls(catspec=catspec)
         for path in _spec_files(paths):
             if path.suffix == ".py":
                 found = cls.from_module(load_module(path))
@@ -280,7 +281,7 @@ class Registry:
                 found = serialization.registry_from_yaml(path, strict=strict)
             else:
                 found = cls(
-                    serialization.from_yaml(path, categories=categories, strict=strict)
+                    serialization.from_yaml(path, catspec=catspec, strict=strict)
                 )
             for spec in found.specs:
                 registry.add(spec)
@@ -349,7 +350,7 @@ class Registry:
         the same binding themselves. Call it to check a registry, or to hold
         on to the bound specs.
         """
-        resolved = Registry(categories=self._categories)
+        resolved = Registry(catspec=self._categories)
         resolved._specs.update(self._bind(require_known=True))
         resolved._check_categories()
         resolved.order()
@@ -723,7 +724,7 @@ class Registry:
         from every spec's Enum and Categorical columns.
 
         Merging refuses two specs that define the same name differently;
-        pass `categories=` to the registry to settle which is right.
+        pass `catspec=` to the registry to settle which is right.
         """
         if self._categories is not None:
             return self._categories
@@ -738,7 +739,7 @@ class Registry:
             if key in store and not same(store[key], value):
                 raise RegistryError(
                     f"{spec} and {origin[key]} disagree about {key!r} "
-                    f"({value!r} vs {store[key]!r}). Pass categories= to the "
+                    f"({value!r} vs {store[key]!r}). Pass catspec= to the "
                     "Registry to say which is right."
                 )
             store.setdefault(key, value)
@@ -752,7 +753,7 @@ class Registry:
             )
 
         for spec in self._specs.values():
-            part = CatSpec.from_framespec(spec)
+            part = CatSpec.from_spec(spec)
             for key, value in part.enums.items():
                 merge(enums, key, value, spec.name, lambda a, b: a == b)
             for key, cats in part.categoricals.items():
@@ -775,10 +776,9 @@ class Registry:
 
         return serialization.registry_from_dict(data, strict=strict)
 
-    def to_yaml(self, path: str | Path | None = None) -> str | None:
-        """Every spec, and the declared categories, as one YAML document:
-        written to the file `path`, or, with no `path`, returned as
-        text."""
+    def to_yaml(self, path: str | Path | None = None) -> str:
+        """Every spec, and the declared categories, as one YAML document,
+        written to the file `path` too when one is given."""
         return serialization.registry_to_yaml(self, path)
 
     @classmethod
@@ -821,3 +821,10 @@ def _spec_files(paths: tuple[str | Path, ...]) -> list[Path]:
         else:
             raise RegistryError(f"no such file or directory: {path}")
     return files
+
+
+def declared_catspec(registry: Registry) -> CatSpec | None:
+    """The category registry `registry` was declared with, if any -- what a
+    registry file carries -- where `Registry.catspec()` merges one from the
+    specs when none was declared."""
+    return registry._categories

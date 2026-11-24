@@ -711,7 +711,7 @@ def _keyed(
                 default=child.default,
                 tags=child.tags,
                 description=description,
-                weights=None,
+                _weights=None,
                 distribution=None,
                 distribution_params=None,
             )

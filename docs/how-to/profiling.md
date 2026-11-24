@@ -40,9 +40,9 @@ does, and rounds what it writes (see [Rounding](#rounding)).
 
 ```python
 Described = FrameSpec.from_dataframe(orders, name="Orders")
-print(Described.col("status").dtype)
-print(Described.col("email").format)
-print(Described.col("note").nullable, Described.col("note").null_probability)
+print(Described.column("status").dtype)
+print(Described.column("email").format)
+print(Described.column("note").nullable, Described.column("note").null_probability)
 ```
 
 ```text
@@ -117,8 +117,8 @@ was null in 85.7% of rows. A person would write `[0, 500]` and `0.86`.
 Rounded = FrameSpec.from_dataframe(
     orders, name="Orders", round_bounds="auto", round_rates="auto"
 )
-print(Rounded.col("total").bounds)
-print(Rounded.col("note").null_probability)
+print(Rounded.column("total").bounds)
+print(Rounded.column("note").null_probability)
 ```
 
 ```text

@@ -18,12 +18,13 @@ import unicodedata
 import warnings
 from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal
 
 import polars as pl
 import yaml
 from yaml.representer import RepresenterError
 
+from polspec._removed import renamed_keywords
 from polspec.catspec import pool_of
 from polspec.errors import SerializationError, SpecError
 from polspec.serialization.dtypes import physical_name
@@ -96,15 +97,15 @@ class _Located:
         raise type(exc)(f"{self.where}: {exc}") from exc
 
 
-def _written(text: str, path: str | Path | None) -> str | None:
-    """`text` written to `path` -- its folders made -- or, with no path,
-    returned."""
-    if path is None:
-        return text
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text, encoding="utf-8")
-    return None
+def _written(text: str, path: str | Path | None) -> str:
+    """`text`, written to `path` too -- its folders made -- when one is
+    given. Every writer returns its text, as `to_markdown` always has.
+    *Since 2.0; 1.x returned None when it wrote a file.*"""
+    if path is not None:
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text, encoding="utf-8")
+    return text
 
 
 def _warn_unserializable(spec: TableSpec, where: str | Path, kind: str) -> None:
@@ -198,10 +199,11 @@ def to_dict(spec: TableSpec) -> dict[str, Any]:
     return {"version": FORMAT_VERSION, **tablespec_to_data(spec)}
 
 
+@renamed_keywords(categories="catspec")
 def from_dict(
     data: Mapping[str, Any] | None,
     *,
-    categories: CatSpec | None = None,
+    catspec: CatSpec | None = None,
     strict: bool = True,
     where: str = "spec data",
 ) -> TableSpec:
@@ -220,7 +222,7 @@ def from_dict(
     """
     with _Located(where):
         current = migrate(data, "spec", where)
-        return tablespec_from_data(current, Ctx(categories=categories, strict=strict))
+        return tablespec_from_data(current, Ctx(categories=catspec, strict=strict))
 
 
 # ---------------------------------------------------------------------------
@@ -228,14 +230,10 @@ def from_dict(
 # ---------------------------------------------------------------------------
 
 
-@overload
-def to_yaml(spec: SpecLike, path: None = None) -> str: ...
-@overload
-def to_yaml(spec: SpecLike, path: str | Path) -> None: ...
-def to_yaml(spec: SpecLike, path: str | Path | None = None) -> str | None:
+def to_yaml(spec: SpecLike, path: str | Path | None = None) -> str:
     """`spec` -- a `TableSpec` or a `FrameSpec` class -- as human-readable
-    YAML: written to the file `path`, or, with no `path`, returned as
-    text.
+    YAML: returned as text, and written to the file `path`
+    when one is given.
 
     Defaults are omitted so the file shows only what was declared. Checks and
     validators over raw expressions cannot be written and warn.
@@ -300,15 +298,16 @@ def _spec_text(source: str | Path, reader: str, text_reader: str = "from_dict") 
     return Path(source).read_text(encoding="utf-8")
 
 
+@renamed_keywords(categories="catspec")
 def from_yaml(
     source: str | Path,
     *,
-    categories: CatSpec | type[CatSpec] | str | Path | None = None,
+    catspec: CatSpec | type[CatSpec] | str | Path | None = None,
     strict: bool = True,
 ) -> TableSpec:
     """Reads a `TableSpec` from a YAML file written by `to_yaml`.
 
-    `categories` is a CatSpec registry, or a path to one, used to resolve
+    `catspec` is a CatSpec registry, or a path to one, used to resolve
     shared Enums and Categoricals; when omitted, a `categories:` key in the
     file is loaded automatically, relative to the file. A file from an older
     format version is migrated on the way in.
@@ -318,7 +317,7 @@ def from_yaml(
     >>> import pathlib, tempfile
     >>> folder = pathlib.Path(tempfile.mkdtemp())
     >>> spec = TableSpec("Orders", {"id": ColSpec(pl.Int64, unique=True)})
-    >>> to_yaml(spec, folder / "orders.yaml")
+    >>> _ = to_yaml(spec, folder / "orders.yaml")
     >>> from_yaml(folder / "orders.yaml") == spec
     True
     """
@@ -328,8 +327,8 @@ def from_yaml(
         raise SerializationError(
             f"{source}: expected a mapping at the top level, got {type(raw).__name__}"
         )
-    registry = _resolve_categories(categories, raw or {}, path.parent)
-    return from_dict(raw, categories=registry, strict=strict, where=str(source))
+    registry = _resolve_categories(catspec, raw or {}, path.parent)
+    return from_dict(raw, catspec=registry, strict=strict, where=str(source))
 
 
 # ---------------------------------------------------------------------------
@@ -369,14 +368,10 @@ def _require_class_name(name: str) -> None:
     )
 
 
-@overload
-def to_python(spec: SpecLike, path: None = None) -> str: ...
-@overload
-def to_python(spec: SpecLike, path: str | Path) -> None: ...
-def to_python(spec: SpecLike, path: str | Path | None = None) -> str | None:
+def to_python(spec: SpecLike, path: str | Path | None = None) -> str:
     """`spec` -- a `TableSpec` or a `FrameSpec` class -- as a Python module
-    defining a `FrameSpec` subclass: written to the file `path`, or, with
-    no `path`, returned as text.
+    defining a `FrameSpec` subclass: returned as text, and written to the file `path`
+    when one is given.
 
     Columns are declared through `__columns__`, since a name straight from
     data is not always a valid identifier. Checks and validators over raw
@@ -550,19 +545,14 @@ def catspec_from_dict(
         )
 
 
-def catspec_to_yaml(catspec: CatSpec, path: str | Path | None = None) -> str | None:
-    """A `CatSpec` as YAML: written to `path` when one is given, else
-    returned as text."""
+def catspec_to_yaml(catspec: CatSpec, path: str | Path | None = None) -> str:
+    """A `CatSpec` as YAML, returned as text, and written to `path` too when
+    one is given."""
     dumped = dump_yaml(
         {"version": FORMAT_VERSION, **catspec_to_dict(catspec)},
         path if path is not None else "a category registry",
     )
-    if path is None:
-        return dumped
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(dumped, encoding="utf-8")
-    return None
+    return _written(dumped, path)
 
 
 def catspec_from_yaml(source: str | Path, *, strict: bool = True) -> CatSpec:
@@ -581,9 +571,12 @@ _REGISTRY_KEYS: tuple[str, ...] = ("version", "categories", "specs")
 
 def registry_to_dict(registry: Registry) -> dict[str, Any]:
     """`version`, the declared `categories` if any, and `specs` keyed by name."""
+    from polspec.registry import declared_catspec
+
     out: dict[str, Any] = {"version": FORMAT_VERSION}
-    if registry.categories is not None:
-        out["categories"] = catspec_to_dict(registry.categories)
+    declared = declared_catspec(registry)
+    if declared is not None:
+        out["categories"] = catspec_to_dict(declared)
     specs: dict[str, Any] = {}
     for spec in registry.specs:
         body = tablespec_to_data(spec)
@@ -636,7 +629,7 @@ def registry_from_dict(
             f"{where}: a registry file needs a non-empty 'specs' mapping, keyed "
             "by spec name"
         )
-    registry = Registry(categories=categories)
+    registry = Registry(catspec=categories)
     for name, body in specs.items():
         if not isinstance(body, Mapping):
             raise SerializationError(
@@ -655,26 +648,20 @@ def registry_from_dict(
     return registry
 
 
-@overload
-def registry_to_yaml(registry: Registry, path: None = None) -> str: ...
-@overload
-def registry_to_yaml(registry: Registry, path: str | Path) -> None: ...
-def registry_to_yaml(registry: Registry, path: str | Path | None = None) -> str | None:
+def registry_to_yaml(registry: Registry, path: str | Path | None = None) -> str:
     """A `Registry` as one YAML document -- its specs keyed by name, and its
-    categories: written to the file `path`, or, with no `path`, returned
-    as text."""
+    categories -- returned as text, and written to the file `path` too
+    when one is given."""
     label = path if path is not None else "a registry"
     for spec in registry.specs:
         _warn_unserializable(spec, label, "yaml")
     return _written(dump_yaml(registry_to_dict(registry), label), path)
 
 
-def registry_to_python(
-    registry: Registry, path: str | Path | None = None
-) -> str | None:
+def registry_to_python(registry: Registry, path: str | Path | None = None) -> str:
     """`registry` as a Python module: one `FrameSpec` subclass per spec,
     parents before children, then `registry = Registry(...)` over them --
-    written to `path`, or returned as text."""
+    returned as text, and written to `path` too when one is given."""
     imports, body = {"Registry"}, []
     names = registry.order()
     for name in names:

@@ -22,7 +22,7 @@ from polspec.cli._io import (
     _relative_to_output,
     _snake_case,
 )
-from polspec.errors import CliError
+from polspec.errors import CliError, PolspecError
 from polspec.generation.engine import pattern_generation
 
 
@@ -165,7 +165,7 @@ def _render_test_case(
         (
             f"{comment}{setup}"
             f"    frame = polspec_frames({class_name}, {rows}{seeded}{referenced})\n"
-            f"    assert_valid(frame, {class_name}{referenced}{kwargs})\n"
+            f"    assert_valid({class_name}, frame{referenced}{kwargs})\n"
         ),
     ]
     if cartesian and not parents and _supports_cartesian(spec_cls):
@@ -173,7 +173,7 @@ def _render_test_case(
             f"\n\ndef test_{fn_name}_cartesian_coverage(polspec_frames):\n"
             f"{comment}"
             f'    frame = polspec_frames({class_name}, {rows}, method="cartesian"{seeded})\n'
-            f"    assert_valid(frame, {class_name}{kwargs})\n"
+            f"    assert_valid({class_name}, frame{kwargs})\n"
         )
     elif cartesian and parents:
         lines.append(
@@ -199,7 +199,7 @@ def _supports_cartesian(spec_cls: type[FrameSpec]) -> bool:
     """
     try:
         spec_cls.generate(1, method="cartesian", seed=0)
-    except ValueError:
+    except (ValueError, PolspecError):
         return False
     return True
 

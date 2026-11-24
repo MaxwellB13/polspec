@@ -255,9 +255,7 @@ def test_unique_refuses_what_it_cannot_be_combined_with():
     without replacement, and a rule would put the repeats back.
     """
     with pytest.raises(SpecError, match="carry weights"):
-        ColSpec(
-            pl.String, choices=["a", "b", "c"], weights=[1.0, 2.0, 3.0], unique=True
-        )
+        ColSpec(pl.String, choices={"a": 1.0, "b": 2.0, "c": 3.0}, unique=True)
     with pytest.raises(SpecError, match="carry distribution"):
         ColSpec(pl.Int64, distribution="normal", unique=True)
     with pytest.raises(SpecError, match="carry rules"):

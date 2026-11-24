@@ -356,7 +356,8 @@ def test_the_colspec_field_reference_has_a_row_per_field():
     rows = TABLE_KEY.findall(
         (REFERENCE / "colspec-fields.md").read_text(encoding="utf-8")
     )
-    assert [field for field, _ in rows] == [f.name for f in dataclasses.fields(ColSpec)]
+    held = [f.name.removeprefix("_") for f in dataclasses.fields(ColSpec)]
+    assert [field for field, _ in rows] == held
     for field, key in rows:
         if field == "col_name":
             continue  # a class body's: the file holds the column by that name
@@ -391,7 +392,7 @@ def test_the_spec_file_reference_names_every_key_a_file_holds():
     _keys_within(found, _written(named.with_catspec(categories)))
     found["## A category registry"] = set(yaml.safe_load(categories.to_yaml()))
     registry = polspec.Registry(
-        TableSpec("One", {"a": ColSpec(pl.Int64)}), categories=categories
+        TableSpec("One", {"a": ColSpec(pl.Int64)}), catspec=categories
     )
     found["## A registry of specs"] = set(yaml.safe_load(registry.to_yaml()))
 

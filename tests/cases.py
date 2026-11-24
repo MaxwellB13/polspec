@@ -86,7 +86,7 @@ COLUMN_CASES: dict[str, ColSpec] = {
         pl.List(pl.Date), bounds=(dt.date(2020, 1, 1), dt.date(2020, 12, 31))
     ),
     "list_decimal": ColSpec(pl.List(pl.Decimal(6, 2)), bounds=(0, 10)),
-    "list_bool": ColSpec(pl.List(pl.Boolean), weights=[0.2, 0.8]),
+    "list_bool": ColSpec(pl.List(pl.Boolean), choices={False: 0.2, True: 0.8}),
     "list_binary": ColSpec(pl.List(pl.Binary), string_length=(2, 2)),
     "list_categorical": ColSpec(pl.List(pl.Categorical), choices=["p", "q"]),
     "list_distribution": ColSpec(
@@ -99,7 +99,7 @@ COLUMN_CASES: dict[str, ColSpec] = {
     "array_enum": ColSpec(pl.Array(pl.Enum(["a", "b"]), 4)),
     # boolean
     "bool": ColSpec(pl.Boolean),
-    "bool_weighted": ColSpec(pl.Boolean, weights=[0.3, 0.7]),
+    "bool_weighted": ColSpec(pl.Boolean, choices={False: 0.3, True: 0.7}),
     # text and bytes
     "string": ColSpec(pl.String),
     "string_len": ColSpec(pl.String, string_length=(3, 8)),
@@ -164,7 +164,9 @@ COLUMN_CASES: dict[str, ColSpec] = {
     "duration_us": ColSpec(pl.Duration("us")),
     # enum / categorical
     "enum": ColSpec(pl.Enum(["x", "y", "z"])),
-    "enum_weighted": ColSpec(pl.Enum(["x", "y", "z"]), weights=[1.0, 2.0, 3.0]),
+    "enum_weighted": ColSpec(
+        pl.Enum(["x", "y", "z"]), choices={"x": 1.0, "y": 2.0, "z": 3.0}
+    ),
     "enum_nullable": ColSpec(pl.Enum(["x", "y"]), nullable=True),
     "enum_choices_subset": ColSpec(pl.Enum(["x", "y", "z"]), choices=["x", "y"]),
     "categorical": ColSpec(pl.Categorical),

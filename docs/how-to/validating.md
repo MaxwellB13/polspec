@@ -598,7 +598,7 @@ that column's bounds removed:
 ```python
 from polspec import validate
 
-loose = Orders.spec.with_columns(total=Orders.col("total").replace(bounds=None))
+loose = Orders.spec.with_columns(total=Orders.column("total").replace(bounds=None))
 validate(loose, df)
 ```
 

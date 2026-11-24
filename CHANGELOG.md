@@ -40,8 +40,9 @@ for all of 2.x.
   are still drawn at `null_probability`, and a batch still holds the rows the
   whole frame holds there.
 - **Seeded output (2.0): weighted categories are drawn by the alias
-  method.** Every weighted column changes -- `weights=`, `choices=` given
-  as a dict, a finite format widened by `extra_values`, a template's extras
+  method.** Every weighted column changes -- `choices=` given as a dict,
+  an `Enum`'s or a `Boolean`'s weights, a finite format widened by
+  `extra_values`, a template's extras
   given shares -- and so does every frame holding one. A weighted draw costs
   the same whatever the number of categories: 200 of them take 2.7 ns on one
   thread, not 6.9, and three 2.7, not 3.0. The table is built in integer
@@ -95,6 +96,32 @@ for all of 2.x.
   not read: a check rejecting 10% of rows costs 2.0 times a plain
   `generate`, not 2.9, and one rejecting half 3.5 times, not 5.0. A stream
   that keeps checks holds `generate()`'s rows, a composite key's included.
+- **The API's names and signatures, made consistent (2.0).** Each old
+  spelling now raises an error naming its replacement:
+  - `assert_valid(spec, df)` takes the spec first, as `validate`,
+    `passing_rows` and every other function do.
+  - Every writer returns its text, given a path or not; with a path it
+    writes the file too. `to_yaml`, `to_python` and the rest returned
+    `None` when they wrote one.
+  - `CatSpec.from_framespec` is `CatSpec.from_spec`, and
+    `CatSpec.infer(max_enum_cardinality=)` is `max_unique_enum=`.
+  - `categories=` is `catspec=` on `from_dict`, `from_yaml`,
+    `FrameSpec.from_yaml`, `Registry`, `Registry.discover` and
+    `Registry.from_module`. `Registry.categories` is `Registry.catspec()`.
+  - `FrameSpec.col` is `FrameSpec.column`, and `FrameSpec.tag` and
+    `TableSpec.tag` are `tagged`.
+- **Weights are given inside `choices` (2.0).** `ColSpec(..., weights=[...])`
+  and `ColRule(..., weights=[...])` are gone: write `choices={value: weight}`,
+  the spelling the `repr` and `to_python` already used. An `Enum`'s weights
+  map its categories, and a `Boolean`'s both its values:
+  `choices={True: 0.1, False: 0.9}`. A column still reads its weights back
+  as `weights`. Spec files keep their `weights:` key, so no file changes,
+  and no seeded output moves.
+- **Every polspec error is a `PolspecError` only (2.0).** `SpecError`,
+  `ValidationError`, `SerializationError` and the rest no longer also
+  subclass `ValueError`, `TypeError` or `LookupError`: catch `PolspecError`, or
+  the class itself. A wrong argument type, as distinct from a wrong spec,
+  is still a `TypeError` or a `ValueError`.
 
 ### Fixed
 

@@ -22,7 +22,7 @@ from polspec.dtypes import (
     dtype_value_limits,
     float16_inside,
 )
-from polspec.errors import SpecError
+from polspec.errors import PolspecError, SpecError
 
 
 def normalize_ranges(spec: colspec_module.ColSpec) -> None:
@@ -104,7 +104,7 @@ def temporal_endpoints(
             )
         try:
             ends.append(read(endpoint))
-        except ValueError as exc:
+        except (ValueError, PolspecError) as exc:
             raise SpecError(
                 f"ColSpec.bounds {label} ({endpoint!r}) is not an ISO "
                 f"{type(dtype).__name__.lower()} a {dtype!r} column can read"

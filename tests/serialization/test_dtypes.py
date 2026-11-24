@@ -48,7 +48,7 @@ def _column(dtype: pl.DataType) -> TableSpec:
 def _read(dtype_data, categories: CatSpec | None = None) -> pl.DataType:
     """The dtype a spec file holding `dtype_data` declares."""
     data = {"name": "T", "columns": {"c": {"dtype": dtype_data}}}
-    return from_dict(data, categories=categories)["c"].dtype
+    return from_dict(data, catspec=categories)["c"].dtype
 
 
 @pytest.mark.parametrize("dtype", EVERY_DTYPE + NAMED, ids=str)

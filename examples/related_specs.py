@@ -43,7 +43,7 @@ class Customers(FrameSpec):
         distribution="lognormal",
         distribution_params={"mean": 5.0, "std": 1.2},
     )
-    is_active = ColSpec(pl.Boolean, weights=[0.2, 0.8])
+    is_active = ColSpec(pl.Boolean, choices={False: 0.2, True: 0.8})
 
 
 class Employees(FrameSpec):
@@ -139,7 +139,7 @@ if __name__ == "__main__":
     # against the shared categories; order() is the parents-first order the
     # keys imply.
     registry = Registry(
-        Customers, Employees, Orders, OrderLines, Products, categories=categories
+        Customers, Employees, Orders, OrderLines, Products, catspec=categories
     ).resolve()
     print("Generation order:", " -> ".join(registry.order()))
 
@@ -163,7 +163,7 @@ if __name__ == "__main__":
     registry.validate_all(frames)
     print("Relationships drawn:", registry.to_mermaid().count("||--o{"))
 
-    print("PII columns on Customers:", Customers.tag("pii"))
+    print("PII columns on Customers:", Customers.tagged("pii"))
 
     # A coverage set cannot keep checks -- taking rows out would leave
     # combinations uncovered -- so it says so unless told it is expected.

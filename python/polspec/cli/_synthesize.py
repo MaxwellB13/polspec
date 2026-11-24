@@ -25,7 +25,7 @@ from polspec.cli._profiling import (
     add_profile_flags,
     profile_keywords,
 )
-from polspec.errors import CliError
+from polspec.errors import CliError, PolspecError
 from polspec.framespec import FrameSpec
 from polspec.related import synthesized_all
 from polspec.synthesis import synthesized
@@ -64,7 +64,10 @@ def _cmd_synthesize(args: argparse.Namespace) -> int:
                 **profile_keywords(args),
                 name=name,
             )
-        except ValueError as exc:  # a name in --replace the file lacks, and the like
+        except (
+            ValueError,
+            PolspecError,
+        ) as exc:  # a name in --replace the file lacks, and the like
             raise CliError(str(exc)) from exc
     _note_text(spec)
     _write_data_file(fake, output, spec)
@@ -117,7 +120,7 @@ def _synthesize_related(args: argparse.Namespace, sources: list[Path]) -> int:
                 keys=keys,
                 **profile_keywords(args),
             )
-        except ValueError as exc:
+        except (ValueError, PolspecError) as exc:
             raise CliError(str(exc)) from exc
     for name in registry:
         _note_text(registry[name])

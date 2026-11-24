@@ -311,7 +311,7 @@ def test_element_nulls_are_drawn_at_their_rate_inside_present_lists():
 
 def test_elements_are_never_null_unless_a_rate_says_so():
     spec_cls = spec_for(ColSpec(pl.List(pl.Int64), list_length=(3, 3)))
-    assert spec_cls.col("c").element_null_probability == 0.0
+    assert spec_cls.column("c").element_null_probability == 0.0
     assert _elements(spec_cls.generate(2_000, seed=1)["c"]).null_count() == 0
     holed = pl.DataFrame({"c": [[1, None, 3]]})
     (finding,) = spec_cls.inspect(holed).findings

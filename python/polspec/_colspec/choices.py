@@ -25,17 +25,14 @@ def normalize_choices_and_weights(spec: colspec_module.ColSpec) -> None:
     """Splits a `{choice: weight}` mapping into the two fields, and tuples both."""
     choices: Any = spec.choices
     if isinstance(choices, dict):
-        if spec.weights is not None:
-            raise SpecError(
-                "Cannot specify both a dict for choices and an explicit weights parameter"
-            )
-        object.__setattr__(spec, "weights", tuple(float(w) for w in choices.values()))
+        object.__setattr__(spec, "_weights", tuple(float(w) for w in choices.values()))
         object.__setattr__(spec, "choices", tuple(choices.keys()))
+        boolean_from_choices(spec)
     else:
         if spec.choices is not None:
             object.__setattr__(spec, "choices", tuple(spec.choices))
         if spec.weights is not None:
-            object.__setattr__(spec, "weights", tuple(float(w) for w in spec.weights))
+            object.__setattr__(spec, "_weights", tuple(float(w) for w in spec.weights))
 
     if spec.choices is not None and not spec.choices:
         raise SpecError("ColSpec.choices must not be empty")
@@ -49,12 +46,31 @@ def normalize_choices_and_weights(spec: colspec_module.ColSpec) -> None:
         reject_duplicate_choices(spec.choices, "ColSpec.choices", spec.value_dtype)
 
 
+def boolean_from_choices(spec: colspec_module.ColSpec) -> None:
+    """A Boolean's weighted choices of both its values are its weights,
+    `[p_false, p_true]`: `choices={True: 0.1, False: 0.9}` is the spec
+    1.x wrote as `weights=[0.9, 0.1]`, so it compares equal, writes the
+    same file and generates the same frame."""
+    values = spec.choices
+    if (
+        spec.value_dtype != pl.Boolean
+        or values is None
+        or len(values) != 2
+        or not all(isinstance(v, bool) for v in values)
+        or set(values) != {False, True}
+    ):
+        return
+    shares = dict(zip(values, spec.weights or (), strict=True))
+    object.__setattr__(spec, "_weights", (shares[False], shares[True]))
+    object.__setattr__(spec, "choices", None)
+
+
 def enum_from_choices(spec: colspec_module.ColSpec) -> None:
     """A bare `pl.Enum` takes its categories from `choices`, in the order
     written; and choices that are an Enum's categories, in its order,
     are no narrower domain than the Enum's own, so they are dropped.
 
-    Either way the spec is the one `pl.Enum([...])` and `weights=` make,
+    Either way the spec is the one `pl.Enum([...])` with weights makes,
     so the spellings compare equal and write the same file -- and they
     already generate the same frame, so no seed moves.
     """
@@ -76,7 +92,9 @@ def enum_from_choices(spec: colspec_module.ColSpec) -> None:
             )
         reject_duplicate_choices(spec.choices, "ColSpec.choices", pl.String())
         object.__setattr__(spec, "dtype", pl.Enum(list(spec.choices)))
-    dtype = spec.dtype
+    # A List of an Enum drops weighted choices that are its categories
+    # too: the only 2.0 spelling of what 1.x wrote as `weights=` beside it.
+    dtype = spec.dtype if spec.weights is None else spec.value_dtype
     if (
         isinstance(dtype, pl.Enum)
         and spec.choices is not None

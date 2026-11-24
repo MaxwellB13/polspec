@@ -21,7 +21,7 @@ and `null_probability` describe the cell itself.
 | `optional` | `optional` | every column | — (generated like any other) | an absent column is no `missing_columns` finding; present, it is checked as usual |
 | `default` | `default` | scalar columns | — | with `fill_defaults=True`, fills the column's nulls, and the column when absent; `missing_cols="add"` adds it holding this |
 | `bounds` | `bounds` | numeric and temporal values | draws within them; an open end falls back to the default range | a value outside a declared end is a `bounds` finding |
-| `tags` | `tags` | every column | — | — (selects columns: `spec.tag(...)`) |
+| `tags` | `tags` | every column | — | — (selects columns: `spec.tagged(...)`) |
 | `description` | `description` | every column | — | — (`to_markdown` shows it) |
 | `unique` | `unique` | scalar columns | draws without replacement, unique across a whole frame however it is batched | a repeated value is a `unique` finding |
 | `null_probability` | `null_probability` | a `nullable` column | the rate nulls are drawn at | — (drift compares it to the observed rate) |
