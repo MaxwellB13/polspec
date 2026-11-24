@@ -1,5 +1,5 @@
-"""The profiling flags: each `ProfileOptions` field the command line sets,
-declared once for every command that profiles.
+"""The profiling flags: `--describe`, and each `ProfileOptions` field the
+command line sets, declared once for every command that profiles.
 
 `add_profile_flags` gives a parser the flags, and `profile_keywords` reads
 them back as `ProfileOptions`' keywords, so a new option is one entry in
@@ -51,13 +51,24 @@ class _Flag:
         return self.flag.removeprefix("--").replace("-", "_")
 
 
+# Recorded unless `--describe`, each with a `--no-` form; None, unset,
+# leaves it to `describe` (`ProfileOptions`' default, or off).
+_RECORDED = {"action": argparse.BooleanOptionalAction, "default": None}
+
 # In the order `--help` lists them.
 _FLAGS = (
     _Flag(
+        "describe",
+        "--describe",
+        "Record what each column is, not a stand-in for the data: no "
+        "weights, shapes, keys or order unless their flags ask",
+        argparse={"action": "store_true"},
+    ),
+    _Flag(
         "weights",
         "--weights",
-        "Record each category's observed frequency",
-        argparse={"action": "store_true"},
+        "Record each category's observed frequency (default: on, off with --describe)",
+        argparse=_RECORDED,
     ),
     _Flag(
         "max_unique_enum",
@@ -104,20 +115,23 @@ _FLAGS = (
     _Flag(
         "shape",
         "--shape",
-        "Fit the distribution each numeric or temporal column follows",
-        argparse={"action": "store_true"},
+        "Fit the distribution each numeric or temporal column follows "
+        "(default: on, off with --describe)",
+        argparse=_RECORDED,
     ),
     _Flag(
         "detect_unique",
         "--keys",
-        "Declare an all-distinct integer or text column unique",
-        argparse={"action": "store_true"},
+        "Declare an all-distinct integer or text column unique (default: on, "
+        "off with --describe)",
+        argparse=_RECORDED,
     ),
     _Flag(
         "detect_order",
         "--order",
-        "Declare order_by when the rows come sorted by a column",
-        argparse={"action": "store_true"},
+        "Declare order_by when the rows come sorted by a column (default: "
+        "on, off with --describe)",
+        argparse=_RECORDED,
     ),
     _Flag(
         "round_bounds",
@@ -125,17 +139,17 @@ _FLAGS = (
         "Round each numeric column's bounds outward to STEP (1000, 1k, 10k, "
         "1M, 0.01), within its dtype, so the data stays inside; 'auto' keeps "
         "two significant figures of the span and whole seconds; 'exact' "
-        "writes them as observed (default: auto)",
-        argparse={"default": "auto", "type": _rounding, "metavar": "STEP"},
+        "writes them as observed (default: exact)",
+        argparse={"type": _rounding, "metavar": "STEP"},
     ),
     _Flag(
         "round_rates",
         "--round-rates",
-        "Round each null and NaN rate up to STEP (0.01), and each --weights "
+        "Round each null and NaN rate up to STEP (0.01), and each category "
         "frequency to its nearest STEP; 'auto' keeps two significant "
         "figures; 'exact' writes them as observed. A rate of 0 stays 0 "
-        "(default: auto)",
-        argparse={"default": "auto", "type": _rounding, "metavar": "STEP"},
+        "(default: exact)",
+        argparse={"type": _rounding, "metavar": "STEP"},
     ),
     _Flag(
         "replace",
@@ -171,9 +185,12 @@ def add_profile_flags(
 
 
 def profile_keywords(args: argparse.Namespace) -> dict[str, Any]:
-    """`ProfileOptions`' keywords for each profiling flag `args` has."""
+    """The profiling keywords -- `describe`, and `ProfileOptions`' -- for
+    each profiling flag `args` has; a recorded flag left unset is left out,
+    for `describe` to decide."""
     return {
         flag.option: flag.to_option(getattr(args, flag.dest))
         for flag in _FLAGS
         if hasattr(args, flag.dest)
+        and not (flag.argparse is _RECORDED and getattr(args, flag.dest) is None)
     }

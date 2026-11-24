@@ -339,20 +339,22 @@ def test_synthesized_rows_come_in_the_sources_order():
     assert fake["ts"].is_sorted()
 
 
-def test_from_dataframe_detects_an_order_only_when_asked():
-    assert FrameSpec.from_dataframe(_log()).spec.order_by == ()
-    asked = FrameSpec.from_dataframe(_log(), detect_order=True)
+def test_from_dataframe_detects_an_order_unless_it_only_describes():
+    """2.0: `profile()`'s defaults everywhere; `describe=True` is 1.x's."""
+    assert FrameSpec.from_dataframe(_log()).spec.order_by == ("ts",)
+    assert FrameSpec.from_dataframe(_log(), describe=True).spec.order_by == ()
+    asked = FrameSpec.from_dataframe(_log(), describe=True, detect_order=True)
     assert asked.spec.order_by == ("ts",)
 
 
-def test_schema_infer_declares_an_order_with_order(tmp_path):
+def test_schema_infer_declares_an_order_unless_no_order(tmp_path):
     from polspec.cli import main
 
     source = tmp_path / "log.parquet"
     _log().write_parquet(source)
     plain, ordered = tmp_path / "plain.yaml", tmp_path / "ordered.yaml"
-    assert main(["schema", "infer", str(source), "-o", str(plain)]) == 0
-    assert main(["schema", "infer", str(source), "-o", str(ordered), "--order"]) == 0
+    assert main(["schema", "infer", str(source), "-o", str(ordered)]) == 0
+    assert main(["schema", "infer", str(source), "-o", str(plain), "--no-order"]) == 0
     assert from_yaml(plain).order_by == ()
     assert from_yaml(ordered).order_by == ("ts",)
 

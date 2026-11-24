@@ -84,17 +84,18 @@ def real() -> pl.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def test_from_dataframe_with_no_options_infers_what_it_always_did():
-    """Profiling gained three opt-in steps in 0.13.0; none of them runs unless
-    asked, so a spec `polspec schema infer` wrote before still comes out the
-    same. 0.14.0 changed the default on purpose, twice: an Enum needs its
-    values to repeat, and a text column names its format -- `contact` here.
-    0.22.0 once more: a column with no nulls carries no null rate.
-    Regenerate the fixture only on purpose."""
+def test_from_dataframe_describing_infers_what_it_always_did():
+    """Profiling gained three opt-in steps in 0.13.0; none of them runs when
+    describing -- the default until 2.0 -- so a spec `polspec schema infer
+    --describe` writes is the one it wrote before. 0.14.0 changed the
+    default on purpose, twice: an Enum needs its values to repeat, and a
+    text column names its format -- `contact` here. 0.22.0 once more: a
+    column with no nulls carries no null rate. Regenerate the fixture only
+    on purpose."""
     golden = yaml.safe_load(
         (FIXTURES / "profiled_by_default.yaml").read_text(encoding="utf-8")
     )
-    spec = FrameSpec.from_dataframe(golden_frame(), name="Profiled").spec
+    spec = FrameSpec.from_dataframe(golden_frame(), name="Profiled", describe=True).spec
     assert to_dict(spec) == golden
 
 

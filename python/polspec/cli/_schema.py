@@ -22,7 +22,6 @@ from polspec.cli._io import (
 )
 from polspec.cli._profiling import profile_keywords
 from polspec.errors import CliError, PolspecError
-from polspec.profiler import ProfileOptions
 from polspec.related import profile_all
 from polspec.serialization import registry_to_yaml, to_yaml
 
@@ -83,10 +82,9 @@ def _infer_related(args: argparse.Namespace, sources: list[Path]) -> int:
         )
     keys = _declared_keys(args)
     tables = _tables(sources)
-    options = ProfileOptions(**profile_keywords(args))
     with _warnings_printed():
         try:
-            registry = profile_all(tables, keys=keys, options=options)
+            registry = profile_all(tables, keys=keys, **profile_keywords(args))
         except (
             ValueError,
             PolspecError,

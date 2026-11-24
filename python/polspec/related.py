@@ -65,6 +65,7 @@ def profile_all(
     frames: Mapping[str, Source],
     *,
     keys: Keys | Literal[False] | None = None,
+    describe: bool = False,
     options: ProfileOptions | None = None,
     **keywords: Unpack[ProfileKeywords],
 ) -> Registry:
@@ -102,6 +103,11 @@ def profile_all(
         ref_columns="id")]}`. A declared key replaces any key inferred on
         its columns, and one the data does not satisfy raises `SpecError`.
         `False` infers none.
+    describe : bool, default False
+        Record what each column is rather than a stand-in for the data:
+        `weights`, `shape`, `detect_unique` and `detect_order` default to
+        off, and any of them passed as a keyword is still taken. Not with
+        `options=`.
     options : ProfileOptions, optional
         How every table is profiled -- or pass its fields as keywords. A
         column in `replace` need only be in one of the tables.
@@ -123,7 +129,8 @@ def profile_all(
 
     *Added in 1.5.*
     """
-    specs, _ = profiled_tables(frames, keys, profile_options(options, keywords))
+    opts = profile_options(options, keywords, describe=describe)
+    specs, _ = profiled_tables(frames, keys, opts)
     return Registry(*specs.values()).resolve()
 
 

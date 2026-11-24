@@ -55,6 +55,8 @@ def test_generated_test_from_yaml_actually_passes(sample_data, tmp_path):
     content = test_path.read_text(encoding="utf-8")
     assert "def test_" in content
     assert "cartesian" in content  # both tests present by default
+    # The key `schema infer` profiled from 200 rows holds 200 values (2.0).
+    assert "200 rows, not 500: 'order_id' is unique" in content
 
     result = run_pytest_on(test_path)
     assert result.returncode == 0, result.stdout + result.stderr

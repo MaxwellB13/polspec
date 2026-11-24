@@ -49,6 +49,7 @@ def profile(
     source: Source,
     *,
     name: str = "Profiled",
+    describe: bool = False,
     options: ProfileOptions | None = None,
     **keywords: Unpack[ProfileKeywords],
 ) -> TableSpec:
@@ -62,6 +63,11 @@ def profile(
         Arrow IPC file.
     name : str, default "Profiled"
         The spec's name.
+    describe : bool, default False
+        Record what each column is rather than a stand-in for the data:
+        `weights`, `shape`, `detect_unique` and `detect_order` default to
+        off, and any of them passed as a keyword is still taken. Not with
+        `options=`.
     options : ProfileOptions, optional
         What to infer and how finely to write it -- or pass its fields as
         keywords instead: `replace`, `sample`, `seed`, `max_unique_enum`,
@@ -72,8 +78,9 @@ def profile(
     Returns
     -------
     TableSpec
-        Everything `FrameSpec.from_dataframe` records, plus each column's
-        category frequencies, fitted distribution and uniqueness.
+        Each column's dtype, bounds, nulls and values, with its category
+        frequencies, fitted distribution and uniqueness, and the order the
+        rows come in -- or, with `describe=True`, without the last four.
 
     Examples
     --------
@@ -86,7 +93,7 @@ def profile(
     >>> profile(pl.DataFrame({"lgd": ["0.45", "", "0.2"]}), parse_text=True).schema()
     Schema({'lgd': Float64})
     """
-    opts = profile_options(options, keywords)
+    opts = profile_options(options, keywords, describe=describe)
     frame, _ = _load(source, opts.sample, opts.seed)
     return profiled_table(frame, opts, name)
 

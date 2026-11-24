@@ -117,6 +117,17 @@ for all of 2.x.
   `choices={True: 0.1, False: 0.9}`. A column still reads its weights back
   as `weights`. Spec files keep their `weights:` key, so no file changes,
   and no seeded output moves.
+- **One set of profiling defaults (2.0).** `FrameSpec.from_dataframe` and
+  `polspec schema infer` now record what `profile()` records: category
+  frequencies, fitted distributions, unique keys and row order. Bounds and
+  rates are written exactly, as observed, everywhere. `schema infer` no
+  longer rounds them; `--round-bounds auto --round-rates auto` does.
+  `describe=True` on `profile`, `profile_all` and `from_dataframe`, and
+  `--describe` on `schema infer`, give 1.x's lean form, each part of it a
+  keyword or flag away (`describe=True, weights=True`). `--weights`,
+  `--shape`, `--keys` and `--order` gain `--no-` forms. A key keeps its
+  observed range, so `polspec test` asks for no more rows than a unique
+  column holds, saying so in the test it writes. No seeded output moves.
 - **Every polspec error is a `PolspecError` only (2.0).** `SpecError`,
   `ValidationError`, `SerializationError` and the rest no longer also
   subclass `ValueError`, `TypeError` or `LookupError`: catch `PolspecError`, or

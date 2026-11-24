@@ -493,7 +493,7 @@ def _status_is_an_enum(spec: dict) -> bool:
 # Each ProfileOptions field but `seed`, the flags that set it, and what they
 # change in the spec written for `_profiled_source`'s file.
 _PROFILE_FLAGS = {
-    "weights": (["--weights"], lambda s: "weights" in s["columns"]["status"]),
+    "weights": (["--no-weights"], lambda s: "weights" not in s["columns"]["status"]),
     "max_unique_enum": (
         ["--max-unique-enum", "1"],
         lambda s: not _status_is_an_enum(s),
@@ -506,16 +506,16 @@ _PROFILE_FLAGS = {
     ),
     "calculate_bounds": (["--no-bounds"], lambda s: "bounds" not in s["columns"]["id"]),
     "sample": (["--sample", "20"], lambda s: s["columns"]["id"]["bounds"][1] < 200),
-    "shape": (["--shape"], lambda s: "distribution" in s["columns"]["amount"]),
-    "detect_unique": (["--keys"], lambda s: s["columns"]["id"].get("unique") is True),
-    "detect_order": (["--order"], lambda s: s.get("order_by") == ["id"]),
+    "shape": (["--no-shape"], lambda s: "distribution" not in s["columns"]["amount"]),
+    "detect_unique": (["--no-keys"], lambda s: "unique" not in s["columns"]["id"]),
+    "detect_order": (["--no-order"], lambda s: "order_by" not in s),
     "round_bounds": (
-        ["--round-bounds", "exact"],
-        lambda s: s["columns"]["id"]["bounds"][0] == 1,
+        ["--round-bounds", "auto"],
+        lambda s: s["columns"]["id"]["bounds"][0] != 1,
     ),
     "round_rates": (
-        ["--round-rates", "exact"],
-        lambda s: s["columns"]["amount"]["null_probability"] == 0.125,
+        ["--round-rates", "auto"],
+        lambda s: s["columns"]["amount"]["null_probability"] != 0.125,
     ),
     "replace": (["--replace", "status"], lambda s: not _status_is_an_enum(s)),
 }
@@ -574,11 +574,35 @@ def test_each_profiling_flag_changes_the_spec_written(command, option, tmp_path)
     assert changed(_written_spec(tmp_path, command, source, *flags)), (command, option)
 
 
-@pytest.mark.parametrize("option", sorted(set(_PROFILE_FLAGS) - set(_SYNTHESIZE_FLAGS)))
+# What `--describe` leaves out, and the flag that asks for it back.
+_DESCRIBED = {
+    "weights": "--weights",
+    "shape": "--shape",
+    "detect_unique": "--keys",
+    "detect_order": "--order",
+}
+
+
+@pytest.mark.parametrize("option", sorted(_DESCRIBED))
+def test_describe_leaves_out_what_its_flag_asks_back(option, tmp_path):
+    """2.0's one set of defaults records everything; `--describe` is 1.x's
+    lean `schema infer`, each part of it a flag away."""
+    source = _profiled_source(tmp_path)
+    _, left_out = _PROFILE_FLAGS[option]
+    assert left_out(_written_spec(tmp_path, "schema infer", source, "--describe"))
+    asked = _written_spec(
+        tmp_path, "schema infer", source, "--describe", _DESCRIBED[option]
+    )
+    assert not left_out(asked)
+
+
+@pytest.mark.parametrize(
+    "option", [*sorted(set(_PROFILE_FLAGS) - set(_SYNTHESIZE_FLAGS)), "describe"]
+)
 def test_synthesize_refuses_the_flags_that_only_describe(option, capsys):
     """They describe a source less than whole, which a stand-in for it must
     not be."""
-    flags, _ = _PROFILE_FLAGS[option]
+    flags = ["--describe"] if option == "describe" else _PROFILE_FLAGS[option][0]
     with pytest.raises(SystemExit):
         main(["synthesize", "x.csv", "-o", "y.csv", *flags])
     assert "unrecognized arguments" in capsys.readouterr().err

@@ -60,10 +60,12 @@ def test_synthesize_refuses_a_replaced_column_the_file_lacks(tmp_path, capsys):
     assert "replace= names ['nope']" in capsys.readouterr().err
 
 
-def test_schema_infer_profiles_shape_keys_and_replaced_columns_when_asked(tmp_path):
+def test_schema_infer_describing_profiles_shape_keys_and_replaced_columns_when_asked(
+    tmp_path,
+):
     source = _customers_csv(tmp_path)
     plain, full = tmp_path / "plain.yaml", tmp_path / "full.yaml"
-    assert run_cli("schema", "infer", source, "-o", plain) == 0
+    assert run_cli("schema", "infer", source, "-o", plain, "--describe") == 0
     assert (
         run_cli(
             "schema",
@@ -71,6 +73,7 @@ def test_schema_infer_profiles_shape_keys_and_replaced_columns_when_asked(tmp_pa
             source,
             "-o",
             full,
+            "--describe",
             "--shape",
             "--keys",
             "--replace",

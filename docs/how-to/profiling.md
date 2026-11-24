@@ -23,23 +23,44 @@ orders = pl.DataFrame(
 
 ## Describe, or imitate
 
-There are two ways in, and they differ in what they record by default.
+There are two ways in, with the same options and the same defaults.
 
 | | `FrameSpec.from_dataframe(df)` | `polspec.profile(source)` |
 |:--|:--|:--|
 | Gives | a `FrameSpec` class | a `TableSpec` |
-| Reads | a `DataFrame` | a `DataFrame`, a `LazyFrame` or a file path |
-| Records | dtypes, nulls and null rates, bounds and lengths, `Enum`s, formats | all of that, plus category frequencies, fitted distributions, unique keys and row order |
-| For | a contract: what each column is | a stand-in: data that looks like this data |
+| Reads | a `DataFrame`, with rows or without | a `DataFrame`, a `LazyFrame` or a file path |
 
-Both take the same options, so either can record anything the other does.
-`polspec schema infer` on the command line describes, as `from_dataframe`
-does, and rounds what it writes (see [Rounding](#rounding)).
+By default each *imitates* the data, as a stand-in for it needs, and
+`describe=True` *describes* it, as a contract a person reads and edits
+needs. `polspec schema infer` on the command line does the same, with
+`--describe`. *Since 2.0. In 1.x, `from_dataframe` and `schema infer`
+described by default, and `schema infer` rounded (see
+[Rounding](#rounding)).*
 
-### Describe: `from_dataframe`
+### Imitate: the default
 
 ```python
-Described = FrameSpec.from_dataframe(orders, name="Orders")
+spec = polspec.profile(orders, name="Orders")
+print(spec["status"].weights)
+print(spec["order_id"].unique, spec.order_by)
+```
+
+```text
+(0.25, 0.5, 0.25)
+True ('order_id',)
+```
+
+A profile records each column's dtype, nulls, extremes and values, and
+also how often each category occurs, which column is a key, the order the
+rows come in, and the shape a numeric column's values follow. It is what
+[`synthesize`](synthesizing.md) generates from. A key keeps the range it
+was observed in, so a spec profiled from 2,000 rows generates at most
+2,000; `synthesize` widens it to the rows it makes.
+
+### Describe: `describe=True`
+
+```python
+Described = FrameSpec.from_dataframe(orders, name="Orders", describe=True)
 print(Described.column("status").dtype)
 print(Described.column("email").format)
 print(Described.column("note").nullable, Described.column("note").null_probability)
@@ -54,36 +75,21 @@ True 0.857
 A text column whose values repeat becomes an `Enum` of them; one of distinct
 values stays text. A column whose values are emails, UUIDs, IP addresses,
 hostnames or ISO country and currency codes names that
-[format](formats.md), so generated values have it too.
-
-### Imitate: `profile`
-
-```python
-spec = polspec.profile(orders, name="Orders")
-print(spec["status"].weights)
-print(spec["order_id"].unique, spec.order_by)
-```
-
-```text
-(0.25, 0.5, 0.25)
-True ('order_id',)
-```
-
-`profile` also records how often each category occurs, which column is a
-key, the order the rows come in, and the shape a numeric column's values
-follow. It is what [`synthesize`](synthesizing.md) generates from, and it
-reads a lazy frame or a file as well as a frame.
+[format](formats.md), so generated values have it too. Category
+frequencies, fitted distributions, keys and row order are left out unless
+asked for one by one: `describe=True, weights=True` describes the data and
+records its frequencies.
 
 ## Choosing what is inferred
 
 Each option is a keyword on both functions:
 
-| Option | Default (`profile` / `from_dataframe`) | What it does |
+| Option | Default (`describe=True`) | What it does |
 |:--|:--|:--|
-| `weights` | on / off | Record each category's observed frequency |
-| `shape` | on / off | Fit the distribution a numeric or temporal column follows |
-| `detect_unique` | on / off | Declare an all-distinct integer or text column `unique` (from 100 values) |
-| `detect_order` | on / off | Declare `order_by` when the rows come sorted by a column |
+| `weights` | on (off) | Record each category's observed frequency |
+| `shape` | on (off) | Fit the distribution a numeric or temporal column follows |
+| `detect_unique` | on (off) | Declare an all-distinct integer or text column `unique` (from 100 values) |
+| `detect_order` | on (off) | Declare `order_by` when the rows come sorted by a column |
 | `calculate_bounds` | on | Record extremes, and text and binary lengths |
 | `formats` | on | Name a text column's format |
 | `patterns` | on | Write the pattern a code-like text column's values share; see [How close the fake data is](synthesizing.md#how-close-the-fake-data-is) |
@@ -95,7 +101,9 @@ Each option is a keyword on both functions:
 | `parse_text` | off | Read text as the numbers, flags or dates it holds; see [Data read as text](#data-read-as-text) |
 
 ```python
-Lean = FrameSpec.from_dataframe(orders, name="Orders", weights=True, replace=["email"])
+Lean = FrameSpec.from_dataframe(
+    orders, name="Orders", describe=True, weights=True, replace=["email"]
+)
 ```
 
 To use the same choices in several places, make them a `ProfileOptions`
@@ -129,9 +137,10 @@ print(Rounded.column("note").null_probability)
 `"auto"` keeps two significant figures of a column's span, and rounds a
 time to the second. A step rounds to its multiples: `round_bounds=1000`,
 `round_rates=0.01`. Bounds always round outward and rates up, within what the
-dtype holds, so the data a spec was inferred from still passes it. In Python
-the default is exact; `polspec schema infer` rounds `auto` unless told
-`--round-bounds exact`.
+dtype holds, so the data a spec was inferred from still passes it. The
+default is exact, `polspec schema infer` included: `--round-bounds auto
+--round-rates auto` rounds there. *Since 2.0. In 1.x, `schema infer`
+rounded `auto` by default.*
 
 ## Data read as text
 
@@ -286,11 +295,11 @@ tables](synthesizing.md#related-tables) says how a key is found.
 
 ```bash
 polspec schema infer orders.parquet -o orders.yaml
-polspec schema infer orders.parquet -o orders.py --weights --keys --order
+polspec schema infer orders.parquet -o orders.py --describe --weights
 ```
 
-`schema infer` takes the same options as flags: `--weights`, `--shape`,
-`--keys`, `--order`, `--no-bounds`, `--no-formats`, `--no-patterns`,
+`schema infer` takes the same options as flags: `--describe`, `--weights`,
+`--shape`, `--keys` and `--order` (each with a `--no-` form), `--no-bounds`, `--no-formats`, `--no-patterns`,
 `--max-unique-enum`, `--replace`, `--sample`, `--round-bounds`,
 `--round-rates` and `--parse-text`. See
 [the command line](cli.md#schema-infer-profile-data-into-a-spec).

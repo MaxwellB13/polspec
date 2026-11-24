@@ -736,3 +736,57 @@ def test_a_large_frame_profiles_as_its_columns_do_one_at_a_time():
             one_by_one[name] = polspec.profile(frame.select(name))[name]
     assert dict(spec.columns) == one_by_one
     assert [str(w.message)[:11] for w in whole] == ["Column 'b' ", "Column 'a' "]
+
+
+# ---------------------------------------------------------------------------
+# One set of defaults (2.0), and describe=True for the lean form
+# ---------------------------------------------------------------------------
+
+
+def _orders() -> pl.DataFrame:
+    n = 400
+    return pl.DataFrame(
+        {
+            "order_id": range(1, n + 1),
+            "status": ["NEW", "PAID", "PAID", "SHIPPED"] * (n // 4),
+        }
+    )
+
+
+def test_every_way_in_profiles_with_the_same_defaults():
+    """1.x's `from_dataframe` left out what `profile` recorded."""
+    profiled = polspec.profile(_orders(), name="Orders")
+    assert polspec.FrameSpec.from_dataframe(_orders(), name="Orders").spec == profiled
+    registry = polspec.profile_all({"Orders": _orders()})
+    assert registry["Orders"] == profiled
+    assert profiled["status"].weights is not None
+    assert profiled["order_id"].unique
+    assert profiled.order_by == ("order_id",)
+
+
+@pytest.mark.parametrize("way", ["profile", "from_dataframe", "profile_all"])
+def test_describe_leaves_out_frequencies_keys_and_order(way):
+    frame = _orders()
+    described = {
+        "profile": lambda: polspec.profile(frame, name="Orders", describe=True),
+        "from_dataframe": lambda: (
+            polspec.FrameSpec.from_dataframe(frame, name="Orders", describe=True).spec
+        ),
+        "profile_all": lambda: polspec.profile_all({"Orders": frame}, describe=True)[
+            "Orders"
+        ],
+    }[way]()
+    assert described["status"].weights is None
+    assert not described["order_id"].unique
+    assert described.order_by == ()
+
+
+def test_describe_takes_back_what_a_keyword_asks_for():
+    spec = polspec.profile(_orders(), describe=True, weights=True)
+    assert spec["status"].weights is not None
+    assert not spec["order_id"].unique
+
+
+def test_describe_with_an_options_object_says_to_set_its_fields():
+    with pytest.raises(TypeError, match="set its fields instead"):
+        polspec.profile(_orders(), describe=True, options=polspec.ProfileOptions())
