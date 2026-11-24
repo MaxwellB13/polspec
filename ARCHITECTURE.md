@@ -29,6 +29,7 @@ they can change in any release, so code outside polspec should use only
 | `pass_order` | `Pass`/`order` — which rewrite of a generated frame runs first, from what each reads and writes; checked at declaration, followed at generation |
 | `validation` | `inspect` and `validate` over a `TableSpec`: every claim becomes a `Constraint` that produces a `Finding`. The `constraints/` package holds them by kind: `_values` (one value's domain, bounds, length, format, pattern, recursing into a struct's fields and lifted over a list's elements), `_rules`, `_table` (composite keys, checks), `_relations` (foreign keys, hierarchy); `report.py` holds `Finding` and `ValidationReport` |
 | `tablespec` | `TableSpec` — a spec as an immutable value, with its declaration-time checks and structural operations |
+| `joining` | `TableSpec.join`'s spec: the columns `LazyFrame.join` gives two frames of these specs, each carrying its side's claims |
 | `framespec` | `FrameSpec` — the metaclass that builds a `TableSpec` from a class body, and the facade forwarding every verb to it |
 | `generation` | `generate`, `generate_batches`, `scan` and the file sinks, as functions over a `TableSpec`. `pipeline.py` runs the engine then the passes, window by window; `engine.py` turns a spec into the `ColumnPlan`s the Rust extension takes and finishes the result -- gathering typed choices, casting temporal columns back, wrapping a `List` around the column its elements make and gathering a `Struct` from its fields'; `passes/` holds one pass per kind of cross-column claim (`rules`, `foreign_keys`, `hierarchy`, `unique_together`); `seeds.py` keys every pass's seed by name, as the engine keys columns; `keeping.py` keeps a spec's checks under `checks=True`, reading on into the frame for the rows that pass; `scan.py` is the lazy source every sink writes out |
 | `frames` | The frame plumbing every verb shares: accepting a `DataFrame` or `LazyFrame`, and resolving `references=` to parent frames |
@@ -50,12 +51,12 @@ they can change in any release, so code outside polspec should use only
 | `catspec` | `CatSpec` — a shared registry of enums and categoricals, as a value, plus the metaclass that builds one from a class body (the same split as `tablespec`/`framespec`) |
 | `registry` | `Registry` — a declared set of specs: resolving cross-spec keys, ordering parents before children, `generate_all`/`validate_all`, one file and one diagram for the set |
 | `serialization` | Spec files: a field registry (`fields.py`) that YAML, generated Python and the `import datetime` decision all derive from; the dtype codec table (`dtypes.py`); format versions and migrations (`migrations.py`) |
-| `profiler` | Inferring a spec from an existing DataFrame; opt-in, a column's fitted shape, whether it is a key, and which columns' values not to carry over |
+| `profiler` | Inferring a spec from an existing DataFrame, a package by concern: `options` and `rounding` (what is recorded, how finely), `columns` (each column by its dtype's family), `formats`, `shapes` and `text` (what a text column holds), `order` (the rows' order) |
 | `shape` | Fitting the distribution a numeric or temporal column follows: each candidate the engine draws is fitted by moments, drawn through `generate()` with the column's bounds, and scored by its Kolmogorov-Smirnov distance to the data |
 | `synthesis` | `profile` and `synthesize`: a spec, and a fake frame, from a `DataFrame`, a `LazyFrame` or a data file |
 | `related` | `profile_all` and `synthesize_all`: a set of related tables profiled into a `Registry`, the foreign keys between them found by containment and named by their columns, each key's column given its parent's claims; and a fake set generated from it, each key range widened with its children for the rows asked for |
 | `render` | Rendering a spec, a registry, a category registry or a drift report as Markdown or Mermaid |
-| `cli` | The `polspec` command, one module per verb: `_schema` (infer, new), `_data` (validate, generate), `_drift` (diff, drift), `_test`; `_io` holds the readers, writers and spec loaders they share |
+| `cli` | The `polspec` command, one module per verb: `_schema` (infer, new), `_data` (validate, generate), `_drift` (diff, drift), `_test`; `_files` (data files read and written), `_specs` (spec files loaded, Python written) and `_sources` (several sources, `--reference`, key flags) hold what they share |
 
 `import polspec` loads the declarations and `FrameSpec`; every verb module
 -- generation, validation, compare, serialization, the profiler, render --

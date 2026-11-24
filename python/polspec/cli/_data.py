@@ -14,16 +14,14 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 
 from polspec._text import parse_series, text_parser
-from polspec.cli._io import (
+from polspec.cli._files import (
     _DATA_WRITERS,
     _existing,
     _read_data_file,
-    _references_from,
-    _registry_from,
-    _single_spec,
     _write_data_file,
-    frames_named_after_specs,
 )
+from polspec.cli._sources import _references_from, frames_named_after_specs
+from polspec.cli._specs import _registry_from, _single_spec
 from polspec.constants import LARGE_FRAME_BYTES
 from polspec.errors import CliError, PolspecError
 from polspec.generation.pipeline import describe_bytes

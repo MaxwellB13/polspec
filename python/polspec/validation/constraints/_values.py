@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 
 from polspec import frames
-from polspec.domain import is_textual
+from polspec.domain import Domain, is_textual
 from polspec.dtypes import (
     ARRAY_EVAL_ANY,
     ARRAY_EVAL_FILTERS,
@@ -746,12 +746,9 @@ def _map_constraints(
 
 
 def _allowed_values(spec: ColSpec) -> list[Any] | None:
-    """The closed domain this column's values must fall in, if it has one."""
-    if isinstance(spec.value_dtype, pl.Enum):
-        categories = spec.value_dtype.categories.to_list()
-        if spec.choices is not None:
-            return [c for c in spec.choices if c in categories]
-        return categories
-    if spec.choices is not None:
-        return list(spec.choices)
-    return None
+    """The closed domain this column's values must fall in, if it has one:
+    its choices or an Enum's categories, as `Domain` defines them for
+    generation too. A finite format's list is its `_format_claim`'s."""
+    if spec.choices is None and not isinstance(spec.value_dtype, pl.Enum):
+        return None
+    return list(Domain.of(spec).values or ())

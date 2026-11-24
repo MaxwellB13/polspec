@@ -5,25 +5,29 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from polspec.cli._io import (
+from polspec.cli._files import (
     _DATA_WRITERS,
-    _add_key_flags,
-    _class_name_from,
-    _declared_keys,
     _existing,
-    _maybe_format,
     _note_text,
-    _refuse_related_flags,
-    _require_identifier,
-    _tables,
     _warnings_printed,
     _write_data_file,
-    _write_registry,
 )
 from polspec.cli._profiling import (
     SYNTHESIZE_OPTIONS,
     add_profile_flags,
     profile_keywords,
+)
+from polspec.cli._sources import (
+    _add_key_flags,
+    _declared_keys,
+    _refuse_related_flags,
+    _tables,
+)
+from polspec.cli._specs import (
+    _class_name_from,
+    _maybe_format,
+    _require_identifier,
+    _write_registry,
 )
 from polspec.errors import CliError, PolspecError
 from polspec.framespec import FrameSpec

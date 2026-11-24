@@ -32,6 +32,7 @@ from polspec.constants import (
     DEFAULT_WIDE_INT_BOUND,
     MAX_CARTESIAN_ROWS,
 )
+from polspec.domain import Domain
 from polspec.dtypes import (
     TIME_UNIT_FACTORS,
     DtypeLike,
@@ -242,34 +243,29 @@ _ENGINE_KINDS: dict[DtypeLike, str] = {
 
 
 def _domain(spec: ColSpec) -> pl.Series | None:
-    """The finite, typed domain a column draws from, if it has one.
+    """The finite, typed domain a column draws from, if it has one: the
+    values `Domain.of` declares it to hold -- `choices`, an Enum's
+    categories, or a finite `format`'s list and its extras -- the one
+    definition validation checks against too.
 
-    Declared `choices`, an Enum's categories, or a finite `format`'s list.
     The engine samples *indices* into this and the values are gathered back
     on the Python side, so a choice keeps its type -- a `datetime`, a
     `bytes`, a `True` -- with no string round-trip.
     """
     dtype = spec.value_dtype
-    if spec.choices is not None:
-        return typed_values(spec.choices, dtype)
-    if spec.unique and dtype == pl.Float16:
+    if spec.choices is None and spec.unique and dtype == pl.Float16:
         # Distinct singles can round to the same half, so a unique half is
         # drawn from the halves themselves: the finite set between the
         # bounds, sampled without replacement like any other domain.
         lo, hi = _resolve_numeric_bounds(spec)
         halves = _every_float16()
         return halves.filter(halves.is_between(lo, hi))
-    if isinstance(dtype, pl.Enum):
-        return pl.Series(dtype.categories, dtype=dtype)
-    if spec.format is not None:
-        fmt = _lookup_format(spec.format)
-        if fmt.is_finite:
-            # A finite format's extras join its list, weighted by
-            # `_extended_weights`.
-            return typed_values(
-                (*(fmt.values or ()), *(spec.extra_values or ())), dtype
-            )
-    return None
+    values = Domain.of(spec).values
+    if values is None:
+        return None
+    # A finite format's extras are among the values, weighted by
+    # `_extended_weights`.
+    return typed_values(values, dtype)
 
 
 def joint_space(spec: ColSpec) -> tuple[int, Callable[[pl.Series], pl.Series]] | None:
@@ -369,41 +365,7 @@ def plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None]
         return plan, domain
 
     if kind in ("int", "float", "temporal", "decimal"):
-        engine_kind = _ENGINE_KINDS.get(_DRAWN_AS.get(spec.dtype, spec.dtype), kind)
-        if kind == "decimal":
-            # A Decimal is filled as its physical integer, at full width, and
-            # scaled back in `_finish`.
-            engine_kind = "int128"
-        if spec.dtype.is_temporal():
-            # Temporal columns cross as their physical integer: Date is an
-            # i32 day count, everything else an i64 in its own time unit.
-            engine_kind = "int32" if spec.dtype == pl.Date else "int64"
-        if (
-            spec.bounds is not None
-            or spec.distribution is None
-            or spec.distribution == "uniform"
-        ):
-            options["min"], options["max"] = _resolve_numeric_bounds(spec)
-        elif spec.dtype == pl.Float16:
-            # A distribution with no bounds keeps its own shape, but not past
-            # what a half holds: beyond it the cast is an infinity.
-            options["min"], options["max"] = -_FLOAT16_MAX, _FLOAT16_MAX
-        elif spec.dtype.is_temporal():
-            # A non-uniform distribution with no explicit bounds is left to
-            # its own shape rather than squeezed into polspec's default
-            # range -- but a temporal dtype's own domain is not optional:
-            # it reaches the engine as a bare integer kind, and without this
-            # clamp could produce values the dtype cannot represent.
-            limits = dtype_value_limits(spec.dtype)
-            if limits is None:  # pragma: no cover - every temporal dtype has limits
-                raise GenerationError(f"no value limits for {spec.dtype!r}")
-            options["min"], options["max"] = limits
-        options["distribution"] = spec.distribution
-        if spec.distribution_params:
-            options["params"] = {
-                k: float(v) for k, v in spec.distribution_params.items()
-            }
-        return column_plan(name, engine_kind, **options), None
+        return _numeric_plan(name, spec, kind, options), None
 
     if kind == "bool":
         if spec.distribution_params:
@@ -412,6 +374,50 @@ def plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None]
             }
         return column_plan(name, "bool", weights=weights, **options), None
 
+    return _string_plan(name, spec, options)
+
+
+def _numeric_plan(name: str, spec: ColSpec, kind: str, options: dict) -> ColumnPlan:
+    """An integer, float, temporal or Decimal column's plan: its physical
+    kind, its range, and the distribution it is drawn from."""
+    engine_kind = _ENGINE_KINDS.get(_DRAWN_AS.get(spec.dtype, spec.dtype), kind)
+    if kind == "decimal":
+        # A Decimal is filled as its physical integer, at full width, and
+        # scaled back in `_finish`.
+        engine_kind = "int128"
+    if spec.dtype.is_temporal():
+        # Temporal columns cross as their physical integer: Date is an
+        # i32 day count, everything else an i64 in its own time unit.
+        engine_kind = "int32" if spec.dtype == pl.Date else "int64"
+    if (
+        spec.bounds is not None
+        or spec.distribution is None
+        or spec.distribution == "uniform"
+    ):
+        options["min"], options["max"] = _resolve_numeric_bounds(spec)
+    elif spec.dtype == pl.Float16:
+        # A distribution with no bounds keeps its own shape, but not past
+        # what a half holds: beyond it the cast is an infinity.
+        options["min"], options["max"] = -_FLOAT16_MAX, _FLOAT16_MAX
+    elif spec.dtype.is_temporal():
+        # A non-uniform distribution with no explicit bounds is left to
+        # its own shape rather than squeezed into polspec's default
+        # range -- but a temporal dtype's own domain is not optional:
+        # it reaches the engine as a bare integer kind, and without this
+        # clamp could produce values the dtype cannot represent.
+        limits = dtype_value_limits(spec.dtype)
+        if limits is None:  # pragma: no cover - every temporal dtype has limits
+            raise GenerationError(f"no value limits for {spec.dtype!r}")
+        options["min"], options["max"] = limits
+    options["distribution"] = spec.distribution
+    if spec.distribution_params:
+        options["params"] = {k: float(v) for k, v in spec.distribution_params.items()}
+    return column_plan(name, engine_kind, **options)
+
+
+def _string_plan(name: str, spec: ColSpec, options: dict) -> tuple[ColumnPlan, None]:
+    """A text column's plan: a format's template, a pattern, or free strings
+    of the declared lengths."""
     # A shaped string: the engine fills each value from the format's template.
     if spec.format is not None:
         template = list(_lookup_format(spec.format).template or ())
@@ -440,7 +446,7 @@ def plan_column(name: str, spec: ColSpec) -> tuple[ColumnPlan, pl.Series | None]
                 f"{spec.pattern!r}: {reason}. It is filled with random text, as "
                 "before 1.4, which validation will not accept; validate with "
                 "pattern=False, or pin it with fixed=.",
-                stacklevel=2,
+                stacklevel=3,
             )
 
     options["str_min_len"], options["str_max_len"] = int(shortest), int(longest)

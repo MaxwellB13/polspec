@@ -42,7 +42,7 @@ def _private(name: str) -> bool:
 
 
 def _private_module(part: str) -> bool:
-    """`_io`, and `__main__`, which `python -m polspec` runs."""
+    """`_files`, and `__main__`, which `python -m polspec` runs."""
     return _private(part) or part == "__main__"
 
 
@@ -121,7 +121,7 @@ def _allowed(importer: str, target: str, name: str) -> bool:
     """Whether `importer` may take `name`, private, from `target`.
 
     A private module's names belong to the package it sits in, so its
-    siblings may share them: `polspec.cli._io` serves the rest of
+    siblings may share them: `polspec.cli._files` serves the rest of
     `polspec.cli`. A private name in a module with a public name belongs to
     that module alone. A private submodule, imported as a module, is a
     module, not a name.

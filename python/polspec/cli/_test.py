@@ -15,7 +15,7 @@ import argparse
 from pathlib import Path
 
 from polspec import FrameSpec
-from polspec.cli._io import (
+from polspec.cli._specs import (
     _display_path,
     _loaded_specs,
     _maybe_format,

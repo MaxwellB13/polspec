@@ -56,115 +56,130 @@ def foreign_key_findings(
     df_col_names: Sequence[str],
     collect_kwargs: dict[str, Any],
 ) -> list[Finding]:
+    """Each foreign key's finding: a referenced column the parent lacks, or
+    the rows whose key no parent row holds -- every key's count collected
+    at once."""
     findings: list[Finding] = []
     pending: list[tuple[ForeignKey, pl.LazyFrame | None, pl.LazyFrame, Any]] = []
     local_schema = lf.collect_schema()
 
     for fk, target_lf in foreign_keys:
-        local_cols = list(fk.columns)
-        ref_cols = list(fk.ref_columns)
-        if not all(c in df_col_names for c in local_cols):
+        if not all(c in df_col_names for c in fk.columns):
             continue  # already reported through missing_cols handling
-
         parent_lf = target_lf if target_lf is not None else lf
         parent_schema = parent_lf.collect_schema()
-        parent_names = parent_schema.names()
-        missing_ref = [c for c in ref_cols if c not in parent_names]
+        missing_ref = [c for c in fk.ref_columns if c not in parent_schema.names()]
         if missing_ref:
-            findings.append(
-                Finding(
-                    code="foreign_key",
-                    key=f"fk:{fk.name}",
-                    message=(
-                        f"ForeignKey '{fk.name}' on {schema_name!r} references columns "
-                        f"{missing_ref} not present in the referenced DataFrame"
-                    ),
-                    columns=tuple(local_cols),
-                    details={
-                        "target": fk.references,
-                        "missing_ref_columns": missing_ref,
-                    },
-                )
-            )
+            findings.append(_missing_reference(fk, schema_name, missing_ref))
             continue
-
-        key_expr = (
-            frames.column(local_cols[0])
-            if len(local_cols) == 1
-            else pl.struct(frames.columns(local_cols))
-        )
-        present = (
-            frames.column(local_cols[0]).is_not_null()
-            if len(local_cols) == 1
-            else pl.all_horizontal([frames.column(c).is_not_null() for c in local_cols])
-        )
-        # A key may legitimately span dtypes -- a String column referencing
-        # an Enum primary key, which declaration allows and generation
-        # handles -- and a join across the two would raise instead. Casting
-        # the *parent's* keys to the local dtype settles it without touching
-        # the frame under validation, so `rows()` returns it as it was. A
-        # parent value the local dtype cannot hold becomes null and matches
-        # nothing, which is right: the column could never have held it.
-        # Both sides join on keys renamed alike: a join takes its keys by
-        # name or expression, and a column named as a pattern is neither
-        # until it is renamed.
-        taken = set(local_schema) | set(parent_schema)
-        keys = []
-        for _ in local_cols:
-            keys.append(frames.fresh("__polspec_key", taken))
-            taken.add(keys[-1])
-        parent_keys = parent_lf.select(
-            [
-                (
-                    frames.column(ref_col).cast(local_schema[local_col], strict=False)
-                    if parent_schema[ref_col] != local_schema[local_col]
-                    else frames.column(ref_col)
-                ).alias(key)
-                for local_col, ref_col, key in zip(
-                    local_cols, ref_cols, keys, strict=True
-                )
-            ]
-        ).unique()
-
-        orphans_of = Orphans(present, parent_keys, tuple(local_cols), tuple(keys))
-
-        stats = orphans_of(lf.select(frames.columns(local_cols))).select(
-            pl.len().alias("cnt"),
-            key_expr.unique(maintain_order=True)
-            .head(MAX_SAMPLES)
-            .implode()
-            .alias("samples"),
-        )
+        stats, orphans_of = _orphans(lf, local_schema, fk, parent_lf, parent_schema)
         pending.append((fk, target_lf, stats, orphans_of))
 
     if pending:
         results = pl.collect_all([p[2] for p in pending], **collect_kwargs)
         for (fk, target_lf, _, orphans_of), stats in zip(pending, results, strict=True):
-            count = stats["cnt"][0]
-            if not count:
-                continue
-            raw_samples = stats["samples"][0]
-            samples = list(raw_samples) if raw_samples is not None else []
-            target_label = "self" if target_lf is None else fk.references
-            local_cols = list(fk.columns)
-            ref_cols = list(fk.ref_columns)
-            findings.append(
-                Finding(
-                    code="foreign_key",
-                    key=f"fk:{fk.name}",
-                    message=(
-                        f"ForeignKey '{fk.name}' violated ({local_cols} -> "
-                        f"{target_label}.{ref_cols}): found {count} row(s) with no "
-                        f"matching parent record. Violating samples: {samples}"
-                    ),
-                    columns=tuple(local_cols),
-                    count=int(count),
-                    samples=tuple(samples),
-                    details={"target": target_label, "ref_columns": ref_cols},
-                    _locate=orphans_of,
-                )
-            )
+            if stats["cnt"][0]:
+                findings.append(_orphaned(fk, target_lf, stats, orphans_of))
     return findings
+
+
+def _missing_reference(
+    fk: ForeignKey, schema_name: str, missing_ref: list[str]
+) -> Finding:
+    return Finding(
+        code="foreign_key",
+        key=f"fk:{fk.name}",
+        message=(
+            f"ForeignKey '{fk.name}' on {schema_name!r} references columns "
+            f"{missing_ref} not present in the referenced DataFrame"
+        ),
+        columns=tuple(fk.columns),
+        details={"target": fk.references, "missing_ref_columns": missing_ref},
+    )
+
+
+def _orphans(
+    lf: pl.LazyFrame,
+    local_schema: pl.Schema,
+    fk: ForeignKey,
+    parent_lf: pl.LazyFrame,
+    parent_schema: pl.Schema,
+) -> tuple[pl.LazyFrame, Orphans]:
+    """The count and samples of `lf`'s rows whose key no parent row holds,
+    as a query to collect, and the `Orphans` that locates them."""
+    local_cols, ref_cols = list(fk.columns), list(fk.ref_columns)
+    key_expr = (
+        frames.column(local_cols[0])
+        if len(local_cols) == 1
+        else pl.struct(frames.columns(local_cols))
+    )
+    present = (
+        frames.column(local_cols[0]).is_not_null()
+        if len(local_cols) == 1
+        else pl.all_horizontal([frames.column(c).is_not_null() for c in local_cols])
+    )
+    # A key may legitimately span dtypes -- a String column referencing
+    # an Enum primary key, which declaration allows and generation
+    # handles -- and a join across the two would raise instead. Casting
+    # the *parent's* keys to the local dtype settles it without touching
+    # the frame under validation, so `rows()` returns it as it was. A
+    # parent value the local dtype cannot hold becomes null and matches
+    # nothing, which is right: the column could never have held it.
+    # Both sides join on keys renamed alike: a join takes its keys by
+    # name or expression, and a column named as a pattern is neither
+    # until it is renamed.
+    taken = set(local_schema) | set(parent_schema)
+    keys = []
+    for _ in local_cols:
+        keys.append(frames.fresh("__polspec_key", taken))
+        taken.add(keys[-1])
+    parent_keys = parent_lf.select(
+        [
+            (
+                frames.column(ref_col).cast(local_schema[local_col], strict=False)
+                if parent_schema[ref_col] != local_schema[local_col]
+                else frames.column(ref_col)
+            ).alias(key)
+            for local_col, ref_col, key in zip(local_cols, ref_cols, keys, strict=True)
+        ]
+    ).unique()
+
+    orphans_of = Orphans(present, parent_keys, tuple(local_cols), tuple(keys))
+    stats = orphans_of(lf.select(frames.columns(local_cols))).select(
+        pl.len().alias("cnt"),
+        key_expr.unique(maintain_order=True)
+        .head(MAX_SAMPLES)
+        .implode()
+        .alias("samples"),
+    )
+    return stats, orphans_of
+
+
+def _orphaned(
+    fk: ForeignKey,
+    target_lf: pl.LazyFrame | None,
+    stats: pl.DataFrame,
+    orphans_of: Orphans,
+) -> Finding:
+    count = stats["cnt"][0]
+    raw_samples = stats["samples"][0]
+    samples = list(raw_samples) if raw_samples is not None else []
+    target_label = "self" if target_lf is None else fk.references
+    local_cols, ref_cols = list(fk.columns), list(fk.ref_columns)
+    return Finding(
+        code="foreign_key",
+        key=f"fk:{fk.name}",
+        message=(
+            f"ForeignKey '{fk.name}' violated ({local_cols} -> "
+            f"{target_label}.{ref_cols}): found {count} row(s) with no "
+            f"matching parent record. Violating samples: {samples}"
+        ),
+        columns=tuple(local_cols),
+        count=int(count),
+        samples=tuple(samples),
+        details={"target": target_label, "ref_columns": ref_cols},
+        _locate=orphans_of,
+    )
 
 
 # ---------------------------------------------------------------------------

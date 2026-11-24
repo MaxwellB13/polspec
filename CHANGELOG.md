@@ -144,6 +144,18 @@ for all of 2.x.
   Polars cannot make a literal from a bare integer that wide; the bound is
   now typed as the column is, so validation no longer raises.
 
+### Internal
+
+- `profiler` is a package by concern -- options, rounding, columns,
+  formats, shapes, text and order -- in place of one 1,400-line module.
+  The join is `joining.py`, out of `TableSpec`; `cli/_io.py` is three
+  modules, for data files, spec files and several sources.
+- A class body is read into one `_Body`, and `_build_table_spec` merges it
+  with its parents in named steps. The two longest functions left,
+  `foreign_key_findings` and `plan_column`, are split the same way.
+- Generation and validation take a column's finite values from `Domain`,
+  the one definition: each kept its own copy of the rule.
+
 ## [1.7.0] - 2026-11-17
 
 **Generated data that keeps its checks, and validation that tolerates a

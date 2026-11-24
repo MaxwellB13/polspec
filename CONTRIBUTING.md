@@ -186,7 +186,7 @@ needs that line. `tests/contracts/test_boundary.py` holds the line:
 - the docs and README import only public names;
 - every public class and function has a docstring;
 - no module imports another module's `_private` names (a private module,
-  such as `cli._io`, shares its names with its own package);
+  such as `cli._files`, shares its names with its own package);
 - the CLI reaches into no `_private` attribute. It uses polspec as a user
   would, or a helper the owning module exposes for it without an
   underscore (`reading.parse_declared_text`).

@@ -7,20 +7,15 @@ import sys
 from pathlib import Path
 
 from polspec import FrameSpec
-from polspec.cli._io import (
+from polspec.cli._files import _existing, _note_text, _read_data_file, _warnings_printed
+from polspec.cli._profiling import profile_keywords
+from polspec.cli._sources import _declared_keys, _refuse_related_flags, _tables
+from polspec.cli._specs import (
     _class_name_from,
-    _declared_keys,
-    _existing,
     _maybe_format,
-    _note_text,
-    _read_data_file,
-    _refuse_related_flags,
     _require_identifier,
-    _tables,
-    _warnings_printed,
     _write_registry,
 )
-from polspec.cli._profiling import profile_keywords
 from polspec.errors import CliError, PolspecError
 from polspec.related import profile_all
 from polspec.serialization import registry_to_yaml, to_yaml

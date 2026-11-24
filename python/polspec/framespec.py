@@ -22,7 +22,8 @@ from __future__ import annotations
 
 import difflib
 import inspect
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Unpack, cast, overload
 
@@ -224,51 +225,122 @@ def _refuse_mistakes(name: str, ns: Mapping[str, Any]) -> None:
                 )
 
 
-def _build_table_spec(
-    name: str,
-    parents: Sequence[_FrameSpecMeta],
-    own_columns: dict[str, ColSpec],
-    declared: Mapping[Any, Any] | None,
-    removed: set[str],
-    checks: Sequence[Check],
-    foreign_keys: Sequence[ForeignKey],
-    unique_together: Any,
-    hierarchy: Hierarchy | None,
-    order: tuple[Any, Any] | None = None,
-    description: str | None = None,
-    rows: Any = _INHERITED,
-) -> tuple[TableSpec, dict[str, str]]:
-    """Merges inherited specs with a class body's own declarations.
+@dataclass(frozen=True, slots=True)
+class _Body:
+    """What a class body declares, popped from its namespace."""
 
-    Returns the spec and the attribute-name to column-name mapping that a
-    subclass needs in order to override or remove a column by attribute.
-    """
-    columns: dict[str, ColSpec] = {}
-    attr_to_col: dict[str, str] = {}
-    all_checks: list[Check] = []
-    all_fks: list[ForeignKey] = []
-    all_unique: list[tuple[str, ...]] = []
+    own_columns: dict[str, ColSpec]
+    declared: Mapping[Any, Any] | None
+    removed: set[str]
+    checks: list[Check]
+    foreign_keys: list[ForeignKey]
+    unique_together: Any
+    hierarchy: Hierarchy | None
+    order: tuple[Any, Any] | None
+    description: str | None
+    rows: Any
 
+
+def _read_body(
+    name: str, ns: dict[str, Any], parents: Sequence[_FrameSpecMeta]
+) -> _Body:
+    """Pops every declaration from a class body's namespace, refusing what
+    is left that looks like one polspec would not read."""
+    own_columns: dict[str, ColSpec] = {}
+    for attr in list(ns):
+        if attr.startswith("_"):
+            continue
+        if isinstance(ns[attr], ColSpec):
+            own_columns[attr] = ns.pop(attr)
+        elif is_dtype(ns[attr]):  # `order_id = pl.Int64`: a column of it
+            own_columns[attr] = ColSpec(ns.pop(attr))
+    declared = ns.pop("__columns__", None)
+    checks = _pop_declaration(ns, ("__checks__", "checks"), Check)
+    # `@check` functions, in the order the body declares them.
+    for attr in list(ns):
+        if isinstance(ns[attr], DeclaredCheck):
+            declared_check = ns.pop(attr).as_check(attr)
+            if any(c.name == declared_check.name for c in checks):
+                raise SpecError(
+                    f"{name} declares two checks named {declared_check.name!r}"
+                )
+            checks.append(declared_check)
+    foreign_keys = _pop_declaration(
+        ns, ("__foreign_keys__", "foreign_keys"), ForeignKey
+    )
+    unique_together = _pop_unique_together(ns)
+    hierarchy = _pop_hierarchy(ns)
+    order = _pop_order(ns)
+    description = _pop_description(ns)
+    doc = ns.get("__doc__")
+    if description is None and parents and isinstance(doc, str) and doc.strip():
+        # The class's own docstring says what the table holds, as
+        # `__description__` would; `__description__` wins over it.
+        description = inspect.cleandoc(doc)
+    rows = ns.pop("__rows__", _INHERITED)
+    _refuse_mistakes(name, ns)
+    # A non-ColSpec value assigned over an inherited column attribute
+    # removes that column; the value itself stays an ordinary attribute.
+    removed = {
+        attr
+        for attr in ns
+        if not attr.startswith("_") and any(attr in p._attr_to_col for p in parents)
+    }
+    return _Body(
+        own_columns,
+        declared,
+        removed,
+        checks,
+        foreign_keys,
+        unique_together,
+        hierarchy,
+        order,
+        description,
+        rows,
+    )
+
+
+def _added[T](into: list[T], items: Iterable[T]) -> None:
+    """Each of `items` appended to `into` unless it is there already."""
+    for item in items:
+        if item not in into:
+            into.append(item)
+
+
+@dataclass(slots=True)
+class _Merged:
+    """A spec's parts as inheritance and the body build them up."""
+
+    columns: dict[str, ColSpec] = field(default_factory=dict)
+    attr_to_col: dict[str, str] = field(default_factory=dict)
+    checks: list[Check] = field(default_factory=list)
+    foreign_keys: list[ForeignKey] = field(default_factory=list)
+    unique_together: list[tuple[str, ...]] = field(default_factory=list)
+
+
+def _inherited(parents: Sequence[_FrameSpecMeta]) -> _Merged:
+    """The parents' columns, checks, keys and groups, the nearest last so
+    it wins."""
+    merged = _Merged()
     for parent in reversed(parents):
-        columns.update(parent.spec.columns)
-        attr_to_col.update(parent._attr_to_col)
-        for check in parent.spec.checks:
-            if check not in all_checks:
-                all_checks.append(check)
-        for fk in parent.spec.foreign_keys:
-            if fk not in all_fks:
-                all_fks.append(fk)
-        for group in parent.spec.unique_together:
-            if tuple(group) not in all_unique:
-                all_unique.append(tuple(group))
+        merged.columns.update(parent.spec.columns)
+        merged.attr_to_col.update(parent._attr_to_col)
+        _added(merged.checks, parent.spec.checks)
+        _added(merged.foreign_keys, parent.spec.foreign_keys)
+        _added(merged.unique_together, (tuple(g) for g in parent.spec.unique_together))
+    return merged
 
-    for attr in removed:
-        columns.pop(attr_to_col.pop(attr), None)
 
-    for attr, colspec in own_columns.items():
+def _place_attributes(name: str, merged: _Merged, body: _Body) -> None:
+    """The body's column attributes, each under its column name, after the
+    columns it removes; an override replaces the column it renames."""
+    for attr in body.removed:
+        merged.columns.pop(merged.attr_to_col.pop(attr), None)
+    for attr, colspec in body.own_columns.items():
         final = colspec.col_name if colspec.col_name is not None else attr
         colliding = next(
-            (a for a, c in attr_to_col.items() if c == final and a != attr), None
+            (a for a, c in merged.attr_to_col.items() if c == final and a != attr),
+            None,
         )
         if colliding is not None:
             raise SpecError(
@@ -276,78 +348,88 @@ def _build_table_spec(
                 f"the column name {final!r} (via col_name). Give each a distinct "
                 "col_name, or rename one of the attributes."
             )
-        prior = attr_to_col.get(attr)
+        prior = merged.attr_to_col.get(attr)
         if prior is not None and prior != final:
-            del columns[prior]
-        columns[final] = colspec
-        attr_to_col[attr] = final
+            del merged.columns[prior]
+        merged.columns[final] = colspec
+        merged.attr_to_col[attr] = final
 
-    if declared is not None:
-        if not isinstance(declared, Mapping):
+
+def _declared_columns(declared: Mapping[Any, Any] | None) -> dict[str, ColSpec]:
+    """`__columns__`, each value a `ColSpec` -- or a dtype, made one."""
+    if declared is None:
+        return {}
+    if not isinstance(declared, Mapping):
+        raise SpecError(
+            "__columns__ must be a mapping of column name to ColSpec, got "
+            f"{type(declared).__name__}"
+        )
+    columns = {}
+    for raw_key, raw_value in declared.items():
+        key = str(raw_key)
+        value = ColSpec(raw_value) if is_dtype(raw_value) else raw_value
+        if not isinstance(value, ColSpec):
             raise SpecError(
-                "__columns__ must be a mapping of column name to ColSpec, got "
-                f"{type(declared).__name__}"
+                f"__columns__[{key!r}] must be a ColSpec or a dtype, got "
+                f"{type(value).__name__}"
             )
-        for raw_key, raw_value in declared.items():
-            key = str(raw_key)
-            value = ColSpec(raw_value) if is_dtype(raw_value) else raw_value
-            if not isinstance(value, ColSpec):
-                raise SpecError(
-                    f"__columns__[{key!r}] must be a ColSpec or a dtype, got "
-                    f"{type(value).__name__}"
-                )
-            if value.col_name is not None and value.col_name != key:
-                raise SpecError(
-                    f"__columns__[{key!r}] declares col_name={value.col_name!r}, "
-                    "which conflicts with its __columns__ key. col_name only "
-                    "applies to columns declared as class attributes -- for "
-                    "__columns__, the dict key already is the column name."
-                )
-            columns[key] = value
+        if value.col_name is not None and value.col_name != key:
+            raise SpecError(
+                f"__columns__[{key!r}] declares col_name={value.col_name!r}, "
+                "which conflicts with its __columns__ key. col_name only "
+                "applies to columns declared as class attributes -- for "
+                "__columns__, the dict key already is the column name."
+            )
+        columns[key] = value
+    return columns
 
-    for check in checks:
-        if check not in all_checks:
-            all_checks.append(check)
-    for fk in foreign_keys:
-        if fk not in all_fks:
-            all_fks.append(fk)
-    for group in parse_unique_together(unique_together):
-        if group not in all_unique:
-            all_unique.append(group)
 
-    # A subclass that declares none of its own inherits whichever parent
-    # declared one, the same way columns and checks are inherited.
+def _build_table_spec(
+    name: str, parents: Sequence[_FrameSpecMeta], body: _Body
+) -> tuple[TableSpec, dict[str, str]]:
+    """Merges inherited specs with a class body's own declarations.
+
+    Returns the spec and the attribute-name to column-name mapping that a
+    subclass needs in order to override or remove a column by attribute.
+    """
+    merged = _inherited(parents)
+    _place_attributes(name, merged, body)
+    merged.columns.update(_declared_columns(body.declared))
+    _added(merged.checks, body.checks)
+    _added(merged.foreign_keys, body.foreign_keys)
+    _added(merged.unique_together, parse_unique_together(body.unique_together))
+
+    # What a body does not declare it inherits from the nearest parent that
+    # does, as columns and checks are: a hierarchy, an order, a row count.
+    hierarchy = body.hierarchy
     if hierarchy is None:
-        for parent in parents:
-            if parent.spec.hierarchy is not None:
-                hierarchy = parent.spec.hierarchy
-                break
-
-    # An order, too: the nearest parent's, unless the body declares its own.
+        hierarchy = next(
+            (p.spec.hierarchy for p in parents if p.spec.hierarchy is not None), None
+        )
+    order = body.order
     if order is None:
-        for parent in parents:
-            if parent.spec.order_by:
-                order = (parent.spec.order_by, parent.spec.descending)
-                break
+        order = next(
+            ((p.spec.order_by, p.spec.descending) for p in parents if p.spec.order_by),
+            None,
+        )
     order_by, descending = order if order is not None else ((), False)
-
-    # A row count as well: a subclass is held to it unless it says otherwise.
+    rows = body.rows
     if rows is _INHERITED:
         rows = next((p.spec.rows for p in parents if p.spec.rows is not None), None)
 
     spec = TableSpec(
         name,
-        columns,
-        description=description,
+        merged.columns,
+        description=body.description,
         rows=rows,
-        checks=all_checks,
-        unique_together=all_unique,
-        foreign_keys=all_fks,
+        checks=merged.checks,
+        unique_together=merged.unique_together,
+        foreign_keys=merged.foreign_keys,
         hierarchy=hierarchy,
         order_by=order_by,
         descending=descending,
     )
-    return spec, attr_to_col
+    return spec, merged.attr_to_col
 
 
 class _FrameSpecMeta(type):
@@ -362,66 +444,14 @@ class _FrameSpecMeta(type):
         prebuilt: TableSpec | None = ns.pop("__tablespec__", None)
         parents = [b for b in bases if isinstance(b, _FrameSpecMeta)]
 
-        own_columns: dict[str, ColSpec] = {}
-        for attr in list(ns):
-            if attr.startswith("_"):
-                continue
-            if isinstance(ns[attr], ColSpec):
-                own_columns[attr] = ns.pop(attr)
-            elif is_dtype(ns[attr]):  # `order_id = pl.Int64`: a column of it
-                own_columns[attr] = ColSpec(ns.pop(attr))
-        declared = ns.pop("__columns__", None)
-        checks = _pop_declaration(ns, ("__checks__", "checks"), Check)
-        # `@check` functions, in the order the body declares them.
-        for attr in list(ns):
-            if isinstance(ns[attr], DeclaredCheck):
-                declared_check = ns.pop(attr).as_check(attr)
-                if any(c.name == declared_check.name for c in checks):
-                    raise SpecError(
-                        f"{name} declares two checks named {declared_check.name!r}"
-                    )
-                checks.append(declared_check)
-        foreign_keys = _pop_declaration(
-            ns, ("__foreign_keys__", "foreign_keys"), ForeignKey
-        )
-        unique_together = _pop_unique_together(ns)
-        hierarchy = _pop_hierarchy(ns)
-        order = _pop_order(ns)
-        description = _pop_description(ns)
-        doc = ns.get("__doc__")
-        if description is None and parents and isinstance(doc, str) and doc.strip():
-            # The class's own docstring says what the table holds, as
-            # `__description__` would; `__description__` wins over it.
-            description = inspect.cleandoc(doc)
-        rows = ns.pop("__rows__", _INHERITED)
-        _refuse_mistakes(name, ns)
-        # A non-ColSpec value assigned over an inherited column attribute
-        # removes that column; the value itself stays an ordinary attribute.
-        removed = {
-            attr
-            for attr in ns
-            if not attr.startswith("_") and any(attr in p._attr_to_col for p in parents)
-        }
+        body = _read_body(name, ns, parents)
 
         cls = super().__new__(mcls, name, bases, ns, **kwargs)
         if prebuilt is not None:
             cls.spec = prebuilt if prebuilt.name == name else prebuilt.with_name(name)
             cls._attr_to_col = {}
         else:
-            cls.spec, cls._attr_to_col = _build_table_spec(
-                name,
-                parents,
-                own_columns,
-                declared,
-                removed,
-                checks,
-                foreign_keys,
-                unique_together,
-                hierarchy,
-                order,
-                description,
-                rows,
-            )
+            cls.spec, cls._attr_to_col = _build_table_spec(name, parents, body)
         return cls
 
     @property

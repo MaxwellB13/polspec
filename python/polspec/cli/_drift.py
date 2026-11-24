@@ -7,13 +7,9 @@ from __future__ import annotations
 import argparse
 import json
 
-from polspec.cli._io import (
-    _existing,
-    _read_data_file,
-    _registry_from,
-    _single_spec,
-    frames_named_after_specs,
-)
+from polspec.cli._files import _existing, _read_data_file
+from polspec.cli._sources import frames_named_after_specs
+from polspec.cli._specs import _registry_from, _single_spec
 from polspec.compare import DriftOptions, DriftReport, diff, drift
 from polspec.compare.report import SCHEMA_VERSION as REPORT_SCHEMA_VERSION
 from polspec.errors import CliError, PolspecError

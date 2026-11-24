@@ -27,9 +27,9 @@ import sys
 
 from polspec.cli._data import _cmd_generate, _cmd_validate
 from polspec.cli._drift import _FAIL_ON, _cmd_diff, _cmd_drift
-from polspec.cli._io import _add_key_flags
 from polspec.cli._profiling import add_profile_flags
 from polspec.cli._schema import _cmd_schema_infer, _cmd_schema_new
+from polspec.cli._sources import _add_key_flags
 from polspec.cli._synthesize import add_synthesize_parser
 from polspec.cli._test import _cmd_test
 from polspec.compare import DriftOptions
