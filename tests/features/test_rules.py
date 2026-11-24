@@ -129,7 +129,6 @@ def test_colrule_rejects_the_removed_dict_condition():
     with pytest.raises(SpecError, match="must be a predicate built with col") as info:
         ColRule(when={"column": "x", "equals": 1}, choices=["X"])
     assert "col('x') == ..." in str(info.value)
-    assert "still loads" in str(info.value)  # a file written earlier is fine
 
 
 def test_colrule_rejects_empty_choices():

@@ -17,7 +17,6 @@ from polspec import (
     ColSpec,
     FrameSpec,
     SerializationError,
-    col,
     from_dict,
     to_dict,
 )
@@ -92,26 +91,6 @@ V1_FILE = {
 }
 
 
-def test_version_1_files_migrate_to_the_current_form():
-    spec = from_dict(V1_FILE)
-    migrated = to_dict(spec)
-    assert migrated["version"] == FORMAT_VERSION
-    region = migrated["columns"]["region"]
-    assert region["tags"] == "geo" and "category" not in region
-    amount = migrated["columns"]["amount"]
-    assert amount["distribution"] == "normal"
-    assert amount["distribution_params"] == {"mean": 5, "std": 2}
-    assert migrated["columns"]["carrier"]["rules"][0]["when"] == {
-        "eq": [{"col": "region"}, "UK"]
-    }
-
-    assert spec["region"].tags == ("geo",)
-    assert spec["amount"].distribution_params == {"mean": 5.0, "std": 2.0}
-    assert spec["carrier"].rules[0].when.equals(col("region") == "UK")
-    # Writing it back produces a current-format file that reads identically.
-    assert from_dict(to_dict(spec)) == spec
-
-
 def test_declarations_store_canonical_distribution_forms():
     spec = ColSpec(pl.Float64, distribution="Exp", distribution_params={"lambda_": 3})
     assert spec.distribution == "exponential"
@@ -135,7 +114,7 @@ def test_declarations_store_canonical_distribution_forms():
 
 def test_unknown_keys_are_an_error_naming_the_closest_known_key(tmp_path):
     data = {
-        "version": 2,
+        "version": 4,
         "name": "X",
         "columns": {"a": {"dtype": "Int64", "nullible": True}},
     }
@@ -149,7 +128,7 @@ def test_unknown_keys_are_an_error_naming_the_closest_known_key(tmp_path):
     ):
         from_dict(
             {
-                "version": 2,
+                "version": 4,
                 "name": "X",
                 "colums": {},
                 "columns": {"a": {"dtype": "Int64"}},
@@ -162,7 +141,7 @@ def test_strict_false_downgrades_unknown_keys_to_a_warning(tmp_path):
     path.write_text(
         yaml.safe_dump(
             {
-                "version": 2,
+                "version": 4,
                 "name": "X",
                 "columns": {"a": {"dtype": "Int64", "colour": "blue"}},
             }
@@ -179,7 +158,7 @@ def test_strict_false_downgrades_unknown_keys_to_a_warning(tmp_path):
 
 def test_registry_files_reject_unknown_keys_and_physical_dtypes(tmp_path):
     with pytest.raises(SerializationError, match="Unknown key"):
-        CatSpec.from_dict({"version": 2, "enums": {"A": ["x"]}, "enumz": {}})
+        CatSpec.from_dict({"version": 4, "enums": {"A": ["x"]}, "enumz": {}})
     with pytest.raises(SerializationError, match="Unknown physical dtype 'UInt7'"):
         CatSpec(categoricals={"C": {"physical": "UInt7"}})
 
@@ -203,9 +182,3 @@ def test_registry_round_trips_including_loose_choices(tmp_path):
     assert loaded.choices.get("CURRENCY") == ["GBP", "USD"]
     assert loaded.choices.get("plain") == ["a", "b"]
     assert loaded.to_dict() == cats.to_dict()
-
-
-def test_flat_version_1_registry_still_loads():
-    cats = CatSpec.from_dict({"STATUS": ["A", "B"], "CURRENCY": {"physical": "UInt8"}})
-    assert cats.status == pl.Enum(["A", "B"])
-    assert cats["currency"].categories.physical() == pl.UInt8

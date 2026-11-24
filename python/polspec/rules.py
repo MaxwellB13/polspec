@@ -102,9 +102,7 @@ class ColRule:
             if isinstance(self.when, dict) and "column" in self.when:
                 hint = (
                     " The one-column dict was removed: write "
-                    f"col({self.when['column']!r}) == ... instead. A spec file "
-                    "written by an earlier version still loads -- its "
-                    "conditions are converted as the file migrates."
+                    f"col({self.when['column']!r}) == ... instead."
                 )
             raise SpecError(
                 "ColRule.when must be a predicate built with col(), got "

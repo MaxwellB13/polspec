@@ -2,8 +2,8 @@
 
 Everything here is driven by the field registry in `fields.py`, so the YAML
 a spec writes, the YAML it reads, and the Python it emits cannot disagree
-about which fields exist. Files carry a `version:`; `migrations.py` brings an
-older file forward before it is read.
+about which fields exist. Files carry a `version:`; `versions.py` refuses
+any but the current one.
 
 What is public here is exported from `polspec` itself.
 
@@ -38,7 +38,7 @@ from polspec.serialization.fields import (
     tablespec_from_data,
     tablespec_to_data,
 )
-from polspec.serialization.migrations import FORMAT_VERSION, migrate
+from polspec.serialization.versions import FORMAT_VERSION, current_format, versionless
 from polspec.tablespec import SpecLike, TableSpec, as_table_spec, require_columns
 
 if TYPE_CHECKING:
@@ -221,8 +221,9 @@ def from_dict(
     Schema({'id': Int64, 'placed': Date})
     """
     with _Located(where):
-        current = migrate(data, "spec", where)
-        return tablespec_from_data(current, Ctx(categories=catspec, strict=strict))
+        current = current_format(data, where)
+        ctx = Ctx(categories=catspec, strict=strict, versionless=versionless(data))
+        return tablespec_from_data(current, ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -536,8 +537,9 @@ def catspec_from_dict(
     from polspec.catspec import CatSpec
 
     with _Located(where):
-        current = migrate(data, "catspec", where)
-        check_unknown_keys(current, _CATSPEC_KEYS, Ctx(strict=strict), "")
+        current = current_format(data, where)
+        ctx = Ctx(strict=strict, versionless=versionless(data))
+        check_unknown_keys(current, _CATSPEC_KEYS, ctx, "")
         return CatSpec(
             enums=current.get("enums"),
             categoricals=current.get("categoricals"),
@@ -602,8 +604,8 @@ def registry_from_dict(
     """
     from polspec.registry import Registry
 
-    current = migrate(data, "registry", where)
-    ctx = Ctx(strict=strict)
+    current = current_format(data, where)
+    ctx = Ctx(strict=strict, versionless=versionless(data))
     check_unknown_keys(current, _REGISTRY_KEYS, ctx, "")
 
     declared = current.get("categories")

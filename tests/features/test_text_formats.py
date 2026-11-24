@@ -193,9 +193,9 @@ def test_ndjson_writes_the_format_too(tmp_path):
 
 
 def test_text_a_declared_format_nearly_fits_is_read_or_reported_never_a_crash():
-    """Polars 1.39 panics reading `30 Sep 2031` with `%d %B %Y`, where later
-    Polars reads it. Either way validation returns: the value reads, or it
-    is reported as text that does not."""
+    """Polars 1.39 panicked reading `30 Sep 2031` with `%d %B %Y`. Whatever
+    the Polars, validation returns: the value reads, or it is reported as
+    text that does not."""
     spec = TableSpec("B", {"m": ColSpec(pl.Date, text_format="%d %B %Y")})
     frame = pl.DataFrame({"m": ["30 Sep 2031", "30 September 2031"]})
     report = polspec.inspect(spec, frame, parse_text=True)

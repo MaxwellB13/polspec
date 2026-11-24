@@ -128,6 +128,19 @@ for all of 2.x.
   `--shape`, `--keys` and `--order` gain `--no-` forms. A key keeps its
   observed range, so `polspec test` asks for no more rows than a unique
   column holds, saying so in the test it writes. No seeded output moves.
+- **Polars 2 is the floor (2.0).** polspec needs `polars>=2,<3`: 1.x
+  supported Polars 1.39 onwards. `Map` is always there, and the Polars 1
+  workarounds are gone -- version checks, a list rebuilt where a null list
+  became an array, an `Array` sampled as a `List`, an `Array` written to
+  JSON as a `List`, the explain labels a scan passed only where Polars took
+  them. Known limitations loses Polars 1.39's struct with no fields.
+- **Spec files of format 1 to 3 are refused (2.0).** polspec 2.0 reads
+  version 4, which every release since 0.14.0 writes. A file of version 1,
+  2 or 3 -- from 0.13 or earlier -- is refused, naming its version and
+  saying that polspec 1.x reads it and writes it back as version 4. A
+  mapping with no `version:` key is read as version 4. An unknown key in
+  one -- what format 1 spelt differently -- says the file may be format 1,
+  and where to read it.
 - **Every polspec error is a `PolspecError` only (2.0).** `SpecError`,
   `ValidationError`, `SerializationError` and the rest no longer also
   subclass `ValueError`, `TypeError` or `LookupError`: catch `PolspecError`, or

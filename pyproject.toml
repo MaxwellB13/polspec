@@ -25,18 +25,13 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    # Every Polars from 1.39 to 2.x: CI tests the floor (lowest-direct), the
-    # lock's 1.x (test) and the newest 2.x (polars-latest), and the seeded
-    # output is the same on each (tests/contracts/test_seeded.py). The Rust
-    # extension links pyo3-polars, which talks to Python Polars through its
-    # Arrow-based series interface; raise the upper bound deliberately, once
-    # a Polars 3 passes the suite.
-    "polars>=1.39,<3 ; python_version < '3.15'",
-    # Polars 1 does not run on Python 3.15: its Series methods that defer to
-    # an expression find them by their compiled bytecode, which 3.15
-    # changed, and return None -- `Series.fill_null`, `Series.abs` -- with
-    # crashes to follow. Polars 2 runs; so on 3.15 it is the floor.
-    "polars>=2,<3 ; python_version >= '3.15'",
+    # Polars 2: CI tests the floor (lowest-direct), the lock's 2.x (test)
+    # and the newest 2.x (polars-latest), and the seeded output is the same
+    # on each (tests/contracts/test_seeded.py). The Rust extension links
+    # pyo3-polars, which talks to Python Polars through its Arrow-based
+    # series interface; raise the upper bound deliberately, once a Polars 3
+    # passes the suite. *Since 2.0: 1.x supported Polars 1.39 onwards.*
+    "polars>=2,<3",
     "pyyaml>=6.0.3",
     # Windows ships no IANA database, and a zoned Datetime becoming a Python
     # value -- a finding's samples -- needs one; without it Polars panics.

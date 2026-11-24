@@ -130,13 +130,12 @@ jobs:
         run: uv run --no-sync python examples/related_specs.py
 
   polars-latest:
-    # uv.lock pins the newest Polars 1.x; this job tests the newest release
-    # the bound in pyproject.toml allows -- a Polars 2.x -- so it is also the
-    # required run of the tests only Polars 2 has (`Map`). With `test` on the
-    # lock and `lowest-direct` on the floor, it covers the supported range's
-    # two ends and its newest 1.x. It runs on Windows too: the extension
-    # hands its frames to Polars through Polars' own FFI, so a Polars major
-    # is tested with the extension built for that platform.
+    # The newest release the bound in pyproject.toml allows, which a Polars
+    # released since uv.lock was written is and the lock is not. With `test`
+    # on the lock and `lowest-direct` on the floor, 2.0.0, it covers the
+    # supported range's two ends. It runs on Windows too: the extension
+    # hands its frames to Polars through Polars' own FFI, so a new Polars is
+    # tested with the extension built for that platform.
     name: Test (${{ matrix.label }}, py3.13, newest polars)
     runs-on: ${{ matrix.os }}
     strategy:
@@ -174,7 +173,7 @@ jobs:
 
   lowest-direct:
     # The oldest release of every direct dependency the bounds allow:
-    # `polars>=1.39` and the rest are promises about releases the lock
+    # `polars>=2` and the rest are promises about releases the lock
     # never installs.
     name: Test (ubuntu, py3.12, lowest direct dependencies)
     runs-on: ubuntu-latest

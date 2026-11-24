@@ -65,9 +65,6 @@ from polspec import (
     validate,
 )
 
-# Polars 2's `Map`; on Polars 1, no dtype is one.
-MAP = getattr(pl, "Map", ())
-
 MAX_ROWS = 120
 
 # A deep run's count for every property, or 0 for each one's own.
@@ -473,7 +470,7 @@ def specs(
 
 def _sortable(column: ColSpec) -> bool:
     """A column `order_by` may name: one of single values."""
-    return not column.dtype.is_nested() and not isinstance(column.dtype, MAP)
+    return not column.dtype.is_nested() and not isinstance(column.dtype, pl.Map)
 
 
 def _order(

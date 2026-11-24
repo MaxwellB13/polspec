@@ -426,10 +426,9 @@ def test_an_element_null_is_sized_as_a_slot_and_a_validity_bit():
     ids=str,
 )
 def test_an_array_of_several_chunks_validates(dtype):
-    """Polars 1 panics taking distinct samples of an `Array` column in more
+    """Polars 1 panicked taking distinct samples of an `Array` column in more
     than one chunk when no row fails -- every passing frame concatenated, or
-    read from a file in row groups -- so an `Array` is sampled as a `List`.
-    Samples come back as the lists they always were."""
+    read from a file in row groups. Samples come back as lists."""
     values = [[1, 2], [2, 1]] if dtype.inner == pl.Int64 else [["a", "b"], ["b", "a"]]
     part = pl.DataFrame({"c": pl.Series(values, dtype=dtype)})
     chunked = pl.concat([part, part], rechunk=False)
@@ -456,8 +455,7 @@ def test_an_array_of_several_chunks_validates(dtype):
 )
 def test_a_bounded_array_of_a_type_stored_as_integers_validates(dtype, bounds, below):
     """Polars before 1.43 panicked on `arr.eval` filtering an Array of
-    Decimal or Duration -- validation's bounds check on its elements. They
-    are checked as a list's are now, on every supported Polars."""
+    Decimal or Duration -- validation's bounds check on its elements."""
     spec = TableSpec("T", {"c": ColSpec(dtype, bounds=bounds, nullable=True)})
     df = generate(spec, 200, seed=1)
     validate(spec, df)

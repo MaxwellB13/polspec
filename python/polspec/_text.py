@@ -161,9 +161,10 @@ _IN_ORDER: tuple[Parser, ...] = (_boolean, _integer, _float, _date, _datetime)
 
 
 def _did_not_parse(exc: BaseException) -> bool:
-    """Whether `exc` is a parse failing: Polars' own error, or -- on Polars
-    1.39, for text a date format nearly fits (`30 Sep 2031` read with
-    `%d %B %Y`) -- a panic, which pyo3 raises as a `BaseException`."""
+    """Whether `exc` is a parse failing: Polars' own error, or a panic, which
+    pyo3 raises as a `BaseException`. A parse here only asks whether text
+    fits, so a Polars bug in it leaves the column text rather than ending
+    the profile (Polars 1.39 panicked on `30 Sep 2031` read with `%d %B %Y`)."""
     return isinstance(exc, pl.exceptions.PolarsError) or (
         type(exc).__name__ == "PanicException"
     )
@@ -434,9 +435,7 @@ def _parse_float(text: pl.Expr, _dtype: pl.DataType) -> pl.Expr:
     return text.cast(pl.Float64, strict=False)
 
 
-_WIDER_THAN_INT64 = tuple(
-    getattr(pl, name) for name in ("UInt64", "Int128", "UInt128") if hasattr(pl, name)
-)
+_WIDER_THAN_INT64 = (pl.UInt64, pl.Int128, pl.UInt128)
 
 
 def _parse_date(text: pl.Expr, _dtype: pl.DataType, fmt: str | None = None) -> pl.Expr:

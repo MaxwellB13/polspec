@@ -55,7 +55,7 @@ Orders.validate(orders)                        # ~26 ms; raises on any breach
   across every batch.
 - **Every Polars dtype.** Integers to 128 bits, `Decimal`, time-zoned
   `Datetime`, `Enum`, `Categorical`, and `List`, `Array` and `Struct` nested
-  to any depth (plus `Map` on Polars 2). Bounds, choices with weights,
+  to any depth, and `Map`. Bounds, choices with weights,
   distributions, formats such as `email` and `uuid4`, regex patterns,
   uniqueness, nulls and NaNs are all declared per column, and all of them
   generate.
@@ -85,8 +85,8 @@ Orders.validate(orders)                        # ~26 ms; raises on any breach
   spec to Hypothesis.
 - **A CLI for your pipeline.** `polspec validate`, `generate`, `drift` and
   `synthesize`, with exit codes for CI.
-- **Deterministic.** The same seed gives the same data on every Polars from
-  1.39 to 2.x, on Windows, Linux and macOS, checked case by case in CI.
+- **Deterministic.** The same seed gives the same data on every Polars 2,
+  on Windows, Linux and macOS, checked case by case in CI.
 
 ## A quick tour
 
@@ -168,8 +168,7 @@ polspec generate orders_spec.py -n 1000000 -o fixture.parquet --seed 1
 uv add polspec           # or: pip install polspec
 ```
 
-polspec works with Polars 1.39 and later, Polars 2 included, on Python 3.12
-to 3.15 (on 3.15, Polars 2: Polars 1 does not run on it). Wheels are published for Linux (x86_64, aarch64), macOS (Intel
+polspec works with Polars 2 on Python 3.12 to 3.15. Wheels are published for Linux (x86_64, aarch64), macOS (Intel
 and Apple silicon) and Windows (x86_64), so you don't need a Rust toolchain.
 
 > **Stable.** A public name, a spec file's format, a seed's output and the

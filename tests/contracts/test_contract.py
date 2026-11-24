@@ -33,6 +33,7 @@ from polspec import (
     ForeignKey,
     Hierarchy,
     Registry,
+    SerializationError,
     TableSpec,
     col,
     from_yaml,
@@ -99,13 +100,20 @@ EVERY_VERSION = TableSpec(
 )
 
 
-@pytest.mark.parametrize("version", range(1, FORMAT_VERSION + 1))
-def test_a_spec_file_of_every_version_reads_as_the_spec_it_declared(version):
-    spec = from_yaml(GOLDEN / f"spec_v{version}.yaml")
+def test_a_spec_file_of_the_current_version_reads_as_the_spec_it_declared():
+    spec = from_yaml(GOLDEN / f"spec_v{FORMAT_VERSION}.yaml")
     assert spec == EVERY_VERSION
     for name, column in EVERY_VERSION.columns.items():
         for got, want in zip(spec[name].rules, column.rules, strict=True):
-            assert got.when.equals(want.when), (version, name)
+            assert got.when.equals(want.when), name
+
+
+@pytest.mark.parametrize("version", range(1, FORMAT_VERSION))
+def test_a_spec_file_of_an_older_version_is_refused_saying_1x_reads_it(version):
+    """Since 2.0. Version 1 has no `version:` key, so it reads as today's
+    format and fails on what format 1 spelt differently."""
+    with pytest.raises(SerializationError, match=r"polspec 1\.x"):
+        from_yaml(GOLDEN / f"spec_v{version}.yaml")
 
 
 def test_todays_format_is_written_byte_for_byte():

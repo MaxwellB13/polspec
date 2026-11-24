@@ -91,9 +91,10 @@ An open-ended bound, such as `bounds=(0, None)`, writes its open end as
 `null` and reads back unchanged. A file you write by hand may use either
 YAML list style: `bounds: [1, 1000000]` reads the same.
 
-`version:` records the file format that wrote the file. A file from an
-earlier version is migrated on the way in; a file from a later polspec is
-refused with a message saying so. A key the reader does not know is an
+`version:` records the file format that wrote the file. A file of an
+earlier version, from polspec 0.13 or before, is refused naming its
+version, as is a file from a later polspec; polspec 1.x reads the first
+kind and writes it back as the current version. A key the reader does not know is an
 error naming the closest known key, since silently reading a misspelt option
 as its default is the worst outcome — pass `strict=False` to
 `from_yaml` to downgrade that to a warning.

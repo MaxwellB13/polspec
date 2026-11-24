@@ -5,8 +5,6 @@ generated as one -- `list_length`, `fields` -- with a map's own two rules on
 top: a key is never null, and no key repeats within a map. It validates,
 drifts, profiles and is sized as that list too, with a finding about a key
 or a value named `m.key` or `m.value`, and round-trips through a spec file.
-Polars 1 has no `Map`, so most of this runs only where it exists, and one
-test pins what Polars 1 says on meeting one in a file.
 """
 
 from __future__ import annotations
@@ -27,19 +25,15 @@ from polspec import (
     inspect,
 )
 
-HAS_MAP = hasattr(pl, "Map")
-needs_map = pytest.mark.skipif(not HAS_MAP, reason="Map is a Polars 2 dtype")
-
 
 def _map(key, value):
-    return pl.Map(key, value)  # type: ignore[attr-defined]
+    return pl.Map(key, value)
 
 
 def _frame(dtype):
     return pl.DataFrame({"m": pl.Series([{"a": 1}, {"b": 2}, None], dtype=dtype)})
 
 
-@needs_map
 def test_a_map_declares_validates_and_drifts_by_dtype():
     dtype = _map(pl.String, pl.Int64)
     spec = TableSpec("T", {"m": ColSpec(dtype, nullable=True)})
@@ -56,7 +50,6 @@ def _distinct_keys(column: pl.Series) -> bool:
     return bool((maps.map.len() == maps.map.keys().list.n_unique()).all())
 
 
-@needs_map
 def test_a_map_generates_with_distinct_keys_and_its_declared_claims():
     spec = TableSpec(
         "T",
@@ -88,7 +81,6 @@ def test_a_map_generates_with_distinct_keys_and_its_declared_claims():
     assert drift(spec, df).breaking == ()
 
 
-@needs_map
 def test_keys_too_few_for_a_long_map_are_separated_not_folded():
     """Eight entries from ten keys: nearly every map draws a repeat, and
     Polars' cast would fold one into the other and leave a map short."""
@@ -108,7 +100,6 @@ def test_keys_too_few_for_a_long_map_are_separated_not_folded():
     assert m.map.keys().explode().is_between(0, 9).all()
 
 
-@needs_map
 def test_an_undeclared_length_stops_where_the_keys_run_out():
     spec = TableSpec(
         "T",
@@ -124,7 +115,6 @@ def test_an_undeclared_length_stops_where_the_keys_run_out():
     assert _distinct_keys(df["flags"]) and _distinct_keys(df["grades"])
 
 
-@needs_map
 def test_a_map_nests_and_is_nested():
     inner = _map(pl.String, pl.Int8)
     spec = TableSpec(
@@ -145,7 +135,6 @@ def test_a_map_nests_and_is_nested():
     assert _distinct_keys(df["map_of_maps"].map.values().explode())
 
 
-@needs_map
 def test_a_batched_map_column_has_the_shape_of_a_whole_one():
     spec = TableSpec("T", {"m": ColSpec(_map(pl.Int16, pl.Int16), list_length=(0, 6))})
     batched = pl.concat(generate_batches(spec, 3_000, batch_size=700, seed=5))
@@ -155,7 +144,6 @@ def test_a_batched_map_column_has_the_shape_of_a_whole_one():
     assert generate(spec, 3_000, seed=5)["m"].map.len().equals(batched["m"].map.len())
 
 
-@needs_map
 def test_batches_hold_the_whole_frames_entries_and_no_batch_repeats_another():
     """Entries are a window onto the whole frame's -- keys separated as the
     whole frame separates them -- so no batch repeats the first's."""
@@ -166,7 +154,6 @@ def test_batches_hold_the_whole_frames_entries_and_no_batch_repeats_another():
     assert pl.concat(parts).equals(generate(spec, 30, seed=5))
 
 
-@needs_map
 def test_a_batch_separates_repeated_keys_as_the_whole_frame_does():
     """Keys from a domain of three, four to a map: nearly every map repeats a
     key and redraws it, and the redraws are where the whole frame's are."""
@@ -186,7 +173,6 @@ def test_a_batch_separates_repeated_keys_as_the_whole_frame_does():
     assert (whole["m"].map.len() == 3).all()
 
 
-@needs_map
 @pytest.mark.parametrize(
     ("column", "complaint"),
     [
@@ -220,7 +206,6 @@ def test_what_a_map_cannot_be_declared_as(column, complaint):
         column(_map(pl.String, pl.Int64))
 
 
-@needs_map
 def test_a_declared_length_the_keys_can_reach_is_accepted():
     """Exactly as many keys as the longest map needs is enough."""
     spec = TableSpec(
@@ -237,7 +222,6 @@ def test_a_declared_length_the_keys_can_reach_is_accepted():
     assert m.map.keys().list.sort().to_list() == [[1, 2, 3, 4]] * 200
 
 
-@needs_map
 def test_a_map_round_trips_through_a_spec_file(tmp_path):
     dtype = _map(pl.String, pl.List(pl.Int64))
     spec_cls = FrameSpec.from_spec(TableSpec("T", {"m": ColSpec(dtype, nullable=True)}))
@@ -251,7 +235,6 @@ def test_a_map_round_trips_through_a_spec_file(tmp_path):
     assert namespace[spec_cls.__name__].spec == spec_cls.spec
 
 
-@needs_map
 def test_a_profiled_map_column_can_be_saved_and_checked(tmp_path):
     """`polspec schema infer` on a file with a map column: profiled, written,
     read back, and the data it came from validates."""
@@ -263,12 +246,6 @@ def test_a_profiled_map_column_can_be_saved_and_checked(tmp_path):
 
 def _map_file(dtype_data) -> dict:
     return {"name": "T", "columns": {"m": {"dtype": dtype_data}}}
-
-
-@pytest.mark.skipif(HAS_MAP, reason="this Polars has a Map dtype")
-def test_polars_1_names_the_version_a_map_needs():
-    with pytest.raises(SerializationError, match="a dtype Polars 2 introduced"):
-        from_dict(_map_file({"Map": {"key": "String", "value": "Int64"}}))
 
 
 def test_a_malformed_map_is_refused_naming_its_form():
@@ -297,7 +274,6 @@ def _metrics_frame(*maps):
     return pl.DataFrame({"m": pl.Series(list(maps), dtype=_map(pl.String, pl.Int64))})
 
 
-@needs_map
 def test_a_bad_key_or_value_is_found_under_its_name():
     spec = TableSpec("T", {"m": _metrics()})
     df = _metrics_frame(
@@ -319,7 +295,6 @@ def test_a_bad_key_or_value_is_found_under_its_name():
     ]
 
 
-@needs_map
 def test_a_map_read_from_arrow_can_repeat_a_key_and_is_found():
     """Polars folds a repeated key away when it casts to a `Map`, but a map
     that arrives from Arrow keeps both entries."""
@@ -335,7 +310,6 @@ def test_a_map_read_from_arrow_can_repeat_a_key_and_is_found():
     assert (finding.key, finding.code, finding.count) == ("m.key__unique", "unique", 1)
 
 
-@needs_map
 def test_a_map_of_a_wider_key_or_value_is_compatible_unless_strict():
     spec = TableSpec("T", {"m": ColSpec(_map(pl.String, pl.Int32))})
     wider = pl.DataFrame({"m": pl.Series([{"a": 1}], dtype=_map(pl.String, pl.Int64))})
@@ -349,7 +323,6 @@ def test_a_map_of_a_wider_key_or_value_is_compatible_unless_strict():
     assert [f.code for f in inspect(spec, as_list)] == ["dtype"]
 
 
-@needs_map
 def test_a_map_in_a_list_is_named_apart_from_the_list():
     inner = _map(pl.String, pl.Int8)
     spec = TableSpec(
@@ -367,7 +340,6 @@ def test_a_map_in_a_list_is_named_apart_from_the_list():
     assert [f.key for f in inspect(spec, too_long).findings] == ["c__list_len"]
 
 
-@needs_map
 def test_drift_reads_a_maps_key_value_and_length():
     spec = TableSpec("T", {"m": _metrics()})
     df = _metrics_frame(
@@ -380,7 +352,6 @@ def test_drift_reads_a_maps_key_value_and_length():
     assert all(f.columns == ("m",) for f in by_key.values())
 
 
-@needs_map
 def test_from_dataframe_re_declares_a_map_by_its_key_and_value():
     source = TableSpec("T", {"m": _metrics()})
     df = generate(source, 2_000, seed=7)
@@ -394,7 +365,6 @@ def test_from_dataframe_re_declares_a_map_by_its_key_and_value():
     assert inspect(TableSpec("P", {"m": profiled}), df).passed
 
 
-@needs_map
 def test_a_map_is_sized_as_the_list_it_is():
     as_map = ColSpec(
         _map(pl.Int64, pl.Float64),
@@ -413,7 +383,6 @@ def test_a_map_is_sized_as_the_list_it_is():
     )
 
 
-@needs_map
 def test_the_report_describes_a_maps_entries_and_their_key_and_value():
     spec_cls = FrameSpec.from_spec(TableSpec("Metrics", {"m": _metrics()}))
     text = spec_cls.to_markdown()
@@ -422,7 +391,6 @@ def test_the_report_describes_a_maps_entries_and_their_key_and_value():
     assert "Map m" in spec_cls.to_mermaid()
 
 
-@needs_map
 def test_a_declared_map_round_trips_through_a_spec_file(tmp_path):
     spec_cls = FrameSpec.from_spec(TableSpec("T", {"m": _metrics()}))
     spec_cls.to_yaml(tmp_path / "s.yaml")

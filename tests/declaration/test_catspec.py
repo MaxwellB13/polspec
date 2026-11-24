@@ -154,18 +154,6 @@ def test_catspec_yaml_roundtrip():
         assert loaded.choices.get("CURRENCY") == ["USD", "EUR"]
 
 
-def test_catspec_flat_format():
-    flat_data = {
-        "ORDER_STATUS": ["PENDING", "SHIPPED"],
-        "CURRENCY": {"physical": "UInt8"},
-        "SIMPLE_CAT": "UInt16",
-    }
-    loaded = CatSpec.from_dict(flat_data)
-    assert pl.Enum(["PENDING", "SHIPPED"]) == loaded.ORDER_STATUS
-    assert loaded["CURRENCY"].categories.physical() == pl.UInt8
-    assert loaded["SIMPLE_CAT"].categories.physical() == pl.UInt16
-
-
 def test_framespec_from_yaml_with_catspec():
     with tempfile.TemporaryDirectory() as tmpdir:
         cat_file = Path(tmpdir) / "cats.yaml"
