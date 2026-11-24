@@ -9,8 +9,27 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
-Toward 2.0, which changes what a seed generates once, and then keeps it
-for all of 2.x.
+## [2.0.0] - 2026-11-24
+
+**A faster engine, one set of defaults, and one spelling for each name.**
+The generator was rebuilt: columns are seeded every 4,096 rows so small
+frames fill on every core, strings are drawn in bulk, unique columns,
+weighted categories, rules, lists and composite keys cost a fraction of
+what they did, and a batch, scan or sink holds row for row what
+`generate()` holds. Generated data keeps its spec's checks by default.
+`from_dataframe` and `schema infer` profile as `profile()` does, with
+`describe=True` for the lean form. The API's names are made consistent,
+weights are written inside `choices`, every error is a `PolspecError` only,
+and Polars 2 is the floor. [Moving to
+2.0](https://maxwellb13.github.io/polspec/how-to/moving-to-2/) lists every
+change with what to write instead.
+
+This is the one release that breaks, and nothing was deprecated in 1.x
+first: each old spelling raises an error naming its replacement and saying
+"since 2.0". Seeded output changes for nearly every frame, once, and is
+promised again for all of 2.x. The spec-file format stays at version 4:
+1.7 reads every file 2.0 writes, and 2.0 refuses the format 1 to 3 files
+of 0.13 and earlier, which 1.x reads and rewrites.
 
 ### Added
 
@@ -3663,7 +3682,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/MaxwellB13/polspec/compare/v1.7.0...v2.0.0
 [1.7.0]: https://github.com/MaxwellB13/polspec/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/MaxwellB13/polspec/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/MaxwellB13/polspec/compare/v1.5.0...v1.6.0
