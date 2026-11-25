@@ -69,7 +69,7 @@ __all__ = [
 ]
 
 
-def _check_faults(spec: TableSpec, cycles: int, self_references: int) -> None:
+def check_faults(spec: TableSpec, cycles: int, self_references: int) -> None:
     """Faults are hierarchy-shaped, so a spec without one cannot take them."""
     if cycles < 0 or self_references < 0:
         raise ValueError("cycles and self_references must be >= 0")
@@ -307,7 +307,7 @@ def generate(
     spec = as_table_spec(spec)
     require_columns(spec)
     check_counts(n)
-    _check_faults(spec, cycles, self_references)
+    check_faults(spec, cycles, self_references)
     _check_size(spec, n, max_bytes)
     check_method(method)
     checked = checked_pins(spec, fixed, n, method) if fixed else None
@@ -792,6 +792,8 @@ def generate_batches(
     references: References = None,
     fixed: Mapping[str, Any] | None = None,
     checks: bool | None = None,
+    cycles: int = 0,
+    self_references: int = 0,
 ) -> Iterator[pl.DataFrame]:
     """Yields chunks of generated rows without holding all `n` in memory.
 
@@ -822,6 +824,10 @@ def generate_batches(
     pass are the batches `checks=False` gives. *Kept by default since 2.0;
     added in 1.7.*
 
+    `cycles` and `self_references` damage a hierarchy as `generate()` does,
+    and every batch holds the damage the whole frame holds there: the edits
+    are drawn from the seed alone. *Added in 2.1.*
+
     Examples
     --------
     >>> spec = TableSpec("Orders", {"id": ColSpec(pl.Int64, unique=True)})
@@ -832,6 +838,7 @@ def generate_batches(
     require_columns(spec)
     requires_whole_frame(spec, "generate_batches")
     check_counts(n, batch_size)
+    check_faults(spec, cycles, self_references)
     check_method(method)
     pins = checked_pins(spec, fixed, n, method) if fixed else None
     keeping = resolve_checks(
@@ -847,6 +854,8 @@ def generate_batches(
         pins=pins,
         checks=keeping,
         strict=checks is True,
+        cycles=cycles,
+        self_references=self_references,
     )
 
 
@@ -861,13 +870,18 @@ def batch_stream(
     pins: Pins | None,
     checks: bool = False,
     strict: bool = False,
+    cycles: int = 0,
+    self_references: int = 0,
+    frame_rows: int | None = None,
 ) -> Iterator[pl.DataFrame]:
     """`generate_batches` once its arguments are checked, as a generator --
     so the checks above run when it is called, not when it is first read.
     `checks` is whether to keep the spec's checks in each batch, as
     `resolve_checks` decided it beforehand; `strict` (`checks=True`) raises
     if they reject nearly every row, where the default stops keeping them
-    from that batch on and says so."""
+    from that batch on and says so. `frame_rows` is how many rows the whole
+    frame holds when fewer are streamed -- a scan's `head` -- so a windowed
+    hierarchy and self key lay themselves out over the frame, not the head."""
     if n == 0:
         return
     # The whole frame's `n`, so every batch draws from one key range.
@@ -938,7 +952,9 @@ def batch_stream(
             pins=pins.window(offset, rows) if pins is not None else None,
             # Blocks hold the first `n` rows; kept rows can read past them.
             drawn=blocks.window(offset, rows) if offset + rows <= n else None,
-            frame_rows=n,
+            frame_rows=frame_rows if frame_rows is not None else n,
+            cycles=cycles,
+            self_references=self_references,
         )
 
     # Where the frame has been read to: `produced` while every row passes.

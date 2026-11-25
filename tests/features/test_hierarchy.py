@@ -452,14 +452,50 @@ def test_both_layouts_put_as_many_references_at_each_depth():
     assert depths("windowed") == depths("whole")
 
 
-def test_damage_is_the_same_in_every_split_of_the_windowed_frame():
-    """`cycles=` and `self_references=` are `generate()`'s alone, but drawn
-    from the seed, so the frame is a function of the seed and nothing else."""
-    first = Links.generate(3_000, seed=SEED, cycles=4, self_references=3)
-    again = Links.generate(3_000, seed=SEED, cycles=4, self_references=3)
-    assert first.equals(again)
-    report = Links.inspect(first)
-    assert not report.passed
+@pytest.mark.parametrize("batch_size", [1, 77, 1_000])
+def test_damage_streams_as_the_whole_damaged_frame(batch_size):
+    """2.1: `cycles=` and `self_references=` on every streaming verb. The
+    edits are drawn from the seed alone, so each batch holds the damage the
+    whole frame holds there, and the counts are exact however it is split."""
+    broken = Links.generate(ROWS, seed=SEED, cycles=4, self_references=3)
+    batches = Links.generate_batches(
+        ROWS, batch_size=batch_size, seed=SEED, cycles=4, self_references=3
+    )
+    streamed = pl.concat(list(batches))
+    assert streamed.equals(broken)
+    lf = Links.scan(ROWS, seed=SEED, batch_size=batch_size, cycles=4, self_references=3)
+    assert lf.collect().equals(broken)
+    # Four loops of four, and each self-reference a loop of one.
+    assert len(cycle_nodes(parent_map(streamed))) == 4 * 4 + 3
+    same = streamed.filter(pl.col("CHILD_REF") == pl.col("PARENT_REF"))
+    assert same.height == 3
+
+
+def test_a_sunk_damaged_hierarchy_is_reported_by_validation(tmp_path):
+    path = tmp_path / "broken.parquet"
+    Links.sink_parquet(path, ROWS, seed=SEED, batch_size=500, cycles=3)
+    frame = pl.read_parquet(path)
+    assert frame.equals(Links.generate(ROWS, seed=SEED, cycles=3))
+    report = Links.inspect(frame)
+    assert report.by_code("hierarchy_cycle")[0].count >= 3 * 4
+
+
+def test_streaming_damage_needs_a_hierarchy_to_damage():
+    class Plain(FrameSpec):
+        a = ColSpec(pl.Int64)
+
+    with pytest.raises(SpecError, match="declares no __hierarchy__"):
+        list(Plain.generate_batches(10, batch_size=5, seed=SEED, cycles=1))
+    with pytest.raises(SpecError, match="declares no __hierarchy__"):
+        Plain.scan(10, seed=SEED, self_references=1)
+
+
+@pytest.mark.parametrize("rows", [1, 5, 4_097])
+def test_a_scans_head_is_the_whole_frames_first_rows(rows):
+    """A `head` reads fewer rows than the frame holds; the forest is laid out
+    over all of them, so its first rows are `generate()`'s."""
+    whole = Links.generate(10_000, seed=SEED)
+    assert Links.scan(10_000, seed=SEED).head(rows).collect().equals(whole.head(rows))
 
 
 # ---------------------------------------------------------------------------

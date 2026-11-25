@@ -65,6 +65,18 @@ overlapping another. `self_references=n` points that many rows straight at
 themselves, which is the degenerate loop your resolver most likely tests for
 and the one a `child == parent` guard already catches.
 
+Both are exact counts, and the streaming verbs take them too —
+`generate_batches()`, `scan()` and every `sink_*` — each batch holding the
+breakage the whole frame holds there, so a broken frame too large to hold
+goes straight to a file:
+
+<!-- docs: skip -->
+```python
+Links.sink_parquet("broken.parquet", 50_000_000, seed=7, cycles=10)
+```
+
+*On the streaming verbs since 2.1.*
+
 Neither is declared on the spec, because the spec still says the data *should*
 be an acyclic forest. That is what makes them useful: `validate()` reports what
 was injected, so a test can assert its own resolver and polspec agree.
