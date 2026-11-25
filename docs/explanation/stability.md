@@ -81,11 +81,12 @@ above:
 | 1.4.0 | A `pattern` column whose plain text broke its own pattern, now generated from the pattern. A pattern every plain string passes, and one the generator cannot follow, kept their output exactly |
 
 2.0 changed what a seed produces once more, as a major release may, and
-holds the new output for every 2.x release:
+holds the new output for every 2.x release, with one exception:
 
 | Release | What a seed produced differently |
 |:--|:--|
 | 2.0.0 | Nearly every frame: columns seeded every 4,096 rows, nulls drawn from a stream of their own, strings in bulk, unique columns through a cheaper permutation, weighted categories by the alias method, lists, rules and foreign keys as windows onto the whole frame, a composite key distinct across batches, and a spec's checks kept by default. Each is in the changelog, and a frame that must stay as 1.x made it is kept as a file, or made by polspec 1.x |
+| 2.1.0 | A spec with a `__hierarchy__`, and one with a foreign key into its own rows whose referenced column is unique with no nulls: each row's place now comes from its position, so they stream. Not a fix of output that broke its spec, so an exception to the rule above, taken because both are little used and the new layout is the better default. `Hierarchy(..., layout="whole")` generates 2.0's frame exactly; a self key has no switch, so a frame that must stay as 2.0 made it is kept as a file |
 
 What 1.4 added is held to the promise from 1.4 on: a column generated from
 its pattern, a unique one, a derived column, and the `uuid7`, `ulid`,

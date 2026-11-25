@@ -23,6 +23,9 @@ that is deliberate is pinned by an ordinary passing test instead. Either way
 this page cannot quietly go stale — changing what polspec does forces the test
 to be updated.
 
+*2.1 closed two more:* a hierarchy could not be batched or streamed, and a
+key into the spec's own rows was always drawn per batch.
+
 *2.0 closed five entries 1.x listed:* a batch's lists were drawn afresh
 rather than being the whole frame's; `Decimal` and 128-bit bounds past 64
 bits were refused; a composite key of finite or bounded members was
@@ -180,9 +183,11 @@ pinned by a passing test. A NaN, by contrast, is recorded as the column's
   nulls. `fill_defaults=True` fills before validation instead.
 - **A `List`, `Array`, `Map` or `Struct` column takes no `default`.** A
   default is one scalar value; a struct field takes none either.
-- **A `Hierarchy` cannot be batched or streamed.** `generate_batches` and
-  every `sink_*` refuse a spec that declares one, because each batch is
-  generated independently and a forest is a property of the whole frame.
+- **A `Hierarchy` declared `layout="whole"` cannot be batched or
+  streamed.** That is 2.0's builder, kept for the frame 2.0 generated: it
+  lays the forest out over the whole frame at once, so `generate_batches`,
+  `scan` and every `sink_*` refuse it. The default layout streams. *Since
+  2.1; 2.0 refused every hierarchy.*
 - **An ordered spec cannot be batched or streamed either.** A spec with
   `__order_by__` is refused by `generate_batches`, `scan` and every
   `sink_*`, for the same reason: the rows' order is a property of the whole
@@ -197,9 +202,15 @@ pinned by a passing test. A NaN, by contrast, is recorded as the column's
   the whole frame however it is batched, at the cost of its members' weights
   and distributions. A group with a float or free-text member, or one a
   foreign key fills, is repaired per batch of `generate_batches`, a `scan()`
-  or a `sink_*` instead, and so is a unique key that references its own
-  spec: they collide across batches only by chance; generate the frame whole
-  when that matters.
+  or a `sink_*` instead: its combinations collide across batches only by
+  chance; generate the frame whole when that matters.
+- **Some keys into the spec's own rows are drawn per batch.** A
+  self-referencing `ForeignKey` draws its parents from the whole frame when
+  it is one column whose referenced column is unique with no nulls, and no
+  other pass rewrites or pin replaces it. A composite one, or one into a
+  column with nulls, draws a batch's parents from that batch's own rows, so
+  its batches are not the whole frame's. *Since 2.1; 2.0 drew every self key
+  per batch.*
 - **A `unique` column ignores `weights` and a non-uniform `distribution`** —
   both are refused at declaration rather than silently dropped, since neither
   has anything to say about a draw without replacement.
