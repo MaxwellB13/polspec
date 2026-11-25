@@ -305,6 +305,59 @@ def test_generate_foreign_key_self_reference():
     assert all(v in ids for v in non_null_mgrs)
 
 
+class _Employees(FrameSpec):
+    id = ColSpec(pl.Int64, bounds=(1, 10**9), unique=True)
+    manager_id = ColSpec(pl.Int64, nullable=True, null_probability=0.3)
+    __foreign_keys__ = [ForeignKey("manager_id", references="self", ref_columns="id")]
+
+
+@pytest.mark.parametrize("batch_size", [1, 77, 1_000])
+def test_a_self_key_streams_as_its_whole_frame(batch_size):
+    """2.1: a key into the spec's own rows is drawn from the whole frame, so
+    its batches -- and a scan -- are `generate()`'s rows."""
+    whole = _Employees.generate(3_000, seed=4)
+    batches = _Employees.generate_batches(3_000, batch_size=batch_size, seed=4)
+    assert pl.concat(list(batches)).equals(whole)
+    assert _Employees.scan(3_000, seed=4, batch_size=batch_size).collect().equals(whole)
+    _Employees.validate(whole)
+
+
+def test_a_batchs_children_point_anywhere_in_the_frame():
+    """2.0 drew a batch's parents from that batch alone."""
+    first = next(iter(_Employees.generate_batches(3_000, batch_size=300, seed=4)))
+    own = set(first["id"].to_list())
+    managers = [m for m in first["manager_id"].to_list() if m is not None]
+    assert any(m not in own for m in managers)
+
+
+def test_a_unique_self_key_is_unique_across_batches():
+    class Chain(FrameSpec):
+        id = ColSpec(pl.Int64, bounds=(1, 10**9), unique=True)
+        next_id = ColSpec(pl.Int64, unique=True)
+        __foreign_keys__ = [ForeignKey("next_id", references="self", ref_columns="id")]
+
+    frame = pl.concat(list(Chain.generate_batches(2_000, batch_size=150, seed=8)))
+    assert frame["next_id"].n_unique() == 2_000
+    assert set(frame["next_id"].to_list()) == set(frame["id"].to_list())
+    assert frame.equals(Chain.generate(2_000, seed=8))
+
+
+def test_a_self_key_into_a_column_with_nulls_still_draws_per_batch():
+    """A referenced column whose value at a row depends on the rows before
+    it cannot be read where a child points: such a key draws from its own
+    batch's rows, and every key still finds its parent."""
+
+    class Nullable(FrameSpec):
+        id = ColSpec(pl.Int64, unique=True, nullable=True, null_probability=0.1)
+        manager_id = ColSpec(pl.Int64, nullable=True, null_probability=0.3)
+        __foreign_keys__ = [
+            ForeignKey("manager_id", references="self", ref_columns="id")
+        ]
+
+    for batch in Nullable.generate_batches(1_000, batch_size=200, seed=2):
+        Nullable.validate(batch)
+
+
 def test_generate_foreign_key_composite_samples_jointly():
     class RegionGenSpec(FrameSpec):
         tenant = ColSpec(pl.Int64)

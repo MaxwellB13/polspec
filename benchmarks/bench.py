@@ -648,6 +648,12 @@ CASES: tuple[Case, ...] = (
     Case("rules", "regression", (1_000_000,), _polspec(Ruled)),
     Case("derived", "regression", (1_000_000,), _polspec(Derived)),
     Case("foreign_key_self", "regression", (1_000_000,), _polspec(SelfKeyed)),
+    Case(
+        "foreign_key_self_batches_10k",
+        "regression",
+        (1_000_000,),
+        _batches_of(SelfKeyed, 10_000),
+    ),
     Case("unique_together", "regression", (1_000_000,), _polspec(Composite)),
     Case("hierarchy", "regression", (100_000, 1_000_000), _polspec(Linked)),
     Case("hierarchy_whole", "regression", (100_000, 1_000_000), _polspec(LinkedWhole)),

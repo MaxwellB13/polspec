@@ -15,7 +15,48 @@ from polspec._ffi import column_plan, permuted_indices
 from polspec._ffi import generate_dataframe as _generate_dataframe
 from polspec.errors import GenerationError
 from polspec.foreign_key import ForeignKey
+from polspec.generation.engine import unique_at
 from polspec.spec import ColSpec
+
+
+def apply_windowed_self_key(
+    df: pl.DataFrame,
+    columns: dict[str, ColSpec],
+    fk: ForeignKey,
+    *,
+    frame_seed: int,
+    key_seed: int,
+    frame_rows: int,
+    row_offset: int = 0,
+) -> pl.DataFrame:
+    """A key into the spec's own rows, drawn from the whole frame: the row at
+    `row_offset + i` takes the referenced column's value at a row of all
+    `frame_rows`, picked by `key_seed` and the row alone -- with replacement,
+    or, for a unique key, as a permutation of the rows -- and read where it
+    sits (`unique_at`), so a batch's children point anywhere in the frame,
+    as the whole frame's do. *Since 2.1; 2.0 drew from the batch's own rows.*
+
+    Only for a one-column key whose referenced column `readable_at` reads
+    and no other pass rewrites (`windowed_self_key`); `frame_seed` is the
+    frame's engine seed, which drew that column.
+    """
+    m = df.height
+    if m == 0:
+        return df
+    local, ref = fk.columns[0], fk.ref_columns[0]
+    if columns[local].unique:
+        picks = permuted_indices(frame_rows, _as_u64(key_seed), row_offset, m)
+    else:
+        plan = column_plan("__pick", "index", n_categories=frame_rows)
+        picks = _generate_dataframe([plan], m, key_seed, row_offset)["__pick"]
+    values = unique_at(ref, columns[ref], frame_seed, picks.cast(pl.UInt64))
+    sampled = frames.plain(values).cast(df.schema[local])
+    return df.with_columns(
+        pl.when(frames.column(local).is_not_null())
+        .then(pl.lit(sampled))
+        .otherwise(frames.column(local))
+        .alias(local)
+    )
 
 
 def _as_u64(seed: int | None) -> int:
