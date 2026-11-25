@@ -124,12 +124,41 @@ promised no chain is longer than that. Run the same loop over a frame from
 `cycles=10` and it silently returns a value that is not a root — which is
 exactly the bug worth having a fixture for.
 
+## Streaming, and the layout
+
+A hierarchy's forest is laid out from each row's position and the seed, so
+`scan()`, `generate_batches()` and the `sink_*` functions stream one, and
+every batch is the rows `generate()` makes there:
+
+<!-- docs: skip -->
+```python
+Links.sink_parquet("links.parquet", 50_000_000, seed=1)
+for batch in Links.generate_batches(10_000_000, batch_size=500_000, seed=1):
+    process(batch)
+```
+
+`layout="whole"` builds the forest over the whole frame at once instead, as
+2.0 did. It draws the same shape and generates exactly 2.0's frame for a
+seed, and the streaming verbs refuse it. Declare it only to keep a frame
+2.0 made:
+
+<!-- docs: skip -->
+```python
+__hierarchy__ = Hierarchy(child="CHILD_REF", parent="PARENT_REF", max_depth=5,
+                          layout="whole")
+```
+
+`roots=` is exact under the default layout: every root has a child. Under
+`layout="whole"` each first-level reference picks its root with
+replacement, so a root none picked is not in the data. *Since 2.1, which
+made the windowed layout the default and changed a hierarchy's seeded
+output once; 2.0 refused to stream one.*
+
 ## What it will not do
 
-- **`generate_batches` and the `sink_*` functions refuse a spec with a
-  hierarchy.** Each batch is generated independently, so a batched hierarchy
-  would be a pile of unrelated fragments. Use `generate()` and write the frame
-  out yourself.
+- **Keep checks.** Generation keeping a spec's checks drops the rows that
+  fail, and a kept row's parent may be one that was dropped, so a hierarchy's
+  checks are generated unkept, with a warning.
 - **The pass owns both columns.** A `null_probability`, `distribution` or
   `weights` on either is not what you get: the references have to come from one
   pool for the two columns to join at all.

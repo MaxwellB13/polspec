@@ -332,8 +332,8 @@ belongs before the one above it, under the finding code `order`; skip it
 with `order=False`, or `--skip order` on the command line.
 
 An order is a property of the whole frame, so the streaming verbs refuse an
-ordered spec, as they refuse a hierarchy — write `generate()`'s frame out
-instead:
+ordered spec, as they refuse a hierarchy declared `layout="whole"` — write
+`generate()`'s frame out instead:
 
 <!-- docs: raises -->
 ```python

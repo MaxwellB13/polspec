@@ -20,7 +20,7 @@ differ; the ratios matter more than the absolute times.
 | one `unique` integer key | 2 ms |
 | one column with rules | 15 ms |
 | a composite unique key (`__unique_together__`) | 23 ms |
-| a hierarchy | 45 ms |
+| a hierarchy | 28 ms |
 
 Plain columns cost almost nothing; the claims that relate rows to other
 rows cost most. A composite key whose members all have a finite or

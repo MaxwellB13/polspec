@@ -9,6 +9,23 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-25
+
+**Rows that point at rows, streamed.** A `__hierarchy__` and a key into
+the spec's own rows are now drawn from each row's position, so `scan()`,
+`generate_batches()` and the sinks take them, every batch the rows
+`generate()` makes there. A hierarchy generates faster too (a million rows
+in 28 ms, not 43), and its `roots=` is exact. A wide frame of plain columns
+generates as fast as on 1.7 again.
+
+This release moves seeded output for those two kinds of spec, once, which
+*Stability* otherwise keeps for a major: they were little used, and the
+new layout is the better default. `Hierarchy(..., layout="whole")` gives
+2.0's frame exactly; a self key has no switch, so keep a frame as a file
+if it must stay as 2.0 made it. Every other seed is unchanged. The
+spec-file format stays at version 4: the new `layout:` key is written only
+for `layout="whole"`, which 2.0 refuses by naming the key.
+
 ### Changed
 
 - **A hierarchy streams, and its seeded output changes once (2.1).** A
@@ -3726,7 +3743,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/MaxwellB13/polspec/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/MaxwellB13/polspec/compare/v1.7.0...v2.0.0
 [1.7.0]: https://github.com/MaxwellB13/polspec/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/MaxwellB13/polspec/compare/v1.6.0...v1.6.1
