@@ -322,6 +322,14 @@ def test_a_self_key_streams_as_its_whole_frame(batch_size):
     _Employees.validate(whole)
 
 
+@pytest.mark.parametrize("rows", [1, 5, 4_097])
+def test_a_scans_head_holds_the_whole_frames_self_key(rows):
+    """The self key is drawn from all `n` rows even when a `head` reads few."""
+    whole = _Employees.generate(10_000, seed=4)
+    head = _Employees.scan(10_000, seed=4).head(rows).collect()
+    assert head.equals(whole.head(rows))
+
+
 def test_a_batchs_children_point_anywhere_in_the_frame():
     """2.0 drew a batch's parents from that batch alone."""
     first = next(iter(_Employees.generate_batches(3_000, batch_size=300, seed=4)))

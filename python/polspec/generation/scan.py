@@ -44,6 +44,7 @@ from polspec.generation.keeping import (
 from polspec.generation.pipeline import (
     batch_stream,
     check_counts,
+    check_faults,
     check_method,
     checked_pins,
     requires_whole_frame,
@@ -97,6 +98,8 @@ def scan(
     references: References = None,
     fixed: Mapping[str, Any] | None = None,
     checks: bool | None = None,
+    cycles: int = 0,
+    self_references: int = 0,
 ) -> pl.LazyFrame:
     """A `LazyFrame` of `n` generated rows, produced as they are collected.
 
@@ -115,6 +118,10 @@ def scan(
     `head` takes the first rows of the batches the whole scan would make.
     *Kept by default since 2.0; added in 1.7.*
 
+    `cycles` and `self_references` damage a hierarchy as `generate()` does,
+    and every batch holds the damage the whole frame holds there: the edits
+    are drawn from the seed alone. *Added in 2.1.*
+
     Examples
     --------
     >>> spec = TableSpec("Orders", {
@@ -129,6 +136,7 @@ def scan(
     require_columns(spec)
     requires_whole_frame(spec, "scan")
     check_counts(n, batch_size)
+    check_faults(spec, cycles, self_references)
     check_method(method)
     # Checked against the whole spec, now: a pin on a column the plan never
     # reads is still a pin that has to make sense.
@@ -171,6 +179,11 @@ def scan(
             pins=pins.restricted(source.columns) if pins is not None else None,
             checks=keeping,
             strict=checks is True,
+            cycles=cycles,
+            self_references=self_references,
+            # A `head` reads fewer rows than the frame holds; a windowed
+            # hierarchy or self key is laid out over all of them.
+            frame_rows=n,
         ):
             if left <= 0:
                 return

@@ -14,6 +14,7 @@ Internal: not part of the public API.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import math
 import random
 from typing import TYPE_CHECKING
@@ -390,6 +391,16 @@ def _windowed_cycle_edits(layout: _Layout, count: int, seed: int) -> dict[int, i
     )
 
 
+@functools.lru_cache(maxsize=32)
+def _cycle_edits_for(
+    hierarchy: Hierarchy, n: int, seed: int, count: int
+) -> dict[int, int]:
+    """`_windowed_cycle_edits` for one frame, computed once however many
+    windows ask: the set is a function of these alone, and a stream asks for
+    it in every batch."""
+    return _windowed_cycle_edits(_Layout(hierarchy, n, seed), count, seed)
+
+
 def apply_windowed_hierarchy(
     df: pl.DataFrame,
     columns: dict[str, ColSpec],
@@ -433,7 +444,7 @@ def apply_windowed_hierarchy(
     children = slots + layout.roots
 
     if cycles:
-        edits = _windowed_cycle_edits(layout, cycles, seed)
+        edits = _cycle_edits_for(hierarchy, n, seed, cycles)
         keys = pl.Series(list(edits), dtype=pl.UInt64)
         hit = slots.is_in(keys)
         if hit.any():

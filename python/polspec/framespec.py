@@ -727,6 +727,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         references: References = None,
         fixed: Mapping[str, Any] | None = None,
         checks: bool | None = None,
+        cycles: int = 0,
+        self_references: int = 0,
     ) -> pl.LazyFrame:
         """A `LazyFrame` of `n` rows, generated as they are collected.
 
@@ -759,6 +761,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             references=references,
             fixed=fixed,
             checks=checks,
+            cycles=cycles,
+            self_references=self_references,
         )
 
     @classmethod
@@ -772,6 +776,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         references: References = None,
         fixed: Mapping[str, Any] | None = None,
         checks: bool | None = None,
+        cycles: int = 0,
+        self_references: int = 0,
     ) -> Iterator[pl.DataFrame]:
         """Yields chunks of generated rows without holding all `n` in memory.
 
@@ -790,6 +796,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             references=references,
             fixed=fixed,
             checks=checks,
+            cycles=cycles,
+            self_references=self_references,
         )
 
     # The sink options are spelled out here rather than forwarded as
@@ -811,6 +819,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         references: References = None,
         fixed: Mapping[str, Any] | None = None,
         checks: bool | None = None,
+        cycles: int = 0,
+        self_references: int = 0,
         **kwargs: Any,
     ) -> None:
         """Generates `n` rows and streams them to a Parquet file in batches.
@@ -830,6 +840,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             references=references,
             fixed=fixed,
             checks=checks,
+            cycles=cycles,
+            self_references=self_references,
             **kwargs,
         )
 
@@ -846,6 +858,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         references: References = None,
         fixed: Mapping[str, Any] | None = None,
         checks: bool | None = None,
+        cycles: int = 0,
+        self_references: int = 0,
         **kwargs: Any,
     ) -> None:
         """Generates `n` rows and streams them to a CSV file in batches.
@@ -865,6 +879,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             references=references,
             fixed=fixed,
             checks=checks,
+            cycles=cycles,
+            self_references=self_references,
             **kwargs,
         )
 
@@ -881,6 +897,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         references: References = None,
         fixed: Mapping[str, Any] | None = None,
         checks: bool | None = None,
+        cycles: int = 0,
+        self_references: int = 0,
         **kwargs: Any,
     ) -> None:
         """Generates `n` rows and streams them to an Arrow IPC file in batches.
@@ -900,6 +918,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             references=references,
             fixed=fixed,
             checks=checks,
+            cycles=cycles,
+            self_references=self_references,
             **kwargs,
         )
 
@@ -915,6 +935,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
         references: References = None,
         fixed: Mapping[str, Any] | None = None,
         checks: bool | None = None,
+        cycles: int = 0,
+        self_references: int = 0,
         **kwargs: Any,
     ) -> None:
         """Generates `n` rows and streams them to an NDJSON file in batches.
@@ -933,6 +955,8 @@ class FrameSpec(metaclass=_FrameSpecMeta):
             references=references,
             fixed=fixed,
             checks=checks,
+            cycles=cycles,
+            self_references=self_references,
             **kwargs,
         )
 

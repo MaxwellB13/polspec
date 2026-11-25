@@ -14,7 +14,7 @@ page promises; before 1.0, a minor version could break any of them.
 **Rows that point at rows, streamed.** A `__hierarchy__` and a key into
 the spec's own rows are now drawn from each row's position, so `scan()`,
 `generate_batches()` and the sinks take them, every batch the rows
-`generate()` makes there. A hierarchy generates faster too (a million rows
+`generate()` makes there, and a deliberately broken hierarchy streams too. A hierarchy generates faster too (a million rows
 in 28 ms, not 43), and its `roots=` is exact. A wide frame of plain columns
 generates as fast as on 1.7 again.
 
@@ -25,6 +25,15 @@ new layout is the better default. `Hierarchy(..., layout="whole")` gives
 if it must stay as 2.0 made it. Every other seed is unchanged. The
 spec-file format stays at version 4: the new `layout:` key is written only
 for `layout="whole"`, which 2.0 refuses by naming the key.
+
+### Added
+
+- **Damage on every stream.** `cycles=` and `self_references=` are taken by
+  `generate_batches()`, `scan()` and every `sink_*`, not only by
+  `generate()`, so a deliberately broken hierarchy too large to hold goes
+  straight to a file. The breakage is drawn from the seed alone: each batch
+  holds the part the whole frame holds there, and the counts are exact
+  however the frame is split.
 
 ### Changed
 
