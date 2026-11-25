@@ -114,6 +114,24 @@ fn permuted_at(py: Python<'_>, domain: u64, seed: u64, indices: PySeries) -> PyR
     Ok(PySeries(series.into_series()))
 }
 
+/// Each of `slots`' parent in a forest of `sizes` slots per level beneath
+/// `roots` ultimate parents, as a reference index (`UInt64`).
+#[pyfunction]
+fn forest_parents(
+    py: Python<'_>,
+    seed: u64,
+    slots: PySeries,
+    sizes: Vec<u64>,
+    roots: u64,
+) -> PyResult<PySeries> {
+    let slots = u64_values(&slots)?;
+    let values = py
+        .detach(|| permute::forest_parents(seed, &slots, &sizes, roots))
+        .map_err(PyValueError::new_err)?;
+    let series = UInt64Chunked::from_vec(PlSmallStr::from_static("parent"), values);
+    Ok(PySeries(series.into_series()))
+}
+
 /// What a unique column with no nulls holds at `rows` of the frame `seed`
 /// describes: `generate_dataframe([plan], n, seed)[plan.name]` gathered at
 /// `rows`, for rows anywhere in the frame and in any order, without drawing
@@ -279,5 +297,6 @@ fn _polspec(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(permuted_indices, m)?)?;
     m.add_function(wrap_pyfunction!(permuted_at, m)?)?;
     m.add_function(wrap_pyfunction!(unique_values_at, m)?)?;
+    m.add_function(wrap_pyfunction!(forest_parents, m)?)?;
     Ok(())
 }

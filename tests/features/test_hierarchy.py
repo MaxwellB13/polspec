@@ -352,14 +352,114 @@ def test_a_unique_parent_column_is_refused():
 # ---------------------------------------------------------------------------
 
 
-def test_generate_batches_refuses_a_hierarchy():
-    with pytest.raises(SpecError, match="generate_batches cannot produce"):
-        list(Links.generate_batches(100, batch_size=10, seed=SEED))
+class WholeLinks(Links):
+    __hierarchy__ = Hierarchy(
+        child="CHILD_REF", parent="PARENT_REF", max_depth=5, layout="whole"
+    )
 
 
-def test_sinks_refuse_a_hierarchy(tmp_path):
-    with pytest.raises(SpecError, match="a sink cannot produce"):
-        Links.sink_parquet(tmp_path / "out.parquet", 100, seed=SEED)
+@pytest.mark.parametrize("batch_size", [1, 77, 1_000, 5_000])
+def test_a_hierarchy_streams_as_its_whole_frame(batch_size):
+    """2.1: the windowed layout, the default, draws each row's place in the
+    forest from its position alone, so every batch is `generate()`'s rows."""
+    whole = Links.generate(5_000, seed=SEED)
+    batches = Links.generate_batches(5_000, batch_size=batch_size, seed=SEED)
+    assert pl.concat(list(batches)).equals(whole)
+    assert Links.scan(5_000, seed=SEED, batch_size=batch_size).collect().equals(whole)
+
+
+def test_a_sunk_hierarchy_is_its_whole_frame(tmp_path):
+    whole = Links.generate(3_000, seed=SEED)
+    Links.sink_parquet(tmp_path / "out.parquet", 3_000, seed=SEED, batch_size=700)
+    assert pl.read_parquet(tmp_path / "out.parquet").equals(whole)
+
+
+def test_a_projected_scan_holds_the_column_the_frame_holds():
+    whole = Links.generate(2_000, seed=SEED)
+    parents = Links.scan(2_000, seed=SEED, batch_size=300).select("PARENT_REF")
+    assert parents.collect().to_series().equals(whole["PARENT_REF"])
+
+
+def test_the_whole_layout_is_refused_by_every_stream(tmp_path):
+    """`layout="whole"` is 2.0's builder, over the whole frame at once."""
+    with pytest.raises(SpecError, match="layout='whole', which generate_batches"):
+        list(WholeLinks.generate_batches(100, batch_size=10, seed=SEED))
+    with pytest.raises(SpecError, match="layout='whole', which a sink"):
+        WholeLinks.sink_parquet(tmp_path / "out.parquet", 100, seed=SEED)
+    with pytest.raises(SpecError, match="layout='whole', which scan"):
+        WholeLinks.scan(100, seed=SEED)
+
+
+@pytest.mark.parametrize("layout", ["windowed", "whole"])
+def test_both_layouts_draw_the_declared_shape(layout):
+    """The same level sizes and roots, a chain of exactly `max_depth` and none
+    longer, one parent per child, every parent a reference or a root."""
+
+    class Tree(FrameSpec):
+        ref = ColSpec(pl.Int64)
+        up = ColSpec(pl.Int64)
+        __hierarchy__ = Hierarchy(
+            child="ref", parent="up", max_depth=4, roots=25, layout=layout
+        )
+
+    frame = Tree.generate(4_000, seed=SEED)
+    assert frame["ref"].n_unique() == 4_000
+    parent_of = dict(zip(frame["ref"].to_list(), frame["up"].to_list(), strict=True))
+    roots = {p for p in frame["up"].to_list() if p not in parent_of}
+    # The windowed layout gives every root a child, so exactly `roots` are
+    # in the data; 2.0's whole layout picks roots with replacement, and a
+    # root no reference picked is not there at all.
+    if layout == "windowed":
+        assert len(roots) == 25
+    else:
+        assert len(roots) <= 25
+
+    def depth(ref):
+        hops = 0
+        while ref in parent_of:
+            ref, hops = parent_of[ref], hops + 1
+        return hops
+
+    assert max(depth(r) for r in parent_of) == 4
+    Tree.validate(frame)
+
+
+def test_both_layouts_put_as_many_references_at_each_depth():
+    """The level sizes come from `n` and the declaration alone, so the two
+    layouts' forests hold the same number of references at every depth --
+    the branching declared, laid out the same way."""
+
+    def depths(layout):
+        class Wide(FrameSpec):
+            ref = ColSpec(pl.String)
+            up = ColSpec(pl.String)
+            __hierarchy__ = Hierarchy(
+                child="ref", parent="up", max_depth=3, branching=4.0, layout=layout
+            )
+
+        frame = Wide.generate(20_000, seed=SEED)
+        parent_of = dict(
+            zip(frame["ref"].to_list(), frame["up"].to_list(), strict=True)
+        )
+        counts: dict[int, int] = {}
+        for ref in parent_of:
+            hops, node = 0, ref
+            while node in parent_of:
+                node, hops = parent_of[node], hops + 1
+            counts[hops] = counts.get(hops, 0) + 1
+        return counts
+
+    assert depths("windowed") == depths("whole")
+
+
+def test_damage_is_the_same_in_every_split_of_the_windowed_frame():
+    """`cycles=` and `self_references=` are `generate()`'s alone, but drawn
+    from the seed, so the frame is a function of the seed and nothing else."""
+    first = Links.generate(3_000, seed=SEED, cycles=4, self_references=3)
+    again = Links.generate(3_000, seed=SEED, cycles=4, self_references=3)
+    assert first.equals(again)
+    report = Links.inspect(first)
+    assert not report.passed
 
 
 # ---------------------------------------------------------------------------

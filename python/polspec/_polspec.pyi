@@ -109,6 +109,12 @@ def permuted_at(domain: int, seed: int, indices: pl.Series) -> pl.Series:
     """The keyed permutation of `[0, domain)` at each of `indices`, as
     `UInt64`: `permuted_indices` at scattered positions."""
 
+def forest_parents(
+    seed: int, slots: pl.Series, sizes: list[int], roots: int
+) -> pl.Series:
+    """Each slot's parent in a forest of `sizes` slots per level beneath
+    `roots` ultimate parents, as a reference index (`UInt64`)."""
+
 def unique_values_at(plan: ColumnPlan, seed: int, rows: pl.Series) -> pl.Series:
     """What the unique column `plan`, with no nulls, holds at `rows` of the
     frame `seed` describes, without drawing the rows between."""

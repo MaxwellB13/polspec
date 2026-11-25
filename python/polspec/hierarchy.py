@@ -29,6 +29,7 @@ Internal: not part of the public API.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from polspec.errors import SpecError
 
@@ -55,6 +56,18 @@ class Hierarchy:
         must be given, and `branching=3.0` is the default when neither is.
     roots : int | None
         An exact number of ultimate parents, as an alternative to `branching`.
+        Every root has a child, so the frame holds exactly this many -- under
+        the default layout; `layout="whole"` picks each first-level
+        reference's root with replacement, so a root none picked is not in
+        the data, as in 2.0.
+    layout : "windowed" or "whole", default "windowed"
+        How the forest is laid out. `"windowed"` draws each row's place in it
+        from the row's position alone, so `scan()`, `generate_batches()` and
+        the sinks stream a hierarchy, every batch the rows `generate()` makes
+        there. `"whole"` builds the forest over the whole frame at once, as
+        2.0 did, and generates 2.0's frame exactly; it cannot be streamed.
+        Both draw the same shape. *Added in 2.1, which made `"windowed"` the
+        default: a 2.0 hierarchy's seeded output changes once.*
 
     Notes
     -----
@@ -78,6 +91,7 @@ class Hierarchy:
     max_depth: int = 1
     branching: float | None = None
     roots: int | None = None
+    layout: Literal["windowed", "whole"] = "windowed"
 
     def __post_init__(self) -> None:
         for label, value in (("child", self.child), ("parent", self.parent)):
@@ -113,6 +127,10 @@ class Hierarchy:
         ):
             raise SpecError(
                 f"Hierarchy.roots must be an integer of at least 1, got {self.roots!r}"
+            )
+        if self.layout not in ("windowed", "whole"):
+            raise SpecError(
+                f"Hierarchy.layout must be 'windowed' or 'whole', got {self.layout!r}"
             )
 
     @property

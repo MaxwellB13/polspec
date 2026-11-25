@@ -178,11 +178,15 @@ def test_a_predicate_on_a_column_the_projection_drops_still_generates_it():
 # ---------------------------------------------------------------------------
 
 
-def test_a_hierarchy_is_refused_where_it_is_asked_for():
+def test_a_whole_layout_hierarchy_is_refused_where_it_is_asked_for():
+    """2.1: the default layout streams; only 2.0's whole-frame one cannot."""
+
     class Tree(FrameSpec):
         ref = ColSpec(pl.Int64)
         parent = ColSpec(pl.Int64)
-        __hierarchy__ = Hierarchy(child="ref", parent="parent", max_depth=3)
+        __hierarchy__ = Hierarchy(
+            child="ref", parent="parent", max_depth=3, layout="whole"
+        )
 
     with pytest.raises(SpecError, match="which scan cannot produce"):
         Tree.scan(10, seed=SEED)

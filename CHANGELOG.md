@@ -9,6 +9,21 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+### Changed
+
+- **A hierarchy streams, and its seeded output changes once (2.1).** A
+  `__hierarchy__` is now drawn from each row's position: its slot in the
+  forest, its parent -- a pick with replacement in the level above, as
+  before -- and both references, so `scan()`, `generate_batches()` and the
+  sinks accept one, and every batch is the rows `generate()` makes there.
+  It draws the same shape -- level sizes, branching, a chain of exactly
+  `max_depth` -- with different values, and is faster: a million rows take
+  28 ms, not 43. *Stability* promises a seed's output for all of 2.x; this
+  is an exception, taken because a hierarchy is little used and the new
+  layout is the better default. `Hierarchy(..., layout="whole")` generates
+  2.0's frame exactly, and cannot be streamed. `roots=` is now exact: every
+  root has a child, where the whole layout can leave one out.
+
 ### Fixed
 
 - **A wide frame of plain columns generates as fast as in 1.7.** 2.0 asked

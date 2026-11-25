@@ -170,5 +170,6 @@ TABLE_FIELDS: dict[type, dict[str, tuple[TableSpec, TableSpec]]] = {
         "max_depth": (_tree(), _tree(max_depth=4)),
         "branching": (_tree(), _tree(branching=2.0)),
         "roots": (_tree(), _tree(roots=5)),
+        "layout": (_tree(), _tree(layout="whole")),
     },
 }

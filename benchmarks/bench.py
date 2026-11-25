@@ -241,6 +241,15 @@ class Linked(FrameSpec):
     __hierarchy__ = Hierarchy(child="CHILD_REF", parent="PARENT_REF", max_depth=5)
 
 
+class LinkedWhole(Linked):
+    """`Linked` laid out over the whole frame at once: 2.0's builder, which
+    2.1's windowed default is measured against."""
+
+    __hierarchy__ = Hierarchy(
+        child="CHILD_REF", parent="PARENT_REF", max_depth=5, layout="whole"
+    )
+
+
 class Composite(FrameSpec):
     """A composite key, whose repair resamples the rows that repeat."""
 
@@ -641,6 +650,13 @@ CASES: tuple[Case, ...] = (
     Case("foreign_key_self", "regression", (1_000_000,), _polspec(SelfKeyed)),
     Case("unique_together", "regression", (1_000_000,), _polspec(Composite)),
     Case("hierarchy", "regression", (100_000, 1_000_000), _polspec(Linked)),
+    Case("hierarchy_whole", "regression", (100_000, 1_000_000), _polspec(LinkedWhole)),
+    Case(
+        "hierarchy_batches_10k",
+        "regression",
+        (1_000_000,),
+        _batches_of(Linked, 10_000),
+    ),
     Case(
         "hierarchy_validate_cyclic",
         "regression",
