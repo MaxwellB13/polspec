@@ -110,6 +110,7 @@ Only a check written with `col()` can be written to a file. One over a raw
 | `max_depth` | The deepest chain, in hops |
 | `branching` | The mean children per reference |
 | `roots` | How many ultimate parents |
+| `layout` | `whole` for 2.0's whole-frame builder; left out for the default, `windowed` (2.1) |
 
 ## A category registry
 

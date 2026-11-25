@@ -90,6 +90,19 @@ def permuted_at(domain: int, seed: int, indices: pl.Series) -> pl.Series:
         raise GenerationError(str(exc)) from exc
 
 
+def forest_parents(
+    seed: int, slots: pl.Series, sizes: list[int], roots: int
+) -> pl.Series:
+    """Each slot's parent in a forest laid out level by level -- `sizes`
+    slots per level beneath `roots` ultimate parents -- as a reference
+    index: a root's, or `roots` plus a slot one level up. Picked by the
+    seed and the slot alone, so any window takes the whole forest's parents."""
+    try:
+        return _extension().forest_parents(seed, slots, sizes, roots)
+    except ValueError as exc:
+        raise GenerationError(str(exc)) from exc
+
+
 def unique_values_at(plan: ColumnPlan, seed: int, rows: pl.Series) -> pl.Series:
     """What the unique column `plan` -- one with no nulls -- holds at `rows`
     of the frame `seed` describes: `generate_dataframe([plan], n, seed)`

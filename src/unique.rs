@@ -803,17 +803,35 @@ fn strings_at(
     seed: u64,
     space: &(dyn Enumerable + Sync),
 ) -> Result<Series, String> {
-    let values = decoded_at(plan, rows, seed, space.cardinality(), |i| {
-        let mut out = Vec::with_capacity(space.max_bytes());
-        space.decode(i, &mut out);
-        // SAFETY: as in `unique_strings`, every space decodes to UTF-8.
-        unsafe { String::from_utf8_unchecked(out) }
-    })?;
-    Ok(StringChunked::from_iter_values(
-        PlSmallStr::from(plan.name.as_str()),
-        values.iter().map(String::as_str),
-    )
-    .into_series())
+    let name = PlSmallStr::from(plan.name.as_str());
+    let domain = space.cardinality();
+    let Some(&last) = rows.iter().max() else {
+        return Ok(StringChunkedBuilder::new(name, 0).finish().into_series());
+    };
+    if last as u128 + 1 > domain {
+        return Err(too_small(plan, last as u128 + 1, domain));
+    }
+    let key = permutation_seed(ColumnSeed {
+        base: seed,
+        first_chunk: 0,
+    });
+    let permutation = Permutation::new(domain, key);
+    // Task by task straight into each task's view array, as `unique_strings`
+    // builds a whole column: no `String` per value.
+    let arrays: Vec<Utf8ViewArray> = rows
+        .par_chunks(task_rows(rows.len()))
+        .map(|chunk| {
+            let mut views = Views::with_capacity(chunk.len(), false, 0);
+            let mut scratch: Vec<u8> = Vec::with_capacity(space.max_bytes());
+            for &row in chunk {
+                space.decode(permutation.apply(row as u128), &mut scratch);
+                // SAFETY: as in `unique_strings`, every space decodes to UTF-8.
+                views.push(unsafe { std::str::from_utf8_unchecked(&scratch) });
+            }
+            views.finish()
+        })
+        .collect();
+    Ok(StringChunked::from_chunk_iter(name, arrays).into_series())
 }
 
 /// A unique column's values at `rows` of the whole frame, `seed` its column

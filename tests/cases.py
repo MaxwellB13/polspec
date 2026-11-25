@@ -325,6 +325,15 @@ TABLE_CASES: dict[str, TableSpec] = {
         {"child": ColSpec(pl.String), "parent": ColSpec(pl.String)},
         hierarchy=Hierarchy(child="child", parent="parent", max_depth=4),
     ),
+    # 2.0's builder, kept for its frame: the digest 2.0 recorded for
+    # `table/hierarchy` (2.1 made the windowed layout the default).
+    "hierarchy_whole": TableSpec(
+        "H",
+        {"child": ColSpec(pl.String), "parent": ColSpec(pl.String)},
+        hierarchy=Hierarchy(
+            child="child", parent="parent", max_depth=4, layout="whole"
+        ),
+    ),
     "derived": TableSpec(
         "D",
         {
@@ -391,7 +400,7 @@ STREAMED = TableSpec(
     foreign_keys=[ForeignKey("account", references="P", ref_columns="id")],
 )
 
-# Table cases a stream cannot hold to the whole frame: a hierarchy is not
-# batched at all, and a key into the spec's own rows is drawn per batch
-# (Known limitations).
-PER_BATCH = frozenset({"hierarchy", "self_key"})
+# Table cases a stream cannot hold to the whole frame: a hierarchy laid out
+# whole is not batched at all, and a key into the spec's own rows is drawn
+# per batch (Known limitations).
+PER_BATCH = frozenset({"hierarchy_whole", "self_key"})

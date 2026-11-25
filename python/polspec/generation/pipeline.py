@@ -39,7 +39,10 @@ from polspec.generation.passes.foreign_keys import (
     parent_keys_of,
     unique_parent_shortfall,
 )
-from polspec.generation.passes.hierarchy import apply_hierarchy
+from polspec.generation.passes.hierarchy import (
+    apply_hierarchy,
+    apply_windowed_hierarchy,
+)
 from polspec.generation.passes.rules import apply_column_rules
 from polspec.generation.passes.unique_together import apply_unique_together
 from polspec.generation.seeds import pass_seed
@@ -79,18 +82,20 @@ def _check_faults(spec: TableSpec, cycles: int, self_references: int) -> None:
 def requires_whole_frame(spec: TableSpec, verb: str) -> None:
     """Refuses the streaming verbs for a spec whose shape spans the frame.
 
-    A hierarchy is a property of every row at once -- each reference has one
-    parent somewhere else in the same frame. Batches are sampled
-    independently, so a batched hierarchy would be a pile of unrelated
-    fragments rather than a shallow tree, which is a worse answer than saying
-    no.
+    A hierarchy laid out whole (`layout="whole"`, 2.0's builder) is built
+    over every row at once, so batches made apart would be a pile of
+    unrelated fragments rather than a shallow tree, which is a worse answer
+    than saying no. The windowed layout, the default since 2.1, draws each
+    row's place from its position and streams. An order needs every row
+    before the first is written.
     """
-    if spec.hierarchy is not None:
+    if spec.hierarchy is not None and spec.hierarchy.layout == "whole":
         raise SpecError(
-            f"{spec.name} declares a __hierarchy__, which {verb} cannot produce: "
-            "every reference points at another row of the same frame, and each "
-            "batch is generated on its own. Use generate() for a hierarchy, and "
-            "write the frame out yourself."
+            f"{spec.name} declares a __hierarchy__ with layout='whole', which "
+            f"{verb} cannot produce: the forest is built over the whole frame, "
+            "and each batch is generated on its own. Declare the default, "
+            "layout='windowed', to stream it, or use generate() and write the "
+            "frame out yourself."
         )
     if spec.order_by:
         # Rows in order across a stream would need every row before the
@@ -331,6 +336,7 @@ def generate(
             cycles=cycles,
             self_references=self_references,
             pins=checked.window(offset, rows) if checked is not None else {},
+            frame_rows=n,
         )
 
     if keeping:
@@ -551,9 +557,12 @@ def _window(
     pins: Mapping[str, pl.Series] | None = None,
     parent_keys: Mapping[str, pl.DataFrame] | None = None,
     drawn: pl.DataFrame | None = None,
+    frame_rows: int | None = None,
 ) -> pl.DataFrame:
     """Rows `[row_offset, row_offset + n)` of the frame `frame_seed` describes,
-    with the passes run over them. `drawn` is those rows' columns as the
+    with the passes run over them. `frame_rows` is how many rows the whole
+    frame holds, which a windowed hierarchy lays its forest out over; `n`,
+    when not given. `drawn` is those rows' columns as the
     engine fills them, when a caller drew them already (`_Blocks`).
 
     `pins` replace their columns after the draw and before the passes, so
@@ -592,6 +601,7 @@ def _window(
         self_references=self_references,
         parent_keys=parent_keys,
         cartesian=method == "cartesian",
+        frame_rows=frame_rows,
     )
 
 
@@ -608,6 +618,7 @@ def _run_passes(
     self_references: int = 0,
     parent_keys: Mapping[str, pl.DataFrame] | None = None,
     cartesian: bool = False,
+    frame_rows: int | None = None,
 ) -> pl.DataFrame:
     """Applies every rule and foreign-key pass, in dependency order.
 
@@ -644,13 +655,27 @@ def _run_passes(
                 frame, name, col
             )
 
-    if (hierarchy := spec.hierarchy) is not None:
+    if (hierarchy := spec.hierarchy) is not None and hierarchy.layout == "whole":
         seed = pass_seed(frame_seed, "hierarchy")
         runners["hierarchy"] = lambda frame, seed=seed: apply_hierarchy(
             frame,
             columns,
             hierarchy,
             seed,
+            cycles=cycles,
+            self_references=self_references,
+        )
+    elif hierarchy is not None:
+        # Keyed by the whole frame, and laid out over all of its rows, so a
+        # window holds the forest's rows the whole frame holds there.
+        seed = pass_seed(frame_key, "hierarchy")
+        runners["hierarchy"] = lambda frame, seed=seed: apply_windowed_hierarchy(
+            frame,
+            columns,
+            hierarchy,
+            seed,
+            frame_rows=frame_rows if frame_rows is not None else frame.height,
+            row_offset=row_offset,
             cycles=cycles,
             self_references=self_references,
         )
@@ -870,6 +895,7 @@ def batch_stream(
             pins=pins.window(offset, rows) if pins is not None else None,
             # Blocks hold the first `n` rows; kept rows can read past them.
             drawn=blocks.window(offset, rows) if offset + rows <= n else None,
+            frame_rows=n,
         )
 
     # Where the frame has been read to: `produced` while every row passes.

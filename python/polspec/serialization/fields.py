@@ -593,6 +593,10 @@ HIERARCHY_FIELDS: tuple[Field, ...] = (
     Field("max_depth", omit_if=_never),
     Field("branching", omit_if=_if_none),
     Field("roots", omit_if=_if_none),
+    # An added optional key on version 4 (2.1): written only for the layout
+    # that is not the default, so a 2.0 file reads, and a file that sets it
+    # is refused by 2.0 by name.
+    Field("layout", omit_if=lambda v, obj: v == "windowed"),
 )
 
 

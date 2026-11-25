@@ -23,6 +23,7 @@ from polspec._ffi import (
     pattern_status,
 )
 from polspec._ffi import generate_dataframe as _generate_dataframe
+from polspec._ffi import unique_values_at as _unique_values_at
 from polspec.bound import Bound
 from polspec.constants import (
     CATEGORICAL_PHYSICAL_CAPACITY,
@@ -625,6 +626,34 @@ def generate_random(
     if frame.columns != names:
         frame.columns = names
     return frame
+
+
+def unique_at(name: str, spec: ColSpec, seed: int, rows: pl.Series) -> pl.Series:
+    """What `generate_random({name: spec}, n, seed)[name]` holds at `rows`, for
+    rows anywhere in the frame and in any order, without drawing the rows
+    between: a unique scalar column with no nulls and no NaNs, read where a
+    reference points.
+
+    A column with nulls or NaNs, a nested one, or a format whose extras are
+    drawn beside it is refused by name: where such a row's value sits in
+    the column's space depends on the rows before it.
+    """
+    if (
+        not spec.unique
+        or spec.nullable
+        or spec.nan_probability
+        or column_kind(spec.dtype) in ("list", "struct", "map", "null")
+        or _overlays_extras(spec)
+    ):
+        raise GenerationError(
+            f"Column {name!r} cannot be read at given rows: only a unique "
+            "scalar column with no nulls, no NaNs and no format extras can."
+        )
+    if frames.is_pattern(name):
+        spec = dataclasses.replace(spec, seed_name=spec.seed_name or name)
+    spec = _resolve_bounded_categorical(name, spec, seed)
+    plan, domain = plan_column(name, spec)
+    return _finish(_unique_values_at(plan, seed, rows), spec, domain).alias(name)
 
 
 def _generate_column(

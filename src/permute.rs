@@ -17,6 +17,8 @@
 //! bijection on `[0, domain)` too. `2^bits < 2 * domain`, so the walk takes
 //! fewer than two steps on average.
 
+use rayon::prelude::*;
+
 /// Rounds of the network: the four that make a Feistel network a
 /// pseudo-random permutation in theory (Luby-Rackoff), with a round
 /// function -- the splitmix64 finaliser -- that reaches every output bit
@@ -229,8 +231,77 @@ pub fn at(domain: u64, seed: u64, indices: &[u64]) -> Result<Vec<u64>, String> {
     }
     let permutation = Permutation::new(domain as u128, seed);
     Ok(indices
-        .iter()
+        .par_iter()
+        .with_min_len(PAR_MIN)
         .map(|&i| permutation.apply(i as u128) as u64)
+        .collect())
+}
+
+/// Positions a parallel map takes per task: below it a task costs more
+/// than the work it would share.
+const PAR_MIN: usize = 4_096;
+
+#[inline]
+fn uniform_key(seed: u64) -> u64 {
+    mix(seed ^ 0xA076_1D64_78BD_642F)
+}
+
+/// A uniform index into `[0, size)` for one position, keyed by `seed`
+/// through `uniform_key`: a function of the seed and the position alone, so
+/// a slot anywhere in the frame draws the index the whole frame draws there
+/// -- a pick with replacement, which a permutation cannot give. A mixed
+/// 64-bit hash scaled by multiply-and-shift, so each index is within
+/// `size / 2^64` of uniform.
+#[inline]
+fn uniform(key: u64, position: u64, size: u64) -> u64 {
+    let h = mix(key ^ mix(position.wrapping_add(0x9E37_79B9_7F4A_7C15)));
+    ((h as u128 * size as u128) >> 64) as u64
+}
+
+/// Each of `slots`' parent in a forest laid out level by level: level `j`
+/// holds `sizes[j]` slots, numbered on from the levels above, beneath
+/// `roots` ultimate parents. A parent is a reference index -- a root's,
+/// `0..roots`, or `roots + slot` of a slot one level up -- picked with
+/// replacement by `uniform`'s draw keyed by `seed` and the slot, so any
+/// slot anywhere takes the parent the whole forest gives it. The first
+/// `roots` slots of level 1 take one root each, so every root has a child.
+pub fn forest_parents(
+    seed: u64,
+    slots: &[u64],
+    sizes: &[u64],
+    roots: u64,
+) -> Result<Vec<u64>, String> {
+    if roots == 0 || sizes.is_empty() || sizes.contains(&0) {
+        return Err("a forest needs a root and a slot at every level".into());
+    }
+    let mut ends = Vec::with_capacity(sizes.len());
+    let mut total = 0u64;
+    for &size in sizes {
+        total = total
+            .checked_add(size)
+            .ok_or_else(|| "a forest holds more slots than a u64 counts".to_string())?;
+        ends.push(total);
+    }
+    if let Some(&bad) = slots.iter().find(|&&s| s >= total) {
+        return Err(format!("slot {bad} is outside a forest of {total} slots"));
+    }
+    let key = uniform_key(seed);
+    Ok(slots
+        .par_iter()
+        .with_min_len(PAR_MIN)
+        .map(|&slot| {
+            let level = ends.partition_point(|&end| end <= slot);
+            if level == 0 {
+                if slot < roots {
+                    slot
+                } else {
+                    uniform(key, slot, roots)
+                }
+            } else {
+                let above_start = if level >= 2 { ends[level - 2] } else { 0 };
+                roots + above_start + uniform(key, slot, sizes[level - 1])
+            }
+        })
         .collect())
 }
 
@@ -286,6 +357,25 @@ fn mix(mut z: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `uniform` over many positions, as a test reads it.
+    /// A uniform index into `[0, size)` for each of `positions`, keyed by
+    /// `seed`: a function of the seed and the position alone, so a row anywhere
+    /// in the frame draws the index the whole frame draws there -- a parent
+    /// chosen with replacement, which a permutation cannot give. A mixed 64-bit
+    /// hash scaled by multiply-and-shift, so each index is within `size / 2^64`
+    /// of uniform. Refuses an empty range for any position.
+    fn uniform_at(seed: u64, positions: &[u64], size: u64) -> Result<Vec<u64>, String> {
+        if size == 0 && !positions.is_empty() {
+            return Err("a uniform index needs a range of at least one value".into());
+        }
+        let key = uniform_key(seed);
+        Ok(positions
+            .par_iter()
+            .with_min_len(PAR_MIN)
+            .map(|&p| uniform(key, p, size))
+            .collect())
+    }
 
     #[test]
     fn a_composite_window_is_distinct_and_the_whole_spaces_slice() {
@@ -459,6 +549,67 @@ mod tests {
         let tail = window(1 << 40, 3, start, 5).unwrap();
         let got = at(1 << 40, 3, &[start + 4, start]).unwrap();
         assert_eq!(got, vec![tail[4], tail[0]]);
+    }
+
+    #[test]
+    fn a_uniform_index_is_a_function_of_the_position_and_spread_evenly() {
+        let positions: Vec<u64> = (0..200_000).collect();
+        let all = uniform_at(5, &positions, 7).unwrap();
+        assert!(all.iter().all(|&v| v < 7));
+        // The same position draws the same index wherever it is asked for.
+        let scattered = uniform_at(5, &[199_999, 3, 3, 100_000], 7).unwrap();
+        assert_eq!(scattered, vec![all[199_999], all[3], all[3], all[100_000]]);
+        // Even within 2% for each value, and another seed draws otherwise.
+        let mut counts = [0usize; 7];
+        all.iter().for_each(|&v| counts[v as usize] += 1);
+        let expected = positions.len() as f64 / 7.0;
+        assert!(
+            counts
+                .iter()
+                .all(|&c| (c as f64 - expected).abs() < 0.02 * expected),
+            "{counts:?}"
+        );
+        assert_ne!(
+            uniform_at(6, &positions[..64], 7).unwrap(),
+            all[..64].to_vec()
+        );
+        assert!(uniform_at(5, &[1], 0).is_err());
+        assert!(uniform_at(5, &[], 0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_forests_parents_are_each_slots_pick_in_the_level_above() {
+        let sizes = [5u64, 12, 40];
+        let roots = 3;
+        let slots: Vec<u64> = (0..57).collect();
+        let parents = forest_parents(9, &slots, &sizes, roots).unwrap();
+        for (&slot, &parent) in slots.iter().zip(&parents) {
+            if slot < 5 {
+                // Level 1 points at a root; its first `roots` slots, one each.
+                assert!(parent < roots);
+                if slot < roots {
+                    assert_eq!(parent, slot);
+                }
+            } else if slot < 17 {
+                assert!((roots..roots + 5).contains(&parent), "{slot} -> {parent}");
+            } else {
+                assert!(
+                    (roots + 5..roots + 17).contains(&parent),
+                    "{slot} -> {parent}"
+                );
+            }
+        }
+        // A slot asked for anywhere, in any order, takes the same parent.
+        let scattered = forest_parents(9, &[56, 0, 20, 56], &sizes, roots).unwrap();
+        assert_eq!(
+            scattered,
+            vec![parents[56], parents[0], parents[20], parents[56]]
+        );
+        // Past level 1, the pick is `uniform`'s in the level above.
+        let above = uniform_at(9, &[20], 12).unwrap()[0];
+        assert_eq!(parents[20], roots + 5 + above);
+        assert!(forest_parents(9, &[57], &sizes, roots).is_err());
+        assert!(forest_parents(9, &[0], &sizes, 0).is_err());
     }
 
     #[test]
