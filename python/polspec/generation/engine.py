@@ -628,6 +628,19 @@ def generate_random(
     return frame
 
 
+def readable_at(spec: ColSpec) -> bool:
+    """Whether `unique_at` can read `spec`'s column at given rows: a unique
+    scalar column with no nulls, no NaNs and no format extras, whose value at
+    a row depends on that row alone."""
+    return (
+        spec.unique
+        and not spec.nullable
+        and not spec.nan_probability
+        and column_kind(spec.dtype) not in ("list", "struct", "map", "null")
+        and not _overlays_extras(spec)
+    )
+
+
 def unique_at(name: str, spec: ColSpec, seed: int, rows: pl.Series) -> pl.Series:
     """What `generate_random({name: spec}, n, seed)[name]` holds at `rows`, for
     rows anywhere in the frame and in any order, without drawing the rows
@@ -638,13 +651,7 @@ def unique_at(name: str, spec: ColSpec, seed: int, rows: pl.Series) -> pl.Series
     drawn beside it is refused by name: where such a row's value sits in
     the column's space depends on the rows before it.
     """
-    if (
-        not spec.unique
-        or spec.nullable
-        or spec.nan_probability
-        or column_kind(spec.dtype) in ("list", "struct", "map", "null")
-        or _overlays_extras(spec)
-    ):
+    if not readable_at(spec):
         raise GenerationError(
             f"Column {name!r} cannot be read at given rows: only a unique "
             "scalar column with no nulls, no NaNs and no format extras can."

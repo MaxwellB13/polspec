@@ -23,6 +23,17 @@ page promises; before 1.0, a minor version could break any of them.
   layout is the better default. `Hierarchy(..., layout="whole")` generates
   2.0's frame exactly, and cannot be streamed. `roots=` is now exact: every
   root has a child, where the whole layout can leave one out.
+- **A key into the spec's own rows streams, and its seeded output changes
+  once (2.1).** A self-referencing `ForeignKey` now draws its parents from
+  the whole frame -- each row's pick a function of the row and the seed,
+  read where it sits -- so a batch's children point anywhere in the frame,
+  and every batch, scan and sink is `generate()`'s rows; a unique one is
+  unique across batches. 2.0 drew a batch's parents from that batch alone.
+  The same speed: 7 ms a million rows. A key whose referenced column has
+  nulls, or is rewritten by another pass or pinned, still draws per batch,
+  as does a composite one. The same exception to *Stability* as the
+  hierarchy's; there is no switch back, so a frame that must stay as 2.0
+  made it is kept as a file.
 
 ### Fixed
 

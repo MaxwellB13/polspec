@@ -320,6 +320,22 @@ TABLE_CASES: dict[str, TableSpec] = {
         },
         foreign_keys=[ForeignKey("parent", references="self", ref_columns="ref")],
     ),
+    # A self key whose referenced column has nulls, so a row's value cannot
+    # be read where a child points: drawn from each batch's own rows.
+    "self_key_per_batch": TableSpec(
+        "M",
+        {
+            "ref": ColSpec(
+                pl.String,
+                unique=True,
+                string_length=(8, 8),
+                nullable=True,
+                null_probability=0.1,
+            ),
+            "parent": ColSpec(pl.String, nullable=True, null_probability=0.2),
+        },
+        foreign_keys=[ForeignKey("parent", references="self", ref_columns="ref")],
+    ),
     "hierarchy": TableSpec(
         "H",
         {"child": ColSpec(pl.String), "parent": ColSpec(pl.String)},
@@ -401,6 +417,7 @@ STREAMED = TableSpec(
 )
 
 # Table cases a stream cannot hold to the whole frame: a hierarchy laid out
-# whole is not batched at all, and a key into the spec's own rows is drawn
-# per batch (Known limitations).
-PER_BATCH = frozenset({"hierarchy_whole", "self_key"})
+# whole is not batched at all, and a key into the spec's own rows whose
+# referenced column cannot be read at a row is drawn per batch (Known
+# limitations).
+PER_BATCH = frozenset({"hierarchy_whole", "self_key_per_batch"})

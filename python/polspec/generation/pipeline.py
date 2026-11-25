@@ -26,8 +26,9 @@ from polspec._ffi import chunk_size
 from polspec.constants import DEFAULT_WIDE_INT_BOUND, LARGE_FRAME_BYTES
 from polspec.dtypes import map_parts, unholdable
 from polspec.errors import GenerationError, SpecError
+from polspec.foreign_key import ForeignKey
 from polspec.frames import Method, References, to_eager
-from polspec.generation.engine import generate_cartesian, generate_random
+from polspec.generation.engine import generate_cartesian, generate_random, readable_at
 from polspec.generation.keeping import (
     KEY_ROOM,
     kept_or_warned,
@@ -36,6 +37,7 @@ from polspec.generation.keeping import (
 from polspec.generation.passes.derived import apply_derived
 from polspec.generation.passes.foreign_keys import (
     apply_foreign_key,
+    apply_windowed_self_key,
     parent_keys_of,
     unique_parent_shortfall,
 )
@@ -602,7 +604,28 @@ def _window(
         parent_keys=parent_keys,
         cartesian=method == "cartesian",
         frame_rows=frame_rows,
+        pinned=frozenset(pins or ()),
     )
+
+
+def windowed_self_key(
+    spec: TableSpec,
+    fk: ForeignKey,
+    *,
+    cartesian: bool = False,
+    pinned: frozenset[str] = frozenset(),
+) -> bool:
+    """Whether a key into `spec`'s own rows is drawn from the whole frame
+    (`apply_windowed_self_key`): a one-column key whose referenced column is
+    one the engine draws and nothing changes after -- `readable_at` reads
+    it, no pass rewrites it, no pin replaces it, and the frame is not
+    cartesian. Any other self key draws from its window's own rows."""
+    if cartesian or len(fk.columns) != 1:
+        return False
+    ref = fk.ref_columns[0]
+    if ref in pinned or not readable_at(spec.columns[ref]):
+        return False
+    return not any(ref in p.writes for p in passes_of(spec))
 
 
 def _run_passes(
@@ -619,6 +642,7 @@ def _run_passes(
     parent_keys: Mapping[str, pl.DataFrame] | None = None,
     cartesian: bool = False,
     frame_rows: int | None = None,
+    pinned: frozenset[str] = frozenset(),
 ) -> pl.DataFrame:
     """Applies every rule and foreign-key pass, in dependency order.
 
@@ -685,7 +709,26 @@ def _run_passes(
         _warn_unused_references(spec, parents)
         for fk in spec.foreign_keys:
             seed = pass_seed(frame_seed, f"fk:{fk.name}")
-            if fk.references == "self":
+            if fk.references == "self" and windowed_self_key(
+                spec, fk, cartesian=cartesian, pinned=pinned
+            ):
+                # Drawn from the whole frame, keyed by it, so a window's
+                # children point where the whole frame's do.
+                key_seed = pass_seed(frame_key, f"fk:{fk.name}")
+                runners[f"fk:{fk.name}"] = lambda frame, fk=fk, k=key_seed: (
+                    apply_windowed_self_key(
+                        frame,
+                        columns,
+                        fk,
+                        frame_seed=frame_key,
+                        key_seed=k,
+                        frame_rows=frame_rows
+                        if frame_rows is not None
+                        else frame.height,
+                        row_offset=row_offset,
+                    )
+                )
+            elif fk.references == "self":
                 # The parent is this frame as it stands when the pass runs.
                 runners[f"fk:{fk.name}"] = lambda frame, fk=fk, seed=seed: (
                     apply_foreign_key(frame, columns, fk, frame, seed)
