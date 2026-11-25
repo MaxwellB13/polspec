@@ -102,6 +102,54 @@ fn permuted_indices(
     Ok(PySeries(series.into_series()))
 }
 
+/// The keyed permutation of `[0, domain)` at each of `indices`, as `UInt64`:
+/// `permuted_indices` at scattered positions.
+#[pyfunction]
+fn permuted_at(py: Python<'_>, domain: u64, seed: u64, indices: PySeries) -> PyResult<PySeries> {
+    let indices = u64_values(&indices)?;
+    let values = py
+        .detach(|| permute::at(domain, seed, &indices))
+        .map_err(PyValueError::new_err)?;
+    let series = UInt64Chunked::from_vec(PlSmallStr::from_static("index"), values);
+    Ok(PySeries(series.into_series()))
+}
+
+/// What a unique column with no nulls holds at `rows` of the frame `seed`
+/// describes: `generate_dataframe([plan], n, seed)[plan.name]` gathered at
+/// `rows`, for rows anywhere in the frame and in any order, without drawing
+/// the rows between.
+#[pyfunction]
+fn unique_values_at(
+    py: Python<'_>,
+    plan: ColumnPlan,
+    seed: u64,
+    rows: PySeries,
+) -> PyResult<PySeries> {
+    let rows = u64_values(&rows)?;
+    let series = py
+        .detach(|| {
+            let col_seed = sample::seed_for_column(seed, plan.seed_key());
+            unique::generate_unique_at(&plan, col_seed, &rows)
+        })
+        .map_err(PyValueError::new_err)?;
+    Ok(PySeries(series))
+}
+
+/// A Series of row positions as `u64`s, refusing a null or a negative one.
+fn u64_values(series: &PySeries) -> PyResult<Vec<u64>> {
+    if series.0.null_count() > 0 {
+        return Err(PyValueError::new_err("row positions must have no nulls"));
+    }
+    let cast = series
+        .0
+        .strict_cast(&DataType::UInt64)
+        .map_err(|_| PyValueError::new_err("row positions must be non-negative integers"))?;
+    let values = cast
+        .u64()
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(values.into_no_null_iter().collect())
+}
+
 /// Positions `start..start + n` of the permutation of a composite key's
 /// product space, as one `UInt64` index column per member.
 #[pyfunction]
@@ -229,5 +277,7 @@ fn _polspec(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(kinds, m)?)?;
     m.add_function(wrap_pyfunction!(pattern_status, m)?)?;
     m.add_function(wrap_pyfunction!(permuted_indices, m)?)?;
+    m.add_function(wrap_pyfunction!(permuted_at, m)?)?;
+    m.add_function(wrap_pyfunction!(unique_values_at, m)?)?;
     Ok(())
 }

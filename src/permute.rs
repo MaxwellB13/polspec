@@ -214,6 +214,26 @@ pub fn window(domain: u64, seed: u64, start: u64, n: u64) -> Result<Vec<u64>, St
     Ok(out.into_iter().map(|i| i as u64).collect())
 }
 
+/// The permutation of `[0, domain)` that `seed` keys, at each of `indices`
+/// in turn: `window` at scattered positions, so a row anywhere in the frame
+/// -- a parent a child points at -- takes the index the whole frame gives
+/// it there. Refuses an index the domain does not hold, naming both.
+pub fn at(domain: u64, seed: u64, indices: &[u64]) -> Result<Vec<u64>, String> {
+    if let Some(&bad) = indices.iter().find(|&&i| i >= domain) {
+        return Err(format!(
+            "index {bad} is outside a permutation of {domain} distinct indices"
+        ));
+    }
+    if indices.is_empty() {
+        return Ok(Vec::new());
+    }
+    let permutation = Permutation::new(domain as u128, seed);
+    Ok(indices
+        .iter()
+        .map(|&i| permutation.apply(i as u128) as u64)
+        .collect())
+}
+
 /// Positions `start..start + n` of the permutation of a product space --
 /// every combination of members with `sizes` values each -- that `seed`
 /// keys, decoded into one index per member, the first member varying
@@ -421,6 +441,34 @@ mod tests {
                 "{start}+{n}"
             );
         }
+    }
+
+    #[test]
+    fn at_scattered_indices_is_the_window_gathered() {
+        // Narrow and wide domains, indices in any order and repeated.
+        for domain in [1u64, 2, 1_000, 1 << 40, u64::MAX] {
+            let n = domain.min(500);
+            let whole = window(domain, 7, 0, n).unwrap();
+            let indices: Vec<u64> = (0..n).rev().chain([0, n / 2, 0]).collect();
+            let got = at(domain, 7, &indices).unwrap();
+            let want: Vec<u64> = indices.iter().map(|&i| whole[i as usize]).collect();
+            assert_eq!(got, want, "domain {domain}");
+        }
+        // Far into a wide domain, against a window that starts there.
+        let start = (1u64 << 40) - 5;
+        let tail = window(1 << 40, 3, start, 5).unwrap();
+        let got = at(1 << 40, 3, &[start + 4, start]).unwrap();
+        assert_eq!(got, vec![tail[4], tail[0]]);
+    }
+
+    #[test]
+    fn at_an_index_past_the_domain_is_refused() {
+        let err = at(100, 1, &[3, 100]).unwrap_err();
+        assert!(
+            err.contains("index 100") && err.contains("100 distinct"),
+            "{err}"
+        );
+        assert!(at(0, 1, &[]).unwrap().is_empty());
     }
 
     #[test]

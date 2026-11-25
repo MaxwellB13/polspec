@@ -184,6 +184,8 @@ listed here is exactly what warns.
   aarch64), macOS (Apple silicon, and Intel, built but not run) and
   Windows (x86-64).
 
-Every pull request runs the suite on each supported Python on Linux, macOS
-and Windows, and on Linux against both the lowest and the newest Polars
-polspec allows. The deep property run is weekly.
+Every pull request runs the suite on the oldest and newest supported
+Python on Linux, macOS and Windows, and on Linux against both the lowest
+and the newest Polars polspec allows. Every commit to `main` runs it on
+every supported Python on Linux and Windows, and the oldest and newest on
+macOS. The deep property run is weekly.

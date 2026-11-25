@@ -296,7 +296,8 @@ which is a placeholder.
    The tag can follow the merge straight away.
 4. The release workflow checks the tag against `pyproject.toml` and
    `CHANGELOG.md`, and waits for the Test workflow's run on `main` for the
-   tagged commit -- every Python on every OS -- refusing to build unless it
+   tagged commit -- every Python on Linux and Windows, the oldest and
+   newest on macOS -- refusing to build unless it
    passed. It does not run the suite again. Then it builds wheels and
    smoke-tests each, publishes to PyPI, and *drafts* a GitHub
    release with the wheels attached and notes generated from the merged

@@ -9,6 +9,24 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A wide frame of plain columns generates as fast as in 1.7.** 2.0 asked
+  every column for its finite domain, a plain numeric one too: 200 columns
+  of 1,000 rows took 13% longer than on 1.7. A column that can have one --
+  choices, an `Enum` or a format -- is still asked; the rest are not. No
+  seeded output moves.
+
+### Internal
+
+- The engine can give a unique column's values, and its keyed permutation,
+  at any rows of the frame without drawing the rows between
+  (`permute::at`, `unique_values_at`): what 2.1's windowed hierarchy and
+  self-referencing key are drawn from.
+- CI runs macOS on the oldest and newest Python only, on `main` as on a
+  pull request: every macOS-only failure to 2.0 was a runner GitHub did
+  not start or a download that timed out.
+
 ## [2.0.0] - 2026-11-24
 
 **A faster engine, one set of defaults, and one spelling for each name.**

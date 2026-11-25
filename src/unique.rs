@@ -355,6 +355,17 @@ where
     ))
 }
 
+/// An integer column's value space, for a type holding `min..=max`: its
+/// lowest value and how many values it holds. The bounds are clamped to the
+/// type, and taken in either order.
+fn int_space(plan: &ColumnPlan, min: i128, max: i128) -> (i128, u128) {
+    let clamp = |v: i128| -> i128 { v.clamp(min, max) };
+    let lo = plan.min.map_or(min, |l| clamp(l.as_i128()));
+    let hi = plan.max.map_or(max, |l| clamp(l.as_i128()));
+    let (lo, hi) = if lo <= hi { (lo, hi) } else { (hi, lo) };
+    (lo, (hi - lo + 1) as u128)
+}
+
 macro_rules! impl_unique_int_column {
     ($fn_name:ident, $polars_type:ident, $native_type:ty) => {
         fn $fn_name(
@@ -362,17 +373,11 @@ macro_rules! impl_unique_int_column {
             n: usize,
             seed: ColumnSeed,
         ) -> Result<ChunkedArray<$polars_type>, String> {
-            let clamp = |v: i128| -> i128 {
-                v.clamp(<$native_type>::MIN as i128, <$native_type>::MAX as i128)
-            };
-            let lo = plan
-                .min
-                .map_or(<$native_type>::MIN as i128, |l| clamp(l.as_i128()));
-            let hi = plan
-                .max
-                .map_or(<$native_type>::MAX as i128, |l| clamp(l.as_i128()));
-            let (lo, hi) = if lo <= hi { (lo, hi) } else { (hi, lo) };
-            let domain = (hi - lo + 1) as u128;
+            let (lo, domain) = int_space(
+                plan,
+                <$native_type>::MIN as i128,
+                <$native_type>::MAX as i128,
+            );
             permuted_column(plan, n, seed, domain, |i| (lo + i as i128) as $native_type)
         }
     };
@@ -395,11 +400,16 @@ fn unique_int128(
     n: usize,
     seed: ColumnSeed,
 ) -> Result<ChunkedArray<Int128Type>, String> {
+    let (lo, domain) = int128_space(plan);
+    permuted_column(plan, n, seed, domain, |i| lo.wrapping_add(i as i128))
+}
+
+/// An `Int128` column's value space: its lowest value and how many values.
+fn int128_space(plan: &ColumnPlan) -> (i128, u128) {
     let lo = plan.min.map_or(i128::MIN, Limit::as_i128);
     let hi = plan.max.map_or(i128::MAX, Limit::as_i128);
     let (lo, hi) = if lo <= hi { (lo, hi) } else { (hi, lo) };
-    let domain = (hi.wrapping_sub(lo) as u128).saturating_add(1);
-    permuted_column(plan, n, seed, domain, |i| lo.wrapping_add(i as i128))
+    (lo, (hi.wrapping_sub(lo) as u128).saturating_add(1))
 }
 
 /// A unique `UInt128` column, over any bounds a `u128` holds.
@@ -408,10 +418,16 @@ fn unique_uint128(
     n: usize,
     seed: ColumnSeed,
 ) -> Result<ChunkedArray<UInt128Type>, String> {
+    let (lo, domain) = uint128_space(plan);
+    permuted_column(plan, n, seed, domain, |i| lo + i)
+}
+
+/// A `UInt128` column's value space: its lowest value and how many values.
+fn uint128_space(plan: &ColumnPlan) -> (u128, u128) {
     let lo = plan.min.map_or(0, Limit::as_u128);
     let hi = plan.max.map_or(u128::MAX, Limit::as_u128);
     let (lo, hi) = if lo <= hi { (lo, hi) } else { (hi, lo) };
-    permuted_column(plan, n, seed, (hi - lo).saturating_add(1), |i| lo + i)
+    (lo, (hi - lo).saturating_add(1))
 }
 
 /// The grid a unique float column draws from: as many evenly spaced points
@@ -438,6 +454,16 @@ fn float_grid(lo: f64, hi: f64, epsilon: f64) -> (u128, impl Fn(u128) -> f64 + S
     (points, point)
 }
 
+/// A float column's range: its bounds, or `±default` where open, in order.
+fn float_bounds(plan: &ColumnPlan, default: f64) -> (f64, f64) {
+    let lo = plan.min.map_or(-default, |l| l.as_f64());
+    let hi = plan.max.map_or(default, |l| l.as_f64());
+    if lo <= hi { (lo, hi) } else { (hi, lo) }
+}
+
+/// The bound an open float range stops at, either side.
+const FLOAT_DEFAULT_BOUND: f64 = 1_000_000.0;
+
 macro_rules! impl_unique_float_column {
     ($fn_name:ident, $polars_type:ident, $native_type:ty, $default_bound:expr) => {
         fn $fn_name(
@@ -445,17 +471,15 @@ macro_rules! impl_unique_float_column {
             n: usize,
             seed: ColumnSeed,
         ) -> Result<ChunkedArray<$polars_type>, String> {
-            let lo = plan.min.map_or(-$default_bound, |l| l.as_f64());
-            let hi = plan.max.map_or($default_bound, |l| l.as_f64());
-            let (lo, hi) = if lo <= hi { (lo, hi) } else { (hi, lo) };
+            let (lo, hi) = float_bounds(plan, $default_bound);
             let (domain, point) = float_grid(lo, hi, <$native_type>::EPSILON as f64);
             permuted_column(plan, n, seed, domain, |i| point(i) as $native_type)
         }
     };
 }
 
-impl_unique_float_column!(unique_float32, Float32Type, f32, 1_000_000.0);
-impl_unique_float_column!(unique_float64, Float64Type, f64, 1_000_000.0);
+impl_unique_float_column!(unique_float32, Float32Type, f32, FLOAT_DEFAULT_BOUND);
+impl_unique_float_column!(unique_float64, Float64Type, f64, FLOAT_DEFAULT_BOUND);
 
 fn unique_bool(plan: &ColumnPlan, n: usize, seed: ColumnSeed) -> Result<BooleanChunked, String> {
     let (values, validity) = permuted_buffer(plan, n, seed, 2, |i| i == 1)?;
@@ -733,6 +757,147 @@ pub fn generate_unique_series(
                 format!("Column '{}' has kind 'pattern' but no pattern", plan.name)
             })?;
             unique_strings(plan, n, seed, pattern.as_ref())?.into_series()
+        }
+    })
+}
+
+// ---------------------------------------------------------------------------
+// A unique column's values at given rows
+// ---------------------------------------------------------------------------
+
+/// `decode(π(row))` at each of `rows`: what a unique column with no nulls
+/// holds at those rows of the whole frame, wherever they sit -- a parent a
+/// child points at, read without drawing the rows between.
+fn decoded_at<N, F>(
+    plan: &ColumnPlan,
+    rows: &[u64],
+    seed: u64,
+    domain: u128,
+    decode: F,
+) -> Result<Vec<N>, String>
+where
+    N: Send,
+    F: Fn(u128) -> N + Sync,
+{
+    let Some(&last) = rows.iter().max() else {
+        return Ok(Vec::new());
+    };
+    let needed = last as u128 + 1;
+    if needed > domain {
+        return Err(too_small(plan, needed, domain));
+    }
+    let key = permutation_seed(ColumnSeed {
+        base: seed,
+        first_chunk: 0,
+    });
+    let permutation = Permutation::new(domain, key);
+    Ok(rows
+        .par_iter()
+        .map(|&row| decode(permutation.apply(row as u128)))
+        .collect())
+}
+
+fn strings_at(
+    plan: &ColumnPlan,
+    rows: &[u64],
+    seed: u64,
+    space: &(dyn Enumerable + Sync),
+) -> Result<Series, String> {
+    let values = decoded_at(plan, rows, seed, space.cardinality(), |i| {
+        let mut out = Vec::with_capacity(space.max_bytes());
+        space.decode(i, &mut out);
+        // SAFETY: as in `unique_strings`, every space decodes to UTF-8.
+        unsafe { String::from_utf8_unchecked(out) }
+    })?;
+    Ok(StringChunked::from_iter_values(
+        PlSmallStr::from(plan.name.as_str()),
+        values.iter().map(String::as_str),
+    )
+    .into_series())
+}
+
+/// A unique column's values at `rows` of the whole frame, `seed` its column
+/// seed: the column `generate_unique_series` fills, gathered at `rows`, for
+/// rows anywhere and in any order. A column that draws nulls is refused: a
+/// row's value is `π` of how many rows before it hold one, which only the
+/// rows before it tell.
+pub fn generate_unique_at(plan: &ColumnPlan, seed: u64, rows: &[u64]) -> Result<Series, String> {
+    if draws_nulls(plan) {
+        return Err(format!(
+            "Column '{}' draws nulls, so its values at given rows depend on the \
+             rows before them; only a column with no nulls is read at rows.",
+            plan.name
+        ));
+    }
+    let name = PlSmallStr::from(plan.name.as_str());
+    macro_rules! ints {
+        ($t:ty, $polars_type:ident) => {{
+            let (lo, domain) = int_space(plan, <$t>::MIN as i128, <$t>::MAX as i128);
+            let values = decoded_at(plan, rows, seed, domain, |i| (lo + i as i128) as $t)?;
+            ChunkedArray::<$polars_type>::from_vec(name, values).into_series()
+        }};
+    }
+    macro_rules! floats {
+        ($t:ty, $polars_type:ident) => {{
+            let (lo, hi) = float_bounds(plan, FLOAT_DEFAULT_BOUND);
+            let (domain, point) = float_grid(lo, hi, <$t>::EPSILON as f64);
+            let values = decoded_at(plan, rows, seed, domain, |i| point(i) as $t)?;
+            ChunkedArray::<$polars_type>::from_vec(name, values).into_series()
+        }};
+    }
+    let column_seed = ColumnSeed {
+        base: seed,
+        first_chunk: 0,
+    };
+    Ok(match plan.kind {
+        Kind::Int64 => ints!(i64, Int64Type),
+        Kind::Int32 => ints!(i32, Int32Type),
+        Kind::Int16 => ints!(i16, Int16Type),
+        Kind::Int8 => ints!(i8, Int8Type),
+        Kind::UInt64 => ints!(u64, UInt64Type),
+        Kind::UInt32 => ints!(u32, UInt32Type),
+        Kind::UInt16 => ints!(u16, UInt16Type),
+        Kind::UInt8 => ints!(u8, UInt8Type),
+        Kind::Int128 => {
+            let (lo, domain) = int128_space(plan);
+            let values = decoded_at(plan, rows, seed, domain, |i| lo.wrapping_add(i as i128))?;
+            ChunkedArray::<Int128Type>::from_vec(name, values).into_series()
+        }
+        Kind::UInt128 => {
+            let (lo, domain) = uint128_space(plan);
+            let values = decoded_at(plan, rows, seed, domain, |i| lo + i)?;
+            ChunkedArray::<UInt128Type>::from_vec(name, values).into_series()
+        }
+        Kind::Float64 => floats!(f64, Float64Type),
+        Kind::Float32 => floats!(f32, Float32Type),
+        Kind::Bool => {
+            let values = decoded_at(plan, rows, seed, 2, |i| i == 1)?;
+            BooleanChunked::from_slice(name, &values).into_series()
+        }
+        Kind::Index => {
+            let domain = plan.n_categories.unwrap_or(0) as u128;
+            let values = decoded_at(plan, rows, seed, domain, |i| i as u32)?;
+            UInt32Chunked::from_vec(name, values).into_series()
+        }
+        Kind::String => {
+            let space = EvenLengths::new(
+                plan.str_min_len,
+                plan.str_max_len,
+                permutation_seed(column_seed),
+            );
+            strings_at(plan, rows, seed, &space)?
+        }
+        Kind::Template => {
+            let template = plan.template.as_ref().ok_or_else(|| {
+                format!("Column '{}' has kind 'template' but no template", plan.name)
+            })?;
+            strings_at(plan, rows, seed, template)?
+        }
+        Kind::Pattern => {
+            let pattern = plan.pattern.as_ref().ok_or_else(|| {
+                format!("Column '{}' has kind 'pattern' but no pattern", plan.name)
+            })?;
+            strings_at(plan, rows, seed, pattern.as_ref())?
         }
     })
 }
@@ -1222,5 +1387,78 @@ mod tests {
         let s = column(&p, 0, 1).unwrap();
         assert_eq!(s.len(), 0);
         assert_eq!(s.dtype(), &DataType::Int64);
+    }
+
+    #[test]
+    fn values_at_rows_are_the_whole_column_gathered() {
+        // Rows past the first seed chunk, out of order and repeated.
+        let n = SEED_CHUNK * 2 + 77;
+        let rows: Vec<u64> = vec![
+            (n - 1) as u64,
+            0,
+            (SEED_CHUNK + 3) as u64,
+            5,
+            (SEED_CHUNK + 3) as u64,
+        ];
+        let mut plans = vec![
+            plan("int64", None, None, None),
+            plan(
+                "int16",
+                Some(Limit::Int(-10_000)),
+                Some(Limit::Int(10_000)),
+                None,
+            ),
+            plan("uint64", Some(Limit::Int(10)), None, None),
+            plan("int128", None, None, None),
+            plan("uint128", None, None, None),
+            plan(
+                "float64",
+                Some(Limit::Float(0.0)),
+                Some(Limit::Float(1.0)),
+                None,
+            ),
+            plan("float32", None, None, None),
+            plan("index", None, None, Some(n + 10)),
+            string_plan(3, 9),
+        ];
+        plans.push(
+            ColumnPlan::build(PlanArgs {
+                name: "c".into(),
+                kind: "pattern",
+                pattern: Some(r"^ORD-[0-9]{6}$"),
+                unique: true,
+                ..Default::default()
+            })
+            .unwrap(),
+        );
+        for p in &plans {
+            let whole = column(p, n, 17).unwrap();
+            let at = generate_unique_at(p, 17, &rows).unwrap();
+            let indices = IdxCa::from_vec("i".into(), rows.iter().map(|&r| r as IdxSize).collect());
+            let want = whole.take(&indices).unwrap();
+            assert!(at.equals(&want), "{:?}: {at:?} vs {want:?}", p.kind);
+        }
+        // The two booleans, at both rows a unique boolean holds.
+        let b = plan("bool", None, None, None);
+        let whole = column(&b, 2, 4).unwrap();
+        let at = generate_unique_at(&b, 4, &[1, 0]).unwrap();
+        let want = whole
+            .take(&IdxCa::from_vec("i".into(), vec![1, 0]))
+            .unwrap();
+        assert!(at.equals(&want));
+    }
+
+    #[test]
+    fn values_at_rows_refuse_a_row_past_the_domain_and_a_nullable_column() {
+        let small = plan("int64", Some(Limit::Int(1)), Some(Limit::Int(10)), None);
+        let err = generate_unique_at(&small, 1, &[3, 10]).unwrap_err();
+        assert!(
+            err.contains("10 distinct") && err.contains("11 are needed"),
+            "{err}"
+        );
+        let nullable = nullable("int64", None, None, 0.2);
+        let err = generate_unique_at(&nullable, 1, &[0]).unwrap_err();
+        assert!(err.contains("draws nulls"), "{err}");
+        assert_eq!(generate_unique_at(&small, 1, &[]).unwrap().len(), 0);
     }
 }
