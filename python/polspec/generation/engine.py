@@ -260,6 +260,11 @@ def _domain(spec: ColSpec) -> pl.Series | None:
         lo, hi = _resolve_numeric_bounds(spec)
         halves = _every_float16()
         return halves.filter(halves.is_between(lo, hi))
+    if spec.choices is None and spec.format is None and not isinstance(dtype, pl.Enum):
+        # `Domain.of` finds a finite domain only in these three, and is not
+        # asked for every plain column a frame draws: at 200 columns of 1,000
+        # rows it cost 13% of the frame.
+        return None
     values = Domain.of(spec).values
     if values is None:
         return None

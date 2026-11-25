@@ -105,6 +105,14 @@ def pattern_status(
 ) -> tuple[str, str | None]:
     """How a `pattern` column is generated: `("generate", None)` from the pattern; `("keep", None)` as plain text, every value of which already passes it at `plain_lengths` characters; or `("unreachable", reason)`."""
 
+def permuted_at(domain: int, seed: int, indices: pl.Series) -> pl.Series:
+    """The keyed permutation of `[0, domain)` at each of `indices`, as
+    `UInt64`: `permuted_indices` at scattered positions."""
+
+def unique_values_at(plan: ColumnPlan, seed: int, rows: pl.Series) -> pl.Series:
+    """What the unique column `plan`, with no nulls, holds at `rows` of the
+    frame `seed` describes, without drawing the rows between."""
+
 def composite_indices(
     sizes: list[int], seed: int, start: int, n: int
 ) -> list[pl.Series]:

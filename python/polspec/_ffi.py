@@ -80,6 +80,28 @@ def permuted_indices(domain: int, seed: int, start: int, n: int) -> pl.Series:
         raise GenerationError(str(exc)) from exc
 
 
+def permuted_at(domain: int, seed: int, indices: pl.Series) -> pl.Series:
+    """The permutation `permuted_indices` windows, at each of `indices`:
+    a row anywhere in the frame takes the index the whole range gives it
+    there. An index past the domain is a `GenerationError`."""
+    try:
+        return _extension().permuted_at(domain, seed, indices)
+    except ValueError as exc:
+        raise GenerationError(str(exc)) from exc
+
+
+def unique_values_at(plan: ColumnPlan, seed: int, rows: pl.Series) -> pl.Series:
+    """What the unique column `plan` -- one with no nulls -- holds at `rows`
+    of the frame `seed` describes: `generate_dataframe([plan], n, seed)`
+    gathered at `rows`, without drawing the rows between. A row past what
+    its value space holds, or a column that draws nulls, is a
+    `GenerationError`."""
+    try:
+        return _extension().unique_values_at(plan, seed, rows)
+    except ValueError as exc:
+        raise GenerationError(str(exc)) from exc
+
+
 def composite_indices(
     sizes: list[int], seed: int, start: int, n: int
 ) -> list[pl.Series]:

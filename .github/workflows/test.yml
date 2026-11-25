@@ -2,9 +2,10 @@ name: Test
 
 # A pull request runs the corners of the matrix: the oldest and newest
 # Python on each OS, with the floor job and the newest-Polars jobs (Linux
-# and Windows), nine test jobs in all. `main` runs every Python on every
-# OS, and so does the weekly run, which catches a runner image or
-# dependency that changed between pushes.
+# and Windows), nine test jobs in all. `main` runs every Python on Linux
+# and Windows, and the oldest and newest on macOS, whose runners GitHub
+# could not always start (2.1); so does the weekly run, which catches a
+# runner image or dependency that changed between pushes.
 # A release builds only from a commit whose run on `main` passed: see
 # release.yml.
 on:
@@ -91,6 +92,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ${{ fromJSON(github.event_name == 'pull_request' && '["3.12", "3.15"]' || '["3.12", "3.13", "3.14", "3.15"]') }}
+        # macOS's middle versions: the other two platforms run them, and
+        # every macOS-only failure to 2.0 was a runner or a download.
+        exclude:
+          - { os: macos-latest, python-version: "3.13" }
+          - { os: macos-latest, python-version: "3.14" }
 
     steps:
       - uses: actions/checkout@v7
