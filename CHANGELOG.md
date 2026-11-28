@@ -9,6 +9,44 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-11-28
+
+**An ordered spec, streamed.** `__order__ = "drawn"` draws the first
+`order_by` column in order, from each row's position, so `scan()`,
+`generate_batches()` and every `sink_*` take an ordered spec, each batch
+the rows `generate()` makes there. It is also faster than the sort: a
+million rows of five columns in 6.2 ms, not 14.6.
+
+No seed's output moves. The default stays `"sorted"`, 2.1's sort; a drawn
+order is opt-in, and up to 65,536 rows it gives the sorted frame exactly.
+The spec-file format stays at version 4: the new `order:` key is written
+only for `order: drawn`, which 2.1 refuses by naming the key.
+
+### Added
+
+- **A drawn order: `__order__ = "drawn"`** (`TableSpec(order="drawn")`,
+  `order: drawn` in a spec file). The first `order_by` column holds a
+  sample of its distribution, in order: up to 65,536 rows its own draw,
+  sorted, and past that each row reads the distribution at a stratified
+  position, so its quantiles sit closer to the distribution's than a
+  sample's. Every other column is drawn as with no order, row for row;
+  nulls come last. It draws numbers, dates, times, durations and decimals,
+  a boolean, `choices`, `Enum` or `Categorical` in their weights' shares,
+  and a unique number or temporal column distinct and increasing. It
+  refuses, at declaration and by name, free text, nested columns, a float
+  with `nan_probability`, a column a pass writes, a composite-key member,
+  and several order columns behind a first that can tie. Checks beside it
+  are generated unkept, with a warning; the order column cannot be pinned;
+  `method="cartesian"` is refused. `with_order_by()` takes `order=`, a
+  `FrameSpec` subclass inherits `__order__`, and `diff()` reports a change
+  of it as compatible.
+
+### Changed
+
+- **The streaming refusal of a sorted order names the way out.** It says
+  to declare `order='drawn'` when the spec can take it, and why it cannot
+  when not.
+
 ### Fixed
 
 - **`roots=` is exact for a small frame.** With `roots * max_depth` more
@@ -3768,7 +3806,8 @@ First tagged release.
 - CLI: `polspec schema infer`, `polspec schema new`, `polspec test`.
 - Documentation site, comparison guide, and release automation.
 
-[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/MaxwellB13/polspec/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/MaxwellB13/polspec/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/MaxwellB13/polspec/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/MaxwellB13/polspec/compare/v1.7.0...v2.0.0
 [1.7.0]: https://github.com/MaxwellB13/polspec/compare/v1.6.1...v1.7.0

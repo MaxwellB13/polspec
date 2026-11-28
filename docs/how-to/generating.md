@@ -322,10 +322,13 @@ key into another table rewrite, a composite key whose members have a
 finite or bounded space, a hierarchy, and a key into the spec's own rows
 whose referenced column is unique with no nulls. What is drawn per batch
 instead, deterministic but not row for row the whole frame's, is any other
-composite key or key into the spec's own rows. A hierarchy declared
-`layout="whole"` is refused. *Nested columns, rules, foreign keys and
-composite keys are windows since 2.0; a hierarchy and a key into the
-spec's own rows since 2.1.*
+composite key or key into the spec's own rows. An `__order_by__` streams
+when it is [drawn](constraints.md#a-drawn-order-__order__)
+(`__order__ = "drawn"`), each batch in order and the batches in order
+after one another; a sorted one is refused, as is a hierarchy declared
+`layout="whole"`. *Nested columns, rules, foreign keys and composite keys
+are windows since 2.0; a hierarchy and a key into the spec's own rows
+since 2.1; a drawn order since 2.2.*
 
 A small batch costs little. The columns a window draws are filled many
 batches at a time, up to about 64 MiB, in parallel, and each batch is a
