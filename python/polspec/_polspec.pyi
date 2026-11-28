@@ -94,6 +94,31 @@ def distribution_params(name: str) -> list[tuple[str, float, bool]]:
 def distributions() -> list[str]:
     """Every distribution the engine can sample."""
 
+def drawn_float_slots(
+    lo: float, hi: float, seed: int, valid: int, first: int, count: int
+) -> pl.Series:
+    """Positions `first..first + count` of `valid` of a unique float column
+    over `[lo, hi]`, each at its own stratum's point (`Float64`)."""
+
+def drawn_from_table(
+    table: pl.Series, seed: int, valid: int, first: int, count: int
+) -> pl.Series:
+    """Positions `first..first + count` of `valid` drawn in order from a
+    sorted `table` of physical values: `Float64`, interpolated, or
+    `Int64` or `Int128`, stepped in whole units. The result has the table's dtype."""
+
+def drawn_indices(
+    seed: int, valid: int, first: int, count: int, size: int
+) -> pl.Series:
+    """Positions `first..first + count` of `valid` drawn in order, as
+    indices into a sorted table of `size` values (`UInt64`)."""
+
+def drawn_int_slots(
+    lo: int, hi: int, seed: int, valid: int, first: int, count: int
+) -> pl.Series:
+    """Positions `first..first + count` of `valid` of a unique column over
+    `lo..=hi`, physical, each in its own slot of the range (`Int128`)."""
+
 def kinds() -> list[str]:
     """Every column kind a `ColumnPlan` accepts."""
 
