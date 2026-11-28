@@ -103,7 +103,7 @@ def _resolve_bounded_categorical(name: str, spec: ColSpec, frame_seed: int) -> C
     return dataclasses.replace(spec, choices=domain, string_length=None)
 
 
-def _resolve_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
+def resolve_numeric_bounds(spec: ColSpec) -> tuple[float | int, float | int]:
     """Returns the (min, max) an int/float/temporal ColSpec generates within.
 
     Each end is the user's own bound where they gave one, and this dtype's
@@ -258,7 +258,7 @@ def _domain(spec: ColSpec) -> pl.Series | None:
         # Distinct singles can round to the same half, so a unique half is
         # drawn from the halves themselves: the finite set between the
         # bounds, sampled without replacement like any other domain.
-        lo, hi = _resolve_numeric_bounds(spec)
+        lo, hi = resolve_numeric_bounds(spec)
         halves = _every_float16()
         return halves.filter(halves.is_between(lo, hi))
     if spec.choices is None and spec.format is None and not isinstance(dtype, pl.Enum):
@@ -296,7 +296,7 @@ def joint_space(spec: ColSpec) -> tuple[int, Callable[[pl.Series], pl.Series]] |
     kind = column_kind(dtype)
     if kind not in ("int", "temporal") or dtype in (pl.Int128, pl.UInt128):
         return None
-    lo, hi = (int(v) for v in _resolve_numeric_bounds(spec))
+    lo, hi = (int(v) for v in resolve_numeric_bounds(spec))
     size = hi - lo + 1
     if lo >= 0 and size <= 2**64 - 1:
 
@@ -330,7 +330,7 @@ def _extended_weights(listed: int, shares: tuple[float, ...]) -> list[float]:
     return [rest / listed] * listed + list(shares)
 
 
-def _overlays_extras(spec: ColSpec) -> bool:
+def overlays_extras(spec: ColSpec) -> bool:
     """Whether `spec` is a template format with extra values, which the
     engine cannot draw in one column: the template's values, and a pick of
     which rows take an extra instead."""
@@ -400,7 +400,7 @@ def _numeric_plan(name: str, spec: ColSpec, kind: str, options: dict) -> ColumnP
         or spec.distribution is None
         or spec.distribution == "uniform"
     ):
-        options["min"], options["max"] = _resolve_numeric_bounds(spec)
+        options["min"], options["max"] = resolve_numeric_bounds(spec)
     elif spec.dtype == pl.Float16:
         # A distribution with no bounds keeps its own shape, but not past
         # what a half holds: beyond it the cast is an infinity.
@@ -491,7 +491,7 @@ _ENGINE_NATIVE: frozenset = frozenset(
 )
 
 
-def _decimal_from_physical(raw: pl.Series, dtype: pl.Decimal) -> pl.Series:
+def as_decimal(raw: pl.Series, dtype: pl.Decimal) -> pl.Series:
     """An integer column as the Decimal it is the physical form of.
 
     Polars casts an integer to a Decimal *value*, not to its physical, so
@@ -511,7 +511,7 @@ def _finish(raw: pl.Series, spec: ColSpec, domain: pl.Series | None) -> pl.Serie
     if spec.dtype in _ENGINE_NATIVE:
         return raw
     if isinstance(spec.dtype, pl.Decimal):
-        return _decimal_from_physical(raw, spec.dtype)
+        return as_decimal(raw, spec.dtype)
     # Temporal from its physical integer; Binary from strings; a Categorical
     # cast to spec.dtype itself so a named pl.Categories() registry survives.
     return raw.cast(spec.dtype)
@@ -543,7 +543,7 @@ def _coverage_values(spec: ColSpec, seed: int) -> list | None:
     elif kind == "bool":
         values = [True, False]
     elif kind in ("int", "temporal", "decimal"):
-        lo, hi = (int(v) for v in _resolve_numeric_bounds(spec))
+        lo, hi = (int(v) for v in resolve_numeric_bounds(spec))
         if lo < 0:
             values.append(rng.randint(lo, min(hi, -1)))
         if lo <= 0 <= hi:
@@ -555,7 +555,7 @@ def _coverage_values(spec: ColSpec, seed: int) -> list | None:
             scale = spec.dtype.scale
             values = [decimal.Decimal(v).scaleb(-scale) for v in values]
     elif kind == "float":
-        lo, hi = (float(v) for v in _resolve_numeric_bounds(spec))
+        lo, hi = (float(v) for v in resolve_numeric_bounds(spec))
         if lo < 0:
             upper = hi if hi < 0 else (lo / 2.0 if lo > -2e-9 else -1e-9)
             values.append(rng.uniform(lo, upper))
@@ -593,7 +593,7 @@ def generate_random(
         n_: s
         for n_, s in columns.items()
         if column_kind(s.dtype) not in ("list", "struct", "map", "null")
-        and not _overlays_extras(s)
+        and not overlays_extras(s)
     }
     plans: list[ColumnPlan] = []
     domains: dict[str, pl.Series | None] = {}
@@ -637,7 +637,7 @@ def readable_at(spec: ColSpec) -> bool:
         and not spec.nullable
         and not spec.nan_probability
         and column_kind(spec.dtype) not in ("list", "struct", "map", "null")
-        and not _overlays_extras(spec)
+        and not overlays_extras(spec)
     )
 
 
@@ -690,7 +690,7 @@ def _generate_column(
         return _generate_map_column(name, spec, n, seed, row_offset)
     if kind == "struct":
         return _generate_struct_column(name, spec, n, seed, row_offset)
-    if _overlays_extras(spec):
+    if overlays_extras(spec):
         return _generate_with_extras(name, spec, n, seed, row_offset)
     plan, domain = plan_column(name, spec)
     return _with_nans(

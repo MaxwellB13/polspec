@@ -348,7 +348,7 @@ pub fn composite_window(
 
 /// The splitmix64 finaliser: every input bit reaches every output bit.
 #[inline]
-fn mix(mut z: u64) -> u64 {
+pub(crate) fn mix(mut z: u64) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
     z ^ (z >> 31)

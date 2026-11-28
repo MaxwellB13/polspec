@@ -90,6 +90,51 @@ def permuted_at(domain: int, seed: int, indices: pl.Series) -> pl.Series:
         raise GenerationError(str(exc)) from exc
 
 
+def drawn_indices(
+    seed: int, valid: int, first: int, count: int, size: int
+) -> pl.Series:
+    """Positions `[first, first + count)` of `valid` drawn in order, as
+    indices into a sorted table of `size` values, each an equal share."""
+    try:
+        return _extension().drawn_indices(seed, valid, first, count, size)
+    except ValueError as exc:
+        raise GenerationError(str(exc)) from exc
+
+
+def drawn_from_table(
+    table: pl.Series, seed: int, valid: int, first: int, count: int
+) -> pl.Series:
+    """Positions `[first, first + count)` of `valid` drawn in order from a
+    sorted table of physical values: `Float64`, interpolated, or `Int64`
+    or `Int128`, stepped in whole units."""
+    try:
+        return _extension().drawn_from_table(table, seed, valid, first, count)
+    except ValueError as exc:
+        raise GenerationError(str(exc)) from exc
+
+
+def drawn_int_slots(
+    lo: int, hi: int, seed: int, valid: int, first: int, count: int
+) -> pl.Series:
+    """Positions `[first, first + count)` of `valid` of a unique column over
+    `lo..=hi`, physical, each in its own slot (`Int128`)."""
+    try:
+        return _extension().drawn_int_slots(lo, hi, seed, valid, first, count)
+    except ValueError as exc:
+        raise GenerationError(str(exc)) from exc
+
+
+def drawn_float_slots(
+    lo: float, hi: float, seed: int, valid: int, first: int, count: int
+) -> pl.Series:
+    """Positions `[first, first + count)` of `valid` of a unique float column
+    over `[lo, hi]`, each at its own stratum's point (`Float64`)."""
+    try:
+        return _extension().drawn_float_slots(lo, hi, seed, valid, first, count)
+    except ValueError as exc:
+        raise GenerationError(str(exc)) from exc
+
+
 def forest_parents(
     seed: int, slots: pl.Series, sizes: list[int], roots: int
 ) -> pl.Series:

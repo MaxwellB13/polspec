@@ -6,7 +6,8 @@ physical form. What that means for generated data is tested through
 (`src/plan.rs`). What is left here has no public face: the stub matches the
 module, both sides agree on the distributions, the package imports without
 the extension, the engine's complaints arrive as `GenerationError`, and the
-builders the engine exports for lists, decimals and permutations.
+builders the engine exports for lists, decimals and permutations, and the
+drawn order, which has no public face until a spec can ask for one.
 """
 
 import ast
@@ -18,6 +19,7 @@ import polars as pl
 import pytest
 from polspec import ColSpec, FrameSpec, GenerationError, _ffi
 from polspec.distributions import DISTRIBUTIONS
+from polspec.generation.order import TABLE_ROWS, drawn_values, why_not_drawn
 
 # ---------------------------------------------------------------------------
 # ColumnPlan
@@ -143,3 +145,133 @@ def test_a_decimal_is_built_from_its_physical_integers():
     assert decimal.cast(pl.String).to_list() == ["123.45", None, "-0.05"]
     with pytest.raises(GenerationError, match="precision"):
         _ffi.decimal_from_physical(raw, 3, 2)
+
+
+# ---------------------------------------------------------------------------
+# A drawn order (2.2): a column in order, each row from its position
+# ---------------------------------------------------------------------------
+
+_DRAWN = {
+    "int": ColSpec(pl.Int32, bounds=(0, 100)),
+    "normal": ColSpec(pl.Float64, distribution="normal"),
+    "gamma32": ColSpec(pl.Float32, distribution="gamma"),
+    "when": ColSpec(
+        pl.Datetime("us"),
+        bounds=(dt.datetime(2024, 1, 1), dt.datetime(2025, 1, 1)),
+        nullable=True,
+        null_probability=0.05,
+    ),
+    "day": ColSpec(pl.Date),
+    "wait": ColSpec(pl.Duration("ms")),
+    "clock": ColSpec(pl.Time),
+    "amount": ColSpec(pl.Decimal(12, 2), bounds=(0, 1000)),
+    "wide": ColSpec(pl.UInt64, bounds=(0, 2**64 - 1)),
+    "flag": ColSpec(pl.Boolean, nullable=True),
+    "status": ColSpec(pl.String, choices=["open", "closed", "held"]),
+    "level": ColSpec(pl.Enum(["high", "mid", "low"])),
+    "id": ColSpec(pl.Int64, unique=True, bounds=(0, 10**15)),
+    "id128": ColSpec(pl.Int128, unique=True),
+    "stamp": ColSpec(pl.Datetime("ns"), unique=True),
+    "share": ColSpec(pl.Float64, unique=True, bounds=(0, 1)),
+}
+
+
+@pytest.mark.parametrize("descending", [False, True])
+@pytest.mark.parametrize("n", [1_000, 70_000 * 2])  # within the table, and past it
+@pytest.mark.parametrize("name", list(_DRAWN))
+def test_a_drawn_column_is_in_order_and_any_window_is_the_frames(name, n, descending):
+    spec = _DRAWN[name]
+    whole = drawn_values(
+        name, spec, 7, frame_rows=n, row_offset=0, rows=n, descending=descending
+    )
+    assert whole.dtype == spec.dtype and whole.len() == n and whole.name == name
+    windows = pl.concat(
+        drawn_values(
+            name,
+            spec,
+            7,
+            frame_rows=n,
+            row_offset=offset,
+            rows=min(4_999, n - offset),
+            descending=descending,
+        )
+        for offset in range(0, n, 4_999)
+    )
+    assert windows.equals(whole)
+    values = whole.drop_nulls()
+    # Nulls last, as a sort puts them, whichever way the values run.
+    assert whole.is_null().arg_true().to_list() == list(range(values.len(), n))
+    assert values.equals(values.sort(descending=descending))
+    if spec.unique:
+        assert values.n_unique() == values.len()
+
+
+def test_a_frame_within_the_table_draws_its_own_values_in_order():
+    """Up to `TABLE_ROWS` valid rows, the column is the values the engine
+    draws for it, sorted: a sample, not a stratified one."""
+    from polspec.generation.engine import generate_random
+
+    spec = ColSpec(pl.Float64, distribution="lognormal")
+    drawn = drawn_values(
+        "x", spec, 3, frame_rows=TABLE_ROWS, row_offset=0, rows=TABLE_ROWS
+    )
+    assert drawn.equals(generate_random({"x": spec}, TABLE_ROWS, 3)["x"].sort())
+
+
+@pytest.mark.parametrize(
+    ("distribution", "params"),
+    [
+        ("normal", None),
+        ("lognormal", None),
+        ("exponential", None),
+        ("gamma", {"shape": 2.0}),
+        ("beta", {"alpha": 2.0, "beta": 5.0}),
+    ],
+)
+def test_a_drawn_column_holds_its_distribution(distribution, params):
+    """Past the table, every percentile is within 1% of the range of the
+    sorted column's."""
+    from polspec.generation.engine import generate_random
+
+    n = 400_000
+    spec = ColSpec(pl.Float64, distribution=distribution, distribution_params=params)
+    reference = generate_random({"x": spec}, n, 5)["x"]
+    drawn = drawn_values("x", spec, 5, frame_rows=n, row_offset=0, rows=n)
+    span = reference.max() - reference.min()
+    for q in (0.01, 0.1, 0.25, 0.5, 0.75, 0.9, 0.99):
+        assert abs(reference.quantile(q) - drawn.quantile(q)) < 0.01 * span, q
+
+
+def test_a_drawn_finite_column_holds_its_weights():
+    spec = ColSpec(pl.String, choices={"a": 0.6, "b": 0.3, "c": 0.1})
+    n = 300_000
+    drawn = drawn_values("x", spec, 2, frame_rows=n, row_offset=0, rows=n)
+    shares = dict(drawn.value_counts(normalize=True).iter_rows())
+    for value, weight in zip("abc", (0.6, 0.3, 0.1), strict=True):
+        assert abs(shares[value] - weight) < 0.01
+
+
+@pytest.mark.parametrize(
+    ("spec", "reason"),
+    [
+        (ColSpec(pl.String), "free-text"),
+        (ColSpec(pl.List(pl.Int64)), "no order of its own"),
+        (ColSpec(pl.Float64, nan_probability=0.1), "nan_probability"),
+        (ColSpec(pl.Boolean, unique=True, nullable=True), "unique column"),
+        (ColSpec(pl.String, choices=["a", "b"], unique=True), "unique column"),
+    ],
+)
+def test_a_column_a_drawn_order_cannot_hold_is_named(spec, reason):
+    assert reason in why_not_drawn(spec)
+    with pytest.raises(GenerationError, match="'x' cannot be drawn in order"):
+        drawn_values("x", spec, 1, frame_rows=10, row_offset=0, rows=10)
+
+
+def test_a_unique_column_too_small_for_the_frame_is_refused():
+    spec = ColSpec(pl.Int32, unique=True, bounds=(0, 99_999))
+    with pytest.raises(GenerationError, match="fewer than"):
+        drawn_values("x", spec, 1, frame_rows=100_001, row_offset=0, rows=10)
+    assert (
+        drawn_values("x", spec, 1, frame_rows=100_000, row_offset=0, rows=10).len()
+        == 10
+    )

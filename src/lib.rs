@@ -16,6 +16,7 @@
 //!   foreign key's pick of parent rows.
 //! - `assemble.rs` -- a `List` column from its lengths and elements, and a
 //!   `Decimal` from its physical integers.
+//! - `order.rs` -- a column drawn in order, each row from its position.
 
 mod alias;
 mod assemble;
@@ -24,6 +25,7 @@ mod dist;
 mod format;
 mod math;
 mod math_tables;
+mod order;
 mod pattern;
 mod permute;
 mod plan;
@@ -151,6 +153,115 @@ fn unique_values_at(
         })
         .map_err(PyValueError::new_err)?;
     Ok(PySeries(series))
+}
+
+/// Positions `first..first + count` of `valid` drawn in order, as indices
+/// into a sorted table of `size` values (`UInt64`): a finite domain's
+/// values in order, gathered from its table.
+#[pyfunction]
+fn drawn_indices(
+    py: Python<'_>,
+    seed: u64,
+    valid: u64,
+    first: u64,
+    count: u64,
+    size: usize,
+) -> PyResult<PySeries> {
+    let values = py
+        .detach(|| order::indices(seed, valid, first, count, size))
+        .map_err(PyValueError::new_err)?;
+    let series = UInt64Chunked::from_vec(PlSmallStr::from_static("index"), values);
+    Ok(PySeries(series.into_series()))
+}
+
+/// Positions `first..first + count` of `valid` drawn in order from a sorted
+/// `table` of physical values: `Float64`, interpolated, or `Int64` or
+/// `Int128`, stepped in whole units. The result has the table's dtype.
+#[pyfunction]
+fn drawn_from_table(
+    py: Python<'_>,
+    table: PySeries,
+    seed: u64,
+    valid: u64,
+    first: u64,
+    count: u64,
+) -> PyResult<PySeries> {
+    if table.0.null_count() > 0 {
+        return Err(PyValueError::new_err("a drawn order's table has no nulls"));
+    }
+    let name = PlSmallStr::from_static("drawn");
+    match table.0.dtype() {
+        DataType::Float64 => {
+            let values: Vec<f64> = table.0.f64().map_err(to_py)?.into_no_null_iter().collect();
+            let drawn = py
+                .detach(|| order::floats(&values, seed, valid, first, count))
+                .map_err(PyValueError::new_err)?;
+            Ok(PySeries(
+                Float64Chunked::from_vec(name, drawn).into_series(),
+            ))
+        }
+        DataType::Int64 => {
+            let values: Vec<i64> = table.0.i64().map_err(to_py)?.into_no_null_iter().collect();
+            let drawn = py
+                .detach(|| order::integers(&values, seed, valid, first, count))
+                .map_err(PyValueError::new_err)?;
+            Ok(PySeries(Int64Chunked::from_vec(name, drawn).into_series()))
+        }
+        DataType::Int128 => {
+            let values: Vec<i128> = table.0.i128().map_err(to_py)?.into_no_null_iter().collect();
+            let drawn = py
+                .detach(|| order::integers(&values, seed, valid, first, count))
+                .map_err(PyValueError::new_err)?;
+            Ok(PySeries(Int128Chunked::from_vec(name, drawn).into_series()))
+        }
+        other => Err(PyValueError::new_err(format!(
+            "a drawn order's table is Float64, Int64 or Int128, not {other}"
+        ))),
+    }
+}
+
+/// Positions `first..first + count` of `valid` of a unique column over
+/// `lo..=hi`, physical, each in its own slot of the range (`Int128`).
+#[pyfunction]
+fn drawn_int_slots(
+    py: Python<'_>,
+    lo: i128,
+    hi: i128,
+    seed: u64,
+    valid: u64,
+    first: u64,
+    count: u64,
+) -> PyResult<PySeries> {
+    let drawn = py
+        .detach(|| order::int_slots(lo, hi, seed, valid, first, count))
+        .map_err(PyValueError::new_err)?;
+    let name = PlSmallStr::from_static("drawn");
+    Ok(PySeries(Int128Chunked::from_vec(name, drawn).into_series()))
+}
+
+/// Positions `first..first + count` of `valid` of a unique float column
+/// over `[lo, hi]`, each at its own stratum's point (`Float64`).
+#[pyfunction]
+fn drawn_float_slots(
+    py: Python<'_>,
+    lo: f64,
+    hi: f64,
+    seed: u64,
+    valid: u64,
+    first: u64,
+    count: u64,
+) -> PyResult<PySeries> {
+    let drawn = py
+        .detach(|| order::float_slots(lo, hi, seed, valid, first, count))
+        .map_err(PyValueError::new_err)?;
+    let name = PlSmallStr::from_static("drawn");
+    Ok(PySeries(
+        Float64Chunked::from_vec(name, drawn).into_series(),
+    ))
+}
+
+fn to_py(error: PolarsError) -> PyErr {
+    PyValueError::new_err(error.to_string())
 }
 
 /// A Series of row positions as `u64`s, refusing a null or a negative one.
@@ -292,6 +403,10 @@ fn _polspec(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(generate_dataframe, m)?)?;
     m.add_function(wrap_pyfunction!(distribution_params, m)?)?;
     m.add_function(wrap_pyfunction!(distributions, m)?)?;
+    m.add_function(wrap_pyfunction!(drawn_float_slots, m)?)?;
+    m.add_function(wrap_pyfunction!(drawn_from_table, m)?)?;
+    m.add_function(wrap_pyfunction!(drawn_indices, m)?)?;
+    m.add_function(wrap_pyfunction!(drawn_int_slots, m)?)?;
     m.add_function(wrap_pyfunction!(kinds, m)?)?;
     m.add_function(wrap_pyfunction!(pattern_status, m)?)?;
     m.add_function(wrap_pyfunction!(permuted_indices, m)?)?;
