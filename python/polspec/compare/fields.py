@@ -1168,6 +1168,27 @@ def _compare_order(old: TableSpec, new: TableSpec) -> list[DriftFinding]:
     )
 
 
+def _compare_order_given(old: TableSpec, new: TableSpec) -> list[DriftFinding]:
+    """How generation gives the rows their order: compatible, since the
+    order they must have is `order_by`'s, but a seed's rows change."""
+    if old.order == new.order:
+        return []
+    return [
+        DriftFinding(
+            code="field_changed",
+            severity="compatible",
+            key="order",
+            message=(
+                f"order changed from {old.order!r} to {new.order!r}: the rows "
+                "keep the order order_by declares, but a seed generates "
+                "different rows"
+            ),
+            columns=(),
+            details={"field": "order", "old": old.order, "new": new.order},
+        )
+    ]
+
+
 def _compare_description(old: TableSpec, new: TableSpec) -> list[DriftFinding]:
     if old.description == new.description:
         return []
@@ -1231,6 +1252,7 @@ TABLE_COMPARATORS: dict[str, TableComparator] = {
     "hierarchy": _compare_hierarchy,
     "order_by": _compare_order,
     "descending": _table_ignore,  # compared with `order_by`, as one claim
+    "order": _compare_order_given,
 }
 
 

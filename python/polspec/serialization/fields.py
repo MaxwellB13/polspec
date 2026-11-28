@@ -672,6 +672,10 @@ TABLESPEC_FIELDS: tuple[Field, ...] = (
         # One flag for every column when they agree, as `sort` takes it.
         to_data=lambda flags: flags[0] if len(set(flags)) == 1 else list(flags),
     ),
+    # An added optional key on version 4 (2.2): written only for a drawn
+    # order, so a 2.1 file reads, and a file that sets it is refused by 2.1
+    # by name.
+    Field("order", omit_if=lambda v, spec: v == "sorted"),
     # An added optional key on version 4: a file without it allows any number
     # of rows, which is what an older reader assumes of it.
     Field(

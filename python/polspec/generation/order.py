@@ -47,11 +47,11 @@ from polspec.errors import GenerationError
 from polspec.generation.engine import (
     as_decimal,
     generate_random,
-    overlays_extras,
     resolve_numeric_bounds,
 )
 from polspec.generation.seeds import pass_seed
 from polspec.spec import ColSpec, column_kind
+from polspec.tablespec import why_not_drawn
 
 # How many values a column's table holds: 512 KiB of 8-byte values, drawn
 # and sorted in about a millisecond, and fine enough that a drawn column's
@@ -59,27 +59,6 @@ from polspec.spec import ColSpec, column_kind
 TABLE_ROWS = 65_536
 
 _NUMERIC = ("int", "float", "temporal", "decimal")
-_FINITE_KINDS = ("bool", "enum", "categorical")
-
-
-def why_not_drawn(spec: ColSpec) -> str | None:
-    """Why a drawn order cannot hold `spec`'s column, or None if it can."""
-    kind = column_kind(spec.dtype)
-    if kind in ("list", "struct", "map", "null"):
-        return f"a {spec.dtype} column has no order of its own to draw"
-    if spec.nan_probability:
-        return "it declares nan_probability, and NaNs sort apart from the values"
-    if overlays_extras(spec):
-        return "its format draws extras beside its values"
-    finite = spec.choices is not None or kind in _FINITE_KINDS
-    if spec.unique and (finite or kind not in _NUMERIC):
-        return (
-            "a unique column is drawn in order only as a number, a date or a "
-            "time, from its own slot of the range"
-        )
-    if not finite and kind in ("string", "binary"):
-        return "a free-text value's order is not its draw's: declare choices"
-    return None
 
 
 def drawn_values(
@@ -136,19 +115,15 @@ def _ascending(
             return drawn.cast(spec.dtype).alias(name)
         drawn = drawn_int_slots(int(lo), int(hi), key, valid, first, count)
         return _from_physical(drawn, spec).alias(name)
-    table = _table(name, spec, seed, TABLE_ROWS)
     if spec.choices is not None or kind not in _NUMERIC:
+        table = _table(name, spec, seed, TABLE_ROWS)
         at = drawn_indices(key, valid, first, count, table.len())
         return table.gather(at).alias(name)
+    drawn = drawn_from_table(
+        _physical_table(name, spec, seed), key, valid, first, count
+    )
     if kind == "float":
-        drawn = drawn_from_table(table.cast(pl.Float64), key, valid, first, count)
         return drawn.cast(spec.dtype).alias(name)
-    physical = table.to_physical()
-    # Int64 holds every physical value but a 128-bit integer's, a UInt64's
-    # past 2^63 and a Decimal's, which take the wide path.
-    wide = physical.dtype in (pl.Int128, pl.UInt128, pl.UInt64)
-    physical = physical.cast(pl.Int128 if wide else pl.Int64)
-    drawn = drawn_from_table(physical, key, valid, first, count)
     return _from_physical(drawn, spec).alias(name)
 
 
@@ -170,6 +145,28 @@ def _table(name: str, spec: ColSpec, seed: int, size: int) -> pl.Series:
     table = generate_random({name: plain}, size, seed)[name].sort()
     _TABLES[key] = (spec, table)
     return table
+
+
+def _physical_table(name: str, spec: ColSpec, seed: int) -> pl.Series:
+    """The table as the engine's order step reads it, in one chunk: Float64
+    for a float column, and physical integers otherwise -- Int64, which
+    holds every physical value but a 128-bit integer's, a UInt64's past
+    2^63 and a Decimal's, which are Int128. Kept beside the table, so a
+    stream converts it once."""
+    key = (id(spec), name, seed, -1)
+    hit = _TABLES.get(key)
+    if hit is not None and hit[0] is spec:
+        return hit[1]
+    table = _table(name, spec, seed, TABLE_ROWS)
+    if column_kind(spec.dtype) == "float":
+        physical = table.cast(pl.Float64)
+    else:
+        physical = table.to_physical()
+        wide = physical.dtype in (pl.Int128, pl.UInt128, pl.UInt64)
+        physical = physical.cast(pl.Int128 if wide else pl.Int64)
+    physical = physical.rechunk()
+    _TABLES[key] = (spec, physical)
+    return physical
 
 
 def _from_physical(physical: pl.Series, spec: ColSpec) -> pl.Series:

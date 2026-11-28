@@ -110,14 +110,16 @@ def _pop_hierarchy(ns: dict[str, Any]) -> Hierarchy | None:
     return None
 
 
-def _pop_order(ns: dict[str, Any]) -> tuple[Any, Any] | None:
-    """`__order_by__` and `__descending__`, or None when the body declares
-    no order of its own."""
+def _pop_order(ns: dict[str, Any]) -> tuple[Any, Any, Any] | None:
+    """`__order_by__`, `__descending__` and `__order__`, or None when the
+    body declares no order of its own. `__order__` alone keeps the order a
+    parent declared, and says how it is given: `__order_by__` is then None."""
+    how = ns.pop("__order__", None)
     if "__order_by__" not in ns:
         if "__descending__" in ns:
             raise SpecError("__descending__ needs an __order_by__ to apply to")
-        return None
-    return ns.pop("__order_by__"), ns.pop("__descending__", False)
+        return None if how is None else (None, None, how)
+    return ns.pop("__order_by__"), ns.pop("__descending__", False), how
 
 
 # `__rows__` left out of a class body, as opposed to `__rows__ = None`, which
@@ -148,6 +150,7 @@ DECLARATION_DUNDERS = (
     "__hierarchy__",
     "__order_by__",
     "__descending__",
+    "__order__",
     "__description__",
     "__rows__",
 )
@@ -236,7 +239,7 @@ class _Body:
     foreign_keys: list[ForeignKey]
     unique_together: Any
     hierarchy: Hierarchy | None
-    order: tuple[Any, Any] | None
+    order: tuple[Any, Any, Any] | None
     description: str | None
     rows: Any
 
@@ -406,13 +409,22 @@ def _build_table_spec(
         hierarchy = next(
             (p.spec.hierarchy for p in parents if p.spec.hierarchy is not None), None
         )
+    inherited = next(
+        (
+            (p.spec.order_by, p.spec.descending, p.spec.order)
+            for p in parents
+            if p.spec.order_by
+        ),
+        ((), False, "sorted"),
+    )
     order = body.order
     if order is None:
-        order = next(
-            ((p.spec.order_by, p.spec.descending) for p in parents if p.spec.order_by),
-            None,
-        )
-    order_by, descending = order if order is not None else ((), False)
+        order = inherited
+    elif order[0] is None:
+        # `__order__` alone: the parent's order, given the way it says.
+        order = (inherited[0], inherited[1], order[2])
+    order_by, descending, how = order
+    how = how if how is not None else "sorted"
     rows = body.rows
     if rows is _INHERITED:
         rows = next((p.spec.rows for p in parents if p.spec.rows is not None), None)
@@ -428,6 +440,7 @@ def _build_table_spec(
         hierarchy=hierarchy,
         order_by=order_by,
         descending=descending,
+        order=how,
     )
     return spec, merged.attr_to_col
 

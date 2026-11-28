@@ -119,6 +119,11 @@ def why_unkeepable(
             "a foreign key into its own rows would point at rows that taking "
             "out the failures removes"
         )
+    if spec.order == "drawn":
+        return (
+            "its order is drawn over exactly n rows, and keeping checks reads "
+            "rows past them, which have no place in it"
+        )
     if sequence_pins:
         return (
             "fixed= gives a column all n of its values, in order, and taking "

@@ -189,28 +189,33 @@ fn drawn_from_table(
     if table.0.null_count() > 0 {
         return Err(PyValueError::new_err("a drawn order's table has no nulls"));
     }
+    // Read in place: a stream hands every batch the same table, and copying
+    // it would cost each batch more than drawing its rows.
     let name = PlSmallStr::from_static("drawn");
     match table.0.dtype() {
         DataType::Float64 => {
-            let values: Vec<f64> = table.0.f64().map_err(to_py)?.into_no_null_iter().collect();
+            let ca = table.0.f64().map_err(to_py)?.rechunk();
+            let values = ca.cont_slice().map_err(to_py)?;
             let drawn = py
-                .detach(|| order::floats(&values, seed, valid, first, count))
+                .detach(|| order::floats(values, seed, valid, first, count))
                 .map_err(PyValueError::new_err)?;
             Ok(PySeries(
                 Float64Chunked::from_vec(name, drawn).into_series(),
             ))
         }
         DataType::Int64 => {
-            let values: Vec<i64> = table.0.i64().map_err(to_py)?.into_no_null_iter().collect();
+            let ca = table.0.i64().map_err(to_py)?.rechunk();
+            let values = ca.cont_slice().map_err(to_py)?;
             let drawn = py
-                .detach(|| order::integers(&values, seed, valid, first, count))
+                .detach(|| order::integers(values, seed, valid, first, count))
                 .map_err(PyValueError::new_err)?;
             Ok(PySeries(Int64Chunked::from_vec(name, drawn).into_series()))
         }
         DataType::Int128 => {
-            let values: Vec<i128> = table.0.i128().map_err(to_py)?.into_no_null_iter().collect();
+            let ca = table.0.i128().map_err(to_py)?.rechunk();
+            let values = ca.cont_slice().map_err(to_py)?;
             let drawn = py
-                .detach(|| order::integers(&values, seed, valid, first, count))
+                .detach(|| order::integers(values, seed, valid, first, count))
                 .map_err(PyValueError::new_err)?;
             Ok(PySeries(Int128Chunked::from_vec(name, drawn).into_series()))
         }

@@ -44,6 +44,7 @@ from polspec.generation.keeping import (
 from polspec.generation.pipeline import (
     batch_stream,
     check_counts,
+    check_drawn_order,
     check_faults,
     check_method,
     checked_pins,
@@ -77,6 +78,10 @@ def needed_columns(spec: TableSpec, wanted: frozenset[str]) -> list[str]:
             if step.writes & needed and not (step.writes | step.reads) <= needed:
                 needed |= step.writes | step.reads
                 changed = True
+    if spec.order == "drawn" and spec.order_by[0] in needed:
+        # The first column is drawn in order only while the spec keeps its
+        # order, and a projection that drops any order column drops it.
+        needed |= set(spec.order_by)
     return [name for name in spec.columns if name in needed]
 
 
@@ -135,6 +140,7 @@ def scan(
     spec = as_table_spec(spec)
     require_columns(spec)
     requires_whole_frame(spec, "scan")
+    check_drawn_order(spec, method)
     check_counts(n, batch_size)
     check_faults(spec, cycles, self_references)
     check_method(method)

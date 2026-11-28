@@ -518,6 +518,35 @@ def test_what_a_drawn_spec_streams_it_validates(spec, n, seed, batch_size):
     validate(spec, streamed)
 
 
+@settings(
+    SETTINGS,
+    suppress_health_check=[
+        *SETTINGS.suppress_health_check,
+        HealthCheck.filter_too_much,
+    ],
+)
+@given(spec=specs(), n=_ROWS, seed=_SEEDS, batch_size=st.integers(1, 50))
+def test_a_drawn_spec_given_a_drawn_order_streams_as_its_frame(
+    spec, n, seed, batch_size
+):
+    """2.2: an ordered spec whose order can be drawn validates, and every
+    batch is its whole frame's rows."""
+    assume(spec.order_by)
+    try:
+        drawn = spec.with_order_by(
+            *spec.order_by, descending=spec.descending, order="drawn"
+        )
+    except SpecError:
+        assume(False)
+        return
+    whole = generate(drawn, n, seed=seed, checks=False)
+    validate(drawn, whole)
+    parts = list(
+        generate_batches(drawn, n, batch_size=batch_size, seed=seed, checks=False)
+    )
+    assert (pl.concat(parts) if parts else whole.clear()).equals(whole)
+
+
 @SETTINGS
 @given(spec=specs(), seed=_SEEDS)
 def test_a_drawn_spec_survives_a_yaml_file(spec, seed):

@@ -143,6 +143,10 @@ TABLE_FIELDS: dict[type, dict[str, tuple[TableSpec, TableSpec]]] = {
             _BASE.with_order_by("a"),
             _BASE.with_order_by("a", descending=True),
         ),
+        "order": (
+            _BASE.with_order_by("a"),
+            _BASE.with_order_by("a", order="drawn"),
+        ),
     },
     Check: {
         "expr": (
