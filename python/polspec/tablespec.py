@@ -31,7 +31,7 @@ from polspec.errors import SpecError
 from polspec.expr import root_names
 from polspec.foreign_key import ForeignKey, default_fk_name
 from polspec.hierarchy import Hierarchy
-from polspec.pass_order import ordered_passes
+from polspec.pass_order import ordered_passes, passes_of
 from polspec.spec import ColSpec, check_description, column_kind, is_dtype
 
 if TYPE_CHECKING:
@@ -241,6 +241,53 @@ SPEC_VERBS = frozenset(
 )
 
 
+_FINITE_KINDS = ("bool", "enum", "categorical")
+_DRAWN_KINDS = ("int", "float", "temporal", "decimal")
+
+
+def why_not_drawn(spec: ColSpec) -> str | None:
+    """Why `order="drawn"` cannot draw `spec`'s column in order, or None if
+    it can: a column of numbers, dates or times, or of a finite set of
+    values -- a boolean, `choices`, an `Enum` or a `Categorical`."""
+    kind = column_kind(spec.dtype)
+    if kind in ("list", "struct", "map", "null"):
+        return f"a {spec.dtype} column has no order of its own to draw"
+    if spec.nan_probability:
+        return "it declares nan_probability, and NaNs sort apart from the values"
+    finite = spec.choices is not None or kind in _FINITE_KINDS
+    if spec.unique and (finite or kind not in _DRAWN_KINDS):
+        return (
+            "a unique column is drawn in order only as a number, a date or a "
+            "time, from its own slot of the range"
+        )
+    if not finite and kind in ("string", "binary"):
+        return "a free-text value's order is not its draw's: declare choices"
+    return None
+
+
+def why_order_not_drawn(spec: TableSpec) -> str | None:
+    """Why `order="drawn"` cannot give `spec`'s rows its `order_by`, or None
+    if it can -- whichever order `spec` itself declares."""
+    first = spec.order_by[0]
+    column = spec.columns[first]
+    reason = why_not_drawn(column)
+    if reason is not None:
+        return reason
+    if len(spec.order_by) > 1 and (not column.unique or column.nullable):
+        return (
+            f"rows that tie on it would have to be in order by "
+            f"{list(spec.order_by[1:])} too, and a drawn order holds only its "
+            "first column; declare it unique with no nulls, so no two rows "
+            "tie, or order by it alone"
+        )
+    writers = {c: p.label for p in passes_of(spec) for c in p.writes}
+    if first in writers:
+        return f"{writers[first]} writes it after the columns are drawn"
+    if any(first in group for group in spec.unique_together):
+        return "it is part of a composite unique key, whose members are drawn together"
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class TableSpec:
     """The columns and constraints of one table, as an immutable value.
@@ -278,6 +325,14 @@ class TableSpec:
     descending : bool | Sequence[bool]
         Whether each `order_by` column runs high to low: one bool for all of
         them, or one per column.
+    order : {"sorted", "drawn"}
+        How `generate()` gives the rows their order. `"sorted"`, the
+        default, sorts the finished frame. `"drawn"` draws the first
+        `order_by` column already in order, each row's value from its
+        position, so the streaming verbs can produce the frame batch by
+        batch. Only for a column of numbers, dates, times or a finite set
+        of values that no pass writes; with more than one `order_by`
+        column, the first must be unique. *Added in 2.2.*
 
     Notes
     -----
@@ -317,6 +372,7 @@ class TableSpec:
     # checkers.
     order_by: tuple[str, ...] = ()
     descending: tuple[bool, ...] = ()
+    order: Literal["sorted", "drawn"] = "sorted"
 
     if TYPE_CHECKING:
 
@@ -335,6 +391,7 @@ class TableSpec:
             hierarchy: Hierarchy | None = None,
             order_by: str | Sequence[str] = (),
             descending: bool | Sequence[bool] = False,
+            order: Literal["sorted", "drawn"] = "sorted",
         ) -> None: ...
 
     def __post_init__(self) -> None:
@@ -514,6 +571,27 @@ class TableSpec:
                     )
 
     def _validate_order(self) -> None:
+        self._validate_order_columns()
+        if self.order not in ("sorted", "drawn"):
+            raise SpecError(f"order must be 'sorted' or 'drawn', got {self.order!r}")
+        if self.order == "drawn":
+            self._validate_drawn_order()
+
+    def _validate_drawn_order(self) -> None:
+        if not self.order_by:
+            raise SpecError(
+                "order='drawn' draws the first order_by column in order, and "
+                "order_by is empty"
+            )
+        reason = why_order_not_drawn(self)
+        if reason is not None:
+            raise SpecError(
+                f"order='drawn' cannot draw {self.order_by[0]!r} in order: "
+                f"{reason}. Declare order='sorted', the default, to sort the "
+                "rows instead."
+            )
+
+    def _validate_order_columns(self) -> None:
         seen: set[str] = set()
         for col_name in self.order_by:
             if col_name not in self.columns:
@@ -759,6 +837,7 @@ class TableSpec:
             and self.hierarchy == other.hierarchy
             and self.order_by == other.order_by
             and self.descending == other.descending
+            and self.order == other.order
         )
 
     def __hash__(self) -> int:
@@ -916,11 +995,18 @@ class TableSpec:
         )
 
     def with_order_by(
-        self, *names: str, descending: bool | Sequence[bool] = False
+        self,
+        *names: str,
+        descending: bool | Sequence[bool] = False,
+        order: Literal["sorted", "drawn"] | None = None,
     ) -> TableSpec:
-        """A copy of this spec whose rows come sorted by `names`; with none,
-        a copy with no order."""
-        return dataclasses.replace(self, order_by=names, descending=descending)
+        """A copy of this spec whose rows come in order of `names`; with none,
+        a copy with no order. `order` is how they are given it (see
+        `TableSpec`), this spec's own when not given. *`order` added in 2.2.*"""
+        how = order if order is not None else (self.order if names else "sorted")
+        return dataclasses.replace(
+            self, order_by=names, descending=descending, order=how
+        )
 
     def _require_columns(self, names: Sequence[str], verb: str) -> None:
         require_named(self, names, verb)
@@ -952,7 +1038,7 @@ class TableSpec:
                 else self.hierarchy
             ),
             **(
-                {"order_by": (), "descending": ()}
+                {"order_by": (), "descending": (), "order": "sorted"}
                 if dropped & set(self.order_by)
                 else {}
             ),

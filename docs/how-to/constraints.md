@@ -339,9 +339,12 @@ ordered spec, as they refuse a hierarchy declared `layout="whole"` — write
 ```python
 Events.scan(10_000)
 # SpecError: Events declares order_by ['user_id', 'ts'], which scan cannot
-# produce: the rows' order is a property of the whole frame, and each batch
-# is generated on its own. Use generate() for an ordered frame, and write it out
-# yourself.
+# produce: the rows are sorted once the whole frame is generated, and each
+# batch is generated on its own. order='drawn' would stream it, but cannot
+# draw 'user_id' in order: rows that tie on it would have to be in order by
+# ['ts'] too, and a drawn order holds only its first column; declare it
+# unique with no nulls, so no two rows tie, or order by it alone. Use
+# generate() for an ordered frame, and write it out yourself.
 ```
 
 `profile()` declares an order it finds: the first column of single values,

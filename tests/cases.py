@@ -372,6 +372,22 @@ TABLE_CASES: dict[str, TableSpec] = {
         "X",
         {"c": ColSpec(pl.String, format="iso_country", extra_values={"UK (ISO)": 0.2})},
     ),
+    # An order drawn, not sorted (2.2): the first column in order from each
+    # row's position, nulls last, and a column beside it seeded as ever.
+    "drawn_order": TableSpec(
+        "O",
+        {
+            "ts": ColSpec(
+                pl.Datetime("us"),
+                bounds=(dt.datetime(2025, 1, 1), dt.datetime(2026, 1, 1)),
+                nullable=True,
+                null_probability=0.1,
+            ),
+            "user": ColSpec(pl.Int64, bounds=(1, 1_000)),
+        },
+        order_by="ts",
+        order="drawn",
+    ),
 }
 
 # Checks kept by filtering: about half the free rows fail, so a kept

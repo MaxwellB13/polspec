@@ -59,7 +59,9 @@ def joined(
     if how in ("semi", "anti"):
         # Fewer rows, so no count; and Polars promises no join keeps its
         # rows' order unless asked, so no order either.
-        kept = dataclasses.replace(left, rows=None, order_by=(), descending=())
+        kept = dataclasses.replace(
+            left, rows=None, order_by=(), descending=(), order="sorted"
+        )
         return kept if name is None else kept.with_name(name)
 
     layout = _join_layout(

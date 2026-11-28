@@ -131,7 +131,12 @@ where
         let (below, frac) = along(key, j, valid, table.len());
         let (lo, hi): (i128, i128) = (table[below].into(), table[(below + 1).min(last)].into());
         let gap = hi.abs_diff(lo);
-        let step = ((frac * gap as f64).floor() as u128).min(gap);
+        // A 128-bit integer and a float convert in software; nearly every
+        // gap fits 64 bits, which convert in one instruction.
+        let step = match u64::try_from(gap) {
+            Ok(narrow) => ((frac * narrow as f64) as u64).min(narrow) as u128,
+            Err(_) => ((frac * gap as f64) as u128).min(gap),
+        };
         // Between `lo` and `hi`, both of which are `T`s.
         T::try_from(lo.wrapping_add_unsigned(step)).unwrap_or(table[below])
     }))

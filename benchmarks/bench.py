@@ -250,6 +250,24 @@ class LinkedWhole(Linked):
     )
 
 
+class Ordered(FrameSpec):
+    """An event log in time order: a timestamp and four columns beside it,
+    sorted once the frame is drawn."""
+
+    TS = ColSpec(pl.Datetime("us"))
+    USER = ColSpec(pl.Int64, bounds=(1, 100_000))
+    AMOUNT = ColSpec(pl.Float64, distribution="lognormal")
+    KIND = ColSpec(pl.Enum(["view", "click", "buy"]))
+    NOTE = ColSpec(pl.String, string_length=(5, 12))
+    __order_by__ = "TS"
+
+
+class OrderedDrawn(Ordered):
+    """`Ordered` with its timestamp drawn in order (2.2), nothing sorted."""
+
+    __order__ = "drawn"
+
+
 class Composite(FrameSpec):
     """A composite key, whose repair resamples the rows that repeat."""
 
@@ -662,6 +680,14 @@ CASES: tuple[Case, ...] = (
         "regression",
         (1_000_000,),
         _batches_of(Linked, 10_000),
+    ),
+    Case("ordered_sorted", "regression", (100_000, 1_000_000), _polspec(Ordered)),
+    Case("ordered_drawn", "regression", (100_000, 1_000_000), _polspec(OrderedDrawn)),
+    Case(
+        "ordered_drawn_batches_10k",
+        "regression",
+        (1_000_000,),
+        _batches_of(OrderedDrawn, 10_000),
     ),
     Case(
         "hierarchy_validate_cyclic",

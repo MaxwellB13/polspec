@@ -480,6 +480,8 @@ def _python_class(spec: TableSpec) -> tuple[set[str], list[str]]:
             flags = spec.descending
             written = flags[0] if len(set(flags)) == 1 else list(flags)
             body.append(f"    __descending__ = {written!r}")
+        if spec.order != "sorted":
+            body.append(f"    __order__ = {spec.order!r}")
     if persistable_checks:
         checks = ", ".join(check_to_source(c) for c in persistable_checks)
         body.append(f"    __checks__ = [{checks}]")

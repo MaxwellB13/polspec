@@ -34,6 +34,7 @@ from polspec.generation.keeping import (
     kept_or_warned,
     resolve_checks,
 )
+from polspec.generation.order import drawn_values
 from polspec.generation.passes.derived import apply_derived
 from polspec.generation.passes.foreign_keys import (
     apply_foreign_key,
@@ -57,6 +58,7 @@ from polspec.tablespec import (
     as_table_spec,
     require_columns,
     resolve_references,
+    why_order_not_drawn,
 )
 
 __all__ = [
@@ -99,16 +101,42 @@ def requires_whole_frame(spec: TableSpec, verb: str) -> None:
             "layout='windowed', to stream it, or use generate() and write the "
             "frame out yourself."
         )
-    if spec.order_by:
-        # Rows in order across a stream would need every row before the
-        # first could be written -- and an order within each key, every row
-        # of that key, which batches scatter.
+    if spec.order_by and spec.order == "sorted":
+        # A sorted frame needs every row before the first can be written.
+        # A drawn order gives each row its place from its position.
+        reason = why_order_not_drawn(spec)
+        if reason is None:
+            way = (
+                "Declare order='drawn' to draw the order column in order, so "
+                "each batch is the rows generate() makes there."
+            )
+        else:
+            way = (
+                f"order='drawn' would stream it, but cannot draw "
+                f"{spec.order_by[0]!r} in order: {reason}. Use generate() for "
+                "an ordered frame, and write it out yourself."
+            )
         raise SpecError(
             f"{spec.name} declares order_by {list(spec.order_by)}, which {verb} "
-            "cannot produce: the rows' order is a property of the whole frame, "
-            "and each batch is generated on its own. Use generate() for an "
-            "ordered frame, and write it out yourself."
+            "cannot produce: the rows are sorted once the whole frame is "
+            f"generated, and each batch is generated on its own. {way}"
         )
+
+
+def check_drawn_order(spec: TableSpec, method: str) -> None:
+    """A drawn order lays its column out over `n` rows, which a coverage set
+    does not have."""
+    if spec.order == "drawn" and method == "cartesian":
+        raise SpecError(
+            f"{spec.name} declares order='drawn', which method='cartesian' "
+            "cannot give: its row count is the coverage it needs, not n. Use "
+            "the default method, or order='sorted'."
+        )
+
+
+def drawn_column(spec: TableSpec) -> str | None:
+    """The column a drawn order draws in order, or None."""
+    return spec.order_by[0] if spec.order == "drawn" else None
 
 
 # The integer dtypes whose undeclared range is the default, not the dtype's.
@@ -261,7 +289,9 @@ def generate(
 
     A spec declaring `order_by` has its rows sorted by those columns last,
     after every pass: each value keeps its row, so every claim the rows make
-    about their own columns still holds. Nulls come last.
+    about their own columns still holds. Nulls come last. With
+    `order="drawn"` the first order column is drawn in order instead, each
+    row's value from its position, and nothing is sorted.
 
     `fixed` pins columns to values given: `{"status": ["open", "closed"],
     "region": "EU"}`, a scalar for every row or a sequence or Series of
@@ -310,6 +340,7 @@ def generate(
     check_faults(spec, cycles, self_references)
     _check_size(spec, n, max_bytes)
     check_method(method)
+    check_drawn_order(spec, method)
     checked = checked_pins(spec, fixed, n, method) if fixed else None
     keeping = resolve_checks(
         spec,
@@ -423,6 +454,12 @@ def checked_pins(
                 "the columns are drawn, and would overwrite the pin or break "
                 "for it. Pin a column it reads instead."
             )
+        if name == drawn_column(spec):
+            raise GenerationError(
+                f"fixed= cannot pin {name!r}: {spec.name} draws it in order "
+                "(order='drawn'), and a pin would break the order. Pin another "
+                "column, or declare order='sorted'."
+            )
         declared = spec.columns[name]
         dtype = declared.dtype
         if (
@@ -481,8 +518,9 @@ def _pin_values(
 def ordered(frame: pl.DataFrame, spec: TableSpec) -> pl.DataFrame:
     """`frame`'s rows sorted as `spec.order_by` declares: whole rows, so
     every value stays beside the others in its row. Stable, so rows that
-    tie keep the order they were generated in."""
-    if not spec.order_by:
+    tie keep the order they were generated in. A drawn order is in order
+    already."""
+    if not spec.order_by or spec.order == "drawn":
         return frame
     return frame.sort(
         frames.columns(spec.order_by),
@@ -585,7 +623,13 @@ def _window(
     elif method == "cartesian":
         df = generate_cartesian(columns, n, frame_seed)
     else:
-        df = generate_random(columns, n, frame_seed, row_offset)
+        df = _drawn_columns(
+            spec,
+            n,
+            frame_seed,
+            row_offset,
+            frame_rows=frame_rows if frame_rows is not None else n,
+        )
     if pins:
         df = df.with_columns(pins.values())
     pass_seed_ = (
@@ -608,6 +652,33 @@ def _window(
     )
 
 
+def _drawn_columns(
+    spec: TableSpec, n: int, frame_seed: int, row_offset: int, *, frame_rows: int
+) -> pl.DataFrame:
+    """Rows `[row_offset, row_offset + n)` of every column as drawn, before
+    any pass: the engine's, and a drawn order's column in order over the
+    `frame_rows` the frame holds. Every column is seeded by its own name,
+    so leaving the drawn one out of the engine's call moves no other."""
+    in_order = drawn_column(spec)
+    if in_order is None:
+        return generate_random(dict(spec.columns), n, frame_seed, row_offset)
+    engine = {k: v for k, v in spec.columns.items() if k != in_order}
+    df = generate_random(engine, n, frame_seed, row_offset)
+    values = drawn_values(
+        in_order,
+        spec.columns[in_order],
+        frame_seed,
+        frame_rows=frame_rows,
+        row_offset=row_offset,
+        rows=n,
+        descending=spec.descending[0],
+    )
+    # With no other column the engine drew a frame of no rows, which takes
+    # no column of `n`: the drawn one is then the frame.
+    df = df.with_columns(values) if df.width else values.to_frame()
+    return df.select(frames.columns(list(spec.columns)))
+
+
 def windowed_self_key(
     spec: TableSpec,
     fk: ForeignKey,
@@ -623,7 +694,9 @@ def windowed_self_key(
     if cartesian or len(fk.columns) != 1:
         return False
     ref = fk.ref_columns[0]
-    if ref in pinned or not readable_at(spec.columns[ref]):
+    if ref in pinned or ref == drawn_column(spec) or not readable_at(spec.columns[ref]):
+        # A drawn order's column is not the engine's draw, which is what
+        # `unique_at` reads.
         return False
     return not any(ref in p.writes for p in passes_of(spec))
 
@@ -837,6 +910,7 @@ def generate_batches(
     spec = as_table_spec(spec)
     require_columns(spec)
     requires_whole_frame(spec, "generate_batches")
+    check_drawn_order(spec, method)
     check_counts(n, batch_size)
     check_faults(spec, cycles, self_references)
     check_method(method)
@@ -938,7 +1012,13 @@ def batch_stream(
             yield first.slice(offset, batch_size)
         produced = first.height
 
-    blocks = _Blocks(dict(spec.columns), frame_seed, n, batch_size)
+    blocks = _Blocks(
+        spec,
+        frame_seed,
+        n,
+        batch_size,
+        frame_rows=frame_rows if frame_rows is not None else n,
+    )
 
     def read(offset: int, rows: int) -> pl.DataFrame:
         return _window(
@@ -991,16 +1071,24 @@ class _Blocks:
     chunk and spans many, filled in parallel, and each window is a slice of
     it: the rows the window would have drawn itself, without the waste.
     Every column is a window onto the frame -- a list's elements too, since
-    2.0 -- so every column is blocked.
+    2.0 -- and so is a drawn order's (2.2), so every column is blocked.
     """
 
     def __init__(
-        self, columns: dict[str, ColSpec], seed: int, n: int, batch_size: int
+        self,
+        spec: TableSpec,
+        seed: int,
+        n: int,
+        batch_size: int,
+        *,
+        frame_rows: int,
     ) -> None:
-        self._columns, self._seed, self._n = columns, seed, n
+        self._spec, self._seed, self._n = spec, seed, n
+        self._frame_rows = frame_rows
         chunk = self._chunk = chunk_size()
         rows = chunk
-        if columns:
+        if spec.columns:
+            columns = dict(spec.columns)
             per_chunk = estimated_size(TableSpec("block", columns), chunk)
             rows = max(chunk, BLOCK_BYTES // max(per_chunk, 1) * chunk)
         # Never fewer rows than a window, so a window is one slice of one block.
@@ -1017,8 +1105,12 @@ class _Blocks:
             stop = min(
                 self._n, max(start + self._rows, -(-end // self._chunk) * self._chunk)
             )
-            block = self._block = generate_random(
-                self._columns, stop - start, self._seed, start
+            block = self._block = _drawn_columns(
+                self._spec,
+                stop - start,
+                self._seed,
+                start,
+                frame_rows=self._frame_rows,
             )
             self._start = start
         return block.slice(offset - self._start, n)

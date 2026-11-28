@@ -33,6 +33,7 @@ every key still at its default.
 | `rows` | How many rows the table may hold: `[min, max]`; either end may be `null` |
 | `order_by` | The columns the rows come sorted by, the first the major key |
 | `descending` | Whether each `order_by` column runs high to low: `true`, or a list of one flag per column |
+| `order` | `drawn` to draw the first `order_by` column in order, so the frame streams; written only then. *Added in 2.2* |
 
 ### A column
 
