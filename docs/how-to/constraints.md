@@ -9,7 +9,7 @@ validation; a few are only checked:
 | `ColRule` | yes | yes |
 | `ForeignKey` | yes, when given parent data | yes |
 | `unique=True`, `__unique_together__` | yes | yes |
-| `__order_by__` | yes | yes |
+| `__order_by__`, `__order__` | yes | yes |
 | `__hierarchy__` — see [Hierarchies](hierarchies.md) | yes | yes |
 | `__rows__` | no: `generate()` makes the rows asked for | yes |
 | `ColSpec.validators`, `__checks__` | yes, by keeping the rows that pass | yes |
@@ -331,9 +331,10 @@ the same seed gives the same frame. `validate()` reports each row that
 belongs before the one above it, under the finding code `order`; skip it
 with `order=False`, or `--skip order` on the command line.
 
-An order is a property of the whole frame, so the streaming verbs refuse an
-ordered spec, as they refuse a hierarchy declared `layout="whole"` — write
-`generate()`'s frame out instead:
+A sorted order is a property of the whole frame, so the streaming verbs
+refuse it, as they refuse a hierarchy declared `layout="whole"`. The
+refusal says whether a [drawn order](#a-drawn-order-__order__) would
+stream the spec, and if not, why:
 
 <!-- docs: raises -->
 ```python
@@ -350,6 +351,58 @@ Events.scan(10_000)
 `profile()` declares an order it finds: the first column of single values,
 with at least 20 distinct, whose rows come sorted one way or the other. An
 order within each key is yours to declare.
+
+### A drawn order — `__order__`
+
+`__order__ = "drawn"` gives the rows their order another way: each row's
+value of the first `order_by` column is drawn in order, from the row's
+position, so any batch can be made on its own and arrives already in
+order. `generate_batches()`, `scan()` and every `sink_*` then take the
+spec, and each batch is the rows `generate()` makes there:
+
+```python
+class Stream(FrameSpec):
+    __order_by__ = ["ts"]
+    __order__ = "drawn"
+    ts      = ColSpec(pl.Datetime("us"),
+                      bounds=(dt.datetime(2024, 1, 1), dt.datetime(2024, 7, 1)))
+    user_id = ColSpec(pl.Int64, bounds=(1, 500))
+
+stream = pl.concat(Stream.generate_batches(100_000, batch_size=10_000, seed=1))
+assert stream.equals(Stream.generate(100_000, seed=1))
+assert stream["ts"].is_sorted()
+```
+
+The column holds a sample of its distribution, in order. Up to 65,536 rows
+it is exactly what the default, `"sorted"`, gives it: the column's own
+draw, sorted. Past that, row `i` of `n` reads the distribution at a
+position in `[i/n, (i+1)/n)`, so its quantiles sit closer to the
+distribution's than a sample's would. Every other column is drawn as it
+would be with no order at all, row for row, and nulls come last. Past
+65,536 rows the frame is not the sorted one, so switching `__order__`
+changes what a seed produces, as changing any declaration does.
+
+| First `order_by` column | Drawn in order |
+|:--|:--|
+| An integer, float, decimal, date, datetime, time or duration | yes |
+| A boolean, `choices`, `Enum` or `Categorical` | yes, each value its weight's share of the rows |
+| A `unique=True` number, date or time | yes, distinct and increasing, each row from its own slot of the range |
+| A string or binary column without `choices`, a nested column, a float with `nan_probability`, or a unique column of any other kind | no |
+| A column a rule, derivation, foreign key or hierarchy writes | no: its values are written after the columns are drawn |
+| A member of `__unique_together__` | no: a composite key's members are drawn together |
+
+With several `order_by` columns the first must be `unique=True` with no
+nulls, since a drawn order holds only its first column and rows that tie
+on it would need ordering by the next. Each refusal is a `SpecError` at
+declaration, naming the reason.
+
+Beside a drawn order, `method="cartesian"` is refused, and so is a pin of
+the order column (`fixed=` pins every other). Checks are generated unkept,
+with a warning, and `checks=True` refuses: keeping them reads rows past
+`n`, and a drawn order is drawn over exactly `n`.
+
+A `TableSpec` takes it as `order="drawn"`, and a spec file as `order:
+drawn`. *Added in 2.2.*
 
 ### A sequence: `1, 2, …, n`
 

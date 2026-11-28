@@ -188,10 +188,19 @@ pinned by a passing test. A NaN, by contrast, is recorded as the column's
   lays the forest out over the whole frame at once, so `generate_batches`,
   `scan` and every `sink_*` refuse it. The default layout streams. *Since
   2.1; 2.0 refused every hierarchy.*
-- **An ordered spec cannot be batched or streamed either.** A spec with
-  `__order_by__` is refused by `generate_batches`, `scan` and every
-  `sink_*`, for the same reason: the rows' order is a property of the whole
-  frame. Generate it with `generate()` and write that frame out.
+- **A sorted order cannot be batched or streamed either.** A spec with
+  `__order_by__` and the default `__order__ = "sorted"` is refused by
+  `generate_batches`, `scan` and every `sink_*`, for the same reason: the
+  rows are sorted once the whole frame is made. `__order__ = "drawn"`
+  streams it, when its first order column can be drawn in order; the
+  refusal says which. *Since 2.2; 2.1 refused every ordered spec.*
+- **A drawn order covers fewer columns than a sort.** Its first order
+  column can't be free text (a string without `choices`), nested, written by a rule, derivation, key or
+  hierarchy, or a member of a composite key, and with several order
+  columns the first must be unique with no nulls. It keeps no checks, takes
+  no pin of the order column and no `method="cartesian"`. Past 65,536 rows
+  it is smoother than a sample: its quantiles sit on the distribution's,
+  without a sample's noise.
 - **A `Hierarchy` owns both its columns.** A `null_probability`,
   `distribution` or `weights` declared on either is not what you get: the
   references have to come from one pool for the two columns to join at all.
