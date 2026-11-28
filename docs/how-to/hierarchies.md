@@ -160,8 +160,9 @@ __hierarchy__ = Hierarchy(child="CHILD_REF", parent="PARENT_REF", max_depth=5,
                           layout="whole")
 ```
 
-`roots=` is exact under the default layout: every root has a child. Under
-`layout="whole"` each first-level reference picks its root with
+`roots=` is exact under the default layout: every root has a child, so a
+frame needs at least `roots + max_depth - 1` rows, and fewer is refused.
+Under `layout="whole"` each first-level reference picks its root with
 replacement, so a root none picked is not in the data. *Since 2.1, which
 made the windowed layout the default and changed a hierarchy's seeded
 output once; 2.0 refused to stream one.*

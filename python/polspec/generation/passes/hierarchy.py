@@ -74,12 +74,20 @@ def _geometric_sum(branching: float, depth: int) -> float:
     return branching * (branching**depth - 1) / (branching - 1)
 
 
-def _level_sizes(hierarchy: Hierarchy, n: int) -> list[int]:
+def _level_sizes(
+    hierarchy: Hierarchy, n: int, *, room_for_roots: bool = False
+) -> list[int]:
     """How many references sit at each level `1..max_depth`, summing to `n`.
 
     Sized in a geometric progression so the result looks like a tree rather
     than a caterpillar, then adjusted so every level holds at least one
     reference -- which is what guarantees a chain of exactly `max_depth`.
+
+    `room_for_roots` (the windowed layout) gives level 1 at least `roots`
+    references, so every root has a child: with `roots * max_depth > n` the
+    progression is flat and level 1 would hold fewer. A frame with too few
+    rows for both is refused. *Since 2.2; 2.1 gave such a frame fewer roots
+    than declared.*
     """
     depth = hierarchy.max_depth
     if n < depth:
@@ -103,6 +111,21 @@ def _level_sizes(hierarchy: Hierarchy, n: int) -> list[int]:
         sizes[widest] -= 1
     if sum(sizes) < n:
         sizes[sizes.index(max(sizes))] += n - sum(sizes)
+    roots = hierarchy.roots
+    if room_for_roots and roots is not None and sizes[0] < roots:
+        if n < roots + depth - 1:
+            raise GenerationError(
+                f"A hierarchy of roots={roots} and max_depth={depth} needs at "
+                f"least {roots + depth - 1} row(s): a child for each root, and "
+                f"a chain {depth} deep. {n} were asked for. Generate more rows, "
+                "or declare fewer roots."
+            )
+        # Take the shortfall from the widest of the other levels, one at a
+        # time, so the rest keeps as near the progression as it can.
+        while sizes[0] < roots:
+            widest = max(range(1, depth), key=lambda k: sizes[k])
+            sizes[widest] -= 1
+            sizes[0] += 1
     return sizes
 
 
@@ -152,7 +175,7 @@ def _cycle_edits(
     offsets: list[int],
     count: int,
     rng: random.Random,
-) -> tuple[list[int], list]:
+) -> tuple[list[int], list, set[int]]:
     """Which rows to repoint, and at what, to close `count` chains into loops.
 
     Picks a leaf, walks up a few hops to an ancestor, and points that
@@ -165,7 +188,8 @@ def _cycle_edits(
     comes back as a row position and the value to write there.
 
     Ancestors are kept distinct, so no two loops share an edge and the caller
-    gets exactly the number it asked for.
+    gets exactly the number it asked for. The third value is every row on a
+    loop, which a self-reference must leave alone.
     """
     depth = len(parent_index)
     if depth < 2:
@@ -183,16 +207,21 @@ def _cycle_edits(
     claimed: set[int] = set()
     rows: list[int] = []
     values: list = []
+    on_loops: set[int] = set()
     for _ in range(count * _CYCLE_ATTEMPTS):
         if len(rows) == count:
             break
         leaf = rng.randrange(len(leaves))
         node = leaf
+        # Block `j` of the edge frame holds the children of level `j + 1`.
+        path = [offsets[depth - 1] + leaf]
         for level in range(depth - 1, ancestor_level - 1, -1):
             node = int(parent_index[level][node])
+            path.append(offsets[level - 1] + node)
         if node in claimed:
             continue
         claimed.add(node)
+        on_loops.update(path)
         # Block `j` of the edge frame holds the children of level `j + 1`, so
         # the ancestor's own row sits in the block one above its level.
         rows.append(offsets[ancestor_level - 1] + node)
@@ -204,7 +233,7 @@ def _cycle_edits(
             f"{len(rows)} found a chain of their own. Generate more rows, or "
             "ask for fewer cycles."
         )
-    return rows, values
+    return rows, values, on_loops
 
 
 def apply_hierarchy(
@@ -266,26 +295,42 @@ def apply_hierarchy(
         for size in sizes:
             offsets.append(running)
             running += size
-        rows, values = _cycle_edits(levels, parent_index, offsets, cycles, rng)
+        rows, values, on_loops = _cycle_edits(
+            levels, parent_index, offsets, cycles, rng
+        )
         edges = edges.with_columns(
             frames.plain(edges[parent])
             .scatter(pl.Series(rows, dtype=pl.UInt32), pl.Series(values))
             .alias(parent)
         )
+    else:
+        on_loops = set()
 
     # Nothing downstream should be able to depend on the frame arriving
     # grouped by level.
-    edges = edges.sample(n=edges.height, shuffle=True, seed=rng.randrange(2**32))
+    shuffle_seed = rng.randrange(2**32)
+    edges = edges.with_columns(
+        pl.int_range(0, pl.len(), dtype=pl.UInt32).alias("__before")
+    ).sample(n=edges.height, shuffle=True, seed=shuffle_seed)
+    on_loop = edges["__before"].is_in(pl.Series(sorted(on_loops), dtype=pl.UInt32))
+    edges = edges.drop("__before")
 
     if self_references:
-        if self_references > edges.height:
+        if self_references > edges.height - len(on_loops):
             raise GenerationError(
                 f"Asked for {self_references} self-reference(s) in a hierarchy "
-                f"of {edges.height} row(s)."
+                f"of {edges.height} row(s)"
+                + (f", {len(on_loops)} of them on cycles." if on_loops else ".")
             )
         # The frame has just been shuffled, so the leading rows are an
-        # arbitrary sample of it.
-        rows = pl.Series(range(self_references), dtype=pl.UInt32)
+        # arbitrary sample of it. A row on a loop is passed over: pointing it
+        # at itself would open that loop. *Since 2.2; before, a
+        # self-reference could break a cycle, leaving fewer than asked for.*
+        rows = (
+            pl.int_range(0, edges.height, dtype=pl.UInt32, eager=True)
+            .filter(~on_loop)
+            .head(self_references)
+        )
         edges = edges.with_columns(
             frames.plain(edges[parent])
             .scatter(rows, frames.plain(edges[child]).gather(rows))
@@ -332,7 +377,7 @@ class _Layout:
     """The forest's levels over `n` slots, and the keyed choices on them."""
 
     def __init__(self, hierarchy: Hierarchy, n: int, seed: int) -> None:
-        self.sizes = _level_sizes(hierarchy, n)
+        self.sizes = _level_sizes(hierarchy, n, room_for_roots=True)
         self.roots = _root_count(hierarchy, n, self.sizes)
         self.starts = [0]
         for size in self.sizes[:-1]:
@@ -353,14 +398,17 @@ class _Layout:
         return forest_parents(self._parent_key, slots, self.sizes, self.roots)
 
 
-def _windowed_cycle_edits(layout: _Layout, count: int, seed: int) -> dict[int, int]:
+def _windowed_cycle_edits(
+    layout: _Layout, count: int, seed: int
+) -> tuple[dict[int, int], set[int]]:
     """`_cycle_edits` on the windowed layout: which slots to repoint, and at
     which reference, to close `count` chains into loops.
 
     A function of the seed alone, so every window computes the same set and
     applies the edits that land in its rows. The candidates are leaves in a
     keyed order; each walks up the same hops `_cycle_edits` walks, and the
-    first `count` with an ancestor of their own are kept.
+    first `count` with an ancestor of their own are kept. The second value
+    is every slot on a loop, which a self-reference must leave alone.
     """
     depth = len(layout.sizes)
     if depth < 2:
@@ -375,15 +423,20 @@ def _windowed_cycle_edits(layout: _Layout, count: int, seed: int) -> dict[int, i
     order = pl.int_range(0, attempts, dtype=pl.UInt64, eager=True)
     leaves = permuted_at(n_leaves, pass_seed(seed, "cycles"), order) + layout.starts[-1]
     node = leaves
+    path = [leaves]
     for _ in range(hops):
         # An ancestor is at level 1 or below, so every hop lands on a slot.
         node = layout.parent_refs(node) - layout.roots
+        path.append(node)
     claimed: dict[int, int] = {}
-    for leaf, ancestor in zip(leaves.to_list(), node.to_list(), strict=True):
+    on_loops: set[int] = set()
+    for walk in zip(*(p.to_list() for p in path), strict=True):
+        leaf, ancestor = walk[0], walk[-1]
         if ancestor not in claimed:
             claimed[ancestor] = layout.roots + leaf
+            on_loops.update(walk)
             if len(claimed) == count:
-                return claimed
+                return claimed, on_loops
     raise GenerationError(
         f"Could not build {count} non-overlapping cycle(s): only "
         f"{len(claimed)} found a chain of their own. Generate more rows, or "
@@ -392,13 +445,39 @@ def _windowed_cycle_edits(layout: _Layout, count: int, seed: int) -> dict[int, i
 
 
 @functools.lru_cache(maxsize=32)
-def _cycle_edits_for(
-    hierarchy: Hierarchy, n: int, seed: int, count: int
-) -> dict[int, int]:
-    """`_windowed_cycle_edits` for one frame, computed once however many
-    windows ask: the set is a function of these alone, and a stream asks for
-    it in every batch."""
-    return _windowed_cycle_edits(_Layout(hierarchy, n, seed), count, seed)
+def _damage_for(
+    hierarchy: Hierarchy, n: int, seed: int, cycles: int, self_references: int
+) -> tuple[dict[int, int], frozenset[int]]:
+    """The windowed damage of one frame, computed once however many windows
+    ask -- both are functions of these alone, and a stream asks for them in
+    every batch: `_windowed_cycle_edits`, and the rows that point at
+    themselves.
+
+    Those rows are the frame's first, as the whole layout's leading rows
+    after its shuffle are, passing over any whose slot is on a loop:
+    pointing it at itself would open that loop. *Since 2.2; 2.1 could
+    break a cycle so, leaving fewer than asked for.*
+    """
+    layout = _Layout(hierarchy, n, seed)
+    if cycles:
+        edits, on_loops = _windowed_cycle_edits(layout, cycles, seed)
+    else:
+        edits, on_loops = {}, set()
+    if not self_references:
+        return edits, frozenset()
+    if self_references > n - len(on_loops):
+        raise GenerationError(
+            f"Asked for {self_references} self-reference(s) in a hierarchy "
+            f"of {n} row(s)"
+            + (f", {len(on_loops)} of them on cycles." if on_loops else ".")
+        )
+    # Each slot on a loop passes over at most one row, so the first
+    # `self_references + len(on_loops)` rows hold enough.
+    rows = pl.int_range(0, self_references + len(on_loops), dtype=pl.UInt64, eager=True)
+    if on_loops:
+        slots = permuted_at(n, layout.rows_key, rows)
+        rows = rows.filter(~slots.is_in(pl.Series(sorted(on_loops), dtype=pl.UInt64)))
+    return edits, frozenset(rows.head(self_references).to_list())
 
 
 def apply_windowed_hierarchy(
@@ -443,26 +522,19 @@ def apply_windowed_hierarchy(
     parents = layout.parent_refs(slots)
     children = slots + layout.roots
 
-    if cycles:
-        edits = _cycle_edits_for(hierarchy, n, seed, cycles)
-        keys = pl.Series(list(edits), dtype=pl.UInt64)
-        hit = slots.is_in(keys)
-        if hit.any():
-            values = pl.Series(list(edits.values()), dtype=pl.UInt64)
-            repointed = slots.filter(hit).replace_strict(keys, values)
-            parents = parents.scatter(hit.arg_true(), repointed)
-
-    if self_references:
-        if self_references > n:
-            raise GenerationError(
-                f"Asked for {self_references} self-reference(s) in a hierarchy "
-                f"of {n} row(s)."
-            )
-        # The frame's first rows hold arbitrary slots, as the whole layout's
-        # leading rows after its shuffle do.
-        hit = rows < self_references
-        if hit.any():
-            parents = parents.scatter(hit.arg_true(), children.filter(hit))
+    if cycles or self_references:
+        edits, pointed = _damage_for(hierarchy, n, seed, cycles, self_references)
+        if edits:
+            keys = pl.Series(list(edits), dtype=pl.UInt64)
+            hit = slots.is_in(keys)
+            if hit.any():
+                values = pl.Series(list(edits.values()), dtype=pl.UInt64)
+                repointed = slots.filter(hit).replace_strict(keys, values)
+                parents = parents.scatter(hit.arg_true(), repointed)
+        if pointed:
+            hit = rows.is_in(pl.Series(sorted(pointed), dtype=pl.UInt64))
+            if hit.any():
+                parents = parents.scatter(hit.arg_true(), children.filter(hit))
 
     refs = unique_at(child, pool, pool_seed, pl.concat([children, parents]))
     return df.with_columns(

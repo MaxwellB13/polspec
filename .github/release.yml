@@ -34,3 +34,8 @@ changelog:
         - ci/cd
         - build
         - refactor
+    # GitHub leaves out a PR no category matches -- one labelled `tests`, or
+    # not labelled at all -- so this takes the rest.
+    - title: "Other Changes"
+      labels:
+        - "*"

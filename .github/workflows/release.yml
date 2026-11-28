@@ -216,8 +216,10 @@ jobs:
           # Asks GitHub to write the body from the commits since the previous
           # tag, sorted into the categories `.github/release.yml` declares.
           # Without it that file does nothing: it says how notes should be
-          # grouped, not that they should be generated.
-          generate_notes: true
+          # grouped, not that they should be generated. Through 2.1.0 this
+          # was spelled `generate_notes`, an input the action does not have,
+          # so it warned and wrote no notes.
+          generate_release_notes: true
           # A draft, so the generated notes can be read and edited before
           # anyone else sees them. Publishing is a button on the release
           # page; PyPI is published by the job above regardless.

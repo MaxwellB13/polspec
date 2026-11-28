@@ -390,6 +390,57 @@ def test_the_whole_layout_is_refused_by_every_stream(tmp_path):
         WholeLinks.scan(100, seed=SEED)
 
 
+@pytest.mark.parametrize(("depth", "roots", "n"), [(2, 60, 100), (8, 20, 40)])
+def test_roots_are_exact_when_the_levels_would_be_flat(depth, roots, n):
+    """2.2: with `roots * max_depth > n` the levels are flat, and 2.1 gave
+    level 1 fewer references than roots -- so fewer roots had a child, and
+    fewer were in the data. Level 1 now holds every root's child."""
+
+    class Few(FrameSpec):
+        up = ColSpec(pl.String)
+        down = ColSpec(pl.String)
+        __hierarchy__ = Hierarchy(
+            child="down", parent="up", max_depth=depth, roots=roots
+        )
+
+    frame = Few.generate(n, seed=SEED)
+    children = set(frame["down"].to_list())
+    assert len({p for p in frame["up"].to_list() if p not in children}) == roots
+    Few.validate(frame)
+
+
+def test_too_few_rows_for_every_root_is_refused():
+    class Crowded(FrameSpec):
+        up = ColSpec(pl.String)
+        down = ColSpec(pl.String)
+        __hierarchy__ = Hierarchy(child="down", parent="up", max_depth=3, roots=10)
+
+    with pytest.raises(GenerationError, match="needs at least 12 row"):
+        Crowded.generate(11, seed=SEED)
+    assert Crowded.generate(12, seed=SEED).height == 12
+
+
+@pytest.mark.parametrize("layout", ["windowed", "whole"])
+def test_a_self_reference_never_opens_a_cycle(layout):
+    """2.2: a self-reference could land on a row of a cycle, pointing it at
+    itself and opening that loop, so the frame held fewer cycles than asked
+    for. Both damages are now exact together."""
+
+    class Shallow(FrameSpec):
+        PARENT_REF = ColSpec(pl.String)
+        CHILD_REF = ColSpec(pl.String)
+        __hierarchy__ = Hierarchy(
+            child="CHILD_REF", parent="PARENT_REF", max_depth=2, layout=layout
+        )
+
+    for seed in range(40):
+        parent_of = parent_map(
+            Shallow.generate(60, seed=seed, cycles=8, self_references=6)
+        )
+        assert sum(c == p for c, p in parent_of.items()) == 6
+        assert len(cycle_nodes(parent_of)) == 8 * 2 + 6
+
+
 @pytest.mark.parametrize("layout", ["windowed", "whole"])
 def test_both_layouts_draw_the_declared_shape(layout):
     """The same level sizes and roots, a chain of exactly `max_depth` and none

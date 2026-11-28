@@ -9,6 +9,22 @@ page promises; before 1.0, a minor version could break any of them.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`roots=` is exact for a small frame.** With `roots * max_depth` more
+  than the rows asked for, the default layout gave the first level fewer
+  references than roots, so some roots had no child and were not in the
+  data. Level 1 now holds a child for every root, and a frame with fewer
+  than `roots + max_depth - 1` rows is refused by name. Seeded output moves
+  for those frames only; `layout="whole"` is unchanged.
+- **`cycles=` and `self_references=` are exact together.** A
+  self-reference could land on a row of a cycle and open it, leaving fewer
+  cycles than asked for. Self-references now pass over the cycles' rows, in
+  both layouts; a frame where none collided is unchanged.
+- **Release notes are generated.** The release workflow passed
+  `generate_notes`, an input the action does not have, so no GitHub
+  release had generated notes; it now passes `generate_release_notes`.
+
 ## [2.1.0] - 2026-11-25
 
 **Rows that point at rows, streamed.** A `__hierarchy__` and a key into
